@@ -1,0 +1,270 @@
+/* Layout numbers here are mirrored in Sources/ClaudePetCore/PetLayout.swift,
+   which drives hit-testing and click-through. Change one, change the other. */
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* The window is 400x280 so the expanded panel fits INSIDE it. The pet keeps
+   its own 160x160 box in the bottom-right corner, which is where a 160x160
+   window used to put it. */
+#stage {
+  position: relative;
+  width: 400px;
+  height: 280px;
+}
+
+#pet {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  width: 120px;
+  height: 120px;
+  overflow: visible;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
+}
+
+/* ---- 机器人形象 ----------------------------------------------------------
+   The hit region for this drawing is PetLayout.bodyBox + PetLayout.antennaBox.
+   Anything that moves the figure outside those rectangles becomes unclickable,
+   so the `urgent` lift and tilt below are sized to stay inside them. */
+
+.desk      { fill: #6b5b4e; }
+.mon-body, .mon-neck, .mon-foot { fill: #4a4340; }
+.mon-screen{ fill: #1d2b2a; }
+.code rect { fill: #6fae9b; }
+.kbd       { fill: #857567; }
+.torso     { fill: #d97757; }
+.arm       { fill: none; stroke: #d97757; stroke-width: 5.5; stroke-linecap: round; }
+.hand      { fill: #aab0b8; }
+.skull, .ear, .antenna { fill: #c6cad0; }
+.plate     { fill: #1d2b2a; }
+.bulb      { fill: #6fae9b; }
+/* A plain chest light. Swap this for a <text> element if you want initials or
+   a logo there instead. */
+.badge { fill: #fdf3ec; opacity: 0.8; }
+.eye    { fill: #6fae9b; transform-box: fill-box; transform-origin: center; }
+.mouth  { fill: none; stroke: #6fae9b; stroke-width: 1.8; stroke-linecap: round; }
+.face   { transform-box: fill-box; transform-origin: center; }
+.person { transform-box: fill-box; transform-origin: 50% 90%; }
+.head   { transform-box: fill-box; transform-origin: 50% 90%; }
+
+/* Three fixed z's lighting up in sequence. This animates opacity only:
+   transform: scale() on an SVG <text> under transform-box: fill-box degenerates
+   in WebKit and the glyphs disappear from the render entirely. */
+.zzz text {
+  fill: #6d6259;
+  font-family: -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+  font-style: italic;
+  font-weight: 700;
+  opacity: 0;
+}
+.zzz .z1 { font-size: 7px; }
+.zzz .z2 { font-size: 9.5px; }
+.zzz .z3 { font-size: 12px; }
+
+/* Exactly one limb set shows per mood. busy and idle both keep hands on the
+   keyboard; only the animation differs. */
+.limb { display: none; }
+.arms-type, .hands-type { display: block; }
+#pet[data-mood="waiting"] .arms-type,
+#pet[data-mood="waiting"] .hands-type,
+#pet[data-mood="urgent"]  .arms-type,
+#pet[data-mood="urgent"]  .hands-type { display: none; }
+#pet[data-mood="waiting"] .arms-wave { display: block; }
+#pet[data-mood="urgent"]  .arms-up   { display: block; }
+
+/* Blink runs in every mood but idle — it is what makes it read as alive.
+   transform-box: fill-box is load-bearing: without it an SVG element's
+   transform-origin resolves against the whole viewBox, so scaleY() squashes the
+   eyes towards y=0 instead of towards themselves, and they slide down the face
+   rather than blinking. */
+@keyframes blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96%, 97%      { transform: scaleY(0.1); }
+}
+.eye { animation: blink 5.2s infinite; }
+
+/* The antenna bulb is the loudest signal at 120px — louder than any face. */
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* busy: hands alternate on the keys, the screen prints, the head faces it. */
+@keyframes tapDown { 0%, 100% { transform: translateY(0); }      50% { transform: translateY(-2.2px); } }
+@keyframes tapUp   { 0%, 100% { transform: translateY(-2.2px); } 50% { transform: translateY(0); } }
+@keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes lean    { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(0.8px); } }
+#pet[data-mood="busy"] .handL     { animation: tapDown 0.32s infinite; }
+#pet[data-mood="busy"] .handR     { animation: tapUp   0.32s infinite; }
+#pet[data-mood="busy"] .person    { animation: lean 1.6s ease-in-out infinite; }
+#pet[data-mood="busy"] .code rect { animation: flicker 1.2s infinite; }
+#pet[data-mood="busy"] .code rect:nth-child(2) { animation-delay: 0.25s; }
+#pet[data-mood="busy"] .code rect:nth-child(3) { animation-delay: 0.5s; }
+#pet[data-mood="busy"] .face      { transform: translateX(3px); }
+#pet[data-mood="busy"] .bulb      { animation: pulse 1.1s ease-in-out infinite; }
+
+/* idle: asleep at the desk — screen dark, light off, z's rising. */
+@keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
+@keyframes puff {
+  0%, 100% { opacity: 0; }
+  18%      { opacity: 0.9; }
+  55%      { opacity: 0.5; }
+}
+#pet[data-mood="idle"] .person   { animation: breathe 4.2s ease-in-out infinite; }
+#pet[data-mood="idle"] .head     { transform: translate(1px, 2.5px) rotate(-4deg); }
+#pet[data-mood="idle"] .code     { display: none; }
+#pet[data-mood="idle"] .eye      { height: 1.6px; y: -26.4px; animation: none; }
+#pet[data-mood="idle"] .mouth    { d: path("M-18,-19 L-10,-19"); }
+#pet[data-mood="idle"] .bulb     { fill: #5c6660; }
+#pet[data-mood="idle"] .eye,
+#pet[data-mood="idle"] .mouth    { opacity: 0.55; }
+#pet[data-mood="idle"] .zzz text { animation: puff 2.7s ease-in-out infinite; }
+#pet[data-mood="idle"] .zzz .z2  { animation-delay: 0.5s; }
+#pet[data-mood="idle"] .zzz .z3  { animation-delay: 1s; }
+
+/* waiting: stops typing, turns to you, waves. */
+@keyframes wave { 0%, 100% { transform: rotate(-11deg); } 50% { transform: rotate(14deg); } }
+.wave-arm { transform-box: fill-box; transform-origin: 20% 92%; }
+#pet[data-mood="waiting"] .wave-arm { animation: wave 0.62s ease-in-out infinite; }
+#pet[data-mood="waiting"] .eye      { height: 6.2px; y: -29.2px; }
+#pet[data-mood="waiting"] .bulb     { fill: #e0a63c; animation: pulse 0.9s ease-in-out infinite; }
+
+/* urgent: both arms up, red, whole body jolting. The 5pt lift and 3° tilt fit
+   inside PetLayout.bodyBox's upper margin — widen either and the top of the
+   figure stops being clickable. */
+@keyframes jolt {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30%      { transform: translateY(-5px) rotate(-3deg); }
+  65%      { transform: translateY(-1px) rotate(3deg); }
+}
+#pet[data-mood="urgent"] .person { animation: jolt 0.58s ease-in-out infinite; }
+#pet[data-mood="urgent"] .torso  { fill: #c8553d; }
+#pet[data-mood="urgent"] .arm    { stroke: #c8553d; }
+#pet[data-mood="urgent"] .mouth  { d: path("M-18,-20 Q-14,-14 -10,-20"); stroke: #ef7361; }
+#pet[data-mood="urgent"] .eye    { height: 6.6px; y: -29.4px; fill: #ef7361; }
+#pet[data-mood="urgent"] .bulb   { fill: #e0533c; animation: pulse 0.3s steps(2, end) infinite; }
+
+/* Sits above the pet, centred on it, and grows UPWARD.
+   Anchored by its bottom edge on purpose: a chatter line wraps to two or three
+   lines, and a top-anchored bubble grows downward straight over the robot's
+   head. 138 = 280 (stage height) - 142, which keeps the bubble clear of the
+   antenna bulb at y≈146. */
+#bubble {
+  position: absolute;
+  bottom: 138px;
+  left: 320px;
+  transform: translateX(-50%);
+  max-width: 150px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: rgba(35, 32, 29, 0.93);
+  color: #f6f4f1;
+  font: 500 11px/1.35 -apple-system, system-ui, sans-serif;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+#bubble[hidden] { display: none; }
+/* Chatter is not an alarm: softer, and it wraps, because a quota line is longer
+   than a project name. */
+#bubble.chat {
+  background: rgba(35, 32, 29, 0.88);
+  font-weight: 400;
+  white-space: normal;
+  max-width: 170px;
+}
+
+#pet { cursor: pointer; }
+
+/* Slides out to the LEFT of the pet box, entirely within the window:
+   2 + 232 + 6 = 240 = the pet box's left edge. */
+#panel {
+  position: absolute;
+  left: 2px;
+  bottom: 6px;
+  width: 232px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 11px;
+  background: rgba(28, 26, 24, 0.94);
+  color: #f6f4f1;
+  font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
+}
+/* No box-shadow here. The panel sits 6px from the window's bottom edge, so any
+   shadow with offset+blur greater than that gets clipped by the edge and renders
+   as a hard-edged grey slab on the desktop instead of a soft shadow. The panel
+   is near-opaque dark on its own and needs no help standing out. */
+#panel[hidden] { display: none; }
+
+.row { padding: 3px 2px; }
+.row + .row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+
+/* A row whose session runs in a terminal we can address. The arrow is a
+   permanent affordance, because the highlight below only appears once the
+   pointer is already over the row. */
+.row.jumpable { cursor: pointer; }
+/* Every row can be muted, so every row gets the hover treatment — not just the
+   jumpable ones. */
+.row.hot {
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 5px;
+}
+.jump { flex: none; color: #6b6560; font-size: 10px; padding-left: 3px; }
+.row.jumpable.hot .jump { color: #d97757; }
+
+/* The × appears only on the hovered row: at 232px wide there is no room for a
+   permanent one next to the project name, the tool and the age. */
+.mute {
+  flex: none;
+  display: none;
+  padding: 0 1px 0 5px;
+  color: #8a837d;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.row.hot .mute { display: inline; }
+.row.hot .mute:hover { color: #e8624a; }
+
+.muted-note {
+  padding: 5px 2px 1px;
+  color: #6b6560;
+  font-size: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dot.waiting { background: #e8624a; }
+.dot.busy    { background: #d97757; }
+.dot.idle    { background: #6b6560; }
+.proj { font-weight: 600; flex: none; }
+.what { color: #b5aea8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.age  { margin-left: auto; color: #8a837d; flex: none; }
+/* Notification message — design doc section 2 keeps it out of the bubble and
+   shows it only here. */
+.detail {
+  color: #8a837d;
+  padding-left: 12px;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail:empty { display: none; }
+/* A session name is identity, not chatter, so it reads a shade louder than the
+   notification text it replaces. */
+.detail.name { color: #a99f96; }
+.empty { color: #8a837d; padding: 4px 2px; }

@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="pet.css">
+<div id="stage">
+  <div id="bubble" hidden></div>
+  <svg id="pet" viewBox="-60 -60 120 120" aria-hidden="true">
+    <g id="body">
+      <g class="monitor">
+        <rect class="mon-body"  x="8" y="-28" width="34" height="30" rx="3"/>
+        <rect class="mon-screen" x="11" y="-25" width="28" height="24" rx="2"/>
+        <g class="code">
+          <rect x="14" y="-21" width="14" height="2.3" rx="1.15"/>
+          <rect x="14" y="-16" width="20" height="2.3" rx="1.15"/>
+          <rect x="14" y="-11" width="10" height="2.3" rx="1.15"/>
+        </g>
+        <rect class="mon-neck" x="23" y="2"  width="4"  height="10"/>
+        <rect class="mon-foot" x="17" y="12" width="16" height="4" rx="2"/>
+      </g>
+
+      <!-- Everything that moves as one unit. The typing hands are the sole
+           exception: they must draw in front of the desk, so they live outside
+           and carry their own animation. -->
+      <g class="person">
+        <path class="torso" d="M-28,22 L-26,-5 Q-14,-13 -2,-5 L0,22 Z"/>
+        <circle class="badge" cx="-14" cy="6" r="3.4"/>
+
+        <g class="limb arms-type">
+          <path class="arm" d="M-24,-2 Q-27,7 -22,12"/>
+          <path class="arm" d="M-4,-2  Q-1,7  -6,12"/>
+        </g>
+        <g class="limb arms-wave">
+          <path class="arm" d="M-24,-2 Q-27,7 -22,12"/>
+          <g class="wave-arm">
+            <path class="arm" d="M-4,-2 Q6,-8 3,-19"/>
+            <circle class="hand" cx="3" cy="-19" r="3.6"/>
+          </g>
+        </g>
+        <g class="limb arms-up">
+          <path class="arm" d="M-24,-2 Q-34,-11 -30,-23"/>
+          <circle class="hand" cx="-30" cy="-23" r="3.6"/>
+          <path class="arm" d="M-4,-2  Q6,-11  2,-23"/>
+          <circle class="hand" cx="2"   cy="-23" r="3.6"/>
+        </g>
+
+        <g class="head">
+          <!-- antenna: the bulb is the status light, coloured per mood -->
+          <rect class="antenna" x="-15" y="-43" width="2" height="8" rx="1"/>
+          <circle class="bulb" cx="-14" cy="-44" r="3"/>
+          <rect class="ear" x="-31" y="-28" width="4" height="9" rx="1.5"/>
+          <rect class="ear" x="-1"  y="-28" width="4" height="9" rx="1.5"/>
+          <rect class="skull" x="-27" y="-35" width="26" height="25" rx="7"/>
+          <rect class="plate" x="-24" y="-32" width="20" height="17" rx="4"/>
+          <g class="face">
+            <rect class="eye" x="-20.4" y="-28.6" width="4.4" height="5" rx="2.2"/>
+            <rect class="eye" x="-11.6" y="-28.6" width="4.4" height="5" rx="2.2"/>
+            <path class="mouth" d="M-19,-19.5 Q-14,-17.5 -9,-19.5"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- Desk edge and keyboard draw in FRONT of the body: the person sits
+           behind the desk, so its near edge cuts them off at the waist. -->
+      <rect class="desk" x="-46" y="14" width="92" height="12" rx="3.5"/>
+      <rect class="kbd"  x="-31" y="8"  width="30" height="8" rx="2"/>
+
+      <g class="limb hands-type">
+        <circle class="hand handL" cx="-22" cy="11" r="3.6"/>
+        <circle class="hand handR" cx="-6"  cy="11" r="3.6"/>
+      </g>
+
+      <!-- All three z's are staggered by delay so they read as one stream
+           rising rather than three fixed letters. -->
+      <g class="zzz">
+        <text class="z1" x="2"  y="-24">z</text>
+        <text class="z2" x="7"  y="-33">z</text>
+        <text class="z3" x="13" y="-42">z</text>
+      </g>
+    </g>
+  </svg>
+  <div id="panel" hidden></div>
+</div>
+<script src="pet.js"></script>

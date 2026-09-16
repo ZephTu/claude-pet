@@ -1,0 +1,537 @@
+import ClaudePetCore
+import CoreGraphics
+import Foundation
+
+@main
+struct Runner {
+    static func main() {
+        let t = Harness()
+
+        let json = """
+        {"sessionId":"abc","project":"multica","cwd":"/Users/dev/Projects/demo-app",
+         "state":"busy","tool":"Bash","detail":"",
+         "since":"2026-09-15T10:20:00Z","updatedAt":"2026-09-15T10:23:45Z"}
+        """.data(using: .utf8)!
+
+        let s = SessionState.decode(from: json)
+        t.check("decodes a well-formed file", s != nil)
+        t.check("reads sessionId", s?.sessionId == "abc")
+        t.check("reads project", s?.project == "multica")
+        t.check("reads state", s?.state == .busy)
+        t.check("reads tool", s?.tool == "Bash")
+        // 2026-09-15T10:20:00Z verified via `python3 -c "import datetime;print(int(datetime.datetime(2026,9,15,10,20,0,tzinfo=datetime.timezone.utc).timestamp()))"`
+        // and cross-checked with `date -j -u -f "%Y-%m-%dT%H:%M:%SZ" ... "+%s"`; both report 1789467600.
+        t.check("parses since as ISO8601", s?.since == Date(timeIntervalSince1970: 1_789_467_600))
+        t.check("garbage returns nil", SessionState.decode(from: Data("{ not json".utf8)) == nil)
+        t.check("missing field returns nil", SessionState.decode(from: Data(#"{"sessionId":"a"}"#.utf8)) == nil)
+
+        // ---- StateAggregator ----
+        let t0 = Date(timeIntervalSince1970: 1_789_467_600)  // 基准「现在」= 2026-09-15T10:20:00Z，与上面 decode 测试同一时刻
+        func mk(_ id: String, _ st: SessionActivity, sinceAgo: TimeInterval = 0,
+                updatedAgo: TimeInterval = 0, project: String = "p") -> SessionState {
+            SessionState(sessionId: id, project: project, cwd: "/tmp/\(project)",
+                         state: st, tool: "", detail: "",
+                         since: t0.addingTimeInterval(-sinceAgo),
+                         updatedAt: t0.addingTimeInterval(-updatedAgo))
+        }
+
+        t.check("empty input is idle",
+                StateAggregator.aggregate([], now: t0).mood == .idle)
+        t.check("all idle is idle",
+                StateAggregator.aggregate([mk("a", .idle), mk("b", .idle)], now: t0).mood == .idle)
+        t.check("busy beats idle",
+                StateAggregator.aggregate([mk("a", .idle), mk("b", .busy)], now: t0).mood == .busy)
+        t.check("waiting beats busy",
+                StateAggregator.aggregate([mk("a", .busy), mk("b", .waiting)], now: t0).mood == .waiting)
+        t.check("waiting beats busy regardless of order",
+                StateAggregator.aggregate([mk("a", .waiting), mk("b", .busy)], now: t0).mood == .waiting)
+
+        // 死 session 边界：900 秒仍活着，901 秒算死
+        t.check("899s stale still counts",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 899)], now: t0).mood == .busy)
+        t.check("exactly 900s still counts",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 900)], now: t0).mood == .busy)
+        t.check("901s is dropped",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 901)], now: t0).mood == .idle)
+        t.check("dead sessions leave the list",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 901)], now: t0).sessions.isEmpty)
+
+        // urgent 升级边界：60 秒仍是 waiting，61 秒才升级
+        t.check("waiting 59s is not urgent",
+                StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 59)], now: t0).mood == .waiting)
+        t.check("waiting exactly 60s is not urgent",
+                StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 60)], now: t0).mood == .waiting)
+        t.check("waiting 61s is urgent",
+                StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 61)], now: t0).mood == .urgent)
+
+        // urgent 取最早的 since，不是最晚的
+        let mixed = [mk("a", .waiting, sinceAgo: 5, project: "fresh"),
+                     mk("b", .waiting, sinceAgo: 300, project: "stuck")]
+        t.check("oldest waiting drives urgency",
+                StateAggregator.aggregate(mixed, now: t0).mood == .urgent)
+        t.check("bubble names the longest-waiting project",
+                StateAggregator.aggregate(mixed, now: t0).waitingProject == "stuck")
+        t.check("no bubble when nothing waits",
+                StateAggregator.aggregate([mk("a", .busy)], now: t0).waitingProject == nil)
+
+        // busy 不会因为拖久了就升 urgent
+        t.check("long-running busy never turns urgent",
+                StateAggregator.aggregate([mk("a", .busy, sinceAgo: 9999)], now: t0).mood == .busy)
+
+        // 死掉的 waiting 不该让宠物一直急
+        t.check("dead waiting session does not keep pet urgent",
+                StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 5000, updatedAgo: 5000)], now: t0).mood == .idle)
+
+        // ---- StateAggregator.ordered(_:) — sessions 排序 ----
+        // 分组顺序：waiting > busy > idle，输入顺序故意不match期望输出
+        let groupMix = [mk("a", .idle), mk("b", .busy), mk("c", .waiting)]
+        t.check("sessions come back waiting, then busy, then idle",
+                StateAggregator.aggregate(groupMix, now: t0).sessions.map(\.sessionId) == ["c", "b", "a"])
+
+        // 组内顺序：同一状态下，按 since 从旧到新，输入顺序故意是「新的在前」
+        let sameGroup = [mk("x", .idle, sinceAgo: 10), mk("y", .idle, sinceAgo: 100)]
+        t.check("within a group, oldest since comes first",
+                StateAggregator.aggregate(sameGroup, now: t0).sessions.map(\.sessionId) == ["y", "x"])
+
+        // 同一次调用里死的被剔除、活的保留（而不是全死或全活的退化情况）
+        let deadAndLive = [mk("d", .busy, updatedAgo: 901), mk("l", .busy, updatedAgo: 0)]
+        t.check("dead sessions excluded while live ones in the same call are retained",
+                StateAggregator.aggregate(deadAndLive, now: t0).sessions.map(\.sessionId) == ["l"])
+
+        // ---- PetLayout: 窗口几何与像素穿透 ----
+        // C2 的回归护栏：面板过去被放在 right:100% 的 160px body 里，落在窗口外 x<0。
+        let win = CGRect(origin: .zero, size: PetLayout.windowSize)
+        let expandedPanel = CGRect(x: 2, y: 14, width: 232, height: 260)
+        t.check("expanded panel sits fully inside the window",
+                win.contains(expandedPanel))
+        t.check("pet box sits fully inside the window",
+                win.contains(PetLayout.petBox))
+        // pet.css pins #pet at right:20 bottom:20 of the 400x280 stage. If those
+        // two numbers ever drift apart, every hit-test coordinate below is wrong.
+        t.check("pet box matches #pet's right:20 bottom:20 in pet.css",
+                PetLayout.petBox.maxX == win.maxX - 20 && PetLayout.petBox.maxY == win.maxY - 20)
+        t.check("pet box centre is the SVG viewBox origin",
+                PetLayout.petBox.midX == PetLayout.petCenter.x
+                && PetLayout.petBox.midY == PetLayout.petCenter.y)
+        t.check("panel and pet box do not overlap",
+                !expandedPanel.intersects(PetLayout.petBox))
+        t.check("both hit boxes stay inside the pet box",
+                PetLayout.petBox.contains(PetLayout.bodyBox)
+                && PetLayout.petBox.contains(PetLayout.antennaBox))
+        // The antenna box hangs above the body box. A gap between them would be
+        // a dead strip across the robot's neck.
+        t.check("antenna box overlaps the body box, leaving no dead strip",
+                PetLayout.antennaBox.maxY >= PetLayout.bodyBox.minY
+                && PetLayout.bodyBox.minX <= PetLayout.antennaBox.minX
+                && PetLayout.bodyBox.maxX >= PetLayout.antennaBox.maxX)
+
+        func opaque(_ x: CGFloat, _ y: CGFloat,
+                    panel: CGRect? = nil, bubble: CGRect? = nil) -> Bool {
+            PetLayout.isOpaque(at: CGPoint(x: x, y: y), panel: panel, bubble: bubble)
+        }
+        // viewBox coordinate -> stage coordinate, the same mapping pet.css uses.
+        func at(_ vx: CGFloat, _ vy: CGFloat) -> CGPoint {
+            CGPoint(x: PetLayout.petCenter.x + vx, y: PetLayout.petCenter.y + vy)
+        }
+        func opaqueAt(_ vx: CGFloat, _ vy: CGFloat) -> Bool {
+            let p = at(vx, vy)
+            return opaque(p.x, p.y)
+        }
+
+        t.check("the robot's torso is opaque", opaqueAt(-14, 5))
+        t.check("the monitor is opaque", opaqueAt(25, -14))
+        // The desk runs the full width of the drawing; the old circular region
+        // left both of its ends unclickable.
+        t.check("the desk's left end is opaque", opaqueAt(-44, 20))
+        t.check("the desk's right end is opaque", opaqueAt(44, 20))
+        // The bulb sits above the body box and is the brightest thing on screen;
+        // without antennaBox it would look clickable and pass clicks through.
+        t.check("the antenna bulb is opaque", opaqueAt(-14, -44))
+        t.check("the top of the antenna is opaque", opaqueAt(-14, -51))
+        t.check("above the antenna is transparent", !opaqueAt(-14, -58))
+        // urgent lifts the figure 5pt; the head must stay reachable mid-jolt.
+        t.check("the robot's head is opaque at rest", opaqueAt(-14, -34))
+        t.check("the robot's head is still opaque lifted 5pt by the urgent jolt",
+                opaqueAt(-14, -39))
+        // I2：窗口的绝大部分是透明的，点击必须穿透到底下的窗口
+        t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 20))
+        t.check("beyond the desk's right end is transparent", !opaqueAt(54, 20))
+        t.check("below the desk is transparent", !opaqueAt(0, 40))
+        t.check("the window's far corner is transparent", !opaque(10, 10))
+        t.check("the collapsed panel's area is transparent", !opaque(100, 250))
+        t.check("the expanded panel's area is opaque", opaque(100, 250, panel: expandedPanel))
+        t.check("the bubble's area is opaque when shown",
+                opaque(320, 130, bubble: CGRect(x: 280, y: 122, width: 80, height: 22)))
+        t.check("the bubble's area is transparent when hidden", !opaque(320, 130))
+
+        // ---- TerminalTarget: 跳回 session 所在终端 ----
+        t.check("orca and iterm2 are jumpable",
+                TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2"))
+        // 不认识的终端要降级成"不可点"，而不是给用户一个点了没反应的行
+        t.check("an unknown or empty kind is not jumpable",
+                !TerminalTarget.canJump(kind: "vscode") && !TerminalTarget.canJump(kind: ""))
+
+        // ITERM_SESSION_ID 的 w/t/p 前缀是标签当时的位置，换个顺序就失效，uuid 才是稳定的
+        t.check("the w/t/p prefix is stripped from ITERM_SESSION_ID",
+                TerminalTarget.iTermUUID(from: "w0t1p0:9E1C2A3B-1111-2222-3333-444455556666")
+                == "9E1C2A3B-1111-2222-3333-444455556666")
+        t.check("an id with no colon is passed through unchanged",
+                TerminalTarget.iTermUUID(from: "9E1C2A3B-1111") == "9E1C2A3B-1111")
+        t.check("only the first colon splits, so a uuid keeps any later ones",
+                TerminalTarget.iTermUUID(from: "w0t0p0:AB:CD") == "AB:CD")
+
+        // 这是整个功能里唯一真正危险的输入：它来自环境变量，被一个进程写进文件，
+        // 又被另一个进程贴进 AppleScript 里执行。引号或换行就能结束字符串字面量。
+        t.check("a real uuid passes the AppleScript-injection guard",
+                TerminalTarget.isSafeITermUUID("9E1C2A3B-1111-2222-3333-444455556666"))
+        t.check("an empty uuid is rejected", !TerminalTarget.isSafeITermUUID(""))
+        t.check("a quote is rejected",
+                !TerminalTarget.isSafeITermUUID("AB\" & (do shell script \"rm -rf ~\") & \""))
+        t.check("a newline is rejected", !TerminalTarget.isSafeITermUUID("AB\ndo shell script \"x\""))
+        t.check("a space is rejected", !TerminalTarget.isSafeITermUUID("AB CD"))
+        t.check("a non-hex letter is rejected", !TerminalTarget.isSafeITermUUID("ABZZ"))
+
+        // 老的状态文件没有 terminal 字段，必须照常解码成"不可跳转"，而不是整条丢掉
+        let withoutTerminal = Data("""
+        {"sessionId":"s1","project":"p","cwd":"/tmp","state":"busy","tool":"Bash",
+         "detail":"","since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z"}
+        """.utf8)
+        t.check("a state file written before this feature still decodes",
+                SessionState.decode(from: withoutTerminal)?.terminal == nil)
+
+        let withTerminal = Data("""
+        {"sessionId":"s2","project":"p","cwd":"/tmp","state":"busy","tool":"Bash",
+         "detail":"","since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z",
+         "terminal":{"kind":"orca","handle":"term_abc123"}}
+        """.utf8)
+        t.check("a terminal reference round-trips out of the state file",
+                SessionState.decode(from: withTerminal)?.terminal
+                == TerminalRef(kind: "orca", handle: "term_abc123"))
+
+        // identify(): 两个 handle 变量都是普通导出变量，会被子进程继承，所以
+        // 「环境里有哪个变量」不足以判断人到底坐在哪个终端前
+        let orcaOnly = ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x"]
+        t.check("an Orca shell is identified as orca",
+                TerminalTarget.identify(environment: orcaOnly) == TerminalRef(kind: "orca", handle: "term_x"))
+        let itermOnly = ["TERM_PROGRAM": "iTerm.app", "ITERM_SESSION_ID": "w0t0p0:AB-CD"]
+        t.check("an iTerm2 shell is identified as iterm2",
+                TerminalTarget.identify(environment: itermOnly) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
+        // 这条是真在测试里踩到的：在 Orca 终端里跑测试时 ORCA_TERMINAL_HANDLE 还在环境里，
+        // 只按变量存在性判断会把 iTerm2 的 session 跳到一个毫不相干的 Orca 标签页
+        let both = [
+            "TERM_PROGRAM": "iTerm.app",
+            "ITERM_SESSION_ID": "w0t0p0:AB-CD",
+            "ORCA_TERMINAL_HANDLE": "term_stale",
+        ]
+        t.check("TERM_PROGRAM wins when a stale handle from another terminal is inherited",
+                TerminalTarget.identify(environment: both) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
+        // TERM_PROGRAM 缺失时退回到变量存在性，不至于整个功能失灵
+        t.check("a missing TERM_PROGRAM falls back to whichever handle exists",
+                TerminalTarget.identify(environment: ["ORCA_TERMINAL_HANDLE": "term_y"])
+                == TerminalRef(kind: "orca", handle: "term_y"))
+        t.check("a terminal we cannot address yields no reference",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Apple_Terminal"]) == nil)
+        // 同样是实测抓到的：在 Terminal.app 里跑、却继承了 Orca 的 handle，
+        // 按"哪个变量在"回退就会给出一个点了会跳到毫不相干标签页的行
+        t.check("a known-but-unsupported terminal does not fall back to an inherited handle",
+                TerminalTarget.identify(environment: [
+                    "TERM_PROGRAM": "Apple_Terminal",
+                    "ORCA_TERMINAL_HANDLE": "term_stale",
+                ]) == nil)
+        t.check("an empty handle is treated as absent",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": ""]) == nil)
+
+        // ---- 存活判定：查进程，而不是看时间戳 ----
+        // 这是用户报的问题：一个开着但没人操作的 session 不触发任何 hook，
+        // updatedAt 就停在原地，15 分钟后从面板消失——而它其实活得好好的
+        t.check("the current process is detected as running",
+                ProcessProbe.isRunning(pid: ProcessInfo.processInfo.processIdentifier,
+                                       named: ProcessProbe.processName(
+                                           pid: ProcessInfo.processInfo.processIdentifier) ?? "?"))
+        t.check("a pid that cannot exist is not running",
+                !ProcessProbe.isRunning(pid: 0, named: "claude"))
+        t.check("a negative pid is not running",
+                !ProcessProbe.isRunning(pid: -1, named: "claude"))
+        // pid 会被复用，所以光"这个 pid 活着"不够——launchd 一直活着但不是 claude
+        t.check("a live pid running something else does not count as claude",
+                !ProcessProbe.isRunning(pid: 1, named: "claude"))
+        t.check("pid 1 is launchd", ProcessProbe.processName(pid: 1) == "launchd")
+        // 实测踩到的：内核的 p_comm 是 "claude.exe"，ps -o comm 显示的 "claude"
+        // 是 argv[0] 的 basename。按 "claude" 精确匹配会一个 session 都认不出来
+        t.check("the kernel's claude.exe matches the claude prefix",
+                ProcessProbe.nameMatches("claude.exe", "claude"))
+        t.check("a bare claude also matches, in case the name changes back",
+                ProcessProbe.nameMatches("claude", "claude"))
+        t.check("an unrelated process does not match",
+                !ProcessProbe.nameMatches("launchd", "claude"))
+        t.check("an empty wanted name matches nothing",
+                !ProcessProbe.nameMatches("claude.exe", ""))
+        t.check("every process has a parent except the root",
+                (ProcessProbe.parentPID(of: ProcessInfo.processInfo.processIdentifier) ?? 0) > 0)
+
+        // 带 pid 的 session：进程活着就一直留着，哪怕一整天没动静
+        let ancient = Date(timeIntervalSince1970: 1_700_000_000)
+        let idleButOpen = SessionState(
+            sessionId: "open", project: "p", cwd: "/tmp", state: .idle, tool: "",
+            detail: "", since: ancient, updatedAt: ancient, terminal: nil, pid: 4242)
+        t.check("a session whose process is alive survives any amount of silence",
+                StateAggregator.aggregate([idleButOpen], now: t0,
+                                          isLive: { _, _ in true }).sessions.count == 1)
+        t.check("a session whose process is gone is dropped immediately",
+                StateAggregator.aggregate([idleButOpen], now: t0,
+                                          isLive: { _, _ in false }).sessions.isEmpty)
+
+        // 没有 pid 的老状态文件仍然走 900 秒超时，不能因为升级就集体变成僵尸
+        let legacyFresh = mk("legacy-fresh", .busy, updatedAgo: 100)
+        let legacyStale = mk("legacy-stale", .busy, updatedAgo: 901)
+        t.check("a legacy file with no pid still honours the timeout",
+                StateAggregator.isLive(legacyFresh, now: t0)
+                && !StateAggregator.isLive(legacyStale, now: t0))
+
+        // lastPromptAt 是 Date? —— Optional 只管"字段缺失"，不管"字段是空字符串"。
+        // 空串会让整条 session 解码失败、从面板静默消失，所以必须确认两种都安全
+        let emptyPrompt = Data("""
+        {"sessionId":"s","project":"p","cwd":"/tmp","state":"busy","tool":"","detail":"",
+         "since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z","lastPromptAt":""}
+        """.utf8)
+        t.check("an empty lastPromptAt does not take the whole session down",
+                SessionState.decode(from: emptyPrompt) != nil)
+        let missingPrompt = Data("""
+        {"sessionId":"s","project":"p","cwd":"/tmp","state":"busy","tool":"","detail":"",
+         "since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z"}
+        """.utf8)
+        t.check("a missing lastPromptAt decodes as nil",
+                SessionState.decode(from: missingPrompt)?.lastPromptAt == nil)
+
+        // ---- 静音：藏起来，直到你再跟它说话 ----
+        let t1 = t0.addingTimeInterval(-3600)
+        func session(_ id: String, _ act: SessionActivity, prompt: Date?) -> SessionState {
+            SessionState(sessionId: id, project: id, cwd: "/tmp", state: act, tool: "",
+                         detail: "", since: t1, updatedAt: t0, terminal: nil, pid: nil,
+                         lastPromptAt: prompt)
+        }
+        let spoke = session("a", .idle, prompt: t1)
+        let mark = HiddenSessions.mark(for: spoke)
+        t.check("muting records the session's own last prompt, not the wall clock",
+                mark == t1)
+        t.check("a muted session stays hidden while nothing new is said",
+                HiddenSessions.isHidden(spoke, marks: ["a": mark]))
+        // 这条是整个功能的核心：只有"你又说话了"才能让它回来
+        let spokeAgain = session("a", .idle, prompt: t0)
+        t.check("a muted session returns as soon as the user speaks to it again",
+                !HiddenSessions.isHidden(spokeAgain, marks: ["a": mark]))
+        // session 自己干活不算"你跟它说话"，否则长任务会立刻自己解除静音
+        let busyButSilent = session("a", .busy, prompt: t1)
+        t.check("the session working on its own does not un-mute it",
+                HiddenSessions.isHidden(busyButSilent, marks: ["a": mark]))
+        let neverSpoken = session("b", .idle, prompt: nil)
+        t.check("muting a session never typed into still sticks",
+                HiddenSessions.isHidden(neverSpoken,
+                                        marks: ["b": HiddenSessions.mark(for: neverSpoken)]))
+        t.check("an unmuted session is never hidden",
+                !HiddenSessions.isHidden(spoke, marks: [:]))
+        // 再次静音要记新的时间，否则"说话->回来->再静音"这条路会卡住
+        t.check("re-muting after speaking sticks again",
+                HiddenSessions.isHidden(spokeAgain,
+                                        marks: ["a": HiddenSessions.mark(for: spokeAgain)]))
+
+        // 静音的 session 既不进列表，也不影响表情——否则宠物在为一个你看不见的
+        // session 举手报警，比看到它更烦
+        let mutedWaiting = session("w", .waiting, prompt: t1)
+        let visible = session("v", .idle, prompt: t1)
+        let muted = StateAggregator.aggregate([mutedWaiting, visible], now: t0,
+                                              hidden: ["w": t1], isLive: { _, _ in true })
+        t.check("a muted session is dropped from the list",
+                muted.sessions.map(\.sessionId) == ["v"])
+        t.check("a muted session cannot make the pet wave",
+                muted.mood == .idle && muted.waitingProject == nil)
+        t.check("the panel is told how many are muted", muted.hiddenCount == 1)
+        // 已经结束的 session 不该算进"还藏着 N 个"
+        let deadMuted = StateAggregator.aggregate([mutedWaiting, visible], now: t0,
+                                                  hidden: ["w": t1],
+                                                  isLive: { s, _ in s.sessionId != "w" })
+        t.check("a muted session that has exited is not counted as hidden",
+                deadMuted.hiddenCount == 0)
+
+        t.check("marks for departed sessions are pruned away",
+                HiddenSessions.pruned(["a": t1, "gone": t1], keeping: [spoke]) == ["a": t1])
+
+        // ---- 说话：额度数据 ----
+        // 这是别人插件的私有缓存文件，格式随时可能变，任何意外都必须退化成"不说话"
+        let realCache = Data("""
+        {"data":{"planName":"Team","fiveHour":6,"sevenDay":25,
+          "fiveHourResetAt":"2026-09-16T07:40:00.039Z",
+          "sevenDayResetAt":"2026-09-21T20:00:00.039Z"},
+         "timestamp":1789528307450,
+         "lastGoodData":{"planName":"Team","fiveHour":6,"sevenDay":25,
+          "fiveHourResetAt":"2026-09-16T07:40:00.039Z",
+          "sevenDayResetAt":"2026-09-21T20:00:00.039Z"}}
+        """.utf8)
+        let snap = UsageReader.parse(realCache)
+        t.check("the real claude-hud cache parses", snap != nil)
+        t.check("percentages come through", snap?.fiveHourPercent == 6 && snap?.sevenDayPercent == 25)
+        // 缓存里的时间戳带毫秒（…:00.039Z），朴素的 ISO8601 解析器会拒绝它
+        t.check("a reset time with fractional seconds parses",
+                snap?.fiveHourResetAt == Date(timeIntervalSince1970: 1789544400.039))
+        t.check("the capture time comes from the millisecond timestamp",
+                snap?.capturedAt == Date(timeIntervalSince1970: 1789528307.450))
+        // data 为空时退回 lastGoodData，一次 API 失败不该让显示变空
+        let onlyLastGood = Data("""
+        {"lastGoodData":{"planName":"Team","fiveHour":9,"sevenDay":30,
+          "fiveHourResetAt":"2026-09-16T07:40:00Z","sevenDayResetAt":"2026-09-21T20:00:00Z"},
+         "timestamp":1789528307450}
+        """.utf8)
+        t.check("a failed refresh falls back to lastGoodData",
+                UsageReader.parse(onlyLastGood)?.fiveHourPercent == 9)
+        t.check("garbage parses to nothing rather than crashing",
+                UsageReader.parse(Data("not json".utf8)) == nil)
+        t.check("a cache missing the fields we need parses to nothing",
+                UsageReader.parse(Data(#"{"data":{"planName":"Team"}}"#.utf8)) == nil)
+
+        // 百分比会过期（statusline 不跑就不刷新），但重置时刻是绝对时间不会过期
+        let stale = UsageSnapshot(planName: "Team", fiveHourPercent: 90, sevenDayPercent: 90,
+                                  fiveHourResetAt: t0.addingTimeInterval(3600),
+                                  sevenDayResetAt: t0.addingTimeInterval(86400),
+                                  capturedAt: t0.addingTimeInterval(-3600))
+        t.check("percentages older than half an hour are not trusted",
+                !stale.percentagesUsable(now: t0))
+
+        // ---- 说话：什么时候开口 ----
+        let quiet = GlobalState(mood: .idle, sessions: [], waitingProject: nil)
+        let busyState = GlobalState(mood: .busy, sessions: [session("x", .busy, prompt: nil)],
+                                    waitingProject: nil)
+        let alarmed = GlobalState(mood: .urgent, sessions: [], waitingProject: "p")
+        let fresh = UsageSnapshot(planName: "Team", fiveHourPercent: 10, sevenDayPercent: 10,
+                                  fiveHourResetAt: t0.addingTimeInterval(10 * 60),
+                                  sevenDayResetAt: t0.addingTimeInterval(86400),
+                                  capturedAt: t0)
+
+        // 报警的时候气泡要留给"谁在等你授权"，一句闲话都不能说
+        t.check("nothing is said while the pet is raising the alarm",
+                Chatter.next(state: alarmed, previous: quiet, usage: fresh, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+        let waitingState = GlobalState(mood: .waiting, sessions: [], waitingProject: "p")
+        t.check("nothing is said while a session waits on the user",
+                Chatter.next(state: waitingState, previous: quiet, usage: fresh, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+
+        t.check("an imminent quota reset is worth saying",
+                Chatter.next(state: quiet, previous: quiet, usage: fresh, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .quotaResetting)
+        // 刚说过就闭嘴，不管有多少由头
+        t.check("the global cooldown silences everything",
+                Chatter.next(state: quiet, previous: quiet, usage: fresh, now: t0,
+                             lastSpoken: [:],
+                             lastAnything: t0.addingTimeInterval(-60)) == nil)
+        t.check("the same kind stays quiet until its own cooldown expires",
+                Chatter.next(state: quiet, previous: quiet, usage: fresh, now: t0,
+                             lastSpoken: [.quotaResetting: t0.addingTimeInterval(-600)],
+                             lastAnything: t0.addingTimeInterval(-600)) == nil)
+
+        // 重置点已经过去就不该再提"还有 N 分钟"
+        let past = UsageSnapshot(planName: "Team", fiveHourPercent: 10, sevenDayPercent: 10,
+                                 fiveHourResetAt: t0.addingTimeInterval(-60),
+                                 sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
+        t.check("a reset that already happened is not announced",
+                Chatter.next(state: quiet, previous: quiet, usage: past, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+
+        // 额度用得多值得提醒，但数据过期时宁可不说，免得报个过时的数字
+        let high = UsageSnapshot(planName: "Team", fiveHourPercent: 20, sevenDayPercent: 85,
+                                 fiveHourResetAt: t0.addingTimeInterval(4 * 3600),
+                                 sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
+        t.check("a nearly-spent weekly quota is worth saying",
+                Chatter.next(state: quiet, previous: quiet, usage: high, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .quotaHigh)
+        let highButStale = UsageSnapshot(planName: "Team", fiveHourPercent: 20, sevenDayPercent: 85,
+                                         fiveHourResetAt: t0.addingTimeInterval(4 * 3600),
+                                         sevenDayResetAt: t0.addingTimeInterval(86400),
+                                         capturedAt: t0.addingTimeInterval(-3600))
+        t.check("a stale percentage is never announced",
+                Chatter.next(state: quiet, previous: quiet, usage: highButStale, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+
+        // 干完了要有"之前在忙"作对照，否则刚启动就会说一句"都干完了"
+        t.check("finishing is announced when busy turns idle",
+                Chatter.next(state: quiet, previous: busyState, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .finished)
+        t.check("a fresh launch does not greet the user with a transition line",
+                Chatter.next(state: quiet, previous: nil, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+
+        // 跑得久值得说一句，但刚开始跑不值得
+        let longBusy = GlobalState(
+            mood: .busy,
+            sessions: [SessionState(sessionId: "l", project: "multica", cwd: "/tmp", state: .busy,
+                                    tool: "Bash", detail: "", since: t0.addingTimeInterval(-1800),
+                                    updatedAt: t0)],
+            waitingProject: nil)
+        t.check("a long-running session is remarked on",
+                Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .longRun)
+        let justStarted = GlobalState(
+            mood: .busy,
+            sessions: [SessionState(sessionId: "j", project: "p", cwd: "/tmp", state: .busy,
+                                    tool: "", detail: "", since: t0.addingTimeInterval(-60),
+                                    updatedAt: t0)],
+            waitingProject: nil)
+        t.check("a session that just started is not",
+                Chatter.next(state: justStarted, previous: justStarted, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+
+        // 悬停查询是用户主动要的，不受任何冷却限制
+        t.check("the on-demand line always answers",
+                !Chatter.onDemand(usage: fresh, state: quiet, now: t0).isEmpty)
+        t.check("the on-demand line works without claude-hud installed",
+                Chatter.onDemand(usage: nil, state: quiet, now: t0) == "没有活跃的 session")
+
+        // ---- 终端标签标题 = session 的名字 ----
+        // 面板里的 project 只是目录名，同一个仓库开三个 session 长得一模一样
+        let orcaList = Data("""
+        {"result":{"terminals":[
+          {"handle":"term_a","title":"✳ 客户A回归缺陷跟进"},
+          {"handle":"term_b","title":"◐ 🤖 20260915-new game"},
+          {"handle":"term_c","title":"Terminal 1"},
+          {"handle":"term_d"}
+        ]}}
+        """.utf8)
+        let titles = TerminalTitles.parseOrca(orcaList)
+        t.check("orca titles are picked up", titles["term_a"] == "客户A回归缺陷跟进")
+        // 终端在标题前加的是会动的状态符号，留着的话同一个 session 每秒看起来都在改名
+        t.check("the animated status glyph is stripped",
+                titles["term_b"] == "🤖 20260915-new game")
+        t.check("a terminal with no title is skipped", titles["term_d"] == nil)
+        t.check("another app's CLI changing shape degrades to no titles",
+                TerminalTitles.parseOrca(Data("[]".utf8)).isEmpty)
+
+        // 默认名字不值得占一次悬停和一个气泡
+        t.check("default terminal names are treated as useless",
+                TerminalTitles.isUseless("Terminal 1") && TerminalTitles.isUseless("zsh")
+                && TerminalTitles.isUseless("  "))
+        t.check("a real name is not useless",
+                !TerminalTitles.isUseless("客户A回归缺陷跟进"))
+
+        // iTerm2 的 session 自己没有标题，标题在 tab 上，所以脚本输出的是 id<TAB>title
+        let itermOut = "AB-CD\t✳ 审核Bug登记表\nEF-GH\tTerminal 2\nbroken line\n"
+        let iterm = TerminalTitles.parseITerm(itermOut)
+        t.check("iterm2 id/title pairs are parsed", iterm["AB-CD"] == "审核Bug登记表")
+        t.check("a malformed line is skipped rather than fatal", iterm.count == 2)
+
+        // 同目录多个 session 时才值得花第二行写名字
+        let one = [session("a", .idle, prompt: nil)]
+        t.check("a lone session needs no disambiguation",
+                StateAggregator.ambiguousProjects(one).isEmpty)
+        let twoSame = [
+            SessionState(sessionId: "1", project: "daily_work", cwd: "/a", state: .idle,
+                         tool: "", detail: "", since: t0, updatedAt: t0),
+            SessionState(sessionId: "2", project: "daily_work", cwd: "/a", state: .idle,
+                         tool: "", detail: "", since: t0, updatedAt: t0),
+            SessionState(sessionId: "3", project: "multica", cwd: "/b", state: .idle,
+                         tool: "", detail: "", since: t0, updatedAt: t0),
+        ]
+        t.check("only the shared project is flagged",
+                StateAggregator.ambiguousProjects(twoSame) == ["daily_work"])
+
+        t.finish()
+    }
+}

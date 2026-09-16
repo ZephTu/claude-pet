@@ -1,0 +1,6 @@
+.build/
+.DS_Store
+*.app
+dist/*.tar.gz
+dist/claude-pet-*/
+pet-emit
