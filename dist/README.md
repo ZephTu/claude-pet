@@ -1,104 +1,98 @@
 # Claude Pet
 
-一只常驻 macOS 桌面的小机器人，坐在电脑前，反映你本机**所有** Claude Code session 的状态。
+**English** · [中文](README.zh-CN.md)
 
-不用再一个个窗口翻过去看哪个跑完了、哪个卡住了——余光扫一眼桌面就知道现在要不要管。
+A small robot that lives on your macOS desktop and mirrors the state of **every** Claude Code session on this machine.
 
-天线顶上那颗灯是最好认的：不用聚焦，颜色变了你就知道。
+No more tabbing through terminal windows to find out which session finished and which one is stuck. A glance at the corner of the screen tells you whether anything needs you.
 
-| 天线灯 | 它在干嘛 | 什么意思 |
+The lamp on its antenna is the part you can read without focusing on it:
+
+| Lamp | What it is doing | What it means |
 |---|---|---|
-| 红灯急闪 | 双手举过头顶在抖，头顶冒气泡 | 有 session 卡着等你授权，超过 60 秒了。气泡上写着是哪个 project |
-| 黄灯脉冲 | 停下手，转过来朝你招手 | 有 session 在等你授权 |
-| 绿灯慢闪 | 低头敲键盘，屏幕上代码在刷 | 有 session 在干活 |
-| 灭 | 趴桌上睡着，头顶飘 zzz | 全都停了 |
+| Red, fast blink | arms over its head, jolting, speech bubble | a session has been waiting on you for over a minute. The bubble names the project |
+| Amber, pulsing | stops typing, turns around and waves | a session is waiting for your approval |
+| Green, slow blink | heads down, typing, code scrolling | a session is working |
+| Off | asleep at the desk with z's drifting up | everything is done |
 
-**左键点它**展开列表，看每个 session 在忙什么、多久了。
-**点列表里带 ↗ 的行**，直接跳回那个 session 所在的终端标签页（支持 Orca 和 iTerm2）。
-同一个目录下开了多个 session 时，那几行会各自把名字写在第二行，否则它们在列表里长得一模一样。
-**鼠标停在某一行**，气泡显示这个 session 的名字（终端标签的标题），因为列表里那列只是目录名，同一个仓库开几个 session 是分不出来的。**停在机器人身上**则显示额度还剩多少、什么时候回血。
-**鼠标移到某一行，点行尾的 ×** 把它静音——不在列表里显示，也不影响宠物表情。下次你在那个 session 里敲字它自动回来。
-**右键**出菜单：暂停 / 开机自启 / 退出。
-**拖动**换位置，会记住。
+**Left-click** to expand the list — what each session is running, and for how long.
+**Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2).
+**Hover a row** and the bubble shows that session's name; when one directory has several sessions, the names are shown inline instead.
+**Hover the robot** for a second to see your remaining quota.
+**Click the × at the end of a row** to mute that session — it comes back on its own the next time you type into it.
+**Right-click** for the menu: nap / launch at login / quit.
+**Drag** to move it; it remembers where you put it.
 
-它不会响，也不发系统通知——只在你余光里变化，不打断你。
+It never makes a sound and never posts a system notification.
 
-## 装
+## Install
 
 ```bash
 ./install.sh
 ```
 
-装完**要开一个新的 Claude Code session 才生效**，已经开着的窗口不受影响。
+**You must start a NEW Claude Code session afterwards** for the hooks to take effect. Windows already open are unaffected.
 
-## 前提
+## Requirements
 
-- macOS 14 或更新
-- 已经装了 Claude Code
+- macOS 14 or newer
+- Claude Code already installed
 
-不需要 Xcode、不需要 Python、不需要 jq。包里是编译好的 universal 二进制，Intel 和 Apple Silicon 都能跑。
+No Xcode, no Python, no jq. The package ships a universal binary that runs on both Intel and Apple Silicon.
 
-## 它会动你机器上的什么
+## What it touches on your machine
 
-就三个地方，`uninstall.sh` 都能还原：
+Three places, all reversible with `./uninstall.sh`:
 
-1. `~/Applications/ClaudePet.app` —— 宠物本体
-2. `~/.claude/pet/` —— hook 程序和 session 状态文件
-3. **`~/.claude/settings.json` —— 追加 7 条 hook**
+1. `~/Applications/ClaudePet.app` — the pet itself
+2. `~/.claude/pet/` — the hook binary and the session state files
+3. **`~/.claude/settings.json` — 7 appended hooks**
 
-第三条是唯一需要留心的：那个文件管着你所有 Claude Code session 的行为。安装脚本的做法是**只追加、不修改**——你已有的 hook 配置一条都不会被碰，改之前会自动备份到 `~/.claude/settings.json.bak-claudepet-<时间戳>`，改完立刻解析验证，任何异常都会自动还原备份。重复安装是幂等的，不会挂两遍。
+The third is the one to pay attention to: that file governs the behaviour of every Claude Code session you run. The installer **only appends** — not one of your existing hooks is touched. It backs the file up to `~/.claude/settings.json.bak-claudepet-<timestamp>` first, parses the result immediately after writing, and restores the backup on any doubt. Running the installer twice is idempotent; the hooks are not added again.
 
-宠物读的是 `~/.claude/pet/sessions/` 下的状态文件，只记录 project 名、当前状态、工具名和时间戳。**不读你的对话内容，不联网，什么都不上传。**
+The pet reads the state files under `~/.claude/pet/sessions/`, which record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, makes no network requests, and uploads nothing.**
 
-## 卸
+## Uninstall
 
 ```bash
 ./uninstall.sh
 ```
 
-摘掉 hook、删掉 app、清理目录。`settings.json` 会回到装之前的样子（备份文件留着，你确认没问题可以自己删）。
+Removes the hooks, deletes the app, cleans up the directory. `settings.json` goes back to exactly what it was; the backups are left in place for you to delete once you are satisfied.
 
-## 已知的几个毛病
+## Known rough edges
 
-- 展开的面板固定往左边开。宠物拖到屏幕最左边时面板会跑出屏幕外（宠物本身不会丢）
-- 点击穿透按两个矩形算（机器人和桌子一块、天线一块），不是严格按轮廓。这两块矩形里看着是空白的地方也点不到底下的窗口
-- idle 时大约占 4% CPU（是那个呼吸动画），24 小时挂着会有一点耗电
-- 没有 Apple 开发者签名。安装脚本会自动清掉 macOS 的下载隔离标记；万一还是被拦，去「系统设置 → 隐私与安全性」点一下允许就行
+- The expanded panel always opens to the left, so it can run off-screen if you drag the pet to the far-left edge of the display (the pet itself stays put).
+- Click-through is computed from two rectangles rather than the figure's outline, so a few apparently-transparent pixels near the robot still swallow clicks.
+- Roughly 4% CPU while idle — that is the breathing animation. Leaving it running all day costs a little battery.
+- No Apple Developer signature. The installer clears macOS's download quarantine flag automatically; if Gatekeeper still blocks it, allow it once under System Settings → Privacy & Security.
+- Jumping to an **iTerm2** tab raises a macOS Automation prompt the first time. Deny it and jumps fail silently from then on; you can re-allow it under System Settings → Privacy & Security → Automation. **Orca needs no permission at all.**
 
-## 出问题了
+## Troubleshooting
 
-**宠物一直打瞌睡，明明有 session 在跑**
-hook 只对**新开的** session 生效。开一个新窗口试试。还是不行就看 `~/.claude/pet/sessions/` 里有没有文件在生成。
+**The pet is asleep even though sessions are running**
+Hooks only apply to **newly started** sessions. Open a new window. If that does not help, check whether files are appearing under `~/.claude/pet/sessions/`.
 
-**关掉的 session 还在列表里**
-不该发生了：现在是查那个 session 的进程还在不在，关掉就立刻消失，直接叉掉终端窗口也一样。如果真遇到，多半是那条状态文件是升级前留下的（没记进程号），在那个 session 里随便发一条消息就会补上。
+**A session I closed is still listed**
+It should not be: liveness is a process check, so closing the terminal removes it immediately. If you do see one, its state file probably predates the upgrade (no process id recorded) — say anything in that session and it will correct itself.
 
-**行右边没有 ↗，点了不跳转**
-只有 Orca 和 iTerm2 能跳。另外升级前就开着的 session 也没有，在那个 session 里发一条消息就会补上。
+**A row has no ↗ and clicking does nothing**
+Only Orca and iTerm2 sessions can be jumped to. Sessions that were already open before installing also lack it until they next run a hook.
 
-**点 iTerm2 的行没反应**
-第一次跳转 macOS 会弹一次授权框问你要不要允许 ClaudePet 控制 iTerm2，拒绝了就会一直静默失败。去「系统设置 → 隐私与安全性 → 自动化」把 ClaudePet 下面的 iTerm 勾上。Orca 不需要这个授权。
+**I want it to shut up for a while**
+Right-click → Take a Nap. To silence one session only, hover its row and click the ×.
 
-**想临时让它闭嘴**
-右键 → 让宠物睡一会。要单独屏蔽某个 session，鼠标移到那一行点 ×。
+**I cannot find how to quit**
+Right-click → Quit. It is deliberately absent from the Dock and from Cmd-Tab, so the context menu is the only way. Failing that, `pkill -x ClaudePet`.
 
-**静音的 session 怎么找回来**
-在那个 session 里随便说句话就回来了。或者右键 → 取消静音（会全部取消）。
+## Source
 
-**找不到怎么退出**
-右键 → 退出。它不在 Dock 也不在 Cmd-Tab 里（故意的，免得占位置），右键菜单是唯一入口。实在不行 `pkill -x ClaudePet`。
-
-## 源码
-
-包里的 `src/` 就是完整源码。自己编：
+The `src/` directory in this package is the complete source. To build it yourself:
 
 ```bash
 cd src
-./scripts/build-app.sh release          # 本机架构
-./scripts/build-app.sh release universal # Intel + Apple Silicon 通吃
-swift run ClaudePetTests                 # 单元测试（不是 swift test，不依赖 Xcode）
-./hooks/test-pet-emit.sh                 # hook 行为测试
-
-# 形象预览（四个状态的动画，浏览器里直接看）
-open docs/previews/coder-pet.html
+./scripts/build-app.sh release           # this machine's architecture
+./scripts/build-app.sh release universal # Intel + Apple Silicon
+swift run ClaudePetTests                 # unit tests (not swift test — needs no Xcode)
+./hooks/test-pet-emit.sh                 # hook behaviour tests
 ```

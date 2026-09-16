@@ -85,20 +85,20 @@ public enum Chatter {
             if ready(.quotaResetting), untilReset > 0, untilReset <= resetSoon {
                 return Utterance(
                     kind: .quotaResetting,
-                    text: "五小时额度还有 \(minutes(untilReset)) 分钟回血"
+                    text: "5-hour quota resets in \(minutes(untilReset))m"
                 )
             }
             if ready(.quotaHigh), usage.percentagesUsable(now: now) {
                 if usage.sevenDayPercent >= highWaterMark {
                     return Utterance(
                         kind: .quotaHigh,
-                        text: "周额度用了 \(usage.sevenDayPercent)%，悠着点"
+                        text: "Weekly quota at \(usage.sevenDayPercent)% — go easy"
                     )
                 }
                 if usage.fiveHourPercent >= highWaterMark {
                     return Utterance(
                         kind: .quotaHigh,
-                        text: "五小时额度用了 \(usage.fiveHourPercent)%，\(clockHint(usage.fiveHourResetAt, now: now))回血"
+                        text: "5-hour quota at \(usage.fiveHourPercent)%, resets \(clockHint(usage.fiveHourResetAt, now: now))"
                     )
                 }
             }
@@ -116,7 +116,7 @@ public enum Chatter {
            let longest = longestBusy(state.sessions, now: now),
            now.timeIntervalSince(longest.since) >= longRunAfter {
             let mins = minutes(now.timeIntervalSince(longest.since))
-            return Utterance(kind: .longRun, text: "\(longest.project) 这活干了 \(mins) 分钟了")
+            return Utterance(kind: .longRun, text: "\(longest.project) has been at it for \(mins)m")
         }
 
         return nil
@@ -126,20 +126,20 @@ public enum Chatter {
     /// never rate-limited: the user asked for this one.
     public static func onDemand(usage: UsageSnapshot?, state: GlobalState, now: Date) -> String {
         guard let usage else {
-            return state.sessions.isEmpty ? "没有活跃的 session" : "\(state.sessions.count) 个 session 在跑"
+            return state.sessions.isEmpty ? "No live sessions" : "\(state.sessions.count) sessions running"
         }
         var parts: [String] = []
         if usage.percentagesUsable(now: now) {
-            parts.append("五小时 \(usage.fiveHourPercent)% · 周 \(usage.sevenDayPercent)%")
+            parts.append("5h \(usage.fiveHourPercent)% · week \(usage.sevenDayPercent)%")
         }
-        parts.append("\(clockHint(usage.fiveHourResetAt, now: now))回血")
-        return parts.joined(separator: "，")
+        parts.append("resets \(clockHint(usage.fiveHourResetAt, now: now))")
+        return parts.joined(separator: ", ")
     }
 
     // MARK: - Wording
 
     private static func finishedLine(count: Int) -> String {
-        count > 1 ? "\(count) 个都干完了" : "干完了"
+        count > 1 ? "All \(count) done" : "Done"
     }
 
     private static func longestBusy(_ sessions: [SessionState], now: Date) -> SessionState? {
@@ -150,15 +150,15 @@ public enum Chatter {
         max(1, Int((interval / 60).rounded()))
     }
 
-    /// "42 分钟后" for something imminent, "15:40" for something further off —
+    /// "in 42m" for something imminent, "at 15:40" for something further off —
     /// a countdown is useful within the hour and useless beyond it.
     private static func clockHint(_ date: Date, now: Date) -> String {
         let delta = date.timeIntervalSince(now)
-        if delta <= 0 { return "随时" }
-        if delta < 60 * 60 { return "\(minutes(delta)) 分钟后" }
+        if delta <= 0 { return "any moment" }
+        if delta < 60 * 60 { return "in \(minutes(delta))m" }
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: date)
+        return "at " + formatter.string(from: date)
     }
 }

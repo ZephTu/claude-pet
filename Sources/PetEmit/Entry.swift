@@ -14,7 +14,7 @@ struct Entry {
         switch arguments.first {
         case "--patch-settings", "--unpatch-settings":
             guard arguments.count == 2 else {
-                FileHandle.standardError.write(Data("用法: pet-emit \(arguments[0]) <settings.json 路径>\n".utf8))
+                FileHandle.standardError.write(Data("usage: pet-emit \(arguments[0]) <path to settings.json>\n".utf8))
                 exit(2)
             }
             let adding = arguments[0] == "--patch-settings"

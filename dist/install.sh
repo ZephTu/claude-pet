@@ -1,16 +1,19 @@
 #!/bin/bash
-# Claude Pet 一键安装
+# Claude Pet — one-shot installer
 #
-# 装完会有一只小星芒常驻桌面，反映你本机所有 Claude Code session 的状态：
-# 有 session 卡着等你授权它就跳，有 session 在干活它就转，都停了它就打瞌睡。
+# Afterwards a small robot lives on your desktop and mirrors the state of every
+# Claude Code session on this machine: green lamp while something is working,
+# amber while a session waits on you, red once it has waited a minute, dark when
+# everything is done.
 #
-# 这个脚本会做四件事，每一步都会告诉你：
-#   1. 把 ClaudePet.app 装到 ~/Applications/
-#   2. 把 pet-emit 放到 ~/.claude/pet/
-#   3. 往 ~/.claude/settings.json 里追加 7 条 hook（先备份，不动你现有的任何配置）
-#   4. 启动宠物
+# This script does four things and tells you about each one:
+#   1. install ClaudePet.app into ~/Applications/
+#   2. put pet-emit into ~/.claude/pet/
+#   3. append 7 hooks to ~/.claude/settings.json (backed up first; your own
+#      hooks are not touched)
+#   4. start the pet
 #
-# 卸载跑 ./uninstall.sh，能还原成装之前的样子。
+# Run ./uninstall.sh to put everything back the way it was.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,77 +25,78 @@ APP_DEST="$HOME/Applications/ClaudePet.app"
 say()  { echo "$@"; }
 die()  { echo "" >&2; echo "✗ $*" >&2; exit 1; }
 
-say "=== Claude Pet 安装 ==="
+say "=== Claude Pet installer ==="
 say ""
 
-# ---- 1. 环境检查 -----------------------------------------------------------
+# ---- 1. Environment --------------------------------------------------------
 
 OSVER=$(sw_vers -productVersion 2>/dev/null || echo "0")
 OSMAJOR=${OSVER%%.*}
 if [ "$OSMAJOR" -lt 14 ] 2>/dev/null; then
-  die "需要 macOS 14 或更新，你现在是 $OSVER"
+  die "macOS 14 or newer required; this machine is on $OSVER"
 fi
 
-[ -d "$CLAUDE_DIR" ] || die "找不到 $CLAUDE_DIR —— 这台机器看起来没装 Claude Code，先装它再来"
+[ -d "$CLAUDE_DIR" ] || die "no $CLAUDE_DIR — Claude Code does not look installed here; install it first"
 
-# ---- 2. 准备可执行文件（优先用预编译，不行就本地编译）----------------------
+# ---- 2. Pick an executable (precompiled first, local build as fallback) -----
 
 APP_SRC="$HERE/bin/ClaudePet.app"
 EMIT_SRC="$HERE/bin/pet-emit"
 NEED_BUILD=0
 
 if [ -d "$APP_SRC" ] && [ -f "$EMIT_SRC" ]; then
-  # 压缩包如果是从网盘或邮件下载的，macOS 会打上隔离标记，双击会被拦。
-  # 这里显式清掉，并且告诉你我在这么做——不偷偷来。
+  # A tarball downloaded through a browser or mail client carries macOS's
+  # quarantine flag, and Gatekeeper refuses to run it. Clearing that is stated
+  # out loud rather than done quietly.
   if xattr -p com.apple.quarantine "$EMIT_SRC" >/dev/null 2>&1 \
      || xattr -p com.apple.quarantine "$APP_SRC" >/dev/null 2>&1; then
-    say "==> 这个包带着 macOS 的下载隔离标记（因为它没有 Apple 开发者签名）"
-    say "    正在清除，否则系统会拒绝运行它"
+    say "==> this package carries macOS's download quarantine flag"
+    say "    (it has no Apple Developer signature) — clearing it, or macOS will refuse to run it"
     xattr -dr com.apple.quarantine "$APP_SRC" 2>/dev/null || true
     xattr -dr com.apple.quarantine "$EMIT_SRC" 2>/dev/null || true
   fi
 
-  # 真的能在这台机器上跑起来吗（架构对不对、有没有被 Gatekeeper 拦）
+  # Does it actually run here — right architecture, not blocked by Gatekeeper?
   if "$EMIT_SRC" --version >/dev/null 2>&1; then
-    say "==> 用包里预编译好的版本（$( "$EMIT_SRC" --version )）"
+    say "==> using the precompiled build ($( "$EMIT_SRC" --version ))"
   else
-    say "==> 预编译版本在这台机器上跑不起来，改为本地编译"
+    say "==> the precompiled build will not run here; building locally instead"
     NEED_BUILD=1
   fi
 else
-  say "==> 包里没有预编译版本，改为本地编译"
+  say "==> no precompiled build in this package; building locally instead"
   NEED_BUILD=1
 fi
 
 if [ "$NEED_BUILD" = "1" ]; then
-  [ -d "$HERE/src" ] || die "包里既没有可用的预编译版本，也没有源码，装不了"
+  [ -d "$HERE/src" ] || die "this package has neither a usable precompiled build nor source"
   command -v swift >/dev/null 2>&1 \
-    || die "本地编译需要 Xcode Command Line Tools，先跑一次：xcode-select --install"
-  say "    编译中，大概需要半分钟…"
+    || die "a local build needs Xcode Command Line Tools: run 'xcode-select --install' first"
+  say "    building, takes about half a minute…"
   ( cd "$HERE/src" && ./scripts/build-app.sh release host >/dev/null 2>&1 ) \
-    || die "编译失败。可以进 $HERE/src 手动跑 ./scripts/build-app.sh release 看报错"
+    || die "build failed. Run ./scripts/build-app.sh release inside $HERE/src to see why"
   APP_SRC="$HERE/src/ClaudePet.app"
   EMIT_SRC="$HERE/src/pet-emit"
-  [ -d "$APP_SRC" ] && [ -f "$EMIT_SRC" ] || die "编译完了但没找到产物"
-  say "    编译完成"
+  [ -d "$APP_SRC" ] && [ -f "$EMIT_SRC" ] || die "the build finished but produced nothing"
+  say "    build complete"
 fi
 
-# ---- 3. 安装文件 -----------------------------------------------------------
+# ---- 3. Install files ------------------------------------------------------
 
 mkdir -p "$PET_DIR/sessions"
 cp "$EMIT_SRC" "$PET_DIR/pet-emit"
 chmod +x "$PET_DIR/pet-emit"
-say "==> hook 程序已放到 $PET_DIR/pet-emit"
+say "==> hook binary installed at $PET_DIR/pet-emit"
 
-# ---- 4. 挂 hook（改 settings.json，这是风险最高的一步）---------------------
+# ---- 4. Wire the hooks (edits settings.json — the riskiest step) ------------
 
-say "==> 正在往 $SETTINGS 追加 hook"
-say "    （会先备份；你现有的 hook 一条都不会动）"
+say "==> appending hooks to $SETTINGS"
+say "    (backed up first; not one of your existing hooks is touched)"
 if ! "$PET_DIR/pet-emit" --patch-settings "$SETTINGS"; then
-  die "改 settings.json 失败。你的原文件没有被破坏，上面那行备份路径可以用来核对"
+  die "could not edit settings.json. Your original file is intact — the backup path printed above can be used to check"
 fi
 
-# ---- 5. 装 app 并启动 ------------------------------------------------------
+# ---- 5. Install the app and start it ---------------------------------------
 
 mkdir -p "$HOME/Applications"
 pkill -x ClaudePet 2>/dev/null || true
@@ -100,16 +104,16 @@ rm -rf "$APP_DEST.installing"
 cp -R "$APP_SRC" "$APP_DEST.installing"
 rm -rf "$APP_DEST"
 mv "$APP_DEST.installing" "$APP_DEST"
-say "==> app 已装到 $APP_DEST"
+say "==> app installed at $APP_DEST"
 
-open "$APP_DEST" 2>/dev/null || die "app 装好了但启动失败，可以手动打开 $APP_DEST"
+open "$APP_DEST" 2>/dev/null || die "the app is installed but would not start; try opening $APP_DEST by hand"
 
 say ""
-say "装好了 🎉 桌面右下角应该出现一只橙色星芒。"
+say "Done 🎉 — a small robot should now be sitting in the bottom-right of your screen."
 say ""
-say "几件需要知道的事："
-say "  · hook 要等你【开一个新的 Claude Code session】才生效，已经开着的不受影响"
-say "  · 右键点宠物 = 菜单（暂停 / 开机自启 / 退出），这是唯一的退出入口"
-say "  · 左键点它 = 展开当前所有 session 的列表"
-say "  · 拖动可以换位置，会记住"
-say "  · 不想要了：跑这个包里的 ./uninstall.sh"
+say "Worth knowing:"
+say "  · hooks only take effect in a NEWLY STARTED Claude Code session; open ones are unaffected"
+say "  · right-click the pet for the menu (nap / launch at login / quit) — that is the only way out"
+say "  · left-click it to expand the list of live sessions"
+say "  · drag it anywhere; it remembers where you put it"
+say "  · changed your mind: run ./uninstall.sh from this package"

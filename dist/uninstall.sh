@@ -1,5 +1,6 @@
 #!/bin/bash
-# Claude Pet 卸载：摘掉 hook、删掉 app，把 settings.json 还原成装之前的样子。
+# Claude Pet uninstaller: unwire the hooks, remove the app, and put
+# settings.json back the way it was.
 set -euo pipefail
 
 CLAUDE_DIR="$HOME/.claude"
@@ -10,11 +11,12 @@ PLIST="$HOME/Library/LaunchAgents/local.claudepet.plist"
 
 say() { echo "$@"; }
 
-say "=== Claude Pet 卸载 ==="
+say "=== Claude Pet uninstaller ==="
 
 pkill -x ClaudePet 2>/dev/null || true
 
-# 摘 hook 要用 pet-emit 本身；它可能已经被删了，那就退回到包里的那份。
+# Unwiring needs pet-emit itself. The installed copy may already be gone, so
+# fall back to the one inside this package.
 EMIT=""
 for candidate in "$PET_DIR/pet-emit" "$(cd "$(dirname "$0")" && pwd)/bin/pet-emit"; do
   if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
@@ -24,28 +26,28 @@ for candidate in "$PET_DIR/pet-emit" "$(cd "$(dirname "$0")" && pwd)/bin/pet-emi
 done
 
 if [ -n "$EMIT" ] && [ -f "$SETTINGS" ]; then
-  say "==> 正在从 $SETTINGS 摘掉 hook（会先备份）"
-  "$EMIT" --unpatch-settings "$SETTINGS" || say "!! 摘 hook 失败，你的原文件没被破坏，可以手动检查"
+  say "==> removing hooks from $SETTINGS (backed up first)"
+  "$EMIT" --unpatch-settings "$SETTINGS" || say "!! could not remove the hooks; your original file is intact — check it by hand"
 elif [ -f "$SETTINGS" ]; then
-  say "!! 找不到可用的 pet-emit，没法自动摘 hook"
-  say "   请手动编辑 $SETTINGS，删掉所有 command 里含 pet-emit 的条目"
+  say "!! no usable pet-emit found; cannot unwire the hooks automatically"
+  say "   edit $SETTINGS by hand and delete every entry whose command contains pet-emit"
 fi
 
-# 开机自启（如果设过）
+# Launch-at-login, if it was ever enabled
 if [ -f "$PLIST" ]; then
   launchctl unload "$PLIST" 2>/dev/null || true
   rm -f "$PLIST"
-  say "==> 已取消开机自启"
+  say "==> launch-at-login removed"
 fi
 
 rm -rf "$APP_DEST"
-say "==> 已删除 $APP_DEST"
+say "==> removed $APP_DEST"
 
 rm -f "$PET_DIR/pet-emit"
 rm -rf "$PET_DIR/sessions"
 rmdir "$PET_DIR" 2>/dev/null || true
-say "==> 已清理 $PET_DIR"
+say "==> cleaned up $PET_DIR"
 
 say ""
-say "卸干净了。settings.json 的备份还留着（$CLAUDE_DIR/settings.json.bak-claudepet-*），"
-say "确认没问题后可以自己删掉。"
+say "All gone. The settings.json backups are still there"
+say "($CLAUDE_DIR/settings.json.bak-claudepet-*) — delete them once you are happy."

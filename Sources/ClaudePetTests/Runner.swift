@@ -26,7 +26,7 @@ struct Runner {
         t.check("missing field returns nil", SessionState.decode(from: Data(#"{"sessionId":"a"}"#.utf8)) == nil)
 
         // ---- StateAggregator ----
-        let t0 = Date(timeIntervalSince1970: 1_789_467_600)  // 基准「现在」= 2026-09-15T10:20:00Z，与上面 decode 测试同一时刻
+        let t0 = Date(timeIntervalSince1970: 1_789_467_600)  // Reference "now" = 2026-09-15T10:20:00Z, the same instant as the decode test above
         func mk(_ id: String, _ st: SessionActivity, sinceAgo: TimeInterval = 0,
                 updatedAgo: TimeInterval = 0, project: String = "p") -> SessionState {
             SessionState(sessionId: id, project: project, cwd: "/tmp/\(project)",
@@ -46,7 +46,7 @@ struct Runner {
         t.check("waiting beats busy regardless of order",
                 StateAggregator.aggregate([mk("a", .waiting), mk("b", .busy)], now: t0).mood == .waiting)
 
-        // 死 session 边界：900 秒仍活着，901 秒算死
+        // Dead-session boundary: 900s is still alive, 901s is dead
         t.check("899s stale still counts",
                 StateAggregator.aggregate([mk("a", .busy, updatedAgo: 899)], now: t0).mood == .busy)
         t.check("exactly 900s still counts",
@@ -56,7 +56,7 @@ struct Runner {
         t.check("dead sessions leave the list",
                 StateAggregator.aggregate([mk("a", .busy, updatedAgo: 901)], now: t0).sessions.isEmpty)
 
-        // urgent 升级边界：60 秒仍是 waiting，61 秒才升级
+        // Escalation boundary: 60s is still waiting, 61s becomes urgent
         t.check("waiting 59s is not urgent",
                 StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 59)], now: t0).mood == .waiting)
         t.check("waiting exactly 60s is not urgent",
@@ -64,7 +64,7 @@ struct Runner {
         t.check("waiting 61s is urgent",
                 StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 61)], now: t0).mood == .urgent)
 
-        // urgent 取最早的 since，不是最晚的
+        // Urgency follows the OLDEST since, not the newest
         let mixed = [mk("a", .waiting, sinceAgo: 5, project: "fresh"),
                      mk("b", .waiting, sinceAgo: 300, project: "stuck")]
         t.check("oldest waiting drives urgency",
@@ -74,32 +74,33 @@ struct Runner {
         t.check("no bubble when nothing waits",
                 StateAggregator.aggregate([mk("a", .busy)], now: t0).waitingProject == nil)
 
-        // busy 不会因为拖久了就升 urgent
+        // Being busy for a long time never escalates; only waiting does
         t.check("long-running busy never turns urgent",
                 StateAggregator.aggregate([mk("a", .busy, sinceAgo: 9999)], now: t0).mood == .busy)
 
-        // 死掉的 waiting 不该让宠物一直急
+        // A dead waiting session must not keep the pet alarmed forever
         t.check("dead waiting session does not keep pet urgent",
                 StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 5000, updatedAgo: 5000)], now: t0).mood == .idle)
 
-        // ---- StateAggregator.ordered(_:) — sessions 排序 ----
-        // 分组顺序：waiting > busy > idle，输入顺序故意不match期望输出
+        // ---- StateAggregator.ordered(_:) — row order ----
+        // Group order is waiting > busy > idle; the input is deliberately not in that order
         let groupMix = [mk("a", .idle), mk("b", .busy), mk("c", .waiting)]
         t.check("sessions come back waiting, then busy, then idle",
                 StateAggregator.aggregate(groupMix, now: t0).sessions.map(\.sessionId) == ["c", "b", "a"])
 
-        // 组内顺序：同一状态下，按 since 从旧到新，输入顺序故意是「新的在前」
+        // Within a group, oldest since first; the input is deliberately newest-first
         let sameGroup = [mk("x", .idle, sinceAgo: 10), mk("y", .idle, sinceAgo: 100)]
         t.check("within a group, oldest since comes first",
                 StateAggregator.aggregate(sameGroup, now: t0).sessions.map(\.sessionId) == ["y", "x"])
 
-        // 同一次调用里死的被剔除、活的保留（而不是全死或全活的退化情况）
+        // Dead dropped and live kept in the SAME call — not the degenerate all-or-nothing case
         let deadAndLive = [mk("d", .busy, updatedAgo: 901), mk("l", .busy, updatedAgo: 0)]
         t.check("dead sessions excluded while live ones in the same call are retained",
                 StateAggregator.aggregate(deadAndLive, now: t0).sessions.map(\.sessionId) == ["l"])
 
-        // ---- PetLayout: 窗口几何与像素穿透 ----
-        // C2 的回归护栏：面板过去被放在 right:100% 的 160px body 里，落在窗口外 x<0。
+        // ---- PetLayout: window geometry and click-through ----
+        // Regression guard: the panel used to be laid out at right:100% of a 160px body,
+        // which put it entirely off-window at negative x.
         let win = CGRect(origin: .zero, size: PetLayout.windowSize)
         let expandedPanel = CGRect(x: 2, y: 14, width: 232, height: 260)
         t.check("expanded panel sits fully inside the window",
@@ -153,7 +154,7 @@ struct Runner {
         t.check("the robot's head is opaque at rest", opaqueAt(-14, -34))
         t.check("the robot's head is still opaque lifted 5pt by the urgent jolt",
                 opaqueAt(-14, -39))
-        // I2：窗口的绝大部分是透明的，点击必须穿透到底下的窗口
+        // Most of the window is transparent and must pass clicks through to whatever is under it
         t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 20))
         t.check("beyond the desk's right end is transparent", !opaqueAt(54, 20))
         t.check("below the desk is transparent", !opaqueAt(0, 40))
@@ -164,14 +165,15 @@ struct Runner {
                 opaque(320, 130, bubble: CGRect(x: 280, y: 122, width: 80, height: 22)))
         t.check("the bubble's area is transparent when hidden", !opaque(320, 130))
 
-        // ---- TerminalTarget: 跳回 session 所在终端 ----
+        // ---- TerminalTarget: jumping back to a session's terminal ----
         t.check("orca and iterm2 are jumpable",
                 TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2"))
-        // 不认识的终端要降级成"不可点"，而不是给用户一个点了没反应的行
+        // An unrecognised terminal degrades to "not clickable" rather than a dead click
         t.check("an unknown or empty kind is not jumpable",
                 !TerminalTarget.canJump(kind: "vscode") && !TerminalTarget.canJump(kind: ""))
 
-        // ITERM_SESSION_ID 的 w/t/p 前缀是标签当时的位置，换个顺序就失效，uuid 才是稳定的
+        // The w/t/p prefix is the tab's position when the shell started and goes stale
+        // as soon as tabs are reordered; the uuid does not
         t.check("the w/t/p prefix is stripped from ITERM_SESSION_ID",
                 TerminalTarget.iTermUUID(from: "w0t1p0:9E1C2A3B-1111-2222-3333-444455556666")
                 == "9E1C2A3B-1111-2222-3333-444455556666")
@@ -180,8 +182,9 @@ struct Runner {
         t.check("only the first colon splits, so a uuid keeps any later ones",
                 TerminalTarget.iTermUUID(from: "w0t0p0:AB:CD") == "AB:CD")
 
-        // 这是整个功能里唯一真正危险的输入：它来自环境变量，被一个进程写进文件，
-        // 又被另一个进程贴进 AppleScript 里执行。引号或换行就能结束字符串字面量。
+        // The one genuinely dangerous input here: it comes from an environment variable,
+        // is written to a file by one process, and pasted into a script another process
+        // executes. A quote or newline would end the literal and run as code.
         t.check("a real uuid passes the AppleScript-injection guard",
                 TerminalTarget.isSafeITermUUID("9E1C2A3B-1111-2222-3333-444455556666"))
         t.check("an empty uuid is rejected", !TerminalTarget.isSafeITermUUID(""))
@@ -191,7 +194,7 @@ struct Runner {
         t.check("a space is rejected", !TerminalTarget.isSafeITermUUID("AB CD"))
         t.check("a non-hex letter is rejected", !TerminalTarget.isSafeITermUUID("ABZZ"))
 
-        // 老的状态文件没有 terminal 字段，必须照常解码成"不可跳转"，而不是整条丢掉
+        // A state file predating this field must decode as "not jumpable", not be dropped
         let withoutTerminal = Data("""
         {"sessionId":"s1","project":"p","cwd":"/tmp","state":"busy","tool":"Bash",
          "detail":"","since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z"}
@@ -208,16 +211,18 @@ struct Runner {
                 SessionState.decode(from: withTerminal)?.terminal
                 == TerminalRef(kind: "orca", handle: "term_abc123"))
 
-        // identify(): 两个 handle 变量都是普通导出变量，会被子进程继承，所以
-        // 「环境里有哪个变量」不足以判断人到底坐在哪个终端前
+        // identify(): both handle variables are ordinary exported variables and are
+        // inherited by child processes, so bare presence cannot say which terminal
+        // the human is actually sitting in front of
         let orcaOnly = ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x"]
         t.check("an Orca shell is identified as orca",
                 TerminalTarget.identify(environment: orcaOnly) == TerminalRef(kind: "orca", handle: "term_x"))
         let itermOnly = ["TERM_PROGRAM": "iTerm.app", "ITERM_SESSION_ID": "w0t0p0:AB-CD"]
         t.check("an iTerm2 shell is identified as iterm2",
                 TerminalTarget.identify(environment: itermOnly) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
-        // 这条是真在测试里踩到的：在 Orca 终端里跑测试时 ORCA_TERMINAL_HANDLE 还在环境里，
-        // 只按变量存在性判断会把 iTerm2 的 session 跳到一个毫不相干的 Orca 标签页
+        // Caught for real while testing: running the suite inside Orca left
+        // ORCA_TERMINAL_HANDLE in the environment, and presence alone sent an iTerm2
+        // session to a completely unrelated Orca tab
         let both = [
             "TERM_PROGRAM": "iTerm.app",
             "ITERM_SESSION_ID": "w0t0p0:AB-CD",
@@ -225,14 +230,14 @@ struct Runner {
         ]
         t.check("TERM_PROGRAM wins when a stale handle from another terminal is inherited",
                 TerminalTarget.identify(environment: both) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
-        // TERM_PROGRAM 缺失时退回到变量存在性，不至于整个功能失灵
+        // With TERM_PROGRAM absent, bare presence is all there is — better than nothing
         t.check("a missing TERM_PROGRAM falls back to whichever handle exists",
                 TerminalTarget.identify(environment: ["ORCA_TERMINAL_HANDLE": "term_y"])
                 == TerminalRef(kind: "orca", handle: "term_y"))
         t.check("a terminal we cannot address yields no reference",
                 TerminalTarget.identify(environment: ["TERM_PROGRAM": "Apple_Terminal"]) == nil)
-        // 同样是实测抓到的：在 Terminal.app 里跑、却继承了 Orca 的 handle，
-        // 按"哪个变量在"回退就会给出一个点了会跳到毫不相干标签页的行
+        // Also caught for real: running under Terminal.app while carrying an inherited
+        // Orca handle, where falling back on presence offers a jump to an unrelated tab
         t.check("a known-but-unsupported terminal does not fall back to an inherited handle",
                 TerminalTarget.identify(environment: [
                     "TERM_PROGRAM": "Apple_Terminal",
@@ -241,9 +246,10 @@ struct Runner {
         t.check("an empty handle is treated as absent",
                 TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": ""]) == nil)
 
-        // ---- 存活判定：查进程，而不是看时间戳 ----
-        // 这是用户报的问题：一个开着但没人操作的 session 不触发任何 hook，
-        // updatedAt 就停在原地，15 分钟后从面板消失——而它其实活得好好的
+        // ---- Liveness: ask the kernel, do not watch the clock ----
+        // Reported by a user: an open session nobody is touching fires no hooks at all,
+        // so updatedAt stands still and it vanished from the panel after 15 minutes —
+        // while being very much alive
         t.check("the current process is detected as running",
                 ProcessProbe.isRunning(pid: ProcessInfo.processInfo.processIdentifier,
                                        named: ProcessProbe.processName(
@@ -252,12 +258,13 @@ struct Runner {
                 !ProcessProbe.isRunning(pid: 0, named: "claude"))
         t.check("a negative pid is not running",
                 !ProcessProbe.isRunning(pid: -1, named: "claude"))
-        // pid 会被复用，所以光"这个 pid 活着"不够——launchd 一直活着但不是 claude
+        // Pids are recycled, so "that pid is alive" is not enough — launchd is always
+        // alive and is not claude
         t.check("a live pid running something else does not count as claude",
                 !ProcessProbe.isRunning(pid: 1, named: "claude"))
         t.check("pid 1 is launchd", ProcessProbe.processName(pid: 1) == "launchd")
-        // 实测踩到的：内核的 p_comm 是 "claude.exe"，ps -o comm 显示的 "claude"
-        // 是 argv[0] 的 basename。按 "claude" 精确匹配会一个 session 都认不出来
+        // Caught for real: the kernel's p_comm is "claude.exe" while ps -o comm shows
+        // "claude", the basename of argv[0]. Exact-matching "claude" recognised nothing.
         t.check("the kernel's claude.exe matches the claude prefix",
                 ProcessProbe.nameMatches("claude.exe", "claude"))
         t.check("a bare claude also matches, in case the name changes back",
@@ -269,7 +276,7 @@ struct Runner {
         t.check("every process has a parent except the root",
                 (ProcessProbe.parentPID(of: ProcessInfo.processInfo.processIdentifier) ?? 0) > 0)
 
-        // 带 pid 的 session：进程活着就一直留着，哪怕一整天没动静
+        // With a pid recorded, a live process keeps the session listed however long it idles
         let ancient = Date(timeIntervalSince1970: 1_700_000_000)
         let idleButOpen = SessionState(
             sessionId: "open", project: "p", cwd: "/tmp", state: .idle, tool: "",
@@ -281,15 +288,17 @@ struct Runner {
                 StateAggregator.aggregate([idleButOpen], now: t0,
                                           isLive: { _, _ in false }).sessions.isEmpty)
 
-        // 没有 pid 的老状态文件仍然走 900 秒超时，不能因为升级就集体变成僵尸
+        // Legacy files with no pid still honour the timeout — upgrading must not turn
+        // them all into zombies
         let legacyFresh = mk("legacy-fresh", .busy, updatedAgo: 100)
         let legacyStale = mk("legacy-stale", .busy, updatedAgo: 901)
         t.check("a legacy file with no pid still honours the timeout",
                 StateAggregator.isLive(legacyFresh, now: t0)
                 && !StateAggregator.isLive(legacyStale, now: t0))
 
-        // lastPromptAt 是 Date? —— Optional 只管"字段缺失"，不管"字段是空字符串"。
-        // 空串会让整条 session 解码失败、从面板静默消失，所以必须确认两种都安全
+        // lastPromptAt is Date? — Optional covers a MISSING key, not a key present with
+        // an empty string. The latter throws, and a throw drops the whole session from
+        // the panel silently, so both shapes are checked.
         let emptyPrompt = Data("""
         {"sessionId":"s","project":"p","cwd":"/tmp","state":"busy","tool":"","detail":"",
          "since":"2026-09-16T00:00:00Z","updatedAt":"2026-09-16T00:00:00Z","lastPromptAt":""}
@@ -303,7 +312,7 @@ struct Runner {
         t.check("a missing lastPromptAt decodes as nil",
                 SessionState.decode(from: missingPrompt)?.lastPromptAt == nil)
 
-        // ---- 静音：藏起来，直到你再跟它说话 ----
+        // ---- Muting: hidden until you speak to it again ----
         let t1 = t0.addingTimeInterval(-3600)
         func session(_ id: String, _ act: SessionActivity, prompt: Date?) -> SessionState {
             SessionState(sessionId: id, project: id, cwd: "/tmp", state: act, tool: "",
@@ -316,11 +325,12 @@ struct Runner {
                 mark == t1)
         t.check("a muted session stays hidden while nothing new is said",
                 HiddenSessions.isHidden(spoke, marks: ["a": mark]))
-        // 这条是整个功能的核心：只有"你又说话了"才能让它回来
+        // The heart of the feature: only the USER speaking brings it back
         let spokeAgain = session("a", .idle, prompt: t0)
         t.check("a muted session returns as soon as the user speaks to it again",
                 !HiddenSessions.isHidden(spokeAgain, marks: ["a": mark]))
-        // session 自己干活不算"你跟它说话"，否则长任务会立刻自己解除静音
+        // The session working on its own does not count, or a long job would instantly
+        // un-mute itself
         let busyButSilent = session("a", .busy, prompt: t1)
         t.check("the session working on its own does not un-mute it",
                 HiddenSessions.isHidden(busyButSilent, marks: ["a": mark]))
@@ -330,13 +340,13 @@ struct Runner {
                                         marks: ["b": HiddenSessions.mark(for: neverSpoken)]))
         t.check("an unmuted session is never hidden",
                 !HiddenSessions.isHidden(spoke, marks: [:]))
-        // 再次静音要记新的时间，否则"说话->回来->再静音"这条路会卡住
+        // Re-muting records a fresh mark, or speak → return → mute again would not stick
         t.check("re-muting after speaking sticks again",
                 HiddenSessions.isHidden(spokeAgain,
                                         marks: ["a": HiddenSessions.mark(for: spokeAgain)]))
 
-        // 静音的 session 既不进列表，也不影响表情——否则宠物在为一个你看不见的
-        // session 举手报警，比看到它更烦
+        // A muted session is out of the list AND out of the mood — otherwise the pet
+        // waves about something the user cannot see, which is worse than seeing it
         let mutedWaiting = session("w", .waiting, prompt: t1)
         let visible = session("v", .idle, prompt: t1)
         let muted = StateAggregator.aggregate([mutedWaiting, visible], now: t0,
@@ -346,7 +356,7 @@ struct Runner {
         t.check("a muted session cannot make the pet wave",
                 muted.mood == .idle && muted.waitingProject == nil)
         t.check("the panel is told how many are muted", muted.hiddenCount == 1)
-        // 已经结束的 session 不该算进"还藏着 N 个"
+        // A session that has exited should not be counted as hidden
         let deadMuted = StateAggregator.aggregate([mutedWaiting, visible], now: t0,
                                                   hidden: ["w": t1],
                                                   isLive: { s, _ in s.sessionId != "w" })
@@ -356,8 +366,9 @@ struct Runner {
         t.check("marks for departed sessions are pruned away",
                 HiddenSessions.pruned(["a": t1, "gone": t1], keeping: [spoke]) == ["a": t1])
 
-        // ---- 说话：额度数据 ----
-        // 这是别人插件的私有缓存文件，格式随时可能变，任何意外都必须退化成"不说话"
+        // ---- Speech: quota data ----
+        // Another plugin's private cache: its shape can change without warning, so any
+        // surprise must degrade to silence
         let realCache = Data("""
         {"data":{"planName":"Team","fiveHour":6,"sevenDay":25,
           "fiveHourResetAt":"2026-09-16T07:40:00.039Z",
@@ -370,12 +381,12 @@ struct Runner {
         let snap = UsageReader.parse(realCache)
         t.check("the real claude-hud cache parses", snap != nil)
         t.check("percentages come through", snap?.fiveHourPercent == 6 && snap?.sevenDayPercent == 25)
-        // 缓存里的时间戳带毫秒（…:00.039Z），朴素的 ISO8601 解析器会拒绝它
+        // The cache writes fractional seconds (…:00.039Z), which a plain ISO8601 parser rejects
         t.check("a reset time with fractional seconds parses",
                 snap?.fiveHourResetAt == Date(timeIntervalSince1970: 1789544400.039))
         t.check("the capture time comes from the millisecond timestamp",
                 snap?.capturedAt == Date(timeIntervalSince1970: 1789528307.450))
-        // data 为空时退回 lastGoodData，一次 API 失败不该让显示变空
+        // Falling back to lastGoodData keeps one failed refresh from blanking the display
         let onlyLastGood = Data("""
         {"lastGoodData":{"planName":"Team","fiveHour":9,"sevenDay":30,
           "fiveHourResetAt":"2026-09-16T07:40:00Z","sevenDayResetAt":"2026-09-21T20:00:00Z"},
@@ -388,7 +399,8 @@ struct Runner {
         t.check("a cache missing the fields we need parses to nothing",
                 UsageReader.parse(Data(#"{"data":{"planName":"Team"}}"#.utf8)) == nil)
 
-        // 百分比会过期（statusline 不跑就不刷新），但重置时刻是绝对时间不会过期
+        // Percentages go stale (nothing refreshes them unless the statusline runs);
+        // reset instants are absolute and do not
         let stale = UsageSnapshot(planName: "Team", fiveHourPercent: 90, sevenDayPercent: 90,
                                   fiveHourResetAt: t0.addingTimeInterval(3600),
                                   sevenDayResetAt: t0.addingTimeInterval(86400),
@@ -396,7 +408,7 @@ struct Runner {
         t.check("percentages older than half an hour are not trusted",
                 !stale.percentagesUsable(now: t0))
 
-        // ---- 说话：什么时候开口 ----
+        // ---- Speech: when it may speak at all ----
         let quiet = GlobalState(mood: .idle, sessions: [], waitingProject: nil)
         let busyState = GlobalState(mood: .busy, sessions: [session("x", .busy, prompt: nil)],
                                     waitingProject: nil)
@@ -406,7 +418,7 @@ struct Runner {
                                   sevenDayResetAt: t0.addingTimeInterval(86400),
                                   capturedAt: t0)
 
-        // 报警的时候气泡要留给"谁在等你授权"，一句闲话都不能说
+        // While raising the alarm the bubble belongs to "who needs you" — no small talk
         t.check("nothing is said while the pet is raising the alarm",
                 Chatter.next(state: alarmed, previous: quiet, usage: fresh, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
@@ -418,7 +430,7 @@ struct Runner {
         t.check("an imminent quota reset is worth saying",
                 Chatter.next(state: quiet, previous: quiet, usage: fresh, now: t0,
                              lastSpoken: [:], lastAnything: nil)?.kind == .quotaResetting)
-        // 刚说过就闭嘴，不管有多少由头
+        // Just spoke: stay quiet, however many occasions there are
         t.check("the global cooldown silences everything",
                 Chatter.next(state: quiet, previous: quiet, usage: fresh, now: t0,
                              lastSpoken: [:],
@@ -428,7 +440,7 @@ struct Runner {
                              lastSpoken: [.quotaResetting: t0.addingTimeInterval(-600)],
                              lastAnything: t0.addingTimeInterval(-600)) == nil)
 
-        // 重置点已经过去就不该再提"还有 N 分钟"
+        // A reset that already happened must not be announced as "N minutes away"
         let past = UsageSnapshot(planName: "Team", fiveHourPercent: 10, sevenDayPercent: 10,
                                  fiveHourResetAt: t0.addingTimeInterval(-60),
                                  sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
@@ -436,7 +448,7 @@ struct Runner {
                 Chatter.next(state: quiet, previous: quiet, usage: past, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
-        // 额度用得多值得提醒，但数据过期时宁可不说，免得报个过时的数字
+        // A nearly-spent quota is worth saying, but stale numbers are worse than silence
         let high = UsageSnapshot(planName: "Team", fiveHourPercent: 20, sevenDayPercent: 85,
                                  fiveHourResetAt: t0.addingTimeInterval(4 * 3600),
                                  sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
@@ -451,7 +463,7 @@ struct Runner {
                 Chatter.next(state: quiet, previous: quiet, usage: highButStale, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
-        // 干完了要有"之前在忙"作对照，否则刚启动就会说一句"都干完了"
+        // "Finished" needs a previous busy state, or a fresh launch would greet you with it
         t.check("finishing is announced when busy turns idle",
                 Chatter.next(state: quiet, previous: busyState, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil)?.kind == .finished)
@@ -459,7 +471,7 @@ struct Runner {
                 Chatter.next(state: quiet, previous: nil, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
-        // 跑得久值得说一句，但刚开始跑不值得
+        // Long-running is worth a line; just-started is not
         let longBusy = GlobalState(
             mood: .busy,
             sessions: [SessionState(sessionId: "l", project: "multica", cwd: "/tmp", state: .busy,
@@ -479,14 +491,14 @@ struct Runner {
                 Chatter.next(state: justStarted, previous: justStarted, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
-        // 悬停查询是用户主动要的，不受任何冷却限制
+        // The on-demand line was asked for, so no cooldown applies
         t.check("the on-demand line always answers",
                 !Chatter.onDemand(usage: fresh, state: quiet, now: t0).isEmpty)
         t.check("the on-demand line works without claude-hud installed",
-                Chatter.onDemand(usage: nil, state: quiet, now: t0) == "没有活跃的 session")
+                Chatter.onDemand(usage: nil, state: quiet, now: t0) == "No live sessions")
 
-        // ---- 终端标签标题 = session 的名字 ----
-        // 面板里的 project 只是目录名，同一个仓库开三个 session 长得一模一样
+        // ---- The terminal tab title IS the session's name ----
+        // The project column is only a directory name; three sessions in one repo match
         let orcaList = Data("""
         {"result":{"terminals":[
           {"handle":"term_a","title":"✳ 客户A回归缺陷跟进"},
@@ -496,28 +508,33 @@ struct Runner {
         ]}}
         """.utf8)
         let titles = TerminalTitles.parseOrca(orcaList)
-        t.check("orca titles are picked up", titles["term_a"] == "客户A回归缺陷跟进")
-        // 终端在标题前加的是会动的状态符号，留着的话同一个 session 每秒看起来都在改名
+        // A CJK title on purpose: tab titles are arbitrary user text, and the
+        // glyph-stripping loop must not mangle multi-byte characters.
+        t.check("a non-ASCII title survives parsing intact",
+                titles["term_a"] == "客户A回归缺陷跟进")
+        // Terminals prepend an ANIMATED status glyph; keeping it makes one session look
+        // like it renames itself every second
         t.check("the animated status glyph is stripped",
                 titles["term_b"] == "🤖 20260915-new game")
         t.check("a terminal with no title is skipped", titles["term_d"] == nil)
         t.check("another app's CLI changing shape degrades to no titles",
                 TerminalTitles.parseOrca(Data("[]".utf8)).isEmpty)
 
-        // 默认名字不值得占一次悬停和一个气泡
+        // A default name is not worth a hover and a bubble
         t.check("default terminal names are treated as useless",
                 TerminalTitles.isUseless("Terminal 1") && TerminalTitles.isUseless("zsh")
                 && TerminalTitles.isUseless("  "))
         t.check("a real name is not useless",
-                !TerminalTitles.isUseless("客户A回归缺陷跟进"))
+                !TerminalTitles.isUseless("release regression triage"))
 
-        // iTerm2 的 session 自己没有标题，标题在 tab 上，所以脚本输出的是 id<TAB>title
-        let itermOut = "AB-CD\t✳ 审核Bug登记表\nEF-GH\tTerminal 2\nbroken line\n"
+        // An iTerm2 session has no title of its own — the tab does — so the script
+        // emits id<TAB>title pairs
+        let itermOut = "AB-CD\t✳ bug intake review\nEF-GH\tTerminal 2\nbroken line\n"
         let iterm = TerminalTitles.parseITerm(itermOut)
-        t.check("iterm2 id/title pairs are parsed", iterm["AB-CD"] == "审核Bug登记表")
+        t.check("iterm2 id/title pairs are parsed", iterm["AB-CD"] == "bug intake review")
         t.check("a malformed line is skipped rather than fatal", iterm.count == 2)
 
-        // 同目录多个 session 时才值得花第二行写名字
+        // A second line is spent on the name only where a project is ambiguous
         let one = [session("a", .idle, prompt: nil)]
         t.check("a lone session needs no disambiguation",
                 StateAggregator.ambiguousProjects(one).isEmpty)

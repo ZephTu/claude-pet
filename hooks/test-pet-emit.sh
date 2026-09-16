@@ -6,8 +6,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # Point at the Swift binary; PET_EMIT can override it (packaging tests reuse this).
 EMIT="${PET_EMIT:-$HERE/../.build/debug/PetEmit}"
 if [ ! -x "$EMIT" ]; then
-  echo "找不到 PetEmit 二进制：$EMIT"
-  echo "先跑 swift build 再执行本测试"
+  echo "PetEmit binary not found: $EMIT"
+  echo "run swift build before this test"
   exit 1
 fi
 export PET_HOME="$(mktemp -d)/pet"
@@ -35,7 +35,7 @@ field() {  # field <session_id> <key>
     "$PET_HOME/sessions/$1.json" "$2"
 }
 
-# --- 事件到 state 的映射 ---
+# --- event -> state mapping ---
 emit SessionStart s1 /Users/dev/Projects/demo-app
 check "SessionStart writes idle" "$(field s1 state)" "idle"
 check "project is cwd basename" "$(field s1 project)" "demo-app"
@@ -61,7 +61,7 @@ check "PostToolUse writes busy" "$(field s1 state)" "busy"
 emit Stop s1 /Users/dev/Projects/demo-app
 check "Stop writes idle" "$(field s1 state)" "idle"
 
-# --- since 的维护：state 不变则沿用 ---
+# --- since is carried forward while the state does not change ---
 emit Notification s2 /tmp/proj "" "waiting one"
 first_since="$(field s2 since)"
 sleep 1
@@ -73,7 +73,7 @@ changed_since="$(field s2 since)"
 check "since is refreshed when state changes" \
   "$([ "$changed_since" != "$first_since" ] && echo yes || echo no)" "yes"
 
-# --- updatedAt 每次都刷新 ---
+# --- updatedAt refreshes on every write ---
 emit Stop s2 /tmp/proj
 sleep 1
 before_updated="$(field s2 updatedAt)"
@@ -81,10 +81,10 @@ emit Stop s2 /tmp/proj
 check "updatedAt always moves" \
   "$([ "$(field s2 updatedAt)" != "$before_updated" ] && echo yes || echo no)" "yes"
 
-# --- 一个 session 一个文件 ---
+# --- one file per session ---
 check "one file per session" "$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')" "2"
 
-# --- 绝不失败 ---
+# --- never fails, whatever it is fed ---
 echo 'not json at all' | "$EMIT"; check "garbage stdin exits 0" "$?" "0"
 printf '{}' | "$EMIT"; check "empty json exits 0" "$?" "0"
 printf '' | "$EMIT"; check "empty stdin exits 0" "$?" "0"
@@ -98,11 +98,12 @@ check "session_id with slash writes nothing" "$(ls "$PET_HOME/sessions" | wc -l 
 check "session_id with slash does not escape sessions dir" \
   "$([ -e "$PET_HOME/escape.json" ] && echo exists || echo absent)" "absent"
 
-# --- 未知事件不该污染状态 ---
+# --- an unknown event must not touch the state ---
 emit PreCompact s1 /Users/dev/Projects/demo-app
 check "unknown event leaves state alone" "$(field s1 state)" "idle"
 
-# --- Notification 分两类：等授权才算 waiting，等输入只是说完了 ---
+# --- Notification means two things: needing permission is waiting,
+#     waiting for input is just done talking ---
 emit Notification s3 /tmp/permproj "" "Claude needs your permission to use Bash"
 check "permission notification means waiting" "$(field s3 state)" "waiting"
 
@@ -110,19 +111,20 @@ emit Notification s4 /tmp/inputproj "" "Claude is waiting for your input"
 check "input notification is not waiting" "$(field s4 state)" "idle"
 check "input notification keeps its message" "$(field s4 detail)" "Claude is waiting for your input"
 
-# 等输入的提示重复到来，不能把 session 拖成 waiting
+# A repeated "waiting for your input" must not drag the session into waiting
 emit Notification s4 /tmp/inputproj "" "Claude is waiting for your input"
 check "repeated input notification stays idle" "$(field s4 state)" "idle"
 
-# 真的等授权时，重复通知仍然是 waiting
+# A genuine permission prompt stays waiting however often it repeats
 emit Notification s3 /tmp/permproj "" "Claude needs your permission to use Read"
 check "repeated permission notification stays waiting" "$(field s3 state)" "waiting"
 
-# 没有 message 的 Notification 按等授权处理（保守：宁可提醒也不漏）
+# A Notification with no message is treated as the blocking kind:
+# a false alarm is cheaper than a stuck session nobody notices
 emit Notification s5 /tmp/blankproj "" ""
 check "notification without message is waiting" "$(field s5 state)" "waiting"
 
-# --- SessionEnd 立刻删掉状态文件，不等 15 分钟超时 ---
+# --- SessionEnd deletes the state file at once, without waiting for a timeout ---
 before_end="$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')"
 emit SessionEnd s4 /tmp/inputproj
 check "SessionEnd removes the state file" \

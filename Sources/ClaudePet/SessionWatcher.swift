@@ -6,7 +6,7 @@ import ClaudePetCore
 /// Re-reading the whole directory on any event is deliberate — it is immune to
 /// missed events — but it is only cheap because this class also *reaps* the
 /// directory: a session file whose `updatedAt` is older than the dead-session
-/// timeout is deleted on sight (design doc section 3, "文件由宠物 app 顺手删掉").
+/// timeout is deleted on sight (design doc section 3: the pet app reaps them).
 /// Without that, the design doc's own figure of 51 session files per 10 hours
 /// turns into thousands a month, all of them re-read on every burst.
 ///

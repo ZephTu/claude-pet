@@ -4,7 +4,7 @@ import Foundation
 ///
 /// The panel shows a project, which is just the directory's name — and three
 /// sessions open in the same directory all render as the same word. The tab
-/// title is the thing that actually distinguishes them ("客户A回归缺陷跟进"
+/// title is the thing that actually distinguishes them ("customer-a regression triage"
 /// vs "20260916-email reply"), so it is what the pet shows on hover.
 ///
 /// Claude Code does not record a session name anywhere of its own: its

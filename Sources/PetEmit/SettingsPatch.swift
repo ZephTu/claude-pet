@@ -35,14 +35,14 @@ enum SettingsPatch {
         var settings: [String: Any]
         if FileManager.default.fileExists(atPath: path) {
             guard let data = try? Data(contentsOf: url) else {
-                report("读不了 \(path)")
+                report("cannot read \(path)")
                 return 1
             }
             guard
                 let parsed = try? JSONSerialization.jsonObject(with: data),
                 let object = parsed as? [String: Any]
             else {
-                report("\(path) 不是合法的 JSON 对象，没有改动它")
+                report("\(path) is not a JSON object — left untouched")
                 return 1
             }
             settings = object
@@ -50,7 +50,7 @@ enum SettingsPatch {
             // A fresh Claude Code install may have no settings file yet.
             settings = [:]
         } else {
-            report("找不到 \(path)，没什么可卸的")
+            report("no \(path) — nothing to remove")
             return 0
         }
 
@@ -65,9 +65,9 @@ enum SettingsPatch {
                 }
                 try FileManager.default.copyItem(at: url, to: destination)
                 backup = destination
-                report("已备份 -> \(destination.path)")
+                report("backed up -> \(destination.path)")
             } catch {
-                report("备份失败，中止：\(error.localizedDescription)")
+                report("backup failed, aborting: \(error.localizedDescription)")
                 return 1
             }
         }
@@ -85,19 +85,19 @@ enum SettingsPatch {
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             )
         else {
-            report("序列化失败，原文件未改动")
+            report("could not serialise — original left untouched")
             return 1
         }
 
         // Parse the bytes we are about to install. If they are not valid JSON we
         // never write them, so there is nothing to roll back.
         guard (try? JSONSerialization.jsonObject(with: output)) != nil else {
-            report("生成的内容不是合法 JSON，原文件未改动")
+            report("generated content is not valid JSON — original left untouched")
             return 1
         }
 
         guard atomicWrite(output, to: url) else {
-            report("写入失败")
+            report("write failed")
             if let backup { restore(backup, to: url) }
             return 1
         }
@@ -107,15 +107,15 @@ enum SettingsPatch {
             let verify = try? Data(contentsOf: url),
             (try? JSONSerialization.jsonObject(with: verify)) != nil
         else {
-            report("写完校验不通过，正在回滚")
+            report("post-write check failed, rolling back")
             if let backup { restore(backup, to: url) }
             return 1
         }
 
         if changed.isEmpty {
-            report(adding ? "（全部已存在，未改动）" : "（没有找到宠物的 hook，未改动）")
+            report(adding ? "(all hooks already present — no change)" : "(no pet hooks found — no change)")
         } else {
-            report((adding ? "已挂载: " : "已摘除: ") + changed.joined(separator: ", "))
+            report((adding ? "installed: " : "removed: ") + changed.joined(separator: ", "))
         }
         return 0
     }
@@ -243,7 +243,7 @@ enum SettingsPatch {
     private static func restore(_ backup: URL, to url: URL) {
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.copyItem(at: backup, to: url)
-        report("已从备份恢复")
+        report("restored from backup")
     }
 
     private static func timestamp() -> String {

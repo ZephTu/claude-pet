@@ -1,5 +1,6 @@
 #!/bin/bash
-# 开发用卸载：摘 hook、删 app、清目录。settings.json 回到装之前的样子。
+# Developer uninstall: unwire hooks, remove the app, clean up. settings.json
+# returns to exactly what it was.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +12,8 @@ PLIST="$HOME/Library/LaunchAgents/local.claudepet.plist"
 
 pkill -x ClaudePet 2>/dev/null || true
 
-# 摘 hook 要用 pet-emit；装过的那份可能已被删，退回到仓库里刚编出来的那份。
+# Unwiring needs pet-emit itself; the installed copy may already be gone, so
+# fall back to the freshly built one in the repo.
 EMIT=""
 for candidate in "$PET_DIR/pet-emit" "$ROOT/pet-emit"; do
   if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
@@ -21,22 +23,22 @@ for candidate in "$PET_DIR/pet-emit" "$ROOT/pet-emit"; do
 done
 
 if [ -n "$EMIT" ] && [ -f "$SETTINGS" ]; then
-  echo "==> 摘 hook（会先备份）"
+  echo "==> unwiring hooks (backed up first)"
   "$EMIT" --unpatch-settings "$SETTINGS"
 elif [ -f "$SETTINGS" ]; then
-  echo "!! 找不到可用的 pet-emit，请手动删掉 $SETTINGS 里 command 含 pet-emit 的条目" >&2
+  echo "!! no usable pet-emit — remove entries whose command contains pet-emit from $SETTINGS by hand" >&2
 fi
 
 if [ -f "$PLIST" ]; then
   launchctl unload "$PLIST" 2>/dev/null || true
   rm -f "$PLIST"
-  echo "==> 已取消开机自启"
+  echo "==> launch-at-login removed"
 fi
 
 rm -rf "$APP_DEST"
 rm -f "$PET_DIR/pet-emit"
 rm -rf "$PET_DIR/sessions"
 rmdir "$PET_DIR" 2>/dev/null || true
-echo "==> 已删除 app 和 $PET_DIR"
+echo "==> removed the app and $PET_DIR"
 echo ""
-echo "卸干净了。settings.json 的备份留在 $CLAUDE_DIR/settings.json.bak-claudepet-*"
+echo "Done. settings.json backups remain at $CLAUDE_DIR/settings.json.bak-claudepet-*"

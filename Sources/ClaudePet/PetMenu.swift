@@ -35,13 +35,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
         let menu = NSMenu()
 
         let pause = NSMenuItem(
-            title: paused ? "唤醒宠物" : "让宠物睡一会",
+            title: paused ? "Wake Up" : "Take a Nap",
             action: #selector(togglePause), keyEquivalent: ""
         )
         pause.target = self
         menu.addItem(pause)
 
-        let login = NSMenuItem(title: "开机自启", action: #selector(toggleLogin), keyEquivalent: "")
+        let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = launchesAtLogin ? .on : .off
         menu.addItem(login)
@@ -50,7 +50,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         // is just noise in a four-item menu.
         if mutedCount > 0 {
             let unmute = NSMenuItem(
-                title: "取消静音（\(mutedCount) 个）",
+                title: "Unmute All (\(mutedCount))",
                 action: #selector(unmuteAll), keyEquivalent: ""
             )
             unmute.target = self
@@ -59,7 +59,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "")
+        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
 

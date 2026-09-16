@@ -30,7 +30,7 @@ html, body {
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
 }
 
-/* ---- 机器人形象 ----------------------------------------------------------
+/* ---- The robot ------------------------------------------------------------
    The hit region for this drawing is PetLayout.bodyBox + PetLayout.antennaBox.
    Anything that moves the figure outside those rectangles becomes unclickable,
    so the `urgent` lift and tilt below are sized to stay inside them. */

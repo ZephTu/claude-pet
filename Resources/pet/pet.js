@@ -29,7 +29,7 @@ window.setMood = function (mood, waitingProject) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.
     clearSpeech();
-    bubble.textContent = waitingProject + " 等你授权";
+    bubble.textContent = waitingProject + " needs you";
     bubble.classList.remove("chat");
     bubble.hidden = false;
   } else if (!speaking) {
@@ -109,13 +109,13 @@ function ageText(seconds) {
 }
 
 function whatText(s) {
-  if (s.state === "waiting") return "等你授权";
-  if (s.state === "busy") return s.tool || "忙着";
+  if (s.state === "waiting") return "needs you";
+  if (s.state === "busy") return s.tool || "working";
   // An idle session carrying a notification message is one that finished
   // talking and is waiting on a reply — worth distinguishing from a session
   // that is merely sitting there.
-  if (s.detail) return "说完了";
-  return "闲着";
+  if (s.detail) return "done talking";
+  return "idle";
 }
 
 /**
@@ -125,10 +125,10 @@ function whatText(s) {
 window.setSessions = function (list, hiddenCount) {
   const muted = hiddenCount || 0;
   const footer = muted
-    ? '<div class="muted-note">还静音着 ' + muted + ' 个，跟它说话就回来</div>'
+    ? '<div class="muted-note">' + muted + ' muted — say something to bring one back</div>'
     : "";
   if (!list.length) {
-    panel.innerHTML = '<div class="empty">没有活跃的 session</div>' + footer;
+    panel.innerHTML = '<div class="empty">No live sessions</div>' + footer;
     hoverRow = null;
     reportLayout();
     return;
@@ -142,7 +142,7 @@ window.setSessions = function (list, hiddenCount) {
         '<span class="proj"></span><span class="what"></span>' +
         '<span class="age">' + ageText(s.waitedSeconds) + "</span>" +
         (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
-        '<span class="mute" title="静音">\u00d7</span>' +
+        '<span class="mute" title="Mute this session">\u00d7</span>' +
         "</div>" +
         '<div class="detail"></div></div>'
       );

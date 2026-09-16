@@ -26,7 +26,7 @@ echo "==> swift build -c $CONFIG $ARCHFLAGS"
 # the script instead of falling through to a confusing "product not found".
 BUILD_LOG=$(mktemp)
 if ! swift build -c "$CONFIG" $ARCHFLAGS >"$BUILD_LOG" 2>&1; then
-  echo "编译失败："
+  echo "Build failed:"
   grep -vE "ld: warning|^\[" "$BUILD_LOG" | tail -20
   rm -f "$BUILD_LOG"
   exit 1
@@ -49,8 +49,8 @@ find_product() {
   return 1
 }
 
-APP_BIN=$(find_product ClaudePet) || { echo "找不到 ClaudePet 产物"; exit 1; }
-EMIT_BIN=$(find_product PetEmit) || { echo "找不到 PetEmit 产物"; exit 1; }
+APP_BIN=$(find_product ClaudePet) || { echo "ClaudePet product not found"; exit 1; }
+EMIT_BIN=$(find_product PetEmit) || { echo "PetEmit product not found"; exit 1; }
 BUNDLE_DIR=$(dirname "$APP_BIN")
 BUNDLE="$BUNDLE_DIR/ClaudePet_ClaudePet.bundle"
 
@@ -76,7 +76,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
        Automation request outright rather than prompting the user, and the jump
        fails silently forever. Orca's jump goes through its own CLI and needs
        no entitlement at all. -->
-  <key>NSAppleEventsUsageDescription</key><string>用来把你点击的 Claude Code session 所在的终端标签页切到前台。</string>
+  <key>NSAppleEventsUsageDescription</key><string>Used to bring the terminal tab of the Claude Code session you clicked to the front.</string>
 </dict></plist>
 PLIST
 

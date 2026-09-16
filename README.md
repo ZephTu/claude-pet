@@ -97,7 +97,7 @@ Tests run through a small hand-written harness as an executable target rather th
 
 Open `docs/previews/coder-pet.html` in a browser to see all four states animating.
 
-The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is.
+The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is. **It is written in Chinese** — the code, comments and this README are English, but that document has not been translated.
 
 ### Two things worth knowing before you change anything
 
