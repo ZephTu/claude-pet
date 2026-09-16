@@ -1,78 +1,119 @@
 # Claude Pet
 
-一只常驻 macOS 桌面的小机器人，坐在电脑前，用动作反映本机全部 Claude Code session 的聚合状态。
+**English** · [中文](README.zh-CN.md)
 
-天线顶上那颗灯是最好认的信号——不用聚焦，余光扫过去就能读到：
+A little robot that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
 
-| 状态 | 天线灯 | 它在干嘛 |
-|---|---|---|
-| 有 session 在干活 | 绿灯慢闪 | 低头敲键盘，屏幕上代码在刷 |
-| 有 session 等你授权 | 黄灯脉冲 | 停下手，转过来朝你招手 |
-| 等超过 60 秒 | 红灯急闪 | 双手举过头顶，整个人在抖，头顶气泡写出是哪个 project |
-| 全都停了 | 灭 | 趴桌上睡着，头顶飘 zzz，屏幕全黑 |
+<img src="docs/images/pet.gif" width="300" alt="The robot cycling through its four states">
 
-点它展开 session 列表，拖它换位置，右键暂停或退出。不发系统通知、不出声。
+You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
 
-**点列表里带 ↗ 的行，直接跳回那个 session 所在的终端标签页。** 支持 Orca 和 iTerm2：
+## The lamp is the signal
 
-- **Orca** 走它自带的 CLI（`orca terminal switch`），不需要任何系统权限
-- **iTerm2** 走 AppleScript，**第一次跳转会弹一次 macOS 自动化授权**，拒绝之后就静默失效
-- 其他终端认不出来，那些行不带 ↗、点了只会展开/收起面板
+The bulb on the antenna is the part you can read without focusing on it:
 
-session 只要进程还活着就一直列在上面，不管多久没动静——存活是查进程，不是看时间戳。
+![Four states](docs/images/states.png)
 
-同一个目录下开了多个 session 时，那几行会各自把 session 名字写在第二行——否则三个 `daily_work` 在列表里长得一模一样。只有一个 session 的目录不受影响，不会平白多占一行。
+| Lamp | Meaning | What it does |
+| --- | --- | --- |
+| 🟢 slow blink | a session is working | heads down, typing, code scrolling on its monitor |
+| 🟡 pulse | a session needs your approval | stops typing, turns around, waves at you |
+| 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project |
+| ⚫ off | everything is done | asleep at the desk with z's drifting up |
 
-**鼠标停在某一行 0.45 秒**，气泡显示这个 session 的名字（终端标签的标题）。面板里那列是目录名，同一个仓库开三个 session 长得一模一样——名字才分得清是「客户A回归缺陷跟进」还是「20260916-email reply」。名字只有 Orca 和 iTerm2 的 session 有，而且只在你展开列表时才去查一次。
+## What you can do with it
 
-**停在机器人身上 1 秒**，气泡显示当前额度和什么时候回血。
+**Click it** to expand a list of every live session — what it is running, and for how long. **Drag** to move it; it remembers where you put it. **Right-click** for pause / launch-at-login / quit.
 
-**不想看某个 session**：鼠标移到那一行，行尾出现 ×，点它静音。静音的 session 既不在列表里，也不会影响宠物表情（它卡在等授权也不会让宠物举手）。**下次你在那个 session 里敲字，它自动回来**，不用手动取消。面板底部会写着还静音着几个，右键菜单可以一次性全部取消。
+**Click a row marked ↗** to jump straight to the terminal tab that session is running in.
 
-## 安装
+- **Orca** goes through its own CLI (`orca terminal switch`) and needs no system permission at all
+- **iTerm2** goes through AppleScript, so the **first jump raises a macOS Automation prompt**; deny it and jumps fail silently afterwards
+- Other terminals cannot be addressed — those rows have no ↗ and clicking them just closes the list
+
+**Hover a row** for 0.45s and the bubble shows that session's name, taken from its terminal tab title. The list's first column is only a directory name, so three sessions open in one repo look identical; the name is what tells them apart. When a directory does have more than one session, the name is shown inline on a second line instead of on hover.
+
+**Hover the robot itself** for a second and it reports your remaining quota and when it resets.
+
+**Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the robot's mood — it can sit blocked on a permission prompt without making the robot wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
+
+A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
+
+## Requirements
+
+- macOS 14 or newer
+- [Claude Code](https://claude.com/claude-code) installed
+- A Swift toolchain (Xcode Command Line Tools) to build from source
+
+Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline plugin. The pet reads the usage cache that plugin maintains rather than calling Anthropic's usage API itself — no OAuth token handling, no rate limit of its own. Without it, everything works except the quota readout.
+
+## Install
 
 ```bash
 ./scripts/install.sh
 ```
 
-编译当前工作副本并装到本机。不需要 jq、不需要 Python，只要有 Swift 工具链。
+Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
 
-**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加七条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / Stop / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
+**This edits `~/.claude/settings.json`**, appending seven hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
 
-装完要开一个新的 Claude Code session 才会生效，已经开着的不受影响。
+Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
 
-## 卸载
+## What it touches
+
+Three places, all reversible by `./scripts/uninstall.sh`:
+
+1. `~/Applications/ClaudePet.app` — the pet itself
+2. `~/.claude/pet/` — the hook binary and one small state file per session
+3. `~/.claude/settings.json` — seven appended hooks
+
+The state files record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, and it makes no network requests of any kind.**
+
+## Uninstall
 
 ```bash
 ./scripts/uninstall.sh
 ```
 
-摘掉 hook、删掉 app 和开机自启的 plist，`settings.json` 回到装之前的样子。
+Removes the hooks, the app and the launch agent. `settings.json` returns to exactly what it was.
 
-## 发给别人
+## Sending it to someone else
 
 ```bash
 ./scripts/package.sh
 ```
 
-产出两个包：`dist/claude-pet-<版本>.tar.gz` 带预编译 universal 二进制和一键安装脚本，收件人不需要任何开发工具；`dist/claude-pet-<版本>-src.tar.gz` 是纯源码。
+Produces two tarballs: one with a precompiled universal binary and a one-click installer, needing no developer tools on the receiving end, and one with just the source.
 
-## 开发
+## Development
 
 ```bash
-swift run ClaudePetTests     # 单元测试（不是 swift test，本机没装 Xcode）
-./hooks/test-pet-emit.sh     # hook 行为测试
-./scripts/build-app.sh       # 只打包 ClaudePet.app，不安装
+swift run ClaudePetTests     # unit tests — not `swift test`, see below
+./hooks/test-pet-emit.sh     # hook behaviour tests
+./scripts/build-app.sh       # build ClaudePet.app without installing
 ```
 
-形象预览（四个状态的动画，浏览器里直接看）：`docs/previews/coder-pet.html`
+Tests run through a small hand-written harness as an executable target rather than XCTest: with only the Command Line Tools installed (no full Xcode), **neither XCTest nor swift-testing is available**, so `swift test` cannot run at all.
 
-设计文档在 `docs/superpowers/specs/`，实现计划在 `docs/superpowers/plans/`。
+Open `docs/previews/coder-pet.html` in a browser to see all four states animating.
 
-终端跳转的逻辑分两半：能纯粹测的（识别终端、解析 session id、防 AppleScript 注入）在 `Sources/ClaudePetCore/TerminalTarget.swift`，真正执行跳转的在 `Sources/ClaudePet/TerminalJump.swift`。
+The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is.
 
-宠物的点击命中区是 `Sources/ClaudePetCore/PetLayout.swift` 里的两个矩形，和 `Resources/pet/pet.css` 的画面必须对齐——**改了画面就要改 PetLayout，反之亦然**。这一点没有测试能替你发现（测试只能锁住 Swift 那一半），只能靠这条约定。
+### Two things worth knowing before you change anything
+
+**The hit region is two rectangles in `Sources/ClaudePetCore/PetLayout.swift`, and they must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
+
+**Terminal jumping is split in two on purpose.** Everything testable — identifying the terminal, parsing session ids, rejecting AppleScript injection — lives in `Sources/ClaudePetCore/TerminalTarget.swift`. The part that actually spawns processes is in `Sources/ClaudePet/TerminalJump.swift`.
+
+## Known limitations
+
+- **The UI is in Chinese.** The code and docs are English; the interface text is not, yet.
+- **The iTerm2 path has never been tested end to end.** Its AppleScript interface was verified against `iTerm2.sdef` and the parsing and injection guards are unit-tested, but the author runs Orca, so no real iTerm2 session has ever been jumped to.
+- No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
+- The expanded panel always opens to the left, so it can run off-screen if you drag the pet to the far left edge.
+- Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the robot still swallow clicks.
+- Roughly 4% CPU while idle — that is the breathing animation.
 
 ## License
 
-MIT，见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).
