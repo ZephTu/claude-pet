@@ -16,11 +16,17 @@ The bulb on the antenna is the part you can read without focusing on it:
 
 ![Every state](docs/images/states.png)
 
+Ordered by how much it wants from you, from nothing to a great deal, and back:
+
 | Lamp | Meaning | What it does |
 | --- | --- | --- |
-| 🟢 slow blink | a session is working | heads down, typing, code scrolling on its monitor |
-| 🟡 pulse | a session needs your approval | stops typing, turns around, waves — and its monitor switches to a warning |
+| 🟢 slow blink | a session is working | hands on the keys, code scrolling. The pose follows the tool: **editing** types, **reading** leans in at the screen, **running a command** slows down and watches |
+| 🟢 steady | compacting its context | hands sweeping side to side, the screen reshuffling rather than printing. Still work — just not work you asked for |
+| 🟡 brief flash | a tool call was interrupted | the monitor turns amber and it carries on working. A failed call is usually not a failed task |
+| 🟡 pulse | a session needs your approval | raises a hand, monitor switches to a warning |
+| 🟡 pulse | a session needs an answer | tilts its head, a question mark floats up. No raised hand — this one wants typing, not a decision |
 | 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project **and the command it is blocked on** |
+| 🟢 brief flash | a turn just finished | two small nods. Deliberately small: a turn ending means Claude stopped talking, not that the work was right |
 | ⚫ off | everything is done | asleep at the desk with z's drifting up |
 
 ## What you can do with it

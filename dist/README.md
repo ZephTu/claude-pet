@@ -10,15 +10,20 @@ The lamp on its antenna is the part you can read without focusing on it:
 
 | Lamp | What it is doing | What it means |
 |---|---|---|
-| Red, fast blink | arms over its head, jolting, speech bubble | a session has been waiting on you for over a minute. The bubble names the project |
-| Amber, pulsing | stops typing, turns around and waves | a session is waiting for your approval |
-| Green, slow blink | heads down, typing, code scrolling | a session is working |
+| Red, fast blink | arms over its head, jolting, speech bubble | a session has been waiting on you for over a minute. The bubble names the project and the command |
+| Amber, pulsing | raises a hand, monitor warns | a session wants your approval |
+| Amber, pulsing | tilts its head, question mark floats up | a session wants an answer — typing, not a decision |
+| Amber, brief flash | monitor turns amber, keeps working | a tool call was interrupted. Usually not a failed task |
+| Green, slow blink | hands on the keys. Types when editing, leans at the screen when reading, slows down while a command runs | a session is working |
+| Green, steady | hands sweeping, screen reshuffling | compacting its context |
+| Green, brief flash | two small nods | a turn just finished. Not a claim that the work was right |
 | Off | asleep at the desk with z's drifting up | everything is done |
 
 **Left-click** to expand the list — what each session is running, and for how long.
 **Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2).
-**Hover a row** and the bubble shows that session's name; when one directory has several sessions, the names are shown inline instead.
+**Hover a row** and the bubble shows where that session is, how full its context window is, how long the turn has run versus how long since anything happened, and its last tool call.
 **Hover the robot** for a second to see your remaining quota.
+**Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 **Click the × at the end of a row** to mute that session — it comes back on its own the next time you type into it.
 **Right-click** for the menu: nap / launch at login / quit.
 **Drag** to move it; it remembers where you put it.
@@ -45,8 +50,8 @@ No Xcode, no Python, no jq. The package ships a universal binary that runs on bo
 Three places, all reversible with `./uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
-2. `~/.claude/pet/` — the hook binary and the session state files
-3. **`~/.claude/settings.json` — 8 appended hooks**
+2. `~/.claude/pet/` — the hook binary, the session state files, the finished-turn records and the activity logs
+3. **`~/.claude/settings.json` — 9 appended hooks**
 
 The third is the one to pay attention to: that file governs the behaviour of every Claude Code session you run. The installer **only appends** — not one of your existing hooks is touched. It backs the file up to `~/.claude/settings.json.bak-claudepet-<timestamp>` first, parses the result immediately after writing, and restores the backup on any doubt. Running the installer twice is idempotent; the hooks are not added again.
 
