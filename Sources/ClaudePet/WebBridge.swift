@@ -47,15 +47,19 @@ final class WebBridge {
         lastSessionsPayload = nil
     }
 
-    func push(_ state: GlobalState) {
+    func push(_ state: GlobalState, motion: ActivitySummary.Motion? = nil) {
         guard isReady else { return }
-        guard state != last else { return }
+        guard state != last || motion != lastMotion else { return }
         last = state
+        lastMotion = motion
 
         let project = state.waitingProject.map { "\"\(escape($0))\"" } ?? "null"
         let on = "\"\(escape(state.waitingOn))\""
-        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on));")
+        let move = motion.map { "\"\($0.rawValue)\"" } ?? "\"\""
+        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on), \(move));")
     }
+
+    private var lastMotion: ActivitySummary.Motion?
 
     /// Left click on the pet expands or collapses the session panel. Swift owns
     /// this because the host view now consumes every mouse event before the page

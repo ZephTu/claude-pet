@@ -39,6 +39,35 @@ public enum ActivitySummary {
         return target.isEmpty ? toolName : clamp(toolName + " " + target)
     }
 
+    /// Which animation a running tool deserves.
+    ///
+    /// Three variants, not one per tool. The mood stays the coarse thing the
+    /// lamp reports; this only chooses how the figure moves inside `busy`, and
+    /// an enum with a case per tool would be a maintenance burden that nobody
+    /// could read at 120px anyway.
+    public enum Motion: String, Sendable, Equatable {
+        /// Reading something: head towards the screen, hands still.
+        case reading
+        /// Changing something: hands on the keys.
+        case writing
+        /// Waiting on something else to finish: hands resting, watching.
+        case awaiting
+    }
+
+    public static func motion(forTool tool: String) -> Motion {
+        switch tool {
+        case "Read", "Grep", "Glob", "WebFetch", "WebSearch", "NotebookRead":
+            return .reading
+        case "Edit", "Write", "NotebookEdit", "MultiEdit":
+            return .writing
+        default:
+            // Bash, Task, MCP tools and anything new: the session has handed the
+            // work to something else and is waiting on it. Guessing harder than
+            // that would mean claiming to know what an unknown tool does.
+            return .awaiting
+        }
+    }
+
     /// What to show when several calls are in flight at once.
     public static func concurrent(_ count: Int) -> String {
         count > 1 ? "\(count) tools running" : ""

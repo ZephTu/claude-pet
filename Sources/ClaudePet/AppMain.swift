@@ -170,7 +170,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
-        bridge?.push(state)
+        bridge?.push(state, motion: currentMotion(state, now: now))
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
@@ -408,6 +408,42 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Motion and visibility
+
+    private var motionShownAt: Date?
+    private var shownMotion: ActivitySummary.Motion?
+    /// Tool calls come and go in well under a second. Without a floor the
+    /// figure would switch poses several times a second, which reads as a
+    /// glitch rather than as information.
+    private static let motionFloor: TimeInterval = 1.5
+
+    /// Which pose the figure should hold, given what is running.
+    ///
+    /// Nil outside `busy`: waiting and urgent have poses of their own, and idle
+    /// is asleep.
+    private func currentMotion(_ state: GlobalState, now: Date) -> ActivitySummary.Motion? {
+        guard state.mood == .busy else {
+            shownMotion = nil
+            motionShownAt = nil
+            return nil
+        }
+        // The longest-running call decides: with several in flight, the one
+        // that has been going longest is the one the session is really on.
+        let running = state.sessions.flatMap(\.running)
+        let oldest = running.min { ($0.since ?? now) < ($1.since ?? now) }
+        let wanted = oldest.map { ActivitySummary.motion(forTool: $0.tool) } ?? .awaiting
+
+        guard let shown = shownMotion, let since = motionShownAt else {
+            shownMotion = wanted
+            motionShownAt = now
+            return wanted
+        }
+        if wanted != shown, now.timeIntervalSince(since) >= Self.motionFloor {
+            shownMotion = wanted
+            motionShownAt = now
+            return wanted
+        }
+        return shown
+    }
 
     /// How often the display is refreshed while it is on screen. The ages shown
     /// in the panel are coarse ("5m"), so a finer tick would redraw the same

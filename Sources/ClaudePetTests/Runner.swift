@@ -1015,6 +1015,17 @@ struct Runner {
                                        toolInput: ["secret": "x"]).isEmpty)
         t.check("a tool with no target still names itself",
                 ActivitySummary.phrase(toolName: "Task", target: "") == "Task")
+        t.check("reading tools read, editing tools type",
+                ActivitySummary.motion(forTool: "Read") == .reading
+                && ActivitySummary.motion(forTool: "Grep") == .reading
+                && ActivitySummary.motion(forTool: "Edit") == .writing
+                && ActivitySummary.motion(forTool: "Write") == .writing)
+        // Anything unrecognised waits rather than pretending to know: an
+        // unknown tool's behaviour is exactly what we cannot guess.
+        t.check("an unknown tool waits rather than being guessed at",
+                ActivitySummary.motion(forTool: "Bash") == .awaiting
+                && ActivitySummary.motion(forTool: "mcp__something__new") == .awaiting
+                && ActivitySummary.motion(forTool: "") == .awaiting)
         t.check("parallel calls are counted rather than listed",
                 ActivitySummary.concurrent(3) == "3 tools running"
                 && ActivitySummary.concurrent(1).isEmpty)

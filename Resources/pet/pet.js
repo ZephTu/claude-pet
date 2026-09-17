@@ -24,8 +24,10 @@ function reportLayout() {
  * @param {string|null} waitingProject project name for the urgent bubble
  * @param {string} waitingOn what that session is blocked on, e.g. "rm -rf build/"
  */
-window.setMood = function (mood, waitingProject, waitingOn) {
+window.setMood = function (mood, waitingProject, waitingOn, motion) {
   pet.dataset.mood = mood;
+  // Empty means "no opinion", which leaves the default (typing) in place.
+  if (motion) { pet.dataset.motion = motion; } else { delete pet.dataset.motion; }
   if (mood === "urgent" && waitingProject) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.

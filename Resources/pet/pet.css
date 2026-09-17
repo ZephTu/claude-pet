@@ -159,6 +159,37 @@ html, body {
 #pet[data-mood="urgent"] .warn-mark { fill: #e0533c; }
 #pet[data-mood="urgent"] .warn      { animation: flicker 0.44s steps(2, end) infinite; }
 
+/* Within busy, WHAT it is doing changes how it moves. The lamp still says
+   "working"; this only makes the figure match.
+
+   reading — hands off the keys, head towards the screen
+   writing — the default: hands on the keys
+   awaiting — hands resting, a slower lean, because the session has handed the
+              work to something else and is watching it */
+#pet[data-mood="busy"][data-motion="reading"] .handL,
+#pet[data-mood="busy"][data-motion="reading"] .handR,
+#pet[data-mood="busy"][data-motion="awaiting"] .handL,
+#pet[data-mood="busy"][data-motion="awaiting"] .handR { animation: none; }
+
+/* reading — leaning in at the screen. The whole head turns and tilts, not just
+   the eyes: at 120px a 4px eye shift is invisible, and a variant nobody can
+   tell apart is cost without information. */
+#pet[data-mood="busy"][data-motion="reading"] .head {
+  transform: translate(4px, 1px) rotate(5deg);
+}
+#pet[data-mood="busy"][data-motion="reading"] .face { transform: translateX(3px); }
+#pet[data-mood="busy"][data-motion="reading"] .handL,
+#pet[data-mood="busy"][data-motion="reading"] .handR { transform: translateY(2px); }
+
+/* awaiting — hands off the keys, sitting back, screen no longer printing. */
+#pet[data-mood="busy"][data-motion="awaiting"] .head { transform: translateY(-1.5px); }
+#pet[data-mood="busy"][data-motion="awaiting"] .handL { transform: translate(-3px, 3px); }
+#pet[data-mood="busy"][data-motion="awaiting"] .handR { transform: translate(3px, 3px); }
+#pet[data-mood="busy"][data-motion="awaiting"] .person {
+  animation: breathe 3s ease-in-out infinite;
+}
+#pet[data-mood="busy"][data-motion="awaiting"] .code rect { animation: none; opacity: 0.4; }
+
 /* idle: asleep at the desk — screen dark, light off, z's rising. */
 @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
 @keyframes puff {
