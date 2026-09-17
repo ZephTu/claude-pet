@@ -24,10 +24,15 @@ public enum Chatter {
     public struct Utterance: Sendable, Equatable {
         public let kind: Kind
         public let text: String
+        /// A substring of `text` the page should set apart — the session or
+        /// project being reported on. Empty when the line names nothing in
+        /// particular, such as a quota reminder.
+        public let emphasis: String
 
-        public init(kind: Kind, text: String) {
+        public init(kind: Kind, text: String, emphasis: String = "") {
             self.kind = kind
             self.text = text
+            self.emphasis = emphasis
         }
     }
 
@@ -91,7 +96,14 @@ public enum Chatter {
         // Which session just came to rest outranks everything else: it is the
         // one thing here the user is actively waiting to hear.
         if hasNews {
-            return Utterance(kind: .sessionDone, text: doneLine(finishedNow, names: names))
+            let labels = finishedNow.map { names[$0.sessionId] ?? $0.project }
+            return Utterance(
+                kind: .sessionDone,
+                text: doneLine(finishedNow, names: names),
+                // Only a single name can be picked out of the sentence; with two
+                // the styled run would be discontiguous.
+                emphasis: labels.count == 1 ? labels[0] : ""
+            )
         }
 
         // Quota lines first: they are time-critical in a way the others are not.
@@ -131,7 +143,11 @@ public enum Chatter {
            let longest = longestBusy(state.sessions, now: now),
            now.timeIntervalSince(longest.since) >= longRunAfter {
             let mins = minutes(now.timeIntervalSince(longest.since))
-            return Utterance(kind: .longRun, text: "\(longest.project) has been at it for \(mins)m")
+            return Utterance(
+                kind: .longRun,
+                text: "\(longest.project) has been at it for \(mins)m",
+                emphasis: longest.project
+            )
         }
 
         return nil

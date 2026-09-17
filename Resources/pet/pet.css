@@ -178,7 +178,22 @@ html, body {
   background: rgba(35, 32, 29, 0.88);
   font-weight: 400;
   white-space: normal;
-  max-width: 170px;
+  /* Right-anchored, like the quota readout. Centred on the pet at x=320 in a
+     400pt window, a bubble cannot exceed 160pt without being clipped — which is
+     what wrapped a session name onto four lines. */
+  left: auto;
+  right: 14px;
+  transform: none;
+  max-width: 232px;
+  text-align: left;
+  line-height: 1.45;
+}
+
+/* The session's own name, set apart from the words around it: the name is the
+   part being reported, the rest is grammar. */
+#bubble .name {
+  color: #e8a184;
+  font-weight: 600;
 }
 
 /* The quota readout needs more width than a chatter line: four columns have to

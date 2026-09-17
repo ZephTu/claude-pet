@@ -111,9 +111,9 @@ final class WebBridge {
 
     /// Show a line for `hold` seconds. Fire-and-forget: the page owns the timer,
     /// because a dropped call must not leave a bubble stuck on screen.
-    func say(_ text: String, hold: TimeInterval) {
+    func say(_ text: String, hold: TimeInterval, emphasis: String = "") {
         guard isReady else { return }
-        evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)));")
+        evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)));")
     }
 
     /// Asks the page for the session name under this point, then hands it back.

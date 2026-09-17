@@ -153,7 +153,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             state: state, previous: lastState, usage: currentUsage(), now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state)
         ) else { return }
-        bridge?.say(line.text, hold: Self.speechHold)
+        bridge?.say(line.text, hold: Self.speechHold, emphasis: line.emphasis)
         lastSpoken[line.kind] = now
         lastAnything = now
     }

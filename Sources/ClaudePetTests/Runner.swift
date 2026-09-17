@@ -638,6 +638,24 @@ struct Runner {
         t.check("a finished session is announced despite the global cooldown",
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: justSpoke)?.kind == .sessionDone)
+        // The name is what the eye should land on, not the word "done"
+        t.check("the single finished session's name is marked for emphasis",
+                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             names: ["a": "email reply"])?.emphasis == "email reply")
+        // Two names cannot be one contiguous styled run, so nothing is marked
+        let twoDone = GlobalState(mood: .idle, sessions: [sess("a", .idle), sess("b", .idle)],
+                                  waitingProject: nil)
+        t.check("two at once mark nothing, since the run would be discontiguous",
+                Chatter.next(state: twoDone, previous: wasBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             names: ["a": "x", "b": "y"])?.emphasis == "")
+        // Whatever is emphasised has to actually occur in the text, or the page
+        // silently falls back to plain rendering
+        let done1 = Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
+                                 lastSpoken: [:], lastAnything: nil, names: ["a": "email reply"])
+        t.check("the emphasised run is a substring of the line",
+                done1.map { $0.text.contains($0.emphasis) } == true)
         // But it still respects its own cooldown, so a flapping session cannot spam
         t.check("it stays quiet inside its own cooldown",
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,

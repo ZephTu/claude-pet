@@ -32,9 +32,10 @@ window.setMood = function (mood, waitingProject, waitingOn) {
     clearSpeech();
     // Naming the actual command is the whole point: it lets the user decide
     // without switching to that terminal.
-    bubble.textContent = waitingOn
+    const text = waitingOn
       ? waitingProject + ": " + waitingOn
       : waitingProject + " needs you";
+    fill(bubble, text, waitingProject);
     bubble.classList.remove("chat");
     bubble.hidden = false;
   } else if (!speaking) {
@@ -45,6 +46,28 @@ window.setMood = function (mood, waitingProject, waitingOn) {
 
 let speaking = false;
 let speechTimer = null;
+
+/**
+ * Writes `text` into `el`, wrapping `emphasis` in a styled span.
+ *
+ * Built from text nodes rather than innerHTML: session names and project names
+ * come from directory names and terminal titles, which are arbitrary user text.
+ */
+function fill(el, text, emphasis) {
+  el.textContent = "";
+  const at = emphasis ? text.indexOf(emphasis) : -1;
+  if (at < 0) {
+    el.textContent = text;
+    return;
+  }
+  if (at > 0) el.appendChild(document.createTextNode(text.slice(0, at)));
+  const span = document.createElement("span");
+  span.className = "name";
+  span.textContent = emphasis;
+  el.appendChild(span);
+  const rest = text.slice(at + emphasis.length);
+  if (rest) el.appendChild(document.createTextNode(rest));
+}
 
 function clearSpeech() {
   speaking = false;
@@ -61,12 +84,14 @@ function clearSpeech() {
  * @param {string} text
  * @param {number} holdMs how long to leave it up; 0 keeps it until cleared,
  *   which is what the hover readout uses.
+ * @param {string} [emphasis] a substring of `text` to set apart — the session's
+ *   name, so the eye lands on WHICH one rather than on "done".
  */
-window.say = function (text, holdMs) {
+window.say = function (text, holdMs, emphasis) {
   if (pet.dataset.mood === "urgent") return;  // the alarm is using the bubble
   clearSpeech();
   speaking = true;
-  bubble.textContent = text;
+  fill(bubble, text, emphasis);
   bubble.classList.add("chat");
   bubble.hidden = false;
   reportLayout();
