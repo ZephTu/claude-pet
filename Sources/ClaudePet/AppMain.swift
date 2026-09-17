@@ -5,6 +5,27 @@ import ClaudePetCore
 struct AppMain {
     static func main() {
         let app = NSApplication.shared
+        // Layout check for the connection panel, used during development
+        // because screen capture needs a permission this app should not ask for.
+        let arguments = CommandLine.arguments
+        if let i = arguments.firstIndex(of: "--render-health"), i + 1 < arguments.count {
+            app.setActivationPolicy(.prohibited)
+            let sample: [HealthCheck] = [
+                HealthReport.claudeCode(version: "2.1.274 (Claude Code)",
+                                        path: NSHomeDirectory() + "/.npm-global/bin/claude"),
+                HealthReport.hooks(installed: 8, expected: 8, binaryExists: true),
+                HealthReport.recentEvents(lastAt: Date().addingTimeInterval(-120),
+                                          liveSessions: 4, now: Date()),
+                HealthReport.sessions(running: 6, known: 4),
+                HealthReport.terminals(kinds: ["orca"], lastFailure: ""),
+                HealthReport.usage(source: "claude-hud", capturedAt: Date().addingTimeInterval(-3000),
+                                   now: Date(), stale: true),
+                HealthReport.stateFiles(writable: true, count: 4, corrupt: 1),
+            ]
+            exit(MainActor.assumeIsolated {
+                HealthWindow.renderPreview(checks: sample, to: arguments[i + 1]) ? 0 : 1
+            })
+        }
         // .accessory keeps it out of the Dock and out of Cmd-Tab.
         app.setActivationPolicy(.accessory)
         let delegate = PetAppDelegate()
@@ -441,8 +462,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // The longest-running call decides: with several in flight, the one
         // that has been going longest is the one the session is really on.
         let running = state.sessions.flatMap(\.running)
-        let oldest = running.min { ($0.since ?? now) < ($1.since ?? now) }
-        let wanted = oldest.map { ActivitySummary.motion(forTool: $0.tool) } ?? .awaiting
+        // Nothing in flight means the session is thinking, not waiting on
+        // something — the default pose (hands on the keys) is right for that.
+        // Falling through to `.awaiting` here made every gap between tool calls
+        // look like the pet had stopped working.
+        guard let oldest = running.min(by: { ($0.since ?? now) < ($1.since ?? now) }) else {
+            shownMotion = nil
+            motionShownAt = nil
+            return nil
+        }
+        let wanted = ActivitySummary.motion(forTool: oldest.tool)
 
         guard let shown = shownMotion, let since = motionShownAt else {
             shownMotion = wanted
@@ -488,6 +517,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Health and demo
 
     private var lastJumpFailure = ""
+    private var healthWindow: HealthWindow?
 
     /// Read-only, and nothing here fixes anything.
     ///
@@ -498,18 +528,14 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let checks = HealthCollector.run(petHome: petHome, sessions: latest,
                                          usage: currentUsage(),
                                          lastJumpFailure: lastJumpFailure)
-        let alert = NSAlert()
-        alert.messageText = "Connection status"
-        alert.informativeText = checks
-            .map { "\($0.status.label) — \($0.name)\n    \($0.detail)" }
-            .joined(separator: "\n\n")
-        alert.addButton(withTitle: "Copy")
-        alert.addButton(withTitle: "Close")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        // The pasteable form, with the home directory collapsed.
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(HealthReport.summary(checks), forType: .string)
+        healthWindow?.close()
+        let window = HealthWindow(checks: checks) {
+            // The pasteable form, with the home directory collapsed.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(HealthReport.summary(checks), forType: .string)
+        }
+        healthWindow = window
+        window.show(near: panel?.frame ?? .zero)
     }
 
     private var demo: Timer?

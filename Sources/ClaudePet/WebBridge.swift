@@ -288,10 +288,12 @@ final class WebBridge {
                 // tells them apart.
                 if let title = titles[t.handle], !TerminalTitles.isUseless(title) {
                     item["title"] = title
-                    // Shown inline, in place of the notification text, because
-                    // knowing WHICH daily_work this is beats knowing it is
-                    // waiting — the first column already said that.
-                    if ambiguous.contains(s.project) { item["nameInline"] = true }
+                    if PanelModel.shouldShowNameInline(
+                        displayed: item["project"] as? String ?? "",
+                        title: title,
+                        ambiguous: ambiguous.contains(s.project)) {
+                        item["nameInline"] = true
+                    }
                 }
             }
             return item

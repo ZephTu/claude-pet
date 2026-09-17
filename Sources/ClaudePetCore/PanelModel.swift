@@ -115,6 +115,24 @@ public enum PanelModel {
             .first { !Snooze.isSnoozed($0, marks: snoozed, now: now) }
     }
 
+    /// Should the row repeat the session's name on its second line?
+    ///
+    /// Only when the first column is not already showing it. This predates the
+    /// first column being able to choose its own name: back then it was always
+    /// a directory, so three sessions in one repo needed the title spelled out
+    /// underneath. Now the title usually IS the first column, and printing it
+    /// again underneath was simply saying it twice.
+    ///
+    /// - Parameters:
+    ///   - displayed: what the first column ended up showing.
+    ///   - title: the terminal tab title, if there is a usable one.
+    ///   - ambiguous: whether this session's project is shared with another.
+    public static func shouldShowNameInline(displayed: String, title: String,
+                                            ambiguous: Bool) -> Bool {
+        guard ambiguous, !title.isEmpty, !TerminalTitles.isUseless(title) else { return false }
+        return displayed != title
+    }
+
     /// What the pet wears on its chest: how many sessions want something, and
     /// how many finishes have not been looked at.
     ///

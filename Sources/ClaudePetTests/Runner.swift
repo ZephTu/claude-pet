@@ -881,6 +881,20 @@ struct Runner {
                 PanelModel.completionRows(fourTurns + [older], live: [])
                     .map(\.sessionId) == ["a", "z"])
 
+        // The second line must not repeat what the first column already says.
+        t.check("the name is not printed twice",
+                !PanelModel.shouldShowNameInline(displayed: "email reply",
+                                                 title: "email reply", ambiguous: true))
+        t.check("but it is shown when the first column says something else",
+                PanelModel.shouldShowNameInline(displayed: "my alias",
+                                                title: "email reply", ambiguous: true))
+        t.check("and never when the project is unambiguous anyway",
+                !PanelModel.shouldShowNameInline(displayed: "daily_work",
+                                                 title: "email reply", ambiguous: false))
+        t.check("a useless title is not worth a second line",
+                !PanelModel.shouldShowNameInline(displayed: "daily_work",
+                                                 title: "Terminal 1", ambiguous: true))
+
         t.check("nothing to report means no badge at all",
                 PanelModel.badge(needsYou: 0, unreadFinishes: 0) == "")
         t.check("the badge counts both kinds of attention",
