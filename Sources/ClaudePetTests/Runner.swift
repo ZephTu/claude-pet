@@ -618,6 +618,18 @@ struct Runner {
         let oneGone = GlobalState(mood: .busy, sessions: [sess("b", .busy)], waitingProject: nil)
         t.check("a session that disappeared is not reported as finished",
                 Chatter.justFinished(previous: wasBusy, current: oneGone).isEmpty)
+        // justStarted is what retires the sticky "done" bubble: the user typing
+        // at any session again means they are past needing to be told
+        t.check("a session going back to work is spotted",
+                Chatter.justStarted(previous: oneDone, current: wasBusy).map(\.sessionId) == ["a"])
+        t.check("nothing starting reads as nothing starting",
+                Chatter.justStarted(previous: wasBusy, current: wasBusy).isEmpty)
+        // A brand new session counts as started — it was not busy before because
+        // it did not exist, and the user did just type at it
+        let plusNew = GlobalState(mood: .busy, sessions: [sess("a", .busy), sess("b", .busy),
+                                                          sess("c", .busy)], waitingProject: nil)
+        t.check("a session that appeared already busy counts as started",
+                Chatter.justStarted(previous: wasBusy, current: plusNew).map(\.sessionId) == ["c"])
         // The project is a directory name shared by several sessions; the tab
         // title is what tells the user which one just came to rest
         t.check("the tab title is used when there is one",
@@ -661,6 +673,12 @@ struct Runner {
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
                              lastSpoken: [.sessionDone: t0.addingTimeInterval(-5)],
                              lastAnything: nil) == nil)
+
+        // A "done" line is the one the user is actually waiting for, and they
+        // are looking at a terminal, not at the corner of the screen. It has no
+        // expiry of its own; everything else takes itself away.
+        t.check("only the done line is sticky",
+                Chatter.Kind.allCases.filter(Chatter.isSticky) == [.sessionDone])
 
         t.finish()
     }

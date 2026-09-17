@@ -105,14 +105,25 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // antennaBox), so the window no longer needs telling about mood.
         bridge?.push(state)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount)
+        // A "done" line has no timer, so something has to retire it. Going back
+        // to work is that something: once a session is busy again, the user has
+        // plainly seen the news or stopped caring about it.
+        if stickyBubble, let previous = lastState,
+           !Chatter.justStarted(previous: previous, current: state).isEmpty {
+            bridge?.hush()
+            stickyBubble = false
+        }
         maybeSpeak(state: state, now: now)
         lastState = state
     }
 
     // MARK: - Talking
 
-    /// How long a line stays up before it takes itself away.
+    /// How long a line stays up before it takes itself away. Sticky lines
+    /// (see `Chatter.isSticky`) ignore this and wait to be replaced instead.
     private static let speechHold: TimeInterval = 6
+    /// True while the bubble holds a line with no timer of its own.
+    private var stickyBubble = false
     /// How long the pointer must rest on the pet before it volunteers the quota.
     private static let dwellDelay: TimeInterval = 1
 
@@ -153,7 +164,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             state: state, previous: lastState, usage: currentUsage(), now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state)
         ) else { return }
-        bridge?.say(line.text, hold: Self.speechHold, emphasis: line.emphasis)
+        let sticky = Chatter.isSticky(line.kind)
+        bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis)
+        stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
     }
@@ -191,6 +204,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
+                stickyBubble = false
                 bridge?.hush()
             }
             return
@@ -204,6 +218,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
+                stickyBubble = false
                 bridge?.hush()
             }
         }

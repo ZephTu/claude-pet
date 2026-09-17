@@ -40,6 +40,16 @@ public enum Chatter {
     /// a burst of events would produce a burst of speech.
     public static let globalCooldown: TimeInterval = 5 * 60
 
+    /// Lines that do not take themselves away.
+    ///
+    /// "Which session just came to rest" is the one line here the user is
+    /// actively waiting for, and they wait for it in a terminal window, not in
+    /// the corner of the screen. Giving it a timer makes noticing it depend on
+    /// already looking at the pet — which is the exact thing the pet exists to
+    /// save them from. So it stays until something replaces it, or until they
+    /// go back to work (see `justStarted`), at which point it is no longer news.
+    public static func isSticky(_ kind: Kind) -> Bool { kind == .sessionDone }
+
     public static func cooldown(for kind: Kind) -> TimeInterval {
         switch kind {
         case .quotaResetting: return 30 * 60
@@ -221,6 +231,18 @@ public enum Chatter {
             .filter { $0.state == .busy && !nowBusy.contains($0.sessionId) }
             // A session that vanished entirely (closed, muted) did not "finish".
             .filter { p in current.sessions.contains { $0.sessionId == p.sessionId } }
+    }
+
+    /// Sessions that were not busy a moment ago and are now.
+    ///
+    /// The mirror of `justFinished`, and what retires a sticky "done" line: once
+    /// the user has typed at something again, being told the previous round
+    /// finished has stopped being useful.
+    public static func justStarted(previous: GlobalState, current: GlobalState) -> [SessionState] {
+        let wasBusy = Set(
+            previous.sessions.filter { $0.state == .busy }.map(\.sessionId)
+        )
+        return current.sessions.filter { $0.state == .busy && !wasBusy.contains($0.sessionId) }
     }
 
     /// - Parameter names: sessionId → the terminal tab title, when known. The
