@@ -101,9 +101,12 @@ check "session_id with slash writes nothing" "$(ls "$PET_HOME/sessions" | wc -l 
 check "session_id with slash does not escape sessions dir" \
   "$([ -e "$PET_HOME/escape.json" ] && echo exists || echo absent)" "absent"
 
-# --- an unknown event must not touch the state ---
-emit PreCompact s1 /Users/dev/Projects/demo-app
-check "unknown event leaves state alone" "$(field s1 state)" "idle"
+# --- an event we do not install must not touch the state ---
+# SubagentStop is real but not one of ours; it stands in for anything a future
+# Claude Code might send. PreCompact used to play this part and no longer can,
+# which is the point: this has to name an event we genuinely ignore.
+emit SubagentStop s1 /Users/dev/Projects/demo-app
+check "an uninstalled event leaves state alone" "$(field s1 state)" "idle"
 
 # --- Notification means two things: needing permission is waiting,
 #     waiting for input is just done talking ---
@@ -233,6 +236,29 @@ check "a token in the command never lands in the log" \
 post sL /Users/dev/Projects/api Bash '{"command":"sleep 99"}' 400 true
 check "an interruption is recorded as such" \
   "$(grep -c '"result":"interrupted"' "$PET_HOME/activity/sL.jsonl" || true)" "1"
+
+# Trouble is a timestamp that CHANGES, not a flag that sits there — the app
+# watches for the change so the warning fires once per failure.
+post sT /Users/dev/Projects/api Bash '{"command":"npm test"}' 100 false
+check "a clean call records no trouble" "$(field sT troubleAt)" ""
+post sT /Users/dev/Projects/api Bash '{"command":"sleep 99"}' 400 true
+FIRST_TROUBLE="$(field sT troubleAt)"
+check "an interrupted call records when" \
+  "$([ -n "$FIRST_TROUBLE" ] && echo yes || echo no)" "yes"
+post sT /Users/dev/Projects/api Bash '{"command":"npm test"}' 100 false
+check "a later clean call does not erase it" "$(field sT troubleAt)" "$FIRST_TROUBLE"
+emit UserPromptSubmit sT /Users/dev/Projects/api
+check "a new turn clears it — last turn's trouble is not this turn's" \
+  "$(field sT troubleAt)" ""
+
+# PreCompact puts the session in a phase, and the phase is cleared by the first
+# event that can only happen afterwards — never by a timer.
+emit PreCompact sP /Users/dev/Projects/api
+check "compaction is a phase" "$(field sP phase)" "compacting"
+emit Notification sP /Users/dev/Projects/api "" "something"
+check "an unrelated event does not end it" "$(field sP phase)" "compacting"
+emit PostToolUse sP /Users/dev/Projects/api Bash
+check "the first event that can only follow it does" "$(field sP phase)" ""
 
 # Ending the session takes its log with it: it describes something that no
 # longer exists and nothing can reach it any more.

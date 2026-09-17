@@ -213,26 +213,6 @@ html, body {
 #pet[data-phase="compacting"] .code rect:nth-child(3) { animation-delay: 0.4s; }
 #pet[data-phase="compacting"] .bulb { fill: #8fc2b8; }
 
-/* A brief reaction laid over whatever the pet is doing.
-
-   done — a nod and one green blink. Deliberately small: a turn ending means
-   Claude stopped talking, NOT that the work was right, and a triumphant
-   animation would be claiming the second thing.
-
-   trouble — the screen warns and the lamp flickers amber, but the figure keeps
-   working, because a failed tool call usually is not a failed task. */
-@keyframes nod {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  40%      { transform: translateY(1.5px) rotate(2deg); }
-}
-#pet[data-flash="done"] .head { animation: nod 0.5s ease-in-out 2; }
-#pet[data-flash="done"] .bulb { fill: #67a498; animation: pulse 0.5s ease-in-out 2; }
-#pet[data-flash="trouble"] .warn { display: block; }
-#pet[data-flash="trouble"] .warn-tri  { stroke: #e0a63c; }
-#pet[data-flash="trouble"] .warn-mark { fill: #e0a63c; }
-#pet[data-flash="trouble"] .code { display: none; }
-#pet[data-flash="trouble"] .bulb { animation: pulse 0.45s steps(2, end) infinite; }
-
 /* idle: asleep at the desk — screen dark, light off, z's rising. */
 @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
 @keyframes puff {
@@ -259,6 +239,31 @@ html, body {
 #pet[data-mood="waiting"] .eye      { height: 7.4px; y: -19.9px; }
 #pet[data-mood="waiting"] .bulb     { fill: #e0a63c; animation: pulse 0.9s ease-in-out infinite; }
 
+/* A question is not an approval. Approval raises a hand — "may I?"; a question
+   tilts the head and puts a mark up — "well?". Same lamp, different ask, and
+   the user finds out which without opening the panel. */
+.ask-mark {
+  fill: #e0a63c;
+  font: italic 700 13px -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+  opacity: 0;
+}
+@keyframes wonder {
+  0%, 100% { opacity: 0.25; transform: translateY(1px); }
+  50%      { opacity: 1; transform: translateY(-1px); }
+}
+#pet[data-ask="question"] .ask-mark {
+  opacity: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wonder 1.5s ease-in-out infinite;
+}
+/* Head cocked, and no waving — the arm stays down for a question. */
+#pet[data-ask="question"] .head { transform: rotate(-7deg) translateY(1px); }
+#pet[data-mood="waiting"][data-ask="question"] .arms-wave { display: none; }
+#pet[data-mood="waiting"][data-ask="question"] .arms-type,
+#pet[data-mood="waiting"][data-ask="question"] .hands-type { display: block; }
+#pet[data-ask="question"] .warn-tri  { stroke: #e0a63c; }
+
 /* urgent: both arms up, red, whole body jolting. The 5pt lift and 3° tilt fit
    inside PetLayout.bodyBox's upper margin — widen either and the top of the
    figure stops being clickable. */
@@ -273,6 +278,31 @@ html, body {
 #pet[data-mood="urgent"] .mouth  { d: path("M-11.6,-11.4 Q-8.8,-6.6 -6,-11.4"); stroke: #ef7361; }
 #pet[data-mood="urgent"] .eye    { height: 7.6px; y: -20px; fill: #ef7361; }
 #pet[data-mood="urgent"] .bulb   { fill: #e0533c; animation: pulse 0.3s steps(2, end) infinite; }
+
+/* A brief reaction laid over whatever the pet is doing.
+
+   done — a nod and one green blink. Deliberately small: a turn ending means
+   Claude stopped talking, NOT that the work was right, and a triumphant
+   animation would be claiming the second thing.
+
+   trouble — the screen warns and the lamp flickers amber, but the figure keeps
+   working, because a failed tool call usually is not a failed task. */
+@keyframes nod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  40%      { transform: translateY(1.5px) rotate(2deg); }
+}
+#pet[data-flash="done"] .head { animation: nod 0.5s ease-in-out 2; }
+#pet[data-flash="done"] .bulb { fill: #67a498; animation: pulse 0.5s ease-in-out 2; }
+#pet[data-flash="trouble"] .warn { display: block; }
+#pet[data-flash="trouble"] .warn-tri  { stroke: #e0a63c; }
+#pet[data-flash="trouble"] .warn-mark { fill: #e0a63c; }
+#pet[data-flash="trouble"] .code { display: none; }
+#pet[data-flash="trouble"] .bulb { animation: pulse 0.45s steps(2, end) infinite; }
+
+/* Placed after every mood rule on purpose: a flash has to win over the state it
+   is laid on top of. While it sat earlier in the file, idle's own grey lamp
+   overrode the green blink of a finished turn — same specificity, later rule
+   wins, and the reaction was invisible exactly where it mattered most. */
 
 /* Sits above the pet, centred on it, and grows UPWARD.
    Anchored by its bottom edge on purpose: a chatter line wraps to two or three

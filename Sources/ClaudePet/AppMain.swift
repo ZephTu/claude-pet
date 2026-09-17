@@ -386,9 +386,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        // The panel is a non-activating window, so the alert needs the app
-        // brought forward or it opens behind whatever has focus.
+        // The ONE place the pet takes the keyboard, and only because the user
+        // asked to type: a text field that cannot receive keystrokes is not a
+        // text field. Everything the pet shows without being asked — the
+        // connection report, the activity list, the bubble — leaves focus alone.
         NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         setPrefs(id) { $0.alias = SessionLabels.sanitiseAlias(field.stringValue) }
     }
@@ -418,18 +421,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
         let entries = ActivityLog.recent(ActivityLog.decode(text), now: Date())
 
-        let alert = NSAlert()
-        alert.messageText = SessionLabels.displayName(for: session, prefs: labelPrefs,
-                                                      title: titleFor(session))
-        alert.informativeText = entries.isEmpty
-            ? "No tool calls recorded yet. Only calls made after the pet was installed are logged."
-            : entries.map { "· " + $0.line() }.joined(separator: "\n")
-        alert.addButton(withTitle: "Close")
-        if !entries.isEmpty { alert.addButton(withTitle: "Clear History") }
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertSecondButtonReturn {
-            try? FileManager.default.removeItem(at: file)
-        }
+        healthWindow?.close()
+        let window = HealthWindow(
+            title: SessionLabels.displayName(for: session, prefs: labelPrefs,
+                                             title: titleFor(session)),
+            lines: entries.map { "· " + $0.line() })
+        healthWindow = window
+        window.show(near: panel?.frame ?? .zero)
     }
 
     @objc private func mutePicked(_ sender: NSMenuItem) {
@@ -452,7 +450,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// task. Anything louder would be claiming something neither event says.
     private func noticeTransients(_ state: GlobalState, previous: GlobalState?) {
         guard !paused, let previous else { return }
-        if !Chatter.justFinished(previous: previous, current: state).isEmpty {
+        // Trouble outranks a finish: if both happened in one refresh, the thing
+        // that went wrong is the one worth showing.
+        let was = Dictionary(previous.sessions.map { ($0.sessionId, $0.troubleAt) },
+                             uniquingKeysWith: { a, _ in a })
+        let brokeJustNow = state.sessions.contains { session in
+            guard let now = session.troubleAt else { return false }
+            // A session appearing WITH trouble already recorded is not news —
+            // that happens on the first render after launch.
+            guard let before = was[session.sessionId] else { return false }
+            return before != now
+        }
+        if brokeJustNow {
+            bridge?.flash("trouble")
+        } else if !Chatter.justFinished(previous: previous, current: state).isEmpty {
             bridge?.flash("done")
         }
     }
@@ -567,40 +578,91 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             demo.invalidate()
             self.demo = nil
             bridge?.setBadge("")
+            bridge?.setPhase("")
             bridge?.hush()
+            // Nothing the demo showed was written anywhere, so leaving it is
+            // just a re-render of whatever is actually true.
+            lastState = nil
             render()
             return
         }
         demoStep = 0
         advanceDemo()
-        demo = Timer.scheduledTimer(withTimeInterval: 2.4, repeats: true) { [weak self] _ in
+        demo = Timer.scheduledTimer(withTimeInterval: 2.8, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.advanceDemo() }
         }
     }
 
+    /// One step of the demo.
+    ///
+    /// Covers every distinct thing the pet can show, not just the four moods —
+    /// the whole point of a demo is that the states nobody sees often are the
+    /// ones worth showing on purpose.
+    private struct DemoStep {
+        let caption: String
+        let mood: GlobalMood
+        /// Which tool is notionally running, "" for none.
+        let tool: String
+        let project: String
+        let waitingOn: String
+        let phase: String
+        /// A transient reaction to fire on arriving here.
+        let flash: String
+    }
+
+    private static let demoSteps: [DemoStep] = [
+        DemoStep(caption: "editing a file", mood: .busy, tool: "Edit",
+                 project: "api-server", waitingOn: "", phase: "", flash: ""),
+        DemoStep(caption: "reading around the code", mood: .busy, tool: "Read",
+                 project: "api-server", waitingOn: "", phase: "", flash: ""),
+        DemoStep(caption: "waiting on a command", mood: .busy, tool: "Bash",
+                 project: "api-server", waitingOn: "", phase: "", flash: ""),
+        DemoStep(caption: "a tool call was interrupted", mood: .busy, tool: "Bash",
+                 project: "api-server", waitingOn: "", phase: "", flash: "trouble"),
+        DemoStep(caption: "compacting its context", mood: .busy, tool: "",
+                 project: "api-server", waitingOn: "", phase: "compacting", flash: ""),
+        DemoStep(caption: "asking to run something", mood: .waiting, tool: "",
+                 project: "api-server", waitingOn: "rm -rf build/", phase: "", flash: ""),
+        DemoStep(caption: "asking you a question", mood: .waiting, tool: "",
+                 project: "api-server", waitingOn: "", phase: "", flash: ""),
+        DemoStep(caption: "ignored for a minute", mood: .urgent, tool: "",
+                 project: "api-server", waitingOn: "rm -rf build/", phase: "", flash: ""),
+        DemoStep(caption: "a turn just finished", mood: .idle, tool: "",
+                 project: "api-server", waitingOn: "", phase: "", flash: "done"),
+        DemoStep(caption: "nothing to do", mood: .idle, tool: "",
+                 project: "api-server", waitingOn: "", phase: "", flash: ""),
+    ]
+
     private func advanceDemo() {
         let now = Date()
-        let steps: [(GlobalMood, String, String)] = [
-            (.busy, "", ""),
-            (.waiting, "api-server", "Edit AppMain.swift"),
-            (.urgent, "api-server", "rm -rf build/"),
-            (.idle, "", ""),
-        ]
-        let (mood, project, on) = steps[demoStep % steps.count]
+        let step = Self.demoSteps[demoStep % Self.demoSteps.count]
         demoStep += 1
 
+        let activity: SessionActivity
+        switch step.mood {
+        case .busy: activity = .busy
+        case .idle: activity = .idle
+        case .waiting, .urgent: activity = .waiting
+        }
+        let running = step.tool.isEmpty
+            ? [] : [RunningTool(id: "d", tool: step.tool, target: "npm test", since: now)]
         let fake = SessionState(
-            sessionId: "demo", project: project.isEmpty ? "demo-project" : project,
-            cwd: "", state: mood == .busy ? .busy : (mood == .idle ? .idle : .waiting),
-            tool: "Bash", detail: "", since: now.addingTimeInterval(-90), updatedAt: now,
-            running: mood == .busy
-                ? [RunningTool(id: "d", tool: "Bash", target: "npm test", since: now)] : [])
-        bridge?.push(GlobalState(mood: mood, sessions: [fake],
-                                 waitingProject: project.isEmpty ? nil : project,
-                                 waitingOn: on))
+            sessionId: "demo", project: step.project, cwd: "", state: activity,
+            tool: step.tool, detail: "", since: now.addingTimeInterval(-90), updatedAt: now,
+            running: running, phase: step.phase)
+
+        bridge?.push(GlobalState(mood: step.mood, sessions: [fake],
+                                 waitingProject: step.mood == .busy || step.mood == .idle
+                                     ? nil : step.project,
+                                 waitingOn: step.waitingOn),
+                     motion: step.tool.isEmpty ? nil : ActivitySummary.motion(forTool: step.tool))
+        bridge?.setPhase(step.phase)
         bridge?.pushSessions([fake], now: now)
-        bridge?.setBadge(mood == .idle ? "" : "1")
-        bridge?.say("demo — the pet is not watching anything right now", hold: 2.2)
+        bridge?.setBadge(step.mood == .idle ? "" : "1")
+        if !step.flash.isEmpty { bridge?.flash(step.flash) }
+        // The caption says both what is being shown AND that it is not real.
+        // A demo that looks like live state is a demo that gets acted on.
+        bridge?.say("demo · \(step.caption)", hold: 0, emphasis: "demo")
     }
 
     // MARK: - Shortcut

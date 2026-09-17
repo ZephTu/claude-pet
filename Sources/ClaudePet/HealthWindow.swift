@@ -1,18 +1,30 @@
 import AppKit
 import ClaudePetCore
 
-/// The connection report, in the pet's own visual language.
+/// A read-only panel in the pet's own visual language: the connection report,
+/// and the per-session activity list.
 ///
-/// An NSAlert was what this used to be, and an NSAlert cannot be made to look
+/// An NSAlert was what these used to be, and an NSAlert cannot be made to look
 /// like anything: it brings a system icon, a white sheet and a title in the
-/// wrong weight, so a dark, quiet pet opened a bright macOS dialog. This is a
-/// borderless panel styled like the session list — same charcoal, same corner
-/// radius, same type scale — so it reads as part of the same object.
+/// wrong weight, so a dark, quiet pet opened a bright macOS dialog. Worse, an
+/// NSAlert is modal and steals the keyboard — looking at a diagnostic should
+/// not interrupt whatever the user was typing.
 @MainActor
 final class HealthWindow: NSPanel {
-    private let onCopy: () -> Void
+    private let onCopy: (() -> Void)?
 
-    init(checks: [HealthCheck], onCopy: @escaping () -> Void) {
+    /// - Parameter lines: pre-formatted rows for a plain list (activity), used
+    ///   instead of `checks` when there is no status to colour.
+    convenience init(title: String, lines: [String]) {
+        self.init(title: title, checks: [], plainLines: lines, onCopy: nil)
+    }
+
+    convenience init(checks: [HealthCheck], onCopy: @escaping () -> Void) {
+        self.init(title: "Connection status", checks: checks, plainLines: nil, onCopy: onCopy)
+    }
+
+    private init(title: String, checks: [HealthCheck], plainLines: [String]?,
+                 onCopy: (() -> Void)?) {
         self.onCopy = onCopy
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 100),
@@ -47,9 +59,17 @@ final class HealthWindow: NSPanel {
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 14, right: 16)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        stack.addArrangedSubview(Self.title("Connection status"))
-        for check in checks { stack.addArrangedSubview(Self.row(check)) }
-        stack.addArrangedSubview(Self.buttons(target: self))
+        stack.addArrangedSubview(Self.title(title))
+        if let plainLines {
+            if plainLines.isEmpty {
+                stack.addArrangedSubview(Self.plain("Nothing recorded yet.", dim: true))
+            } else {
+                for line in plainLines { stack.addArrangedSubview(Self.plain(line, dim: false)) }
+            }
+        } else {
+            for check in checks { stack.addArrangedSubview(Self.row(check)) }
+        }
+        stack.addArrangedSubview(Self.buttons(target: self, canCopy: onCopy != nil))
 
         body.addSubview(stack)
         body.translatesAutoresizingMaskIntoConstraints = false
@@ -63,7 +83,15 @@ final class HealthWindow: NSPanel {
         setContentSize(stack.fittingSize)
     }
 
-    override var canBecomeKey: Bool { true }
+    /// Never key, never main.
+    ///
+    /// This panel is something the user looks at, not something they type into,
+    /// and taking the keyboard to show a diagnostic interrupts whatever they
+    /// were in the middle of. Esc still closes it — see `keyDown` — because the
+    /// pet's own window forwards nothing and a panel with no way out is worse
+    /// than one that does not take focus.
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
     func show(near anchor: NSRect) {
         // Beside the pet, and never off the screen it is on.
@@ -74,8 +102,11 @@ final class HealthWindow: NSPanel {
         origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - frame.width - 8)
         origin.y = min(max(origin.y, visible.minY + 8), visible.maxY - frame.height - 8)
         setFrameOrigin(origin)
-        NSApp.activate(ignoringOtherApps: true)
-        makeKeyAndOrderFront(nil)
+        // orderFrontRegardless, not makeKeyAndOrderFront: the panel comes to
+        // the front without the app activating, so the window the user was
+        // typing in keeps the keyboard.
+        orderFrontRegardless()
+        watchForEsc()
     }
 
     // MARK: - Pieces
@@ -142,18 +173,30 @@ final class HealthWindow: NSPanel {
         }
     }
 
-    private static func buttons(target: HealthWindow) -> NSView {
-        let copy = NSButton(title: "Copy", target: target, action: #selector(copyTapped))
-        copy.bezelStyle = .rounded
-        copy.controlSize = .small
+    private static func plain(_ text: String, dim: Bool) -> NSView {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = dim ? .tertiaryLabelColor : .secondaryLabelColor
+        label.preferredMaxLayoutWidth = 328
+        return label
+    }
+
+    private static func buttons(target: HealthWindow, canCopy: Bool) -> NSView {
         let close = NSButton(title: "Close", target: target, action: #selector(closeTapped))
         close.bezelStyle = .rounded
         close.controlSize = .small
-        close.keyEquivalent = "\u{1b}"   // Esc
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [spacer, copy, close])
+        var views: [NSView] = [spacer]
+        if canCopy {
+            let copy = NSButton(title: "Copy", target: target, action: #selector(copyTapped))
+            copy.bezelStyle = .rounded
+            copy.controlSize = .small
+            views.append(copy)
+        }
+        views.append(close)
+        let row = NSStackView(views: views)
         row.orientation = .horizontal
         row.spacing = 8
         row.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 0, right: 0)
@@ -176,8 +219,26 @@ final class HealthWindow: NSPanel {
         return (try? data.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    /// The panel never becomes key, so Esc cannot arrive as a key equivalent.
+    /// A local monitor catches it while the panel is on screen instead.
+    private var escMonitor: Any?
+
+    private func watchForEsc() {
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }   // Esc
+            self?.close()
+            return nil
+        }
+    }
+
+    override func close() {
+        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
+        escMonitor = nil
+        super.close()
+    }
+
     @objc private func copyTapped() {
-        onCopy()
+        onCopy?()
         close()
     }
 

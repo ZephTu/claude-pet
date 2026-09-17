@@ -135,6 +135,12 @@ enum HookEmit {
         let phase = phaseValue(event: event, at: path)
         if !phase.isEmpty { document["phase"] = phase }
 
+        // When a tool call last came back interrupted. The app watches this for
+        // CHANGES rather than for a flag being set, so the brief warning fires
+        // once per failure instead of for as long as the value sits there.
+        let trouble = troubleAt(event: event, hook: hook, at: path, now: now)
+        if !trouble.isEmpty { document["troubleAt"] = trouble }
+
         write(document, to: path)
 
         // A finished tool call, with the duration Claude Code measured itself.
@@ -219,6 +225,24 @@ enum HookEmit {
         return Array(running.suffix(12))
     }
 
+    /// The timestamp of the most recent interrupted tool call.
+    ///
+    /// Only an interruption counts — that is the one failure Claude Code states
+    /// outright. A non-empty stderr is not a failure, and a tool failing is
+    /// usually not a task failing, which is why this drives a brief warning and
+    /// not a mood.
+    private static func troubleAt(event: String, hook: [String: Any],
+                                  at path: URL, now: String) -> String {
+        let previous = (readDocument(at: path)?["troubleAt"] as? String) ?? ""
+        guard event == "PostToolUse" else {
+            // Cleared when a new turn starts: last turn's trouble is not this
+            // turn's.
+            return event == "UserPromptSubmit" ? "" : previous
+        }
+        let response = hook["tool_response"] as? [String: Any]
+        return (response?["interrupted"] as? Bool == true) ? now : previous
+    }
+
     /// Which multi-event phase the session is in, if any.
     ///
     /// Claude Code sends `PreCompact` when compaction starts but nothing when it
@@ -286,6 +310,9 @@ enum HookEmit {
         case "SessionStart": return "idle"
         case "UserPromptSubmit": return "busy"
         case "PreToolUse": return "busy"
+        // Compaction is work, just not work the user asked for. Without a state
+        // here the whole write is skipped and the phase never reaches the file.
+        case "PreCompact": return "busy"
         case "PostToolUse": return "busy"
         case "Stop": return "idle"
         default: return nil
