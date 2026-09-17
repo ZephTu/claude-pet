@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The riskiest thing this project does is edit ~/.claude/settings.json, and a
+  # break there is silent — it only shows up on someone else's machine, days
+  # later. A weekly run catches rot in the toolchain before an install does.
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  test:
+    # macOS 14 is the floor the package declares; the runner is newer so the
+    # build also proves it still compiles against a current SDK.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: swift --version
+
+      # Builds every target, including the AppKit/WebKit app, and produces the
+      # .build/debug/PetEmit the hook tests below need.
+      - name: Build
+        run: swift build
+
+      - name: Unit tests
+        run: swift run ClaudePetTests
+
+      - name: Hook tests
+        run: ./hooks/test-pet-emit.sh
