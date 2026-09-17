@@ -7,14 +7,25 @@ import Foundation
 /// fast and must never fail: the pet is not allowed to break the hook chain.
 /// Every path returns normally and the caller always exits 0.
 enum HookEmit {
-    /// Where state files live. `PET_HOME` overrides it for tests.
-    static var sessionsDirectory: URL {
+    /// Where the pet keeps its files. `PET_HOME` overrides it for tests.
+    static var baseDirectory: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let base = ProcessInfo.processInfo.environment["PET_HOME"]
+        return ProcessInfo.processInfo.environment["PET_HOME"]
             .map { URL(fileURLWithPath: $0) }
             ?? home.appending(path: ".claude/pet")
-        return base.appending(path: "sessions")
     }
+
+    /// One file per session, replaced in place: the CURRENT state.
+    static var sessionsDirectory: URL { baseDirectory.appending(path: "sessions") }
+
+    /// One file per finished turn: the RECORD that it happened.
+    ///
+    /// Separate from the session file on purpose. The session file only ever
+    /// holds the latest state, so a turn that began and ended between two of the
+    /// app's renders left no trace in it at all — and neither did one that
+    /// finished while the app was suppressing speech. A finish the user never
+    /// saw is the one thing this project is supposed to not do.
+    static var eventsDirectory: URL { baseDirectory.appending(path: "events") }
 
     static func run(payload: Data) {
         guard
@@ -87,7 +98,24 @@ enum HookEmit {
         let prompt = lastPromptAt(for: event, at: path, now: now)
         if !prompt.isEmpty { document["lastPromptAt"] = prompt }
 
+        // Which turn this is, counted from the session's own history.
+        //
+        // Claude Code's payload carries no turn identifier, and the obvious
+        // stand-in — the timestamp of the prompt that began the turn — is only
+        // second-resolution, so two turns inside one second collapse into one.
+        // A counter is not a guess about ordering: it advances on exactly the
+        // event that starts a turn, and on nothing else.
+        let turn = turnNumber(for: event, at: path)
+        document["turn"] = turn
+
         write(document, to: path)
+
+        // Stop is Claude Code telling us a turn ended — a confirmed event, not
+        // something inferred from a session going quiet or disappearing.
+        if event == "Stop" {
+            recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
+                             turnKey: String(turn), at: now)
+        }
     }
 
     /// Identifies the terminal tab this session is running in, so the pet's
@@ -117,6 +145,22 @@ enum HookEmit {
             let previous = old["lastPromptAt"] as? String
         else { return "" }
         return previous
+    }
+
+    /// This session's turn counter: bumped by UserPromptSubmit, carried by
+    /// everything else. A turn redelivering its Stop therefore reports the same
+    /// number, which is what makes the completion record idempotent.
+    private static func turnNumber(for event: String, at path: URL) -> Int {
+        let previous = (readDocument(at: path)?["turn"] as? Int) ?? 0
+        return event == "UserPromptSubmit" ? previous + 1 : previous
+    }
+
+    private static func readDocument(at path: URL) -> [String: Any]? {
+        guard
+            let data = try? Data(contentsOf: path),
+            let raw = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        return raw as? [String: Any]
     }
 
     /// The Claude Code process that invoked this hook.
@@ -200,13 +244,49 @@ enum HookEmit {
         return formatter.string(from: date)
     }
 
-    /// Write-then-rename so the watcher never reads a half-written file.
+    /// Appends the record of one finished turn.
+    ///
+    /// The file name is derived from the session and the turn, so Claude Code
+    /// delivering the same Stop twice overwrites one file rather than producing
+    /// two rows. Failure here is silent by design: the pet may never break the
+    /// hook chain, and a missing record is better than a broken session.
+    private static func recordCompletion(sessionID: String, project: String,
+                                         turnKey: String, at now: String) {
+        guard let finishedAt = CompletionQueue.parseDate(now) else { return }
+        let event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
+                                    project: project, displayName: project,
+                                    finishedAt: finishedAt)
+        let directory = eventsDirectory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        writeAtomically(CompletionQueue.encode(event),
+                        to: directory.appending(path: CompletionQueue.fileName(for: event)))
+    }
+
+    /// Write-then-rename so a reader never sees a half-written file.
     private static func write(_ document: [String: Any], to path: URL) {
         guard let data = try? JSONSerialization.data(withJSONObject: document) else { return }
-        let tmp = URL(fileURLWithPath: path.path + ".tmp")
+        writeAtomically(data, to: path)
+    }
+
+    private static func writeAtomically(_ data: Data, to path: URL) {
+        guard !data.isEmpty else { return }
+        // The temp name is unique per write, not per destination. Claude Code
+        // runs tools in parallel, so two hooks for the SAME session can be in
+        // flight at once, and a shared `.tmp` is a window where one write
+        // silently becomes the other: B overwrites the temp file A just wrote,
+        // then A renames B's bytes into place and A's update is gone.
+        //
+        // Not corruption — `replaceItemAt` is an atomic rename, and eight
+        // concurrent hooks against a shared temp file produced no malformed
+        // JSON when tried. A lost update, which is quieter and worse.
+        let tmp = URL(fileURLWithPath: path.path
+            + ".tmp.\(ProcessInfo.processInfo.processIdentifier).\(UInt32.random(in: 0...UInt32.max))")
         guard (try? data.write(to: tmp)) != nil else { return }
         if (try? FileManager.default.replaceItemAt(path, withItemAt: tmp)) == nil {
-            try? FileManager.default.removeItem(at: tmp)
+            // replaceItemAt fails when the destination does not exist yet.
+            if (try? FileManager.default.moveItem(at: tmp, to: path)) == nil {
+                try? FileManager.default.removeItem(at: tmp)
+            }
         }
     }
 }

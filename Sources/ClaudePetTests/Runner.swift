@@ -680,6 +680,76 @@ struct Runner {
         t.check("only the done line is sticky",
                 Chatter.Kind.allCases.filter(Chatter.isSticky) == [.sessionDone])
 
+        // ---- CompletionQueue: finishes must survive not being shown ----
+        // The bug this exists for: a finish that happens while another session is
+        // blocked, or inside the speech cooldown, was dropped outright — because
+        // the only record of it was the difference between two snapshots, and
+        // lastState advanced regardless.
+        func ev(_ sid: String, _ turn: String, _ at: TimeInterval,
+                project: String = "api", name: String = "") -> CompletionEvent {
+            CompletionEvent(sessionId: sid, turnKey: turn, project: project,
+                            displayName: name.isEmpty ? project : name,
+                            finishedAt: t0.addingTimeInterval(at))
+        }
+
+        t.check("the event id is derived from session and turn, not from chance",
+                ev("a", "T1", 0).eventId == ev("a", "T1", 99).eventId
+                && ev("a", "T1", 0).eventId != ev("a", "T2", 0).eventId
+                && ev("a", "T1", 0).eventId != ev("b", "T1", 0).eventId)
+
+        // Delivering the same Stop twice must not produce two rows.
+        t.check("the same turn recorded twice collapses to one",
+                CompletionQueue.dedupe([ev("a", "T1", 0), ev("a", "T1", 5)]).count == 1)
+        t.check("two turns of one session stay separate",
+                CompletionQueue.dedupe([ev("a", "T1", 0), ev("a", "T2", 5)]).count == 2)
+
+        let blobs: [Data] = [
+            Data(#"{"sessionId":"a","turnKey":"T1","project":"api","displayName":"api","finishedAt":"2026-09-17T10:00:00Z"}"#.utf8),
+            Data("not json at all".utf8),
+            Data(#"{"sessionId":"","turnKey":"T2","project":"x","displayName":"x","finishedAt":"2026-09-17T10:00:01Z"}"#.utf8),
+            Data(#"{"sessionId":"b","turnKey":"T1","project":"web","displayName":"web","finishedAt":"garbage"}"#.utf8),
+        ]
+        let decoded = CompletionQueue.decode(blobs)
+        t.check("a corrupt file does not take the queue down with it",
+                decoded.map(\.sessionId) == ["a"])
+
+        let read: Set<String> = [ev("a", "T1", 0).eventId]
+        t.check("read events are filtered out",
+                CompletionQueue.unread([ev("a", "T1", 0), ev("a", "T2", 1)], read: read)
+                    .map(\.turnKey) == ["T2"])
+
+        // Retention: 7 days, 500 rows, read rows go first.
+        let staleTurn = ev("a", "OLD", -8 * 24 * 3600)
+        let freshTurn = ev("a", "NEW", -60)
+        let aged = CompletionQueue.prune([staleTurn, freshTurn], read: [], now: t0)
+        t.check("anything past the retention window is dropped",
+                aged.keep.map(\.turnKey) == ["NEW"] && aged.droppedUnread == 1)
+
+        var many: [CompletionEvent] = []
+        for i in 0..<(CompletionQueue.hardLimit + 40) {
+            many.append(ev("a", "T\(i)", -Double(CompletionQueue.hardLimit + 40 - i)))
+        }
+        // The read rows sit in the MIDDLE, not at the front. If they were the
+        // oldest, "drop read first" and "drop oldest first" would be the same
+        // policy and this assertion would prove nothing.
+        let readIds = Set(many[100..<140].map(\.eventId))
+        let capped = CompletionQueue.prune(many, read: readIds, now: t0)
+        t.check("the cap is met by dropping read rows first",
+                capped.keep.count == CompletionQueue.hardLimit
+                && capped.droppedRead == 40 && capped.droppedUnread == 0)
+        // The proof it spent the read rows and not simply the oldest ones.
+        t.check("the oldest unread row survives while read rows are spent",
+                capped.keep.first?.turnKey == many.first?.turnKey)
+
+        // Nothing read: the cap can only be met by dropping unread, and that has
+        // to be reported rather than done quietly.
+        let cappedAllUnread = CompletionQueue.prune(many, read: [], now: t0)
+        t.check("dropping unread to meet the cap is counted, not silent",
+                cappedAllUnread.keep.count == CompletionQueue.hardLimit
+                && cappedAllUnread.droppedUnread == 40)
+        t.check("the rows kept under pressure are the newest ones",
+                cappedAllUnread.keep.last?.turnKey == many.last?.turnKey)
+
         t.finish()
     }
 }

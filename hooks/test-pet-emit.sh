@@ -160,5 +160,50 @@ check "waitingOn survives a following Notification" "$(field s9 waitingOn)" "rm 
 emit Stop s9 /Users/dev/Projects/demo-app
 check "waitingOn is cleared when it stops waiting" "$(field s9 waitingOn)" ""
 
+# ---- completion records -----------------------------------------------------
+# A finished turn has to leave a record on disk. The app used to infer finishes
+# by diffing two renders, which lost every turn that began and ended between
+# them — and every one that finished while speech was suppressed.
+
+events() { ls "$PET_HOME/events" 2>/dev/null | wc -l | tr -d ' '; }
+event_field() {  # event_field <index> <key>
+  f="$(ls "$PET_HOME/events"/*.json 2>/dev/null | sed -n "$1p")"
+  [ -n "$f" ] || { echo "(no file)"; return; }
+  /usr/bin/python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],''))" \
+    "$f" "$2"
+}
+
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sA /Users/dev/Projects/api-server
+emit Stop sA /Users/dev/Projects/api-server
+check "a finished turn is recorded" "$(events)" "1"
+check "the record names the project" "$(event_field 1 project)" "api-server"
+check "the record names the session" "$(event_field 1 sessionId)" "sA"
+
+# Claude Code redelivering the same Stop must not add a second row.
+emit Stop sA /Users/dev/Projects/api-server
+check "the same turn recorded twice stays one file" "$(events)" "1"
+
+# A new turn is a new record, even for the same session.
+emit UserPromptSubmit sA /Users/dev/Projects/api-server
+emit Stop sA /Users/dev/Projects/api-server
+check "a second turn is its own record" "$(events)" "2"
+
+# The case the whole queue exists for: a turn that starts and ends between two
+# renders of the app. Nothing here consults the app at all.
+emit UserPromptSubmit sB /Users/dev/Projects/web
+emit Stop sB /Users/dev/Projects/web
+emit UserPromptSubmit sB /Users/dev/Projects/web
+check "a turn that ended before anything could look is still on disk" "$(events)" "3"
+
+# Events that are not a finished turn must not fabricate records.
+emit PreToolUse sB /Users/dev/Projects/web Bash
+emit Notification sB /Users/dev/Projects/web "" "needs your permission"
+check "only Stop writes a record" "$(events)" "3"
+
+# No temp files may be left lying around in either directory.
+check "no stray temp files" \
+  "$(ls "$PET_HOME/events" "$PET_HOME/sessions" 2>/dev/null | grep -c '\.tmp' || true)" "0"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
