@@ -60,14 +60,27 @@ public enum ActivitySummary {
 
         var kept = [lastComponent(program)]
         for word in words.dropFirst() {
-            guard isPlainWord(word) else {
+            guard let safe = keepable(word) else {
                 kept.append("…")
                 break
             }
-            kept.append(word)
+            kept.append(safe)
             if kept.count >= 3 { break }
         }
         return clamp(kept.joined(separator: " "))
+    }
+
+    /// The form of `word` that is safe to keep, or nil to stop here.
+    ///
+    /// A long path is kept as its last component rather than dropped. `cd
+    /// /Users/me/Documents/Code_Projects/claude-pet` used to summarise to
+    /// `cd …` — technically safe and practically useless. The basename says
+    /// which directory without saying where it lives.
+    static func keepable(_ word: String) -> String? {
+        if isPlainWord(word) { return word }
+        guard word.contains("/") else { return nil }
+        let name = lastComponent(word)
+        return isPlainWord(name) ? name : nil
     }
 
     /// A bare word: letters, digits and the punctuation that shows up in

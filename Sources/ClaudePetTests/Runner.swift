@@ -988,6 +988,14 @@ struct Runner {
         t.check("a pipe stops it",
                 ActivitySummary.safeCommand("cat secrets.env | grep TOKEN")
                     == "cat secrets.env …")
+        // A long path is kept as its last component rather than thrown away:
+        // "cd …" is safe and useless, "cd claude-pet" is safe and tells you
+        // which directory without saying where it lives.
+        t.check("a long path is reduced to its last component, not dropped",
+                ActivitySummary.safeCommand("cd /Users/me/Documents/Code_Projects/claude-pet")
+                    == "cd claude-pet")
+        t.check("but a long path carrying something odd is still stopped",
+                ActivitySummary.safeCommand("cd /a/b/c?token=abc123def456ghi789jkl") == "cd …")
         t.check("an empty command summarises to nothing",
                 ActivitySummary.safeCommand("   ").isEmpty)
         // Not a denylist: a secret nobody thought to name is still withheld.
@@ -1171,6 +1179,45 @@ struct Runner {
                 !rowsAfterRollover.contains { $0.percent == 0 })
         t.check("a live window is still reported",
                 Chatter.quotaRows(usage: fresh1, now: t0).map(\.label) == ["5h", "week"])
+
+        // ---- ActivityLog: what already ran, and what it is allowed to claim ----
+        func act(_ tool: String, _ target: String, ago: TimeInterval, ms: Int = 1200,
+                 result: ActivityEntry.Result = .ok) -> ActivityEntry {
+            ActivityEntry(tool: tool, target: target, finishedAt: t0.addingTimeInterval(-ago),
+                          durationMs: ms, result: result)
+        }
+        t.check("a call reads as what it did and how long it took",
+                act("Bash", "npm test", ago: 0, ms: 2900).line() == "Bash npm test · 2.9s")
+        t.check("a sub-second call is not rounded to 0.0s",
+                act("Read", "x.swift", ago: 0, ms: 57).line() == "Read x.swift · 57ms")
+        t.check("only an interruption is called out",
+                act("Bash", "x", ago: 0, result: .interrupted).line().contains("interrupted")
+                && !act("Bash", "x", ago: 0, result: .unknown).line().contains("interrupted"))
+
+        let log = [act("Bash", "a", ago: 10), act("Read", "b", ago: 5),
+                   act("Edit", "c", ago: 25 * 3600)]
+        t.check("the newest call leads and anything past a day is gone",
+                ActivityLog.recent(log, now: t0).map(\.target) == ["b", "a"])
+        t.check("the list is capped",
+                ActivityLog.recent(Array(repeating: act("Bash", "x", ago: 1), count: 50),
+                                   now: t0).count == ActivityLog.shown)
+
+        t.check("entries survive a round trip",
+                ActivityLog.decode(String(data: ActivityLog.encode(log[0]), encoding: .utf8)!)
+                    == [log[0]])
+        // A hook can be killed mid-write, so a torn last line is normal.
+        let torn = String(data: ActivityLog.encode(log[0]), encoding: .utf8)! + "{\"tool\":\"Ba"
+        t.check("a half-written last line costs only that line",
+                ActivityLog.decode(torn).count == 1)
+        t.check("a log of pure garbage reads as empty, not as a crash",
+                ActivityLog.decode("nonsense\nmore nonsense").isEmpty)
+
+        // One chatty session must not push every other session's history out.
+        t.check("the budget is shared out, not first-come",
+                ActivityLog.perSessionBudget(sessionCount: 10) == 200
+                && ActivityLog.perSessionBudget(sessionCount: 0) == ActivityLog.totalCap)
+        t.check("a busy machine still leaves each session a readable amount",
+                ActivityLog.perSessionBudget(sessionCount: 500) == ActivityLog.shown)
 
         t.finish()
     }

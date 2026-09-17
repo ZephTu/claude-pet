@@ -306,6 +306,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         pin.representedObject = sessionID
         menu.addItem(pin)
 
+        let recent = NSMenuItem(title: "Recent Activity…", action: #selector(activityPicked(_:)),
+                                keyEquivalent: "")
+        recent.target = self
+        recent.representedObject = sessionID
+        menu.addItem(recent)
+
         menu.addItem(.separator())
         let mute = NSMenuItem(title: "Mute Until I Speak To It",
                               action: #selector(mutePicked(_:)), keyEquivalent: "")
@@ -357,6 +363,35 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func pinPicked(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         setPrefs(id) { $0.pinned.toggle() }
+    }
+
+    /// What this session's tools have been doing.
+    ///
+    /// Read from the log pet-emit appends to, never from the transcript: the
+    /// pet does not read conversations, and this has to keep being true.
+    @objc private func activityPicked(_ sender: NSMenuItem) {
+        guard
+            let id = sender.representedObject as? String,
+            let session = latest.first(where: { $0.sessionId == id })
+        else { return }
+        let file = petHome.appending(path: "activity")
+            .appending(path: SessionLabels.sanitiseAlias(id).isEmpty ? id : id)
+            .appendingPathExtension("jsonl")
+        let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        let entries = ActivityLog.recent(ActivityLog.decode(text), now: Date())
+
+        let alert = NSAlert()
+        alert.messageText = SessionLabels.displayName(for: session, prefs: labelPrefs,
+                                                      title: titleFor(session))
+        alert.informativeText = entries.isEmpty
+            ? "No tool calls recorded yet. Only calls made after the pet was installed are logged."
+            : entries.map { "· " + $0.line() }.joined(separator: "\n")
+        alert.addButton(withTitle: "Close")
+        if !entries.isEmpty { alert.addButton(withTitle: "Clear History") }
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn {
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     @objc private func mutePicked(_ sender: NSMenuItem) {

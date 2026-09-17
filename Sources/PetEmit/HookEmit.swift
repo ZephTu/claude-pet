@@ -18,6 +18,9 @@ enum HookEmit {
     /// One file per session, replaced in place: the CURRENT state.
     static var sessionsDirectory: URL { baseDirectory.appending(path: "sessions") }
 
+    /// One append-only log per session: what its tool calls DID.
+    static var activityDirectory: URL { baseDirectory.appending(path: "activity") }
+
     /// One file per finished turn: the RECORD that it happened.
     ///
     /// Separate from the session file on purpose. The session file only ever
@@ -47,6 +50,10 @@ enum HookEmit {
         // to time it out fifteen minutes from now.
         if event == "SessionEnd" {
             try? FileManager.default.removeItem(at: path)
+            // The activity log goes too: it describes a session that no longer
+            // exists, and nothing can reach it any more.
+            try? FileManager.default.removeItem(
+                at: activityDirectory.appending(path: sanitise(sessionID) + ".jsonl"))
             return
         }
 
@@ -122,6 +129,11 @@ enum HookEmit {
         document["running"] = running
 
         write(document, to: path)
+
+        // A finished tool call, with the duration Claude Code measured itself.
+        if event == "PostToolUse" {
+            recordActivity(sessionID: sessionID, hook: hook, now: now)
+        }
 
         // Stop is Claude Code telling us a turn ended — a confirmed event, not
         // something inferred from a session going quiet or disappearing.
@@ -313,6 +325,78 @@ enum HookEmit {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writeAtomically(CompletionQueue.encode(event),
                         to: directory.appending(path: CompletionQueue.fileName(for: event)))
+    }
+
+    /// Appends one finished tool call to this session's log.
+    ///
+    /// Append, not read-modify-write: a hook has to finish fast, and a single
+    /// short line reaches the file in one write. The reader tolerates a
+    /// half-written last line, which is what a hook being killed leaves behind.
+    private static func recordActivity(sessionID: String, hook: [String: Any], now: String) {
+        guard
+            let finishedAt = CompletionQueue.parseDate(now),
+            let tool = hook["tool_name"] as? String, !tool.isEmpty
+        else { return }
+
+        // The only failure claimed is the one Claude Code states outright. A
+        // non-empty stderr is not a failure — guessing from it would label half
+        // of a normal build as broken.
+        let response = hook["tool_response"] as? [String: Any]
+        let result: ActivityEntry.Result
+        if let response {
+            result = (response["interrupted"] as? Bool == true) ? .interrupted : .ok
+        } else {
+            result = .unknown
+        }
+
+        let entry = ActivityEntry(
+            tool: tool,
+            target: ActivitySummary.target(toolName: tool,
+                                           toolInput: hook["tool_input"] as? [String: Any] ?? [:]),
+            finishedAt: finishedAt,
+            durationMs: (hook["duration_ms"] as? Int) ?? 0,
+            result: result)
+
+        let directory = activityDirectory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        append(ActivityLog.encode(entry),
+               to: directory.appending(path: sanitise(sessionID) + ".jsonl"))
+    }
+
+    /// A session id is a uuid, but it arrives from outside and is about to
+    /// become a file name.
+    private static func sanitise(_ s: String) -> String {
+        let ok = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        return String(s.map { ok.contains($0) ? $0 : "_" })
+    }
+
+    /// Roughly this many bytes before the log is trimmed back.
+    private static let activityTrimAt = 24_000
+
+    private static func append(_ data: Data, to path: URL) {
+        guard !data.isEmpty else { return }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: path.path) else {
+            try? data.write(to: path)
+            return
+        }
+        if let handle = try? FileHandle(forWritingTo: path) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        }
+        // Trimming reads the whole file, so it happens by size rather than on
+        // every call — a hook cannot afford that on every tool use.
+        let size = (try? fm.attributesOfItem(atPath: path.path)[.size]) as? Int ?? 0
+        if size > activityTrimAt { trim(path) }
+    }
+
+    private static func trim(_ path: URL) {
+        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count > ActivityLog.shown else { return }
+        writeAtomically(Data((lines.suffix(ActivityLog.shown).joined(separator: "\n") + "\n").utf8),
+                        to: path)
     }
 
     /// Write-then-rename so a reader never sees a half-written file.

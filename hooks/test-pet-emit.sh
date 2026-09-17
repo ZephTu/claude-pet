@@ -205,5 +205,40 @@ check "only Stop writes a record" "$(events)" "3"
 check "no stray temp files" \
   "$(ls "$PET_HOME/events" "$PET_HOME/sessions" 2>/dev/null | grep -c '\.tmp' || true)" "0"
 
+# ---- activity log --------------------------------------------------------
+rm -rf "$PET_HOME/activity"
+# PostToolUse carries tool_use_id, duration_ms and tool_response; the plain
+# emit() helper above sends none of them, so this one builds the payload itself.
+post() {  # post <session> <cwd> <tool> <json tool_input> <duration> <interrupted>
+  # One line: a backslash inside single quotes is a literal backslash, not a
+  # line continuation, and it corrupted the JSON when this was wrapped.
+  printf '{"hook_event_name":"PostToolUse","session_id":"%s","cwd":"%s","tool_name":"%s","tool_use_id":"toolu_%s","tool_input":%s,"duration_ms":%s,"tool_response":{"interrupted":%s}}' "$1" "$2" "$3" "$RANDOM" "$4" "$5" "$6" | "$EMIT"
+}
+
+post sL /Users/dev/Projects/api Bash '{"command":"npm test"}' 2900 false
+check "a finished call is logged" \
+  "$(wc -l < "$PET_HOME/activity/sL.jsonl" | tr -d ' ')" "1"
+check "the log records what it ran" \
+  "$(/usr/bin/python3 -c "import json;print(json.loads(open('$PET_HOME/activity/sL.jsonl').readline())['target'])")" \
+  "npm test"
+check "and how long Claude Code said it took" \
+  "$(/usr/bin/python3 -c "import json;print(json.loads(open('$PET_HOME/activity/sL.jsonl').readline())['ms'])")" \
+  "2900"
+
+# A secret in the command must not reach the log — this file lives for a day.
+post sL /Users/dev/Projects/api Bash '{"command":"deploy --token sk-live-abc123"}' 10 false
+check "a token in the command never lands in the log" \
+  "$(grep -c 'sk-live-abc123' "$PET_HOME/activity/sL.jsonl" || true)" "0"
+
+post sL /Users/dev/Projects/api Bash '{"command":"sleep 99"}' 400 true
+check "an interruption is recorded as such" \
+  "$(grep -c '"result":"interrupted"' "$PET_HOME/activity/sL.jsonl" || true)" "1"
+
+# Ending the session takes its log with it: it describes something that no
+# longer exists and nothing can reach it any more.
+emit SessionEnd sL /Users/dev/Projects/api
+check "SessionEnd removes the log" \
+  "$([ -f "$PET_HOME/activity/sL.jsonl" ] && echo yes || echo no)" "no"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
