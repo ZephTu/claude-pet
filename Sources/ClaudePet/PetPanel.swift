@@ -94,6 +94,10 @@ final class PetPanel: NSPanel {
             self, selector: #selector(windowDidMove), name: NSWindow.didMoveNotification, object: self
         )
         NotificationCenter.default.addObserver(
+            self, selector: #selector(occlusionChanged),
+            name: NSWindow.didChangeOcclusionStateNotification, object: self
+        )
+        NotificationCenter.default.addObserver(
             self, selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
@@ -150,6 +154,15 @@ final class PetPanel: NSPanel {
 
     /// The layout flipped; the page has to be told so it can move the drawing.
     var onMirrorChanged: ((Bool) -> Void)?
+
+    /// Whether anything could actually be looking at the window. Covered by
+    /// another window, on another Space, or on a sleeping display all read as
+    /// not visible.
+    var onVisibilityChanged: ((Bool) -> Void)?
+
+    @objc private func occlusionChanged() {
+        onVisibilityChanged?(occlusionState.contains(.visible))
+    }
 
     var isMirrored: Bool { host.isMirrored }
 

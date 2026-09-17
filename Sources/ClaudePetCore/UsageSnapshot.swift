@@ -11,6 +11,10 @@ public struct UsageSnapshot: Sendable, Equatable {
     public let sevenDayResetAt: Date
     /// When this reading was taken, which is NOT when it was read.
     public let capturedAt: Date
+    /// Where it came from. Carried on the reading itself so two sources can
+    /// never be silently blended into one set of numbers that belongs to
+    /// neither.
+    public let source: String
 
     public init(
         planName: String,
@@ -18,7 +22,8 @@ public struct UsageSnapshot: Sendable, Equatable {
         sevenDayPercent: Int,
         fiveHourResetAt: Date,
         sevenDayResetAt: Date,
-        capturedAt: Date
+        capturedAt: Date,
+        source: String = ""
     ) {
         self.planName = planName
         self.fiveHourPercent = fiveHourPercent
@@ -26,6 +31,7 @@ public struct UsageSnapshot: Sendable, Equatable {
         self.fiveHourResetAt = fiveHourResetAt
         self.sevenDayResetAt = sevenDayResetAt
         self.capturedAt = capturedAt
+        self.source = source
     }
 
     /// Percentages go stale; reset times do not.
@@ -39,6 +45,47 @@ public struct UsageSnapshot: Sendable, Equatable {
 
     public func percentagesUsable(now: Date) -> Bool {
         now.timeIntervalSince(capturedAt) <= Self.percentagesGoStaleAfter
+    }
+
+    /// Has the window this reading describes already rolled over?
+    ///
+    /// When it has, the percentage is not merely old — it belongs to a window
+    /// that no longer exists. The number it would be replaced by is NOT zero:
+    /// the user may have spent plenty of the new window since. So this reports
+    /// that the reading is out of date, and the display says so rather than
+    /// guessing in either direction.
+    public func fiveHourWindowRolledOver(now: Date) -> Bool {
+        now >= fiveHourResetAt
+    }
+
+    public func sevenDayWindowRolledOver(now: Date) -> Bool {
+        now >= sevenDayResetAt
+    }
+}
+
+/// Choosing between readings when more than one source is available.
+public enum UsageSources {
+    /// Ranked by how directly each one knows: Claude Code's own statusline is
+    /// fed the numbers, claude-hud caches what it was given.
+    public static func rank(_ source: String) -> Int {
+        switch source {
+        case "statusline": return 2
+        case "claude-hud": return 1
+        default: return 0
+        }
+    }
+
+    /// The reading to trust.
+    ///
+    /// Freshness beats rank, because a stale reading from a better source is
+    /// still stale — it describes a window that may have rolled over. Rank only
+    /// decides between readings that are both usable.
+    public static func pick(_ candidates: [UsageSnapshot], now: Date) -> UsageSnapshot? {
+        let usable = candidates.filter { $0.percentagesUsable(now: now) }
+        if let best = usable.max(by: { rank($0.source) < rank($1.source) }) { return best }
+        // Nothing usable: hand back the newest anyway so the panel can say how
+        // old it is, rather than claiming there is no source at all.
+        return candidates.max(by: { $0.capturedAt < $1.capturedAt })
     }
 }
 
@@ -94,7 +141,8 @@ public enum UsageReader {
             sevenDayPercent: sevenDay,
             fiveHourResetAt: fiveResetAt,
             sevenDayResetAt: sevenResetAt,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            source: "claude-hud"
         )
     }
 

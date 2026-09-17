@@ -186,12 +186,19 @@ public enum Chatter {
     /// a glance, "5h 28% · week 39%, resets at 15:30" has to be parsed.
     public static func quotaRows(usage: UsageSnapshot?, now: Date) -> [QuotaRow] {
         guard let usage, usage.percentagesUsable(now: now) else { return [] }
-        return [
-            QuotaRow(label: "5h", percent: clampPercent(usage.fiveHourPercent),
-                     resetsIn: duration(until: usage.fiveHourResetAt, now: now)),
-            QuotaRow(label: "week", percent: clampPercent(usage.sevenDayPercent),
-                     resetsIn: duration(until: usage.sevenDayResetAt, now: now)),
-        ]
+        var rows: [QuotaRow] = []
+        // A window that has rolled over is not shown as a number. The reading
+        // describes a window that no longer exists, and the honest replacement
+        // is not 0% — the user may have spent plenty of the new one since.
+        if !usage.fiveHourWindowRolledOver(now: now) {
+            rows.append(QuotaRow(label: "5h", percent: clampPercent(usage.fiveHourPercent),
+                                 resetsIn: duration(until: usage.fiveHourResetAt, now: now)))
+        }
+        if !usage.sevenDayWindowRolledOver(now: now) {
+            rows.append(QuotaRow(label: "week", percent: clampPercent(usage.sevenDayPercent),
+                                 resetsIn: duration(until: usage.sevenDayResetAt, now: now)))
+        }
+        return rows
     }
 
     /// Shown when there is no usable quota reading — claude-hud is not installed,

@@ -1135,6 +1135,43 @@ struct Runner {
                     HealthReport.claudeCode(version: "2.1.0", path: home + "/bin/claude")
                 ]).contains("~/bin/claude"))
 
+        // ---- Usage sources: never blend two, never guess a rolled-over window ----
+        func usageSnap(_ source: String, capturedAgo: TimeInterval, fiveIn: TimeInterval = 3600,
+                  weekIn: TimeInterval = 86_400, five: Int = 40) -> UsageSnapshot {
+            UsageSnapshot(planName: "max", fiveHourPercent: five, sevenDayPercent: 55,
+                          fiveHourResetAt: t0.addingTimeInterval(fiveIn),
+                          sevenDayResetAt: t0.addingTimeInterval(weekIn),
+                          capturedAt: t0.addingTimeInterval(-capturedAgo), source: source)
+        }
+        let fresh1 = usageSnap("claude-hud", capturedAgo: 60)
+        let fresh2 = usageSnap("statusline", capturedAgo: 120)
+        t.check("between two usable readings the better source wins",
+                UsageSources.pick([fresh1, fresh2], now: t0)?.source == "statusline")
+        // Freshness beats rank: a stale reading from a better source is still
+        // describing a window that may have rolled over.
+        let staleBetter = usageSnap("statusline", capturedAgo: 9000)
+        t.check("a stale reading does not outrank a fresh one",
+                UsageSources.pick([fresh1, staleBetter], now: t0)?.source == "claude-hud")
+        t.check("with nothing usable the newest is still handed back, to be labelled old",
+                UsageSources.pick([staleBetter], now: t0)?.source == "statusline")
+        t.check("no sources at all means no reading",
+                UsageSources.pick([], now: t0) == nil)
+
+        // The rule that stops a wrong number being shown confidently.
+        let rolled = usageSnap("claude-hud", capturedAgo: 60, fiveIn: -60)
+        t.check("a window that has rolled over is spotted",
+                rolled.fiveHourWindowRolledOver(now: t0)
+                && !rolled.sevenDayWindowRolledOver(now: t0))
+        let rowsAfterRollover = Chatter.quotaRows(usage: rolled, now: t0)
+        t.check("its meter is dropped rather than shown at the old number",
+                rowsAfterRollover.map(\.label) == ["week"])
+        // Not replaced with 0% either: the user may have spent plenty of the new
+        // window already, and inventing a number is the failure being avoided.
+        t.check("and it is not replaced by a made-up zero",
+                !rowsAfterRollover.contains { $0.percent == 0 })
+        t.check("a live window is still reported",
+                Chatter.quotaRows(usage: fresh1, now: t0).map(\.label) == ["5h", "week"])
+
         t.finish()
     }
 }

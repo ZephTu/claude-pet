@@ -28,6 +28,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private let git = GitCache()
     private var labelPrefs: [String: SessionLabels.Prefs] = [:]
+    /// The user's own preference, independent of whether the window happens to
+    /// be visible right now.
+    private var reduceMotion = false
+    private var windowVisible = true
 
     private var petHome: URL {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet")
@@ -45,9 +49,23 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             // The page has just loaded at its defaults, so whichever side it
             // should be on has to be pushed again.
             bridge.setMirrored(panel?.isMirrored ?? false)
+            self?.applyMotionSetting()
             self?.render()
         }
         panel.onMirrorChanged = { on in bridge.setMirrored(on) }
+        // A pet nobody can see has no reason to repaint. Covered by another
+        // window, on another Space, or on a sleeping display all land here.
+        panel.onVisibilityChanged = { [weak self] visible in
+            guard let self else { return }
+            windowVisible = visible
+            applyMotionSetting()
+            // Slowed right down rather than stopped: the panel has to be current
+            // the moment it comes back, and a stopped clock would show whatever
+            // was true when it got covered up.
+            ticker?.invalidate()
+            startTicker(interval: visible ? Self.tickInterval : Self.hiddenTickInterval)
+        }
+        reduceMotion = UserDefaults.standard.bool(forKey: Self.reduceMotionKey)
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
@@ -90,6 +108,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShortcutToggle: { [weak self] in self?.toggleHotKey() },
             onShowHealth: { [weak self] in self?.showHealth() },
             onDemoToggle: { [weak self] in self?.toggleDemo() },
+            onReduceMotionToggle: { [weak self] in self?.toggleReduceMotion() },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -103,7 +122,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           launchesAtLogin: self.launchesAtLogin,
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
-                          demoOn: self.demo != nil)
+                          demoOn: self.demo != nil,
+                          reduceMotionOn: self.reduceMotion)
             }
         }
         self.menu = menu
@@ -118,9 +138,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // Time passes even when no file changes: a session that has been waiting
         // 59s must still escalate to urgent at 61s, and a dead session must stop
         // counting. Nothing writes a file at that moment, so re-aggregate on a timer.
-        ticker = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.render() }
-        }
+        startTicker(interval: Self.tickInterval)
 
         self.panel = panel
         self.bridge = bridge
@@ -352,6 +370,36 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if prefs.isEmpty { labelPrefs.removeValue(forKey: id) } else { labelPrefs[id] = prefs }
         saveLabels()
         render()
+    }
+
+    // MARK: - Motion and visibility
+
+    /// How often the display is refreshed while it is on screen. The ages shown
+    /// in the panel are coarse ("5m"), so a finer tick would redraw the same
+    /// text.
+    private static let tickInterval: TimeInterval = 5
+    /// And while nothing can see it. Not stopped outright: the panel has to be
+    /// current the moment it comes back, and a stopped clock would show the
+    /// state from whenever it was covered up.
+    private static let hiddenTickInterval: TimeInterval = 30
+    private static let reduceMotionKey = "reduceMotion"
+
+    private func startTicker(interval: TimeInterval) {
+        ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.render() }
+        }
+    }
+
+    /// Animation runs only when someone could be watching it AND has not asked
+    /// for it to stop.
+    private func applyMotionSetting() {
+        bridge?.setCalm(reduceMotion || !windowVisible)
+    }
+
+    private func toggleReduceMotion() {
+        reduceMotion.toggle()
+        UserDefaults.standard.set(reduceMotion, forKey: Self.reduceMotionKey)
+        applyMotionSetting()
     }
 
     // MARK: - Health and demo

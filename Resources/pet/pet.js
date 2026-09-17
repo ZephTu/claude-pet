@@ -450,6 +450,18 @@ window.setMirrored = function (on) {
   reportLayout();
 };
 
+/**
+ * Turn animation off while keeping every state readable.
+ *
+ * Also used when the window is not visible at all: a pet nobody can see has no
+ * reason to be repainting sixty times a second.
+ *
+ * @param {boolean} on
+ */
+window.setCalm = function (on) {
+  document.getElementById("stage").classList.toggle("calm", !!on);
+};
+
 window.setBadge = function (text) {
   const g = document.getElementById("badge-count");
   if (!text) { g.classList.remove("on"); return; }

@@ -118,7 +118,7 @@ The design document in `docs/superpowers/specs/` explains the architecture and, 
 
 - No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
 - Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the robot still swallow clicks.
-- Roughly 4% CPU while idle — that is the breathing animation.
+- Roughly **0.9% CPU and 63MB** while idle, measured on an M-series Mac by CPU-time delta over 20s. That figure did not move when the session count went from 4 to 14, and **Reduce Motion did not lower it either** (0.8% vs 0.9%, inside the measurement noise) — the CSS animation is composited and costs almost nothing. Reduce Motion is there for people who do not want movement on their desktop, not as a way to save power.
 
 ## License
 

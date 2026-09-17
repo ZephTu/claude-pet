@@ -20,6 +20,17 @@ html, body {
   height: 280px;
 }
 
+/* Reduced motion. Everything that moves stops; nothing that CARRIES MEANING is
+   allowed to stop with it. The lamp keeps its colour, the badge keeps its
+   count, the panel keeps its text — what goes is the breathing, the typing, the
+   blinking and the pulse. A calm pet must still be a readable one. */
+#stage.calm #pet *, #stage.calm #pet { animation: none !important; }
+/* The lamp pulses to say "look at me"; with motion off it says the same thing
+   by simply staying lit rather than sitting at whatever opacity the animation
+   was paused on. */
+#stage.calm .bulb { opacity: 1 !important; }
+#stage.calm .zzz text { opacity: 0.6 !important; }
+
 /* Mirrored layout: pet on the left, panel on the right. Used when the window
    sits near the left edge of a display, where the panel's usual side would be
    off-screen. Every rule that positions something has a counterpart here, and
