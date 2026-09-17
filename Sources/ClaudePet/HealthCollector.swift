@@ -43,7 +43,7 @@ enum HealthCollector {
         }
 
         if let usage {
-            facts.usageSource = "claude-hud cache"
+            facts.usageSource = usage.source.isEmpty ? "unknown source" : usage.source
             facts.usageCapturedAt = usage.capturedAt
             facts.usageStale = !usage.percentagesUsable(now: now)
         }

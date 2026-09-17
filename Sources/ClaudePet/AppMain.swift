@@ -228,8 +228,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if let cached = usageCache, now.timeIntervalSince(cached.readAt) < 60 {
             return cached.snapshot
         }
-        let url = UsageReader.cacheURL(claudeHome: claudeHome)
-        let snapshot = (try? Data(contentsOf: url)).flatMap(UsageReader.parse)
+        // Two possible sources, read independently and never blended. The one
+        // that wins is decided by UsageSources, which puts freshness first: a
+        // reading from a better source that has gone stale still describes a
+        // window that may have rolled over.
+        var candidates: [UsageSnapshot] = []
+        if let hud = (try? Data(contentsOf: UsageReader.cacheURL(claudeHome: claudeHome)))
+            .flatMap(UsageReader.parse) {
+            candidates.append(hud)
+        }
+        if let line = (try? Data(contentsOf: StatuslineUsage.cacheURL(petHome: petHome)))
+            .flatMap(StatuslineUsage.decode) {
+            candidates.append(line)
+        }
+        let snapshot = UsageSources.pick(candidates, now: now)
         usageCache = (snapshot, now)
         return snapshot
     }

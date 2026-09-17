@@ -25,7 +25,15 @@ The bulb on the antenna is the part you can read without focusing on it:
 
 ## What you can do with it
 
-**Click it** to expand a list of every live session — what it is running, and for how long. **Drag** to move it; it remembers where you put it. **Right-click** for pause / launch-at-login / quit.
+**Click it** to expand the panel. It has three groups, in the order they want your attention:
+
+- **Needs you** — sessions blocked on an approval or a question, longest wait first
+- **Finished** — turns that ended while you were not looking, folded to one row per session
+- **Running** — everything else that is alive
+
+A number on the robot's chest counts both kinds of attention. It is not shown at zero.
+
+**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 
 **Click a row marked ↗** to jump straight to the terminal tab that session is running in.
 
@@ -37,11 +45,25 @@ The bulb on the antenna is the part you can read without focusing on it:
 
 **Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
+**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed, the row says so and offers the ✓ instead. `clear` on the group heading marks them all.
+
+**Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
+
+**⏱ on a blocked row** postpones it for 5, 15 or 30 minutes. The row stays visible and says how much longer — this is not muting. The delay belongs to that one approval: if the session resolves it and blocks on a different one, the new one is not postponed. Sleeping through a delay replays nothing.
+
 **Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the robot's mood — it can sit blocked on a permission prompt without making the robot wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
 
 When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
 
 A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
+
+**A row says what is running right now**, from the tool calls that have started and not reported back — `Bash npm test`, `Read PetLayout.swift`, or `3 tools running`. The age beside it is how long *that call* has been going, which is the number that answers "is this stuck?". Inside `busy` the figure's pose follows: reading leans at the screen, editing types, anything else sits back and waits.
+
+**Optional: a global shortcut.** Off by default. Turn on ⌃⌥⌘J in the right-click menu to jump to whatever has been waiting longest. Claiming a system-wide chord uninvited is taking something that was not offered, so you have to ask for it — and if another app already owns it, the menu says so instead of quietly failing.
+
+**Right-click → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
+
+**Right-click → Demo the States** cycles the pet through everything it can show, writing nothing to disk.
 
 ## Requirements
 
@@ -68,10 +90,40 @@ Hooks only take effect in **newly started** sessions. Windows already open are u
 Three places, all reversible by `./scripts/uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
-2. `~/.claude/pet/` — the hook binary and one small state file per session
-3. `~/.claude/settings.json` — seven appended hooks
+2. `~/.claude/pet/` — the hook binary and the data below
+3. `~/.claude/settings.json` — eight appended hooks
 
-The state files record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, and it makes no network requests of any kind.**
+Inside `~/.claude/pet/`:
+
+| Path | What it holds | Cleared |
+| --- | --- | --- |
+| `sessions/<id>.json` | the CURRENT state of one session: project, directory, state, running tool calls, pid, timestamps | when the session ends |
+| `events/<id>~<turn>.json` | one record per finished turn | 7 days, or 500 rows |
+| `activity/<id>.jsonl` | that session's recent tool calls: tool, short target, duration, result | when the session ends, or `Clear History` |
+| `read.json` | which finished turns you have acknowledged | with the events they refer to |
+| `usage.json` | quota numbers, only if you wired up the statusline below | overwritten each time |
+
+Aliases, pins, mutes, snoozes and settings live in `UserDefaults`, not here.
+
+**It does not read your conversations, and it makes no network requests of any kind.** The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
+
+## Optional: reading quota from your statusline
+
+The pet reads [claude-hud](https://github.com/jarrodwatts/claude-hud)'s cache if you have it. If you do not, and you are on Claude Code 2.1.251 or newer, it can capture the numbers from whatever statusline you already run:
+
+```jsonc
+// ~/.claude/settings.json — edit this by hand
+"statusLine": {
+  "type": "command",
+  "command": "$HOME/.claude/pet/pet-emit --statusline -- <your existing command>"
+}
+```
+
+`pet-emit --statusline` passes the input through byte for byte and forwards your command's output and exit code unchanged; a parse failure costs a quota reading and nothing else.
+
+**The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. It also means uninstalling the pet cannot break a statusline it never touched.
+
+Two sources are never blended. Whichever reading is fresh wins; a stale reading from a better source still describes a window that may have rolled over. **Caveat: the shape of the statusline's `rate_limits` payload has not been verified against a live one** — the parser accepts several plausible spellings and returns nothing rather than a wrong number when it recognises none.
 
 ## Uninstall
 
@@ -106,9 +158,11 @@ rather than keeping a copy, so it cannot fall behind the app.
 
 The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is. **It is written in Chinese** — the code, comments and this README are English, but that document has not been translated.
 
-### Two things worth knowing before you change anything
+### Three things worth knowing before you change anything
 
 **The hit region is two rectangles in `Sources/ClaudePetCore/PetLayout.swift`, and they must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
+
+This is not hypothetical. The mirrored layout was first written as a reflection (`x → width - maxX`), every test passed, and the body box still looked right in a screenshot — because it happens to be symmetric inside the pet. The antenna's box is not, and the bulb ended up outside its own hit region. What caught it was drawing both rectangles over the rendered page and looking. Do that after any change here.
 
 **The `settings.json` patch is tested against real files, not in process.** It is the only thing here that can break someone else's machine, and the parts that make it safe — the backup, the atomic write, the parse-back, the rollback — exist only on disk; testing them in memory tests nothing. The assertion that matters is the round trip: install then uninstall, and not one field of the user's own hooks may differ.
 

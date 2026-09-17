@@ -1173,6 +1173,25 @@ struct Runner {
                 UsageSources.pick([fresh1, staleBetter], now: t0)?.source == "claude-hud")
         t.check("with nothing usable the newest is still handed back, to be labelled old",
                 UsageSources.pick([staleBetter], now: t0)?.source == "statusline")
+        // The statusline payload's shape is NOT verified against a live
+        // payload — see StatuslineUsage — so the parser accepts several
+        // spellings and, crucially, returns nil rather than a wrong number.
+        let sl = Data(#"{"rate_limits":{"five_hour":{"used_pct":31,"resets_at":"2026-09-17T12:00:00Z"},"seven_day":{"used_pct":58,"resets_at":"2026-09-21T00:00:00Z"}}}"#.utf8)
+        t.check("a statusline payload is captured and labelled with its source",
+                StatuslineUsage.parse(sl, now: t0)?.fiveHourPercent == 31
+                && StatuslineUsage.parse(sl, now: t0)?.source == "statusline")
+        t.check("camelCase spellings are accepted too",
+                StatuslineUsage.parse(
+                    Data(#"{"rate_limits":{"fiveHour":{"usedPct":10,"resetsAt":"2026-09-17T12:00:00Z"},"sevenDay":{"usedPct":20,"resetsAt":"2026-09-21T00:00:00Z"}}}"#.utf8),
+                    now: t0)?.fiveHourPercent == 10)
+        t.check("an unrecognised shape yields nothing rather than a wrong number",
+                StatuslineUsage.parse(Data(#"{"rate_limits":{"mystery":{"x":1}}}"#.utf8), now: t0) == nil
+                && StatuslineUsage.parse(Data("not json".utf8), now: t0) == nil
+                && StatuslineUsage.parse(Data("{}".utf8), now: t0) == nil)
+        t.check("a captured reading survives a round trip through its cache file",
+                StatuslineUsage.decode(StatuslineUsage.encode(StatuslineUsage.parse(sl, now: t0)!))?
+                    .sevenDayPercent == 58)
+
         t.check("no sources at all means no reading",
                 UsageSources.pick([], now: t0) == nil)
 
