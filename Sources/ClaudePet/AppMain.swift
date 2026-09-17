@@ -88,6 +88,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onLoginToggle: { [weak self] in self?.toggleLaunchAtLogin() },
             onUnmuteAll: { [weak self] in self?.unmuteAll() },
             onShortcutToggle: { [weak self] in self?.toggleHotKey() },
+            onShowHealth: { [weak self] in self?.showHealth() },
+            onDemoToggle: { [weak self] in self?.toggleDemo() },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -100,7 +102,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           paused: self.paused,
                           launchesAtLogin: self.launchesAtLogin,
                           mutedCount: self.hiddenMarks.count,
-                          shortcutOn: self.hotKey?.isRegistered ?? false)
+                          shortcutOn: self.hotKey?.isRegistered ?? false,
+                          demoOn: self.demo != nil)
             }
         }
         self.menu = menu
@@ -131,6 +134,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func render() {
+        // The demo drives the display itself; a real render would fight it.
+        guard demo == nil else { return }
         let now = Date()
         let state = paused
             ? GlobalState(mood: .idle, sessions: [], waitingProject: nil)
@@ -347,6 +352,81 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if prefs.isEmpty { labelPrefs.removeValue(forKey: id) } else { labelPrefs[id] = prefs }
         saveLabels()
         render()
+    }
+
+    // MARK: - Health and demo
+
+    private var lastJumpFailure = ""
+
+    /// Read-only, and nothing here fixes anything.
+    ///
+    /// The install script already knows how to edit settings.json safely; a
+    /// diagnostic that also repairs is a diagnostic that can turn a question
+    /// into an outage.
+    private func showHealth() {
+        let checks = HealthCollector.run(petHome: petHome, sessions: latest,
+                                         usage: currentUsage(),
+                                         lastJumpFailure: lastJumpFailure)
+        let alert = NSAlert()
+        alert.messageText = "Connection status"
+        alert.informativeText = checks
+            .map { "\($0.status.label) — \($0.name)\n    \($0.detail)" }
+            .joined(separator: "\n\n")
+        alert.addButton(withTitle: "Copy")
+        alert.addButton(withTitle: "Close")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // The pasteable form, with the home directory collapsed.
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(HealthReport.summary(checks), forType: .string)
+    }
+
+    private var demo: Timer?
+    private var demoStep = 0
+
+    /// Cycles the pet through its states without touching any real data.
+    ///
+    /// Writes nothing: no session files, no completion records, no read marks.
+    /// A demo that leaves evidence behind is one the user has to clean up after.
+    private func toggleDemo() {
+        if let demo {
+            demo.invalidate()
+            self.demo = nil
+            bridge?.setBadge("")
+            bridge?.hush()
+            render()
+            return
+        }
+        demoStep = 0
+        advanceDemo()
+        demo = Timer.scheduledTimer(withTimeInterval: 2.4, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advanceDemo() }
+        }
+    }
+
+    private func advanceDemo() {
+        let now = Date()
+        let steps: [(GlobalMood, String, String)] = [
+            (.busy, "", ""),
+            (.waiting, "api-server", "Edit AppMain.swift"),
+            (.urgent, "api-server", "rm -rf build/"),
+            (.idle, "", ""),
+        ]
+        let (mood, project, on) = steps[demoStep % steps.count]
+        demoStep += 1
+
+        let fake = SessionState(
+            sessionId: "demo", project: project.isEmpty ? "demo-project" : project,
+            cwd: "", state: mood == .busy ? .busy : (mood == .idle ? .idle : .waiting),
+            tool: "Bash", detail: "", since: now.addingTimeInterval(-90), updatedAt: now,
+            running: mood == .busy
+                ? [RunningTool(id: "d", tool: "Bash", target: "npm test", since: now)] : [])
+        bridge?.push(GlobalState(mood: mood, sessions: [fake],
+                                 waitingProject: project.isEmpty ? nil : project,
+                                 waitingOn: on))
+        bridge?.pushSessions([fake], now: now)
+        bridge?.setBadge(mood == .idle ? "" : "1")
+        bridge?.say("demo — the pet is not watching anything right now", hold: 2.2)
     }
 
     // MARK: - Shortcut

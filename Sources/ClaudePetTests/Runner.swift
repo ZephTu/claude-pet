@@ -1070,6 +1070,71 @@ struct Runner {
                 !GitLabel.isWorthShowing("main") && !GitLabel.isWorthShowing("master")
                 && GitLabel.isWorthShowing("feat/x"))
 
+        // ---- HealthReport: five states, because a tick and a cross are not
+        // enough to tell "never turned on" from "turned on and broken" ----
+        t.check("a missing Claude Code is the one thing worth alarming about",
+                HealthReport.claudeCode(version: "", path: "").status == .needsAttention)
+        t.check("a found one reports version and path",
+                HealthReport.claudeCode(version: "2.1.0", path: "/usr/bin/claude").status == .ok)
+
+        t.check("no hooks is not set up, not broken",
+                HealthReport.hooks(installed: 0, expected: 8, binaryExists: true).status
+                    == .notConfigured)
+        t.check("a partial install does need attention",
+                HealthReport.hooks(installed: 5, expected: 8, binaryExists: true).status
+                    == .needsAttention)
+        t.check("hooks pointing at a missing binary need attention",
+                HealthReport.hooks(installed: 8, expected: 8, binaryExists: false).status
+                    == .needsAttention)
+        t.check("a full install is fine",
+                HealthReport.hooks(installed: 8, expected: 8, binaryExists: true).status == .ok)
+
+        // Nothing arriving is never reported as "stuck": whether silence is a
+        // problem depends on whether anything should have been talking.
+        t.check("silence with nothing running is simply not set up yet",
+                HealthReport.recentEvents(lastAt: nil, liveSessions: 0, now: t0).status
+                    == .notConfigured)
+        t.check("silence WITH sessions running is unknown, not broken",
+                HealthReport.recentEvents(lastAt: nil, liveSessions: 2, now: t0).status
+                    == .unknown)
+        t.check("and it explains the usual cause rather than blaming the install",
+                HealthReport.recentEvents(lastAt: nil, liveSessions: 2, now: t0).detail
+                    .contains("started after installing"))
+        t.check("recent traffic is fine",
+                HealthReport.recentEvents(lastAt: t0.addingTimeInterval(-30),
+                                          liveSessions: 1, now: t0).status == .ok)
+
+        t.check("processes we have not heard from are explained, not alarmed about",
+                HealthReport.sessions(running: 3, known: 1).status == .unknown)
+        t.check("an unreadable state file is skipped, not called broken",
+                HealthReport.stateFiles(writable: true, count: 9, corrupt: 1).status == .unknown)
+        t.check("an unwritable directory does need attention",
+                HealthReport.stateFiles(writable: false, count: 0, corrupt: 0).status
+                    == .needsAttention)
+        t.check("no addressable terminal is unsupported, not a fault",
+                HealthReport.terminals(kinds: [], lastFailure: "").status == .unsupported)
+        t.check("a failed jump needs attention and says why",
+                HealthReport.terminals(kinds: ["orca"], lastFailure: "permission denied").detail
+                    .contains("permission denied"))
+        t.check("no quota source is not set up",
+                HealthReport.usage(source: "", capturedAt: nil, now: t0, stale: false).status
+                    == .notConfigured)
+        t.check("a stale reading is unknown rather than reported as current",
+                HealthReport.usage(source: "claude-hud", capturedAt: t0.addingTimeInterval(-9000),
+                                   now: t0, stale: true).status == .unknown)
+
+        // The summary is meant to be pasted into an issue, so it must not carry
+        // the user's home directory.
+        let home = NSHomeDirectory()
+        t.check("a home directory is collapsed in the pasteable summary",
+                !HealthReport.summary([
+                    HealthReport.claudeCode(version: "2.1.0", path: home + "/bin/claude")
+                ]).contains(home))
+        t.check("and the path is still recognisable afterwards",
+                HealthReport.summary([
+                    HealthReport.claudeCode(version: "2.1.0", path: home + "/bin/claude")
+                ]).contains("~/bin/claude"))
+
         t.finish()
     }
 }
