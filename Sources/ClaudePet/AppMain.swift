@@ -40,10 +40,14 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
         // Nothing may be pushed before the page can receive it, and the first
         // real render must happen here — not earlier. See WebBridge.markReady.
-        panel.onReady = { [weak self] in
+        panel.onReady = { [weak self, weak panel] in
             bridge.markReady()
+            // The page has just loaded at its defaults, so whichever side it
+            // should be on has to be pushed again.
+            bridge.setMirrored(panel?.isMirrored ?? false)
             self?.render()
         }
+        panel.onMirrorChanged = { on in bridge.setMirrored(on) }
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
@@ -70,6 +74,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge.onMarkRead = { [weak self] ids in self?.markRead(ids) }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
         panel.showOnDesktop()
+        panel.updateLayoutSide()
+        // A saved spot can be on a display that is no longer attached, or one
+        // that has since shrunk.
+        panel.rescueIfOffScreen()
 
         let menu = PetMenu(
             onPauseToggle: { [weak self] in

@@ -191,6 +191,13 @@ final class WebBridge {
         evaluate("window.setBadge(\(jsString(text)));")
     }
 
+    private var lastMirrored: Bool?
+    func setMirrored(_ on: Bool) {
+        guard isReady, on != lastMirrored else { return }
+        lastMirrored = on
+        evaluate("window.setMirrored(\(on));")
+    }
+
     func hush() {
         guard isReady else { return }
         evaluate("window.hush();")

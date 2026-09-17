@@ -20,6 +20,18 @@ html, body {
   height: 280px;
 }
 
+/* Mirrored layout: pet on the left, panel on the right. Used when the window
+   sits near the left edge of a display, where the panel's usual side would be
+   off-screen. Every rule that positions something has a counterpart here, and
+   PetLayout.mirrored(_:) has to agree with all of them. */
+#stage.mirrored #pet    { right: auto; left: 20px; }
+#stage.mirrored #panel  { left: auto; right: 2px; }
+#stage.mirrored #bubble.chat,
+#stage.mirrored #bubble.quota { right: auto; left: 14px; text-align: left; }
+#stage.mirrored #bubble:not(.chat):not(.quota) {
+  left: 80px; right: auto; transform: translateX(-50%);
+}
+
 #pet {
   position: absolute;
   right: 20px;

@@ -436,6 +436,20 @@ window.hitRow = function (x, y) {
  *
  * @param {string} text "" to hide
  */
+/**
+ * Flip the layout so the pet sits on the left and the panel opens to its right.
+ *
+ * Called from Swift when the window moves near a screen's left edge. The page
+ * only moves pixels; PetLayout.mirrored(_:) moves the hit boxes to match, and
+ * the two have to be changed together.
+ *
+ * @param {boolean} on
+ */
+window.setMirrored = function (on) {
+  document.getElementById("stage").classList.toggle("mirrored", !!on);
+  reportLayout();
+};
+
 window.setBadge = function (text) {
   const g = document.getElementById("badge-count");
   if (!text) { g.classList.remove("on"); return; }

@@ -93,6 +93,10 @@ final class PetPanel: NSPanel {
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowDidMove), name: NSWindow.didMoveNotification, object: self
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
+        )
 
         startClickThroughMonitoring()
     }
@@ -111,7 +115,45 @@ final class PetPanel: NSPanel {
 
     @objc private func windowDidMove() {
         saveOrigin()
+        updateLayoutSide()
     }
+
+    /// A display was plugged in, unplugged, or changed resolution.
+    ///
+    /// The saved spot can now be on no screen at all, or on one that shrank. The
+    /// pet is moved back to somewhere reachable rather than left where nobody
+    /// can click it — and it moves the minimum distance, so a setup that is
+    /// still valid is not rearranged for no reason.
+    @objc private func screensChanged() {
+        let visible = (screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        if let fixed = PetLayout.rescued(windowOrigin: frame.origin, visibleFrame: visible,
+                                         mirrored: host.isMirrored) {
+            setFrameOrigin(fixed)
+            saveOrigin()
+        }
+        updateLayoutSide()
+    }
+
+    /// Called after any move: decides which side the panel opens on, and tells
+    /// both halves — the page for drawing, the host view for hit testing.
+    ///
+    /// Recomputed on every move rather than once at launch, so dragging between
+    /// displays and unplugging one both go through the same path as a drag.
+    func updateLayoutSide() {
+        let visible = (screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        guard visible.width > 0 else { return }
+        let flip = PetLayout.shouldMirror(windowOrigin: frame.origin, visibleFrame: visible)
+        guard flip != host.isMirrored else { return }
+        host.isMirrored = flip
+        onMirrorChanged?(flip)
+    }
+
+    /// The layout flipped; the page has to be told so it can move the drawing.
+    var onMirrorChanged: ((Bool) -> Void)?
+
+    var isMirrored: Bool { host.isMirrored }
+
+    func rescueIfOffScreen() { screensChanged() }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }

@@ -64,8 +64,14 @@ final class PetHostView: NSView {
         CGPoint(x: viewPoint.x, y: bounds.height - viewPoint.y)
     }
 
+    /// True when the layout is flipped (pet left, panel right). Kept here
+    /// because hit testing is the other half of that flip — the drawing moves
+    /// in CSS, the boxes move here, and the two must change together.
+    var isMirrored = false
+
     func opaqueRegionContains(_ p: NSPoint) -> Bool {
-        PetLayout.isOpaque(at: cssPoint(from: p), panel: panelRect, bubble: bubbleRect)
+        PetLayout.isOpaque(at: cssPoint(from: p), panel: panelRect, bubble: bubbleRect,
+                           mirrored: isMirrored)
     }
 
     // MARK: - Event routing

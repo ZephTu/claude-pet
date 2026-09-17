@@ -155,6 +155,83 @@ struct Runner {
         t.check("the robot's head is still opaque lifted 5pt by the urgent jolt",
                 opaqueAt(-9, -23))
         // Most of the window is transparent and must pass clicks through to whatever is under it
+        // Mirrored layout: the pet moves to the window's left, so every box that
+        // knows where it is has to move with it or the figure stops being
+        // clickable exactly when it is nearest the screen edge.
+        t.check("mirroring keeps the box the same size",
+                PetLayout.mirrored(PetLayout.bodyBox).width == PetLayout.bodyBox.width
+                && PetLayout.mirrored(PetLayout.bodyBox).height == PetLayout.bodyBox.height)
+        // The assertion that matters, and the one an earlier version got wrong:
+        // flipping MOVES the pet element, it does not mirror the drawing inside
+        // it. So every box keeps its offset within the pet. Reflecting instead
+        // gives the right answer for bodyBox — symmetric inside the pet — and
+        // puts the antenna bulb outside its own hit region.
+        for box in [PetLayout.bodyBox, PetLayout.antennaBox] {
+            t.check("a mirrored box keeps its offset inside the pet",
+                    PetLayout.mirrored(box).minX - PetLayout.mirroredPetBox.minX
+                        == box.minX - PetLayout.petBox.minX)
+        }
+        t.check("the mirrored boxes stay inside the mirrored pet",
+                PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.bodyBox))
+                && PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.antennaBox)))
+        // Not an involution, and it should not be: this maps normal → flipped,
+        // and the pet only ever moves in that one direction.
+        t.check("everything shifts by exactly the pet's own displacement",
+                PetLayout.mirrored(PetLayout.bodyBox).minX - PetLayout.bodyBox.minX
+                    == PetLayout.mirroredPetBox.minX - PetLayout.petBox.minX)
+        t.check("the antenna stays above the body after mirroring",
+                PetLayout.mirrored(PetLayout.antennaBox).maxY
+                    >= PetLayout.mirrored(PetLayout.bodyBox).minY)
+        let mirroredBody = PetLayout.mirrored(PetLayout.bodyBox)
+        t.check("a point on the mirrored body is opaque only when mirrored",
+                PetLayout.isOpaque(at: CGPoint(x: mirroredBody.midX, y: mirroredBody.midY),
+                                   panel: nil, bubble: nil, mirrored: true)
+                && !PetLayout.isOpaque(at: CGPoint(x: mirroredBody.midX, y: mirroredBody.midY),
+                                       panel: nil, bubble: nil, mirrored: false))
+
+        // Flipping is decided by whether the panel would fall off the screen,
+        // and only done when flipping actually helps.
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        t.check("a window well inside the screen does not flip",
+                !PetLayout.shouldMirror(windowOrigin: CGPoint(x: 600, y: 100),
+                                        visibleFrame: screen))
+        t.check("a window hanging off the left flips",
+                PetLayout.shouldMirror(windowOrigin: CGPoint(x: -120, y: 100),
+                                       visibleFrame: screen))
+        // A window wider than what is left of the screen cannot be helped by
+        // flipping — it would only move the problem to the other edge.
+        t.check("flipping is skipped when it would not help",
+                !PetLayout.shouldMirror(windowOrigin: CGPoint(x: -120, y: 100),
+                                        visibleFrame: CGRect(x: 0, y: 0, width: 260, height: 900)))
+
+        // Unplugging a display, or a resolution change, can leave the pet
+        // outside every screen. Only the PET has to be rescued, not the whole
+        // window — most of it is transparent, and insisting all 400pt fit would
+        // stop the pet ever sitting near an edge.
+        let desk = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        t.check("a pet already on screen is left where the user put it",
+                PetLayout.rescued(windowOrigin: CGPoint(x: 900, y: 100),
+                                  visibleFrame: desk) == nil)
+        t.check("a pet off the right edge is pulled back",
+                PetLayout.rescued(windowOrigin: CGPoint(x: 1400, y: 100),
+                                  visibleFrame: desk) != nil)
+        t.check("a pet below the screen is pulled back",
+                PetLayout.rescued(windowOrigin: CGPoint(x: 900, y: -400),
+                                  visibleFrame: desk) != nil)
+        // The rescue has to actually land it on screen, not merely move it.
+        if let fixed = PetLayout.rescued(windowOrigin: CGPoint(x: 1400, y: -400),
+                                         visibleFrame: desk) {
+            t.check("a rescued window puts the pet fully back on screen",
+                    PetLayout.rescued(windowOrigin: fixed, visibleFrame: desk) == nil)
+        } else {
+            t.check("a rescued window puts the pet fully back on screen", false)
+        }
+        // A window whose left 280pt hang off the screen is FINE: that part is
+        // transparent. Rescuing it would be the bug.
+        t.check("transparent margin hanging off an edge is not a reason to move",
+                PetLayout.rescued(windowOrigin: CGPoint(x: -240, y: 100),
+                                  visibleFrame: desk) == nil)
+
         t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 21))
         t.check("beyond the desk's right end is transparent", !opaqueAt(54, 21))
         t.check("below the desk is transparent", !opaqueAt(0, 40))
