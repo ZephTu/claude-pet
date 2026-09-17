@@ -109,8 +109,6 @@ The design document in `docs/superpowers/specs/` explains the architecture and, 
 
 ## Known limitations
 
-- **The UI is in Chinese.** The code and docs are English; the interface text is not, yet.
-- **The iTerm2 path has never been tested end to end.** Its AppleScript interface was verified against `iTerm2.sdef` and the parsing and injection guards are unit-tested, but the author runs Orca, so no real iTerm2 session has ever been jumped to.
 - No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
 - The expanded panel always opens to the left, so it can run off-screen if you drag the pet to the far left edge.
 - Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the robot still swallow clicks.
