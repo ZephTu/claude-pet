@@ -194,40 +194,111 @@ function whatText(s) {
   return "idle";
 }
 
+/** Markup for one live-session row. */
+function sessionRowHTML(s) {
+  const jumpable = s.termHandle ? " jumpable" : "";
+  return (
+    '<div class="row' + jumpable + '"><div class="line">' +
+    '<span class="dot ' + s.state + '"></span>' +
+    '<span class="proj"></span><span class="what"></span>' +
+    '<span class="age">' + ageText(s.waitedSeconds) + "</span>" +
+    (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
+    '<span class="mute" title="Mute this session">\u00d7</span>' +
+    "</div>" +
+    '<div class="detail"></div></div>'
+  );
+}
+
 /**
- * Called from Swift whenever the live session list changes.
- * @param {{project:string,state:string,tool:string,detail:string,waitedSeconds:number}[]} list
+ * Markup for one finished-turn row.
+ *
+ * Deliberately a different shape from a session row: this is a record of
+ * something that already happened, not a thing currently running. A row whose
+ * session has gone says so rather than offering a jump that cannot work.
  */
-window.setSessions = function (list, hiddenCount) {
+function finishedRowHTML(f) {
+  const jumpable = f.termHandle ? " jumpable" : "";
+  return (
+    '<div class="row done' + jumpable + '"><div class="line">' +
+    '<span class="dot done"></span>' +
+    '<span class="proj"></span>' +
+    '<span class="what">' + (f.count > 1 ? f.count + " turns" : "done") + "</span>" +
+    '<span class="age">' + ageText(f.agoSeconds) + "</span>" +
+    (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
+    '<span class="read" title="Mark as read">\u2713</span>' +
+    "</div>" +
+    (f.closed ? '<div class="detail closed">session closed</div>' : "") +
+    "</div>"
+  );
+}
+
+/**
+ * Called from Swift whenever the panel's contents change.
+ *
+ * @param {object[]} list live sessions
+ * @param {number} hiddenCount how many live sessions are muted
+ * @param {object[]} finished unread finished turns, newest first
+ * @param {number} dropped unread finishes discarded to stay under the cap
+ */
+window.setSessions = function (list, hiddenCount, finished, dropped) {
   const muted = hiddenCount || 0;
-  const footer = muted
-    ? '<div class="muted-note">' + muted + ' muted — say something to bring one back</div>'
-    : "";
-  if (!list.length) {
+  const done = finished || [];
+  let footer = "";
+  if (dropped > 0) {
+    // Losing news quietly is the one thing the queue exists to prevent, so a
+    // forced discard is stated rather than absorbed.
+    footer +=
+      '<div class="muted-note dropped">' + dropped +
+      " older unread finishes were discarded (queue full)</div>";
+  }
+  if (muted) {
+    footer +=
+      '<div class="muted-note">' + muted + " muted — say something to bring one back</div>";
+  }
+  if (!list.length && !done.length) {
     panel.innerHTML = '<div class="empty">No live sessions</div>' + footer;
     hoverRow = null;
     reportLayout();
     return;
   }
-  panel.innerHTML = list
-    .map(function (s) {
-      const jumpable = s.termHandle ? " jumpable" : "";
-      return (
-        '<div class="row' + jumpable + '"><div class="line">' +
-        '<span class="dot ' + s.state + '"></span>' +
-        '<span class="proj"></span><span class="what"></span>' +
-        '<span class="age">' + ageText(s.waitedSeconds) + "</span>" +
-        (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
-        '<span class="mute" title="Mute this session">\u00d7</span>' +
-        "</div>" +
-        '<div class="detail"></div></div>'
-      );
-    })
-    .join("") + footer;
+
+  // Three groups, in the order they deserve attention: what wants something
+  // from you, what just finished, then everything still running.
+  const needs = list.filter(function (s) { return s.state === "waiting"; });
+  const others = list.filter(function (s) { return s.state !== "waiting"; });
+  function heading(text, extra) {
+    return '<div class="group">' + text + (extra || "") + "</div>";
+  }
+
+  let html = "";
+  if (needs.length) html += heading("Needs you") + needs.map(sessionRowHTML).join("");
+  if (done.length) {
+    html += heading("Finished", '<span class="read-all" title="Mark all as read">clear</span>')
+          + done.map(finishedRowHTML).join("");
+  }
+  if (others.length) {
+    html += (needs.length || done.length ? heading("Running") : "")
+          + others.map(sessionRowHTML).join("");
+  }
+  panel.innerHTML = html + footer;
+
   // Fill text via textContent so a project name can never inject markup.
   // The terminal handle goes through dataset for the same reason.
-  const rows = panel.querySelectorAll(".row");
-  list.forEach(function (s, i) {
+  const doneRows = panel.querySelectorAll(".row.done");
+  done.forEach(function (f, i) {
+    const row = doneRows[i];
+    if (!row) return;
+    row.querySelector(".proj").textContent = f.label;
+    row.dataset.sessionId = f.sessionId || "";
+    row.dataset.eventIds = (f.eventIds || []).join(" ");
+    if (f.termHandle) {
+      row.dataset.termKind = f.termKind || "";
+      row.dataset.termHandle = f.termHandle;
+    }
+  });
+
+  const rows = panel.querySelectorAll(".row:not(.done)");
+  needs.concat(others).forEach(function (s, i) {
     rows[i].querySelector(".proj").textContent = s.project;
     rows[i].querySelector(".what").textContent = whatText(s);
     // A session sharing its project with another shows its name here instead of
@@ -249,6 +320,14 @@ window.setSessions = function (list, hiddenCount) {
   // Rebuilding the list drops whatever row was highlighted.
   hoverRow = null;
   reportLayout();
+};
+
+/**
+ * Says why a finished row could not be jumped to, instead of closing the panel
+ * and letting the user believe it worked.
+ */
+window.explainNoJump = function () {
+  window.say("that session's terminal is gone — marking it read is all that is left", 4000);
 };
 
 /**
@@ -293,6 +372,23 @@ window.hitRow = function (x, y) {
     const row = mute.closest(".row");
     return { action: "mute", sessionId: (row && row.dataset.sessionId) || "" };
   }
+  if (el.closest(".read-all")) return { action: "readAll" };
+  const tick = el.closest(".read");
+  if (tick) {
+    const row = tick.closest(".row");
+    return { action: "read", eventIds: idsOf(row) };
+  }
+  // A finished row opens its session AND clears itself, but only in that order:
+  // Swift marks it read after the jump, never before.
+  const finished = el.closest(".row.done");
+  if (finished) {
+    return {
+      action: "openFinished",
+      kind: finished.dataset.termKind || "",
+      handle: finished.dataset.termHandle || "",
+      eventIds: idsOf(finished),
+    };
+  }
   const row = el.closest(".row.jumpable");
   if (!row) return null;
   return {
@@ -301,6 +397,31 @@ window.hitRow = function (x, y) {
     handle: row.dataset.termHandle || "",
   };
 };
+
+/**
+ * Sets the attention badge, or hides it when there is nothing to report.
+ *
+ * The pill widens for a three-character count ("99+") rather than letting the
+ * text spill past its edge.
+ *
+ * @param {string} text "" to hide
+ */
+window.setBadge = function (text) {
+  const g = document.getElementById("badge-count");
+  if (!text) { g.classList.remove("on"); return; }
+  const w = text.length <= 2 ? 11 : 16;
+  const pill = g.querySelector(".badge-pill");
+  pill.setAttribute("width", w);
+  pill.setAttribute("x", -30 - w / 2);
+  g.querySelector(".badge-num").textContent = text;
+  g.classList.add("on");
+};
+
+/** The event ids a finished row stands for. */
+function idsOf(row) {
+  if (!row || !row.dataset.eventIds) return [];
+  return row.dataset.eventIds.split(" ").filter(Boolean);
+}
 
 let hoverRow = null;
 

@@ -57,6 +57,17 @@ html, body {
 .person { transform-box: fill-box; transform-origin: 50% 90%; }
 .head   { transform-box: fill-box; transform-origin: 50% 90%; }
 
+/* The attention badge. Hidden at zero rather than shown as "0": an empty count
+   still pulls the eye, and being quiet when there is nothing to say is the
+   whole point of this thing. */
+.badge-count { display: none; }
+.badge-count.on { display: block; }
+.badge-pill { fill: #e0533c; }
+.badge-num {
+  fill: #fdf3ec; text-anchor: middle;
+  font: 700 7px -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+}
+
 /* Three fixed z's lighting up in sequence. This animates opacity only:
    transform: scale() on an SVG <text> under transform-box: fill-box degenerates
    in WebKit and the glyphs disappear from the render entirely. */
@@ -113,7 +124,7 @@ html, body {
 /* The monitor shows one of two things, never both: what it is writing, or
    what it is stuck on. Same warning ramp as the antenna lamp, because it is
    answering the same question in a place the eye is already pointed. */
-.warn { display: none; }
+#pet .warn { display: none; }
 .warn-tri  { fill: none; stroke: #e0a63c; stroke-width: 1.7;
              stroke-linejoin: round; stroke-linecap: round; }
 .warn-mark { fill: #e0a63c; }
@@ -317,7 +328,42 @@ html, body {
   align-items: baseline;
   gap: 6px;
 }
+/* Group headings. Small and dim on purpose: they organise the list, they are
+   not themselves news. */
+.group {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 2px 3px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.4px;
+  text-transform: uppercase; color: #857c74;
+}
+.group:first-child { padding-top: 1px; }
+.read-all {
+  margin-left: auto; font-weight: 500; letter-spacing: 0;
+  text-transform: none; color: #6b6560; cursor: pointer;
+}
+.read-all:hover { color: #d97757; }
+
+/* A finished row is a record, not a running thing — dimmer than a live row,
+   and it carries a tick rather than a mute. */
+.row.done .proj { color: #c6c8ce; }
+.row.done .what { color: #857c74; flex: none; }
+/* A finished row's name is the part that gives: the turn count and the jump
+   arrow are short and fixed, so the name is what truncates when space runs out.
+   min-width:0 is required — without it a flex item refuses to shrink below its
+   content and pushes the arrow out of the row instead. */
+.row.done .proj { flex: 1 1 auto; min-width: 0;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail.closed { color: #6b6560; font-style: italic; }
+.read {
+  flex: none; display: none; color: #6b6560;
+  font-size: 11px; padding-left: 4px; cursor: pointer;
+}
+.row.done.hot .read { display: inline; }
+.row.done.hot .read:hover { color: #67a498; }
+.muted-note.dropped { color: #e0a63c; }
+
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dot.done    { background: #67a498; }
 .dot.waiting { background: #e8624a; }
 .dot.busy    { background: #d97757; }
 .dot.idle    { background: #6b6560; }

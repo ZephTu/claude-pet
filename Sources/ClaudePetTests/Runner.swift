@@ -750,6 +750,76 @@ struct Runner {
         t.check("the rows kept under pressure are the newest ones",
                 cappedAllUnread.keep.last?.turnKey == many.last?.turnKey)
 
+        // ---- PanelModel: what the user sees, and what survives a session ----
+        func panelSess(_ id: String, _ act: SessionActivity, project: String,
+                       ago: TimeInterval = 0, terminal: TerminalRef? = nil) -> SessionState {
+            SessionState(sessionId: id, project: project, cwd: "/tmp", state: act, tool: "",
+                         detail: "", since: t0.addingTimeInterval(-ago), updatedAt: t0,
+                         terminal: terminal)
+        }
+        let liveA = panelSess("a", .idle, project: "api",
+                              terminal: TerminalRef(kind: "orca", handle: "h-a"))
+        let waitingB = panelSess("b", .waiting, project: "web", ago: 300)
+        let waitingC = panelSess("c", .waiting, project: "cli", ago: 60)
+
+        t.check("the longest wait is dealt with first",
+                PanelModel.needsYou([waitingC, waitingB, liveA]).map(\.sessionId) == ["b", "c"])
+        t.check("everything else stays in the other group",
+                PanelModel.others([waitingC, waitingB, liveA]).map(\.sessionId) == ["a"])
+
+        // Four turns of one session are one thing to look at, not four.
+        let fourTurns = (1...4).map {
+            CompletionEvent(sessionId: "a", turnKey: "T\($0)", project: "api",
+                            displayName: "api",
+                            finishedAt: t0.addingTimeInterval(Double($0) * 60))
+        }
+        let folded = PanelModel.completionRows(fourTurns, live: [liveA])
+        t.check("several turns of one session fold into one row",
+                folded.count == 1 && folded[0].count == 4)
+        t.check("the folded row carries every id, so one click clears them all",
+                folded[0].eventIds.count == 4)
+        t.check("a row for a live session with a terminal can be jumped to",
+                folded[0].canJump && !folded[0].sessionClosed)
+
+        // The case the queue exists for: the session is gone, the work still
+        // happened, and the row must not pretend it can jump there.
+        let orphan = PanelModel.completionRows(fourTurns, live: [])
+        t.check("a finish outlives its session", orphan.count == 1)
+        t.check("an orphaned row is marked closed and cannot be jumped to",
+                orphan[0].sessionClosed && !orphan[0].canJump)
+        t.check("an orphaned row keeps the name it had when it finished",
+                orphan[0].label == "api")
+
+        t.check("a live row prefers the terminal tab title",
+                PanelModel.completionRows(fourTurns, live: [liveA],
+                                          titles: ["h-a": "email reply"])[0].label == "email reply")
+        t.check("a useless tab title is not preferred over the recorded name",
+                PanelModel.completionRows(fourTurns, live: [liveA],
+                                          titles: ["h-a": "Terminal 1"])[0].label == "api")
+
+        // Newest session first, so what just happened is at the top.
+        let older = CompletionEvent(sessionId: "z", turnKey: "T1", project: "old",
+                                    displayName: "old", finishedAt: t0)
+        t.check("the most recently finished session leads",
+                PanelModel.completionRows(fourTurns + [older], live: [])
+                    .map(\.sessionId) == ["a", "z"])
+
+        t.check("nothing to report means no badge at all",
+                PanelModel.badge(needsYou: 0, unreadFinishes: 0) == "")
+        t.check("the badge counts both kinds of attention",
+                PanelModel.badge(needsYou: 2, unreadFinishes: 3) == "5")
+        t.check("a runaway count is capped rather than widening the badge",
+                PanelModel.badge(needsYou: 0, unreadFinishes: 140) == "99+")
+
+        // Read marks must not outlive the events they acknowledge.
+        let marks: Set<String> = ["a#T1", "a#T2", "gone#T9"]
+        t.check("marks for events that aged out are dropped",
+                ReadMarks.compact(marks, keeping: fourTurns) == ["a#T1", "a#T2"])
+        t.check("marks survive a round trip through disk",
+                ReadMarks.decode(ReadMarks.encode(marks)) == marks)
+        t.check("a corrupt marks file reads as nothing acknowledged",
+                ReadMarks.decode(Data("{{{".utf8)).isEmpty)
+
         t.finish()
     }
 }

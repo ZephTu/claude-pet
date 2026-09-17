@@ -24,11 +24,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var latest: [SessionState] = []
     private var paused = false
     private var menu: PetMenu?
+    private var completions: CompletionStore?
 
-    private var sessionsDirectory: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appending(path: ".claude/pet/sessions")
+    private var petHome: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet")
     }
+    private var sessionsDirectory: URL { petHome.appending(path: "sessions") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panel = PetPanel()
@@ -50,6 +51,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // list — never on a timer for a panel nobody has looked at.
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
         loadHidden()
+        let completions = CompletionStore(petHome: petHome)
+        completions.reload(now: Date(), force: true)
+        self.completions = completions
+        bridge.onMarkRead = { [weak self] ids in self?.markRead(ids) }
+        bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
         panel.showOnDesktop()
 
         let menu = PetMenu(
@@ -103,8 +109,17 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             : StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks)
         // The hit region is a pair of fixed rectangles now (PetLayout.bodyBox /
         // antennaBox), so the window no longer needs telling about mood.
+        completions?.reload(now: now)
+        let unread = paused ? [] : (completions?.unread ?? [])
         bridge?.push(state)
-        bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount)
+        bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
+                             completions: unread, titlesByHandle: bridge?.titles ?? [:],
+                             droppedNotice: completions?.takeDropNotice() ?? 0)
+        // One number for "how many things want me": sessions blocked on the user,
+        // plus finished turns they have not looked at.
+        bridge?.setBadge(PanelModel.badge(
+            needsYou: PanelModel.needsYou(state.sessions).count,
+            unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
         // plainly seen the news or stopped caring about it.
@@ -169,6 +184,18 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    /// Acknowledging finishes. Re-rendering immediately is what makes the badge
+    /// and the list agree without waiting for the next tick.
+    private func markRead(_ ids: [String]) {
+        completions?.markRead(ids)
+        render()
+    }
+
+    private func markAllRead() {
+        completions?.markAllRead()
+        render()
     }
 
     /// sessionId → the terminal tab title, for the sessions we have one for.

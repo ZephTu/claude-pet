@@ -18,6 +18,10 @@ final class WebBridge {
     var onMute: ((String) -> Void)?
     /// The session list just became visible.
     var onPanelOpened: (() -> Void)?
+    /// The user acknowledged these finished turns.
+    var onMarkRead: (([String]) -> Void)?
+    /// The user cleared the whole finished list.
+    var onMarkAllRead: (() -> Void)?
 
     private weak var webView: WKWebView?
     private var isReady = false
@@ -102,6 +106,28 @@ final class WebBridge {
                     TerminalJump.jump(kind: kind, handle: handle)
                     // The list has served its purpose once we are jumping away.
                     self.evaluate("window.togglePanel();")
+                case "read":
+                    // Acknowledging a finished turn. The list stays open: the
+                    // user is working through it, and closing it after each one
+                    // would make clearing three rows take three openings.
+                    self.onMarkRead?(row["eventIds"] as? [String] ?? [])
+                case "readAll":
+                    self.onMarkAllRead?()
+                case "openFinished":
+                    // A finished row that CAN be jumped to: go there, and only
+                    // then call it read. A jump that never happened must not
+                    // clear the one record that it happened at all.
+                    guard
+                        let kind = row["kind"] as? String,
+                        let handle = row["handle"] as? String,
+                        !handle.isEmpty
+                    else {
+                        self.evaluate("window.explainNoJump();")
+                        return
+                    }
+                    TerminalJump.jump(kind: kind, handle: handle)
+                    self.onMarkRead?(row["eventIds"] as? [String] ?? [])
+                    self.evaluate("window.togglePanel();")
                 default:
                     self.togglePanel()
                 }
@@ -137,6 +163,15 @@ final class WebBridge {
         evaluate("window.showQuota(\(json), \(jsString(fallback)));")
     }
 
+    /// How many things want the user right now. Deduped so a 5-second tick does
+    /// not touch the DOM when the number has not moved.
+    private var lastBadge: String?
+    func setBadge(_ text: String) {
+        guard isReady, text != lastBadge else { return }
+        lastBadge = text
+        evaluate("window.setBadge(\(jsString(text)));")
+    }
+
     func hush() {
         guard isReady else { return }
         evaluate("window.hush();")
@@ -165,7 +200,10 @@ final class WebBridge {
     /// handle → tab title, refreshed when the user opens the list.
     var titles: [String: String] = [:]
 
-    func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0) {
+    func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
+                      completions: [CompletionEvent] = [],
+                      titlesByHandle: [String: String] = [:],
+                      droppedNotice: Int = 0) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -203,10 +241,32 @@ final class WebBridge {
             let json = String(data: data, encoding: .utf8)
         else { return }
 
-        let payload = "\(json)|\(hiddenCount)"
+        let rows = PanelModel.completionRows(completions, live: sessions,
+                                             titles: titlesByHandle)
+        let finished = rows.map { row -> [String: Any] in
+            var item: [String: Any] = [
+                "sessionId": row.sessionId,
+                "eventIds": row.eventIds,
+                "label": row.label,
+                "count": row.count,
+                "closed": row.sessionClosed,
+                "agoSeconds": Int(max(0, now.timeIntervalSince(row.latestAt))),
+            ]
+            if row.canJump, let t = row.terminal {
+                item["termKind"] = t.kind
+                item["termHandle"] = t.handle
+            }
+            return item
+        }
+        guard
+            let finishedData = try? JSONSerialization.data(withJSONObject: finished),
+            let finishedJSON = String(data: finishedData, encoding: .utf8)
+        else { return }
+
+        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)"
         guard payload != lastSessionsPayload else { return }
         lastSessionsPayload = payload
-        evaluate("window.setSessions(\(json), \(hiddenCount));")
+        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice));")
     }
 
     /// A nil completionHandler swallows JS errors silently, which is exactly how
