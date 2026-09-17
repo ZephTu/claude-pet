@@ -72,6 +72,7 @@ session 只要进程还活着就一直列在上面，不管多久没动静——
 ```bash
 swift run ClaudePetTests     # 单元测试（不是 swift test，本机没装 Xcode）
 ./hooks/test-pet-emit.sh     # hook 行为测试
+./hooks/test-settings-patch.sh  # settings.json 往返测试，见下
 ./scripts/build-app.sh       # 只打包 ClaudePet.app，不安装
 ```
 
@@ -80,6 +81,8 @@ swift run ClaudePetTests     # 单元测试（不是 swift test，本机没装 X
 设计文档在 `docs/superpowers/specs/`，讲清楚了架构，以及每个地方为什么是现在这样。
 
 终端跳转的逻辑分两半：能纯粹测的（识别终端、解析 session id、防 AppleScript 注入）在 `Sources/ClaudePetCore/TerminalTarget.swift`，真正执行跳转的在 `Sources/ClaudePet/TerminalJump.swift`。
+
+`settings.json` 的补丁测试跑的是真文件，不是进程内单测。因为这是这个项目唯一能把别人机器搞坏的地方，而它危险的部分——备份、原子写、写完解析回读、出事回滚——全都只存在于磁盘上，在内存里测等于没测。断言里最要紧的一条是往返：装上再卸掉，用户自己的 hook 一个字段都不能变。
 
 宠物的点击命中区是 `Sources/ClaudePetCore/PetLayout.swift` 里的两个矩形，和 `Resources/pet/pet.css` 的画面必须对齐——**改了画面就要改 PetLayout，反之亦然**。这一点没有测试能替你发现（测试只能锁住 Swift 那一半），只能靠这条约定。
 

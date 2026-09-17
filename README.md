@@ -2,6 +2,8 @@
 
 **English** · [中文](README.zh-CN.md)
 
+[![CI](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml/badge.svg)](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml)
+
 A little robot that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
 
 <img src="docs/images/pet.gif" width="300" alt="The robot cycling through its four states">
@@ -92,6 +94,7 @@ Produces two tarballs: one with a precompiled universal binary and a one-click i
 ```bash
 swift run ClaudePetTests     # unit tests — not `swift test`, see below
 ./hooks/test-pet-emit.sh     # hook behaviour tests
+./hooks/test-settings-patch.sh  # settings.json round trip — see below
 ./scripts/build-app.sh       # build ClaudePet.app without installing
 ```
 
@@ -104,6 +107,8 @@ The design document in `docs/superpowers/specs/` explains the architecture and, 
 ### Two things worth knowing before you change anything
 
 **The hit region is two rectangles in `Sources/ClaudePetCore/PetLayout.swift`, and they must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
+
+**The `settings.json` patch is tested against real files, not in process.** It is the only thing here that can break someone else's machine, and the parts that make it safe — the backup, the atomic write, the parse-back, the rollback — exist only on disk; testing them in memory tests nothing. The assertion that matters is the round trip: install then uninstall, and not one field of the user's own hooks may differ.
 
 **Terminal jumping is split in two on purpose.** Everything testable — identifying the terminal, parsing session ids, rejecting AppleScript injection — lives in `Sources/ClaudePetCore/TerminalTarget.swift`. The part that actually spawns processes is in `Sources/ClaudePet/TerminalJump.swift`.
 
