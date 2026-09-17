@@ -18,7 +18,7 @@ The bulb on the antenna is the part you can read without focusing on it:
 | --- | --- | --- |
 | 🟢 slow blink | a session is working | heads down, typing, code scrolling on its monitor |
 | 🟡 pulse | a session needs your approval | stops typing, turns around, waves at you |
-| 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project |
+| 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project **and the command it is blocked on** |
 | ⚫ off | everything is done | asleep at the desk with z's drifting up |
 
 ## What you can do with it
@@ -33,9 +33,11 @@ The bulb on the antenna is the part you can read without focusing on it:
 
 **Hover a row** for 0.45s and the bubble shows that session's name, taken from its terminal tab title. The list's first column is only a directory name, so three sessions open in one repo look identical; the name is what tells them apart. When a directory does have more than one session, the name is shown inline on a second line instead of on hover.
 
-**Hover the robot itself** for a second and it reports your remaining quota and when it resets.
+**Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
 **Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the robot's mood — it can sit blocked on a permission prompt without making the robot wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
+
+When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
 
 A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
 
@@ -55,7 +57,7 @@ Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline
 
 Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
 
-**This edits `~/.claude/settings.json`**, appending seven hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
+**This edits `~/.claude/settings.json`**, appending eight hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
 
 Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
 

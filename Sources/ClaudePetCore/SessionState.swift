@@ -53,6 +53,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// only when the human speaks to it again. Nil for sessions last written
     /// before this field existed, and for ones never spoken to.
     public let lastPromptAt: Date?
+    /// A short phrase naming what this session is waiting for approval on, e.g.
+    /// "rm -rf build/" or "Edit AppMain.swift". Empty when it is not waiting, or
+    /// when the session predates PermissionRequest support.
+    public let waitingOn: String
 
     public init(
         sessionId: String,
@@ -65,7 +69,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         updatedAt: Date,
         terminal: TerminalRef? = nil,
         pid: Int32? = nil,
-        lastPromptAt: Date? = nil
+        lastPromptAt: Date? = nil,
+        waitingOn: String = ""
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -78,11 +83,12 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.terminal = terminal
         self.pid = pid
         self.lastPromptAt = lastPromptAt
+        self.waitingOn = waitingOn
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
-        case terminal, pid, lastPromptAt
+        case terminal, pid, lastPromptAt, waitingOn
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -106,6 +112,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         terminal = try? c.decodeIfPresent(TerminalRef.self, forKey: .terminal)
         pid = try? c.decodeIfPresent(Int32.self, forKey: .pid)
         lastPromptAt = try? c.decodeIfPresent(Date.self, forKey: .lastPromptAt)
+        waitingOn = (try? c.decodeIfPresent(String.self, forKey: .waitingOn)) as? String ?? ""
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

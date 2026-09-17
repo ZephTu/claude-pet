@@ -14,7 +14,7 @@
 |---|---|---|
 | 有 session 在干活 | 绿灯慢闪 | 低头敲键盘，屏幕上代码在刷 |
 | 有 session 等你授权 | 黄灯脉冲 | 停下手，转过来朝你招手 |
-| 等超过 60 秒 | 红灯急闪 | 双手举过头顶，整个人在抖，头顶气泡写出是哪个 project |
+| 等超过 60 秒 | 红灯急闪 | 双手举过头顶，整个人在抖，气泡写出是哪个 project **以及卡在哪条命令上** |
 | 全都停了 | 灭 | 趴桌上睡着，头顶飘 zzz，屏幕全黑 |
 
 点它展开 session 列表，拖它换位置，右键暂停或退出。不发系统通知、不出声。
@@ -25,13 +25,15 @@
 - **iTerm2** 走 AppleScript，**第一次跳转会弹一次 macOS 自动化授权**，拒绝之后就静默失效
 - 其他终端认不出来，那些行不带 ↗、点了只会展开/收起面板
 
+某个 session 干完一轮活，宠物会立刻说出是哪一个——你不用盯着也知道它停下来了。
+
 session 只要进程还活着就一直列在上面，不管多久没动静——存活是查进程，不是看时间戳。
 
 同一个目录下开了多个 session 时，那几行会各自把 session 名字写在第二行——否则三个 `daily_work` 在列表里长得一模一样。只有一个 session 的目录不受影响，不会平白多占一行。
 
 **鼠标停在某一行 0.45 秒**，气泡显示这个 session 的名字（终端标签的标题）。面板里那列是目录名，同一个仓库开三个 session 长得一模一样——名字才分得清是「客户A回归缺陷跟进」还是「20260916-email reply」。名字只有 Orca 和 iTerm2 的 session 有，而且只在你展开列表时才去查一次。
 
-**停在机器人身上 1 秒**，气泡显示当前额度和什么时候回血。
+**停在机器人身上 1 秒**，气泡把额度画成两条进度条——五小时和一周并排，各带倒计时。超过 60% 变黄、超过 85% 变红，和天线灯是同一套预警色。
 
 **不想看某个 session**：鼠标移到那一行，行尾出现 ×，点它静音。静音的 session 既不在列表里，也不会影响宠物表情（它卡在等授权也不会让宠物举手）。**下次你在那个 session 里敲字，它自动回来**，不用手动取消。面板底部会写着还静音着几个，右键菜单可以一次性全部取消。
 
@@ -45,7 +47,7 @@ session 只要进程还活着就一直列在上面，不管多久没动静——
 
 额度播报依赖 [claude-hud](https://github.com/jarrodwatts/claude-hud) 这个 statusline 插件——宠物读的是它维护的 usage 缓存，而不是自己去调 Anthropic 的 usage API，所以不碰你的 OAuth token、也不占你的 rate limit。没装那个插件的话，除了额度以外一切照常。
 
-**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加七条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / Stop / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
+**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加八条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / PermissionRequest / Stop / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
 
 装完要开一个新的 Claude Code session 才会生效，已经开着的不受影响。
 

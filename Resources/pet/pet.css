@@ -181,6 +181,45 @@ html, body {
   max-width: 170px;
 }
 
+/* The quota readout needs more width than a chatter line: four columns have to
+   fit on one row, or the bars wrap and stop being comparable. */
+/* Anchored to the window's right edge rather than centred on the pet: four
+   columns are wider than the space left of centre, and a centred bubble ran off
+   the right side of the window with the countdown clipped. */
+#bubble.quota {
+  left: auto;
+  right: 14px;
+  transform: none;
+  max-width: 230px;
+  text-align: left;
+  padding: 7px 9px;
+}
+.qrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.qlabel { width: 30px; flex: none; color: #b5aea8; }
+/* An explicit width, NOT flex:1. The bubble is shrink-to-fit, so a flex-grow
+   track has a basis of zero and the container reserves no space for it — the
+   bar renders as a hairline. */
+.qbar {
+  width: 68px;
+  flex: none;
+  height: 7px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.qfill { display: block; height: 100%; border-radius: 3px; background: #6fae9b; }
+/* Same warning ramp the antenna lamp uses, so the colours mean one thing. */
+.qfill[data-level="mid"]  { background: #e0a63c; }
+.qfill[data-level="high"] { background: #e0533c; }
+.qpct   { width: 30px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+.qreset { flex: none; color: #8a837d; font-size: 10px; }
+
 #pet { cursor: pointer; }
 
 /* Slides out to the LEFT of the pet box, entirely within the window:

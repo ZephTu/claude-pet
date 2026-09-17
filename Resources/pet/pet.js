@@ -22,14 +22,19 @@ function reportLayout() {
  * Called from Swift on every state change.
  * @param {"idle"|"busy"|"waiting"|"urgent"} mood
  * @param {string|null} waitingProject project name for the urgent bubble
+ * @param {string} waitingOn what that session is blocked on, e.g. "rm -rf build/"
  */
-window.setMood = function (mood, waitingProject) {
+window.setMood = function (mood, waitingProject, waitingOn) {
   pet.dataset.mood = mood;
   if (mood === "urgent" && waitingProject) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.
     clearSpeech();
-    bubble.textContent = waitingProject + " needs you";
+    // Naming the actual command is the whole point: it lets the user decide
+    // without switching to that terminal.
+    bubble.textContent = waitingOn
+      ? waitingProject + ": " + waitingOn
+      : waitingProject + " needs you";
     bubble.classList.remove("chat");
     bubble.hidden = false;
   } else if (!speaking) {
@@ -43,6 +48,7 @@ let speechTimer = null;
 
 function clearSpeech() {
   speaking = false;
+  bubble.classList.remove("quota");
   if (speechTimer) {
     clearTimeout(speechTimer);
     speechTimer = null;
@@ -89,6 +95,51 @@ window.rowTitle = function (x, y) {
   const el = document.elementFromPoint(x, y);
   const row = el && el.closest ? el.closest(".row") : null;
   return (row && row.dataset.title) || "";
+};
+
+/**
+ * Show the quota readout as labelled meters.
+ *
+ * Bars rather than a sentence: two percentages being compared are read at a
+ * glance from their lengths, while "5h 28% · week 39%, resets at 15:30" has to
+ * be parsed word by word.
+ *
+ * @param {{label:string, percent:number, resetsIn:string}[]} rows
+ * @param {string} fallback shown when there is no usable reading
+ */
+window.showQuota = function (rows, fallback) {
+  if (pet.dataset.mood === "urgent") return;  // the alarm owns the bubble
+  clearSpeech();
+  speaking = true;
+  bubble.classList.add("chat", "quota");
+  if (!rows || !rows.length) {
+    bubble.textContent = fallback;
+    bubble.hidden = false;
+    reportLayout();
+    return;
+  }
+  bubble.innerHTML = rows
+    .map(function () {
+      return (
+        '<div class="qrow"><span class="qlabel"></span>' +
+        '<span class="qbar"><span class="qfill"></span></span>' +
+        '<span class="qpct"></span><span class="qreset"></span></div>'
+      );
+    })
+    .join("");
+  const els = bubble.querySelectorAll(".qrow");
+  rows.forEach(function (r, i) {
+    const pct = Math.max(0, Math.min(100, r.percent || 0));
+    els[i].querySelector(".qlabel").textContent = r.label;
+    els[i].querySelector(".qpct").textContent = pct + "%";
+    els[i].querySelector(".qreset").textContent = r.resetsIn;
+    const fill = els[i].querySelector(".qfill");
+    fill.style.width = pct + "%";
+    // Colour carries the same warning the pet's own lamp does.
+    fill.dataset.level = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+  });
+  bubble.hidden = false;
+  reportLayout();
 };
 
 /** Take the bubble down now — used when the pointer leaves the pet. */

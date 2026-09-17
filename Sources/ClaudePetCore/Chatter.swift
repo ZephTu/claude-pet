@@ -17,6 +17,7 @@ public enum Chatter {
         case quotaResetting
         case quotaHigh
         case finished
+        case sessionDone
         case longRun
     }
 
@@ -39,6 +40,10 @@ public enum Chatter {
         case .quotaResetting: return 30 * 60
         case .quotaHigh: return 60 * 60
         case .finished: return 10 * 60
+        // Short on purpose: "this one just finished" is the line the user
+        // actually asked for, and it is only ever emitted by a real transition,
+        // so it cannot run away on its own.
+        case .sessionDone: return 20
         case .longRun: return 20 * 60
         }
     }
@@ -64,19 +69,29 @@ public enum Chatter {
         usage: UsageSnapshot?,
         now: Date,
         lastSpoken: [Kind: Date],
-        lastAnything: Date?
+        lastAnything: Date?,
+        names: [String: String] = [:]
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
         // and a session waiting on the user is not a moment for small talk.
         guard state.mood != .urgent, state.mood != .waiting else { return nil }
 
-        if let lastAnything, now.timeIntervalSince(lastAnything) < globalCooldown {
+        // A finishing session is news with a short shelf life, so it is exempt
+        // from the global gap — otherwise a quota line said four minutes ago
+        // would swallow it. Its own 20s cooldown is what keeps it in check.
+        let finishedNow = previous.map { justFinished(previous: $0, current: state) } ?? []
+        let hasNews = !finishedNow.isEmpty && Self.ready(.sessionDone, lastSpoken: lastSpoken, now: now)
+        if !hasNews, let lastAnything,
+           now.timeIntervalSince(lastAnything) < globalCooldown {
             return nil
         }
 
-        func ready(_ kind: Kind) -> Bool {
-            guard let last = lastSpoken[kind] else { return true }
-            return now.timeIntervalSince(last) >= cooldown(for: kind)
+        func ready(_ kind: Kind) -> Bool { Self.ready(kind, lastSpoken: lastSpoken, now: now) }
+
+        // Which session just came to rest outranks everything else: it is the
+        // one thing here the user is actively waiting to hear.
+        if hasNews {
+            return Utterance(kind: .sessionDone, text: doneLine(finishedNow, names: names))
         }
 
         // Quota lines first: they are time-critical in a way the others are not.
@@ -122,18 +137,86 @@ public enum Chatter {
         return nil
     }
 
-    /// The line the pet shows when the pointer rests on it. Always available,
+    /// One row of the hover readout: a labelled meter.
+    public struct QuotaRow: Sendable, Equatable {
+        public let label: String
+        /// 0-100.
+        public let percent: Int
+        /// "1h 44m", "4d 14h".
+        public let resetsIn: String
+
+        public init(label: String, percent: Int, resetsIn: String) {
+            self.label = label
+            self.percent = percent
+            self.resetsIn = resetsIn
+        }
+    }
+
+    /// The readout shown while the pointer rests on the pet. Always available and
     /// never rate-limited: the user asked for this one.
-    public static func onDemand(usage: UsageSnapshot?, state: GlobalState, now: Date) -> String {
-        guard let usage else {
-            return state.sessions.isEmpty ? "No live sessions" : "\(state.sessions.count) sessions running"
+    ///
+    /// Returns rows rather than a sentence so the page can draw meters. Prose is
+    /// the wrong shape for two numbers that are being compared — a bar is read at
+    /// a glance, "5h 28% · week 39%, resets at 15:30" has to be parsed.
+    public static func quotaRows(usage: UsageSnapshot?, now: Date) -> [QuotaRow] {
+        guard let usage, usage.percentagesUsable(now: now) else { return [] }
+        return [
+            QuotaRow(label: "5h", percent: clampPercent(usage.fiveHourPercent),
+                     resetsIn: duration(until: usage.fiveHourResetAt, now: now)),
+            QuotaRow(label: "week", percent: clampPercent(usage.sevenDayPercent),
+                     resetsIn: duration(until: usage.sevenDayResetAt, now: now)),
+        ]
+    }
+
+    /// Shown when there is no usable quota reading — claude-hud is not installed,
+    /// or its cache has gone stale.
+    public static func fallbackLine(state: GlobalState) -> String {
+        state.sessions.isEmpty ? "No live sessions" : "\(state.sessions.count) sessions running"
+    }
+
+    private static func clampPercent(_ p: Int) -> Int { min(100, max(0, p)) }
+
+    /// "44m", "1h 44m", "4d 14h" — coarse on purpose; nobody needs the seconds.
+    public static func duration(until date: Date, now: Date) -> String {
+        let seconds = Int(date.timeIntervalSince(now))
+        if seconds <= 0 { return "now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(max(1, minutes))m" }
+        let hours = minutes / 60
+        if hours < 24 { return hours == 0 ? "\(minutes)m" : "\(hours)h \(minutes % 60)m" }
+        let days = hours / 24
+        return "\(days)d \(hours % 24)h"
+    }
+
+    static func ready(_ kind: Kind, lastSpoken: [Kind: Date], now: Date) -> Bool {
+        guard let last = lastSpoken[kind] else { return true }
+        return now.timeIntervalSince(last) >= cooldown(for: kind)
+    }
+
+    /// Sessions that were busy a moment ago and are not any more.
+    ///
+    /// Matched by session id rather than by count: two sessions swapping states
+    /// in one render must not read as "nothing happened".
+    public static func justFinished(previous: GlobalState, current: GlobalState) -> [SessionState] {
+        let nowBusy = Set(
+            current.sessions.filter { $0.state == .busy }.map(\.sessionId)
+        )
+        return previous.sessions
+            .filter { $0.state == .busy && !nowBusy.contains($0.sessionId) }
+            // A session that vanished entirely (closed, muted) did not "finish".
+            .filter { p in current.sessions.contains { $0.sessionId == p.sessionId } }
+    }
+
+    /// - Parameter names: sessionId → the terminal tab title, when known. The
+    ///   project is only a directory name, so several sessions share it; the tab
+    ///   title is what identifies the one that just finished.
+    public static func doneLine(_ finished: [SessionState], names: [String: String]) -> String {
+        let labels = finished.map { names[$0.sessionId] ?? $0.project }
+        switch labels.count {
+        case 1: return labels[0] + " done"
+        case 2: return labels.joined(separator: ", ") + " done"
+        default: return "\(labels.count) sessions done"
         }
-        var parts: [String] = []
-        if usage.percentagesUsable(now: now) {
-            parts.append("5h \(usage.fiveHourPercent)% · week \(usage.sevenDayPercent)%")
-        }
-        parts.append("resets \(clockHint(usage.fiveHourResetAt, now: now))")
-        return parts.joined(separator: ", ")
     }
 
     // MARK: - Wording

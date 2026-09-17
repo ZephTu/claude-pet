@@ -16,6 +16,9 @@ public struct GlobalState: Sendable, Equatable {
     public let sessions: [SessionState]
     /// Project name for the urgent speech bubble; nil unless something is waiting.
     public let waitingProject: String?
+    /// What that session is waiting for approval on, when it told us. Shown next
+    /// to the project name so the bubble answers "should I go look?" by itself.
+    public let waitingOn: String
     /// How many live sessions the user has muted. Shown as a footer line in the
     /// panel so muting something is never a thing the user silently forgets.
     public let hiddenCount: Int
@@ -24,11 +27,13 @@ public struct GlobalState: Sendable, Equatable {
         mood: GlobalMood,
         sessions: [SessionState],
         waitingProject: String?,
-        hiddenCount: Int = 0
+        hiddenCount: Int = 0,
+        waitingOn: String = ""
     ) {
         self.mood = mood
         self.sessions = sessions
         self.waitingProject = waitingProject
         self.hiddenCount = hiddenCount
+        self.waitingOn = waitingOn
     }
 }

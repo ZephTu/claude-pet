@@ -44,7 +44,7 @@
 
 1. `~/Applications/ClaudePet.app` —— 宠物本体
 2. `~/.claude/pet/` —— hook 程序和 session 状态文件
-3. **`~/.claude/settings.json` —— 追加 7 条 hook**
+3. **`~/.claude/settings.json` —— 追加 8 条 hook**
 
 第三条是唯一需要留心的：那个文件管着你所有 Claude Code session 的行为。安装脚本的做法是**只追加、不修改**——你已有的 hook 配置一条都不会被碰，改之前会自动备份到 `~/.claude/settings.json.bak-claudepet-<时间戳>`，改完立刻解析验证，任何异常都会自动还原备份。重复安装是幂等的，不会挂两遍。
 

@@ -25,7 +25,7 @@ enum SettingsPatch {
     }
     static let events = [
         "SessionStart", "UserPromptSubmit", "PreToolUse",
-        "PostToolUse", "Notification", "Stop", "SessionEnd",
+        "PostToolUse", "Notification", "PermissionRequest", "Stop", "SessionEnd",
     ]
 
     /// Returns a process exit code: 0 on success, 1 on failure.

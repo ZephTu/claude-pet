@@ -53,7 +53,8 @@ public enum StateAggregator {
                 mood: waited > urgentAfter ? .urgent : .waiting,
                 sessions: ordered(alive),
                 waitingProject: longest.project,
-                hiddenCount: hiddenCount
+                hiddenCount: hiddenCount,
+                waitingOn: longest.waitingOn
             )
         }
 

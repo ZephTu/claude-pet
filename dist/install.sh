@@ -9,7 +9,7 @@
 # This script does four things and tells you about each one:
 #   1. install ClaudePet.app into ~/Applications/
 #   2. put pet-emit into ~/.claude/pet/
-#   3. append 7 hooks to ~/.claude/settings.json (backed up first; your own
+#   3. append 8 hooks to ~/.claude/settings.json (backed up first; your own
 #      hooks are not touched)
 #   4. start the pet
 #

@@ -44,7 +44,8 @@ final class WebBridge {
         last = state
 
         let project = state.waitingProject.map { "\"\(escape($0))\"" } ?? "null"
-        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project));")
+        let on = "\"\(escape(state.waitingOn))\""
+        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on));")
     }
 
     /// Left click on the pet expands or collapses the session panel. Swift owns
@@ -121,6 +122,19 @@ final class WebBridge {
         webView.evaluateJavaScript("window.rowTitle(\(point.x), \(point.y));") { result, _ in
             MainActor.assumeIsolated { completion(result as? String ?? "") }
         }
+    }
+
+    /// Draws the quota meters. Numbers go over as structured values, not as a
+    /// formatted string, so the page can lay out bars and nothing has to be
+    /// escaped.
+    func showQuota(rows: [Chatter.QuotaRow], fallback: String) {
+        guard isReady else { return }
+        let items = rows.map { ["label": $0.label, "percent": $0.percent, "resetsIn": $0.resetsIn] }
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: items),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        evaluate("window.showQuota(\(json), \(jsString(fallback)));")
     }
 
     func hush() {

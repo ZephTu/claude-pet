@@ -151,11 +151,26 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard !paused, !dwellShowing else { return }
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: currentUsage(), now: now,
-            lastSpoken: lastSpoken, lastAnything: lastAnything
+            lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state)
         ) else { return }
         bridge?.say(line.text, hold: Self.speechHold)
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    /// sessionId → the terminal tab title, for the sessions we have one for.
+    /// Falls back to the project name inside Chatter when a session has none.
+    private func sessionNames(_ state: GlobalState) -> [String: String] {
+        guard let titles = bridge?.titles, !titles.isEmpty else { return [:] }
+        var names: [String: String] = [:]
+        for session in state.sessions {
+            guard let handle = session.terminal?.handle,
+                  let title = titles[handle],
+                  !TerminalTitles.isUseless(title)
+            else { continue }
+            names[session.sessionId] = title
+        }
+        return names
     }
 
     /// Resting the pointer shows something without being asked twice: the quota
@@ -204,10 +219,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 case .pet:
                     guard let state = self.lastState else { return }
                     self.dwellShowing = true
-                    // hold: 0 — it stays until the pointer leaves.
-                    self.bridge?.say(
-                        Chatter.onDemand(usage: self.currentUsage(), state: state, now: Date()),
-                        hold: 0
+                    // Stays up until the pointer leaves.
+                    let now = Date()
+                    self.bridge?.showQuota(
+                        rows: Chatter.quotaRows(usage: self.currentUsage(), now: now),
+                        fallback: Chatter.fallbackLine(state: state)
                     )
                 case .row(let p):
                     self.bridge?.rowTitle(at: p) { [weak self] title in

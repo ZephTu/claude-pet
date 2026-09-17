@@ -46,7 +46,7 @@ Three places, all reversible with `./uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
 2. `~/.claude/pet/` — the hook binary and the session state files
-3. **`~/.claude/settings.json` — 7 appended hooks**
+3. **`~/.claude/settings.json` — 8 appended hooks**
 
 The third is the one to pay attention to: that file governs the behaviour of every Claude Code session you run. The installer **only appends** — not one of your existing hooks is touched. It backs the file up to `~/.claude/settings.json.bak-claudepet-<timestamp>` first, parses the result immediately after writing, and restores the backup on any doubt. Running the installer twice is idempotent; the hooks are not added again.
 

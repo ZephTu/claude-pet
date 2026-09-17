@@ -491,11 +491,33 @@ struct Runner {
                 Chatter.next(state: justStarted, previous: justStarted, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
-        // The on-demand line was asked for, so no cooldown applies
-        t.check("the on-demand line always answers",
-                !Chatter.onDemand(usage: fresh, state: quiet, now: t0).isEmpty)
-        t.check("the on-demand line works without claude-hud installed",
-                Chatter.onDemand(usage: nil, state: quiet, now: t0) == "No live sessions")
+        // The on-demand readout was asked for, so no cooldown applies
+        let rows = Chatter.quotaRows(usage: fresh, now: t0)
+        t.check("the hover readout returns one row per window", rows.count == 2)
+        t.check("rows are labelled and carry a countdown",
+                rows[0].label == "5h" && rows[0].percent == 10 && !rows[0].resetsIn.isEmpty)
+        // No claude-hud, or a stale cache: there is nothing honest to draw
+        t.check("no rows without a usable reading",
+                Chatter.quotaRows(usage: nil, now: t0).isEmpty
+                && Chatter.quotaRows(usage: highButStale, now: t0).isEmpty)
+        t.check("the fallback line still says something useful",
+                Chatter.fallbackLine(state: quiet) == "No live sessions")
+        // A percentage outside 0-100 would draw a bar past the end of its track
+        let overflow = UsageSnapshot(planName: "Team", fiveHourPercent: 140, sevenDayPercent: -5,
+                                     fiveHourResetAt: t0.addingTimeInterval(600),
+                                     sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
+        let clamped = Chatter.quotaRows(usage: overflow, now: t0)
+        t.check("percentages are clamped to the track",
+                clamped[0].percent == 100 && clamped[1].percent == 0)
+
+        t.check("a countdown under an hour reads in minutes",
+                Chatter.duration(until: t0.addingTimeInterval(44 * 60), now: t0) == "44m")
+        t.check("a countdown over an hour reads h+m",
+                Chatter.duration(until: t0.addingTimeInterval(104 * 60), now: t0) == "1h 44m")
+        t.check("a multi-day countdown reads d+h",
+                Chatter.duration(until: t0.addingTimeInterval(4 * 86400 + 14 * 3600), now: t0) == "4d 14h")
+        t.check("a reset already past reads as now",
+                Chatter.duration(until: t0.addingTimeInterval(-60), now: t0) == "now")
 
         // ---- The terminal tab title IS the session's name ----
         // The project column is only a directory name; three sessions in one repo match
@@ -548,6 +570,79 @@ struct Runner {
         ]
         t.check("only the shared project is flagged",
                 StateAggregator.ambiguousProjects(twoSame) == ["daily_work"])
+
+        // ---- PermissionRequest: say WHAT is blocked, not just that something is ----
+        // The old signal was Notification's English copy — contains("waiting for
+        // your input") — which fails silently the day that wording changes.
+        t.check("a bash command is quoted back verbatim",
+                PermissionSummary.describe(toolName: "Bash",
+                                           toolInput: ["command": "rm -rf build/"])
+                == "rm -rf build/")
+        // A full path eats the whole bubble; the file name is what identifies it
+        t.check("an edit names the file, not the path",
+                PermissionSummary.describe(toolName: "Edit",
+                                           toolInput: ["file_path": "/a/b/c/AppMain.swift"])
+                == "Edit AppMain.swift")
+        t.check("a fetch names the host",
+                PermissionSummary.describe(toolName: "WebFetch",
+                                           toolInput: ["url": "https://example.com/a/b?c=d"])
+                == "WebFetch example.com")
+        // A tool we do not special-case still names itself — better than "needs you"
+        t.check("an unknown tool falls back to its own name",
+                PermissionSummary.describe(toolName: "SomeNewTool", toolInput: [:])
+                == "SomeNewTool")
+        t.check("a tool with no name at all still yields something",
+                PermissionSummary.describe(toolName: "", toolInput: [:]) == "permission")
+        // A heredoc would otherwise turn the bubble into a paragraph
+        t.check("newlines and runs of spaces collapse to one line",
+                PermissionSummary.describe(toolName: "Bash",
+                                           toolInput: ["command": "echo a\n\n   b\tc"])
+                == "echo a b c")
+        let long = String(repeating: "x", count: 200)
+        let clamped2 = PermissionSummary.describe(toolName: "Bash", toolInput: ["command": long])
+        t.check("a very long command is clamped with an ellipsis",
+                clamped2.count == PermissionSummary.maxLength && clamped2.hasSuffix("…"))
+
+        // ---- "which session just finished" ----
+        func sess(_ id: String, _ act: SessionActivity, project: String = "p") -> SessionState {
+            SessionState(sessionId: id, project: project, cwd: "/tmp", state: act, tool: "",
+                         detail: "", since: t0, updatedAt: t0)
+        }
+        let wasBusy = GlobalState(mood: .busy, sessions: [sess("a", .busy), sess("b", .busy)],
+                                  waitingProject: nil)
+        let oneDone = GlobalState(mood: .busy, sessions: [sess("a", .idle), sess("b", .busy)],
+                                  waitingProject: nil)
+        t.check("the session that stopped is identified by id",
+                Chatter.justFinished(previous: wasBusy, current: oneDone).map(\.sessionId) == ["a"])
+        // A session that closed or was muted did not "finish" — it left
+        let oneGone = GlobalState(mood: .busy, sessions: [sess("b", .busy)], waitingProject: nil)
+        t.check("a session that disappeared is not reported as finished",
+                Chatter.justFinished(previous: wasBusy, current: oneGone).isEmpty)
+        // The project is a directory name shared by several sessions; the tab
+        // title is what tells the user which one just came to rest
+        t.check("the tab title is used when there is one",
+                Chatter.doneLine([sess("a", .idle, project: "daily_work")],
+                                 names: ["a": "email reply"]) == "email reply done")
+        t.check("the project name is the fallback",
+                Chatter.doneLine([sess("a", .idle, project: "daily_work")], names: [:])
+                == "daily_work done")
+        t.check("two at once are named, more than two are counted",
+                Chatter.doneLine([sess("a", .idle), sess("b", .idle)], names: ["a": "x", "b": "y"])
+                == "x, y done"
+                && Chatter.doneLine([sess("a", .idle), sess("b", .idle), sess("c", .idle)],
+                                    names: [:]).hasSuffix("3 sessions done"))
+
+        // This is the point of the feature: it must get through even when a quota
+        // line was said a minute ago, or the user would not hear about it
+        let justSpoke = t0.addingTimeInterval(-60)
+        t.check("a finished session is announced despite the global cooldown",
+                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: justSpoke)?.kind == .sessionDone)
+        // But it still respects its own cooldown, so a flapping session cannot spam
+        t.check("it stays quiet inside its own cooldown",
+                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
+                             lastSpoken: [.sessionDone: t0.addingTimeInterval(-5)],
+                             lastAnything: nil) == nil)
 
         t.finish()
     }

@@ -41,6 +41,21 @@ enum HookEmit {
 
         guard let state = state(for: event, message: message) else { return }
 
+        // PermissionRequest names the tool and its arguments, so the pet can say
+        // WHAT is blocked rather than just that something is. Carried forward on
+        // other events so the phrase survives until the session stops waiting.
+        let waitingOn: String
+        if event == "PermissionRequest" {
+            waitingOn = PermissionSummary.describe(
+                toolName: hook["tool_name"] as? String ?? "",
+                toolInput: hook["tool_input"] as? [String: Any] ?? [:]
+            )
+        } else if state == "waiting" {
+            waitingOn = previousWaitingOn(at: path)
+        } else {
+            waitingOn = ""
+        }
+
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let now = iso8601(Date())
@@ -54,6 +69,7 @@ enum HookEmit {
             "tool": hook["tool_name"] as? String ?? "",
             "detail": message,
             "since": since(for: state, at: path, fallback: now),
+            "waitingOn": waitingOn,
             "updatedAt": now,
         ]
         if let terminal = terminalRef() {
@@ -132,6 +148,9 @@ enum HookEmit {
             return message.contains("waiting for your input") ? "idle" : "waiting"
         }
         switch event {
+        // Structured and unambiguous, unlike inferring intent from Notification's
+        // English copy.
+        case "PermissionRequest": return "waiting"
         case "SessionStart": return "idle"
         case "UserPromptSubmit": return "busy"
         case "PreToolUse": return "busy"
@@ -139,6 +158,17 @@ enum HookEmit {
         case "Stop": return "idle"
         default: return nil
         }
+    }
+
+    /// The phrase from the last PermissionRequest, so that the events which
+    /// follow it (a repeated Notification, say) do not blank the bubble.
+    private static func previousWaitingOn(at path: URL) -> String {
+        guard
+            let data = try? Data(contentsOf: path),
+            let raw = try? JSONSerialization.jsonObject(with: data),
+            let old = raw as? [String: Any]
+        else { return "" }
+        return old["waitingOn"] as? String ?? ""
     }
 
     /// Keep `since` across writes that do not change state, otherwise the 60s

@@ -35,6 +35,9 @@ field() {  # field <session_id> <key>
     "$PET_HOME/sessions/$1.json" "$2"
 }
 
+# Feeds a raw payload, for events whose shape the `emit` helper cannot express.
+emit_json() { printf '%s' "$1" | "$EMIT"; }
+
 # --- event -> state mapping ---
 emit SessionStart s1 /Users/dev/Projects/demo-app
 check "SessionStart writes idle" "$(field s1 state)" "idle"
@@ -143,5 +146,19 @@ check "SessionEnd slash guard deletes nothing outside sessions/" \
   "$([ -f "$PET_HOME/escape.json" ] && echo present || echo gone)" "gone"
 
 echo
+
+# --- PermissionRequest: structured, and says WHAT is blocked ---
+emit_json '{"session_id":"s9","hook_event_name":"PermissionRequest","cwd":"/Users/dev/Projects/demo-app","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}'
+check "PermissionRequest means waiting" "$(field s9 state)" "waiting"
+check "the command is carried to the bubble" "$(field s9 waitingOn)" "rm -rf build/"
+
+# The phrase has to survive the events that follow, or the bubble blanks out
+emit Notification s9 /Users/dev/Projects/demo-app "" "needs your permission"
+check "waitingOn survives a following Notification" "$(field s9 waitingOn)" "rm -rf build/"
+
+# ...and has to be dropped once the session is no longer blocked
+emit Stop s9 /Users/dev/Projects/demo-app
+check "waitingOn is cleared when it stops waiting" "$(field s9 waitingOn)" ""
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
