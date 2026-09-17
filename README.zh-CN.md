@@ -4,11 +4,11 @@
 
 一只常驻 macOS 桌面的小机器人，坐在电脑前，用动作反映本机全部 Claude Code session 的聚合状态。
 
-<img src="docs/images/pet.gif" width="300" alt="机器人的四种状态">
+<img src="docs/images/pet.gif" width="360" alt="机器人把能显示的状态过一遍，含气泡">
 
 天线顶上那颗灯是最好认的信号——不用聚焦，余光扫过去就能读到：
 
-![四种状态](docs/images/states.png)
+![所有状态](docs/images/states.png)
 
 | 状态 | 天线灯 | 它在干嘛 |
 |---|---|---|

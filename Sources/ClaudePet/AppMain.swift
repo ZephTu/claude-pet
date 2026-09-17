@@ -98,6 +98,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
         loadHidden()
         loadSnoozed()
+        loadQuotaSaid()
         loadLabels()
         git.onUpdate = { [weak self] in self?.render() }
         bridge.onRowMenu = { [weak self] id, point in self?.showRowMenu(sessionID: id, at: point) }
@@ -273,15 +274,38 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         return snapshot
     }
 
+    private static let quotaSaidKey = "quotaThresholdsSaid"
+    private var quotaSaid: Set<String> = []
+
+    private func loadQuotaSaid() {
+        quotaSaid = Set(UserDefaults.standard.stringArray(forKey: Self.quotaSaidKey) ?? [])
+    }
+
+    private func saveQuotaSaid() {
+        UserDefaults.standard.set(Array(quotaSaid), forKey: Self.quotaSaidKey)
+    }
+
     private func maybeSpeak(state: GlobalState, now: Date) {
         // Paused means the pet is asleep, and a sleeping robot with a speech
         // bubble is just wrong. It also never sees real transitions while
         // paused, since render() substitutes a fixed idle state.
         guard !paused, !dwellShowing else { return }
+        let usage = currentUsage()
+        let decision = QuotaAlarm.evaluate(usage: usage, alreadySaid: quotaSaid, now: now)
         guard let line = Chatter.next(
-            state: state, previous: lastState, usage: currentUsage(), now: now,
-            lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state)
+            state: state, previous: lastState, usage: usage, now: now,
+            lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
+            quotaAlarm: decision.speak
         ) else { return }
+        // Recorded only when it is actually SAID. That is what makes a warning
+        // suppressed by an alarm come back afterwards instead of being lost:
+        // nothing was said, so nothing was marked, so it is still pending next
+        // time round.
+        if line.kind == .quotaHigh {
+            quotaSaid.formUnion(decision.markSaid)
+            quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
+            saveQuotaSaid()
+        }
         let sticky = Chatter.isSticky(line.kind)
         bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis)
         stickyBubble = sticky
@@ -761,16 +785,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// Replaced showing the session's name, which stopped being worth a hover
     /// once the first column started showing it.
-    private func hoverDetail(for sessionID: String) -> String {
-        guard let session = latest.first(where: { $0.sessionId == sessionID }) else { return "" }
+    private func hoverDetail(for sessionID: String) -> SessionDetail.Detail? {
+        guard let session = latest.first(where: { $0.sessionId == sessionID }) else { return nil }
         let file = petHome.appending(path: "activity")
             .appending(path: sessionID).appendingPathExtension("jsonl")
         let recent = ActivityLog.recent(
             ActivityLog.decode((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
             now: Date(), limit: 1).first
-        return SessionDetail.lines(session: session, insight: insights[sessionID],
-                                   lastActivity: recent, now: Date())
-            .joined(separator: "\n")
+        return SessionDetail.detail(session: session, insight: insights[sessionID],
+                                    lastActivity: recent, now: Date())
     }
 
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
@@ -860,10 +883,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                     // capture, neither of which the page has.
                     self.bridge?.rowSessionId(at: p) { [weak self] id in
                         guard let self, !id.isEmpty else { return }
-                        let text = self.hoverDetail(for: id)
-                        guard !text.isEmpty else { return }
+                        guard let detail = self.hoverDetail(for: id), !detail.isEmpty
+                        else { return }
                         self.dwellShowing = true
-                        self.bridge?.say(text, hold: 0)
+                        self.bridge?.showDetail(detail)
                     }
                 }
             }

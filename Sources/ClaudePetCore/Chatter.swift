@@ -65,8 +65,6 @@ public enum Chatter {
 
     /// Say something when the five-hour window is this close to rolling over.
     public static let resetSoon: TimeInterval = 15 * 60
-    /// Say something when a window is at least this full.
-    public static let highWaterMark = 80
     /// A single session busy for this long is worth remarking on.
     public static let longRunAfter: TimeInterval = 20 * 60
 
@@ -85,7 +83,8 @@ public enum Chatter {
         now: Date,
         lastSpoken: [Kind: Date],
         lastAnything: Date?,
-        names: [String: String] = [:]
+        names: [String: String] = [:],
+        quotaAlarm: QuotaAlarm.Alarm? = nil
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
         // and a session waiting on the user is not a moment for small talk.
@@ -125,19 +124,12 @@ public enum Chatter {
                     text: "5-hour quota resets in \(minutes(untilReset))m"
                 )
             }
-            if ready(.quotaHigh), usage.percentagesUsable(now: now) {
-                if usage.sevenDayPercent >= highWaterMark {
-                    return Utterance(
-                        kind: .quotaHigh,
-                        text: "Weekly quota at \(usage.sevenDayPercent)% — go easy"
-                    )
-                }
-                if usage.fiveHourPercent >= highWaterMark {
-                    return Utterance(
-                        kind: .quotaHigh,
-                        text: "5-hour quota at \(usage.fiveHourPercent)%, resets \(clockHint(usage.fiveHourResetAt, now: now))"
-                    )
-                }
+            // Quota warnings are decided by QuotaAlarm, which fires on CROSSING
+            // a threshold rather than on sitting above one. They are handed in
+            // by the caller because saying one has to be recorded, and Chatter
+            // is pure.
+            if let alarm = quotaAlarm {
+                return Utterance(kind: .quotaHigh, text: alarm.text)
             }
         }
 

@@ -6,7 +6,7 @@
 
 A little robot that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
 
-<img src="docs/images/pet.gif" width="300" alt="The robot cycling through its four states">
+<img src="docs/images/pet.gif" width="360" alt="The robot cycling through every state it can show, speech bubbles included">
 
 You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
 
@@ -14,7 +14,7 @@ You stop tabbing through terminal windows to find out which session finished and
 
 The bulb on the antenna is the part you can read without focusing on it:
 
-![Four states](docs/images/states.png)
+![Every state](docs/images/states.png)
 
 | Lamp | Meaning | What it does |
 | --- | --- | --- |

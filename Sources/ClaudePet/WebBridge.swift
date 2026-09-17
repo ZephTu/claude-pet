@@ -222,6 +222,21 @@ final class WebBridge {
         evaluate("window.setMirrored(\(on));")
     }
 
+    /// Draws the hover readout for one row.
+    func showDetail(_ d: SessionDetail.Detail) {
+        guard isReady, !d.isEmpty else { return }
+        var doc: [String: Any] = [
+            "path": d.path, "worktree": d.worktree, "model": d.model,
+            "turn": d.turn, "quiet": d.quiet, "last": d.last, "lastBad": d.lastBad,
+        ]
+        if let percent = d.contextPercent { doc["context"] = percent }
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: doc),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        evaluate("window.showDetail(\(json));")
+    }
+
     func hush() {
         guard isReady else { return }
         evaluate("window.hush();")

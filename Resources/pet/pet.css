@@ -392,6 +392,40 @@ html, body {
 .qfill[data-level="mid"]  { background: #e0a63c; }
 .qfill[data-level="high"] { background: #e0533c; }
 .qpct   { width: 30px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* The hover readout. Four kinds of fact, each given its own weight so the eye
+   can land on one without reading the others. Runs as prose it was a wall of
+   words; the context meter reuses the quota bars outright. */
+/* NAMING: the panel already owns .detail, .warn, .row and .name. A bubble class
+   that collides with one of those inherits its layout silently — .detail is
+   display:flex, which laid all four of these rows out side by side. Bubble-only
+   classes are prefixed. */
+#bubble.readout {
+  display: block;
+  white-space: normal;
+  padding: 7px 10px;
+}
+#bubble.readout > * + * { margin-top: 3px; }
+.dpath { display: flex; gap: 6px; align-items: baseline; }
+.dwhere {
+  color: #e8e4df; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dtree { flex: none; color: #857c74; font-size: 10px; }
+.dtree::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
+.dclocks { display: flex; gap: 5px; align-items: baseline; color: #b5aea8; font-size: 10.5px; }
+.dkey { color: #7d746c; }
+.dval { font-variant-numeric: tabular-nums; }
+.dmodel { color: #b5aea8; font-size: 10.5px; }
+.dlast {
+  display: flex; gap: 5px; align-items: baseline;
+  font-size: 10.5px; color: #8a837d;
+  overflow: hidden;
+}
+.dlast .dtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ddot { flex: none; font-size: 7px; }
+.ddot.ok  { color: #67a498; }
+.ddot.bad { color: #e0a63c; }
 .qreset { flex: none; color: #8a837d; font-size: 10px; }
 
 #pet { cursor: pointer; }

@@ -80,7 +80,7 @@ function fill(el, text, emphasis) {
 
 function clearSpeech() {
   speaking = false;
-  bubble.classList.remove("quota");
+  bubble.classList.remove("quota", "readout");
   if (speechTimer) {
     clearTimeout(speechTimer);
     speechTimer = null;
@@ -419,6 +419,85 @@ window.hitRow = function (x, y) {
     kind: row.dataset.termKind || "",
     handle: row.dataset.termHandle || "",
   };
+};
+
+/**
+ * The hover readout for one session row.
+ *
+ * Structured rather than a paragraph, for the same reason the quota readout is
+ * bars: these are four different KINDS of fact — where it is, how full it is,
+ * how long it has been, what it last did — and running them together as a
+ * sentence makes the eye read all of it to find any of it.
+ *
+ * @param {{path?:string, worktree?:string, context?:number, model?:string,
+ *          turn?:string, quiet?:string, last?:string, lastBad?:boolean}} d
+ */
+window.showDetail = function (d) {
+  if (pet.dataset.mood === "urgent") return;   // the alarm owns the bubble
+  clearSpeech();
+  speaking = true;
+  bubble.classList.add("chat", "readout");
+  bubble.textContent = "";
+
+  function row(cls) {
+    const el = document.createElement("div");
+    el.className = cls;
+    bubble.appendChild(el);
+    return el;
+  }
+  function span(parent, cls, text) {
+    const el = document.createElement("span");
+    el.className = cls;
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
+  if (d.path) {
+    // Paths and branch names are user text, so every one of these is textContent.
+    const head = row("dpath");
+    span(head, "dwhere", d.path);
+    if (d.worktree) span(head, "dtree", d.worktree);
+  }
+
+  if (typeof d.context === "number") {
+    const meter = row("qrow");
+    span(meter, "qlabel", "ctx");
+    const bar = document.createElement("span");
+    bar.className = "qbar";
+    const fill = document.createElement("span");
+    fill.className = "qfill";
+    const pct = Math.max(0, Math.min(100, d.context));
+    fill.style.width = pct + "%";
+    // Same warning ramp as the quota meters and the antenna lamp.
+    fill.dataset.level = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+    bar.appendChild(fill);
+    meter.appendChild(bar);
+    span(meter, "qpct", pct + "%");
+    if (d.model) span(meter, "qreset", d.model);
+  } else if (d.model) {
+    span(row("dclocks"), "dmodel", d.model);
+  }
+
+  if (d.turn) {
+    const clocks = row("dclocks");
+    span(clocks, "dkey", "turn");
+    span(clocks, "dval", d.turn);
+    if (d.quiet) {
+      span(clocks, "dkey", "quiet");
+      span(clocks, "dval", d.quiet);
+    }
+  }
+
+  if (d.last) {
+    const last = row("dlast");
+    span(last, "ddot", d.lastBad ? "\u25b2" : "\u25cf").classList
+      .add(d.lastBad ? "bad" : "ok");
+    span(last, "dtext", d.last);
+  }
+
+  bubble.hidden = false;
+  reportLayout();
 };
 
 /**

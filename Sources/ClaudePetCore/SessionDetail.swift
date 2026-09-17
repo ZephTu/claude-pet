@@ -16,42 +16,55 @@ public enum SessionDetail {
     ///
     /// The third is the one that answers "is this stuck?", and it is the one a
     /// single number cannot express alongside the others.
-    public static func lines(
+    /// Structured, not a paragraph: the page draws a meter for the context and
+    /// gives each kind of fact its own weight. Handing over a sentence made the
+    /// reader parse all of it to find any of it.
+    public struct Detail: Sendable, Equatable {
+        public var path = ""
+        public var worktree = ""
+        /// 0-100, or nil when no statusline is wired up or its reading is stale.
+        public var contextPercent: Int?
+        public var model = ""
+        public var turn = ""
+        /// Only set once the session has actually gone quiet.
+        public var quiet = ""
+        public var last = ""
+        /// The last call was interrupted, so the marker beside it warns.
+        public var lastBad = false
+
+        public var isEmpty: Bool {
+            path.isEmpty && contextPercent == nil && model.isEmpty
+                && turn.isEmpty && last.isEmpty
+        }
+    }
+
+    public static func detail(
         session: SessionState,
         insight: SessionInsight?,
         lastActivity: ActivityEntry?,
         now: Date
-    ) -> [String] {
-        var out: [String] = []
-
-        let place = home(session.cwd)
-        let where_ = [place, insight?.worktree ?? ""]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-        if !where_.isEmpty { out.append(where_) }
+    ) -> Detail {
+        var d = Detail()
+        d.path = home(session.cwd)
 
         if let insight, insight.isFresh(now: now) {
-            var second: [String] = []
-            if let percent = insight.contextPercent {
-                second.append("context \(percent)%")
-            }
-            if !insight.modelName.isEmpty { second.append(insight.modelName) }
-            if !second.isEmpty { out.append(second.joined(separator: " · ")) }
+            d.worktree = insight.worktree
+            d.contextPercent = insight.contextPercent
+            d.model = insight.modelName
         }
 
-        var clocks = ["turn " + Chatter.duration(until: now, now: session.since)]
-        let quiet = now.timeIntervalSince(session.updatedAt)
-        // Only worth saying once it is longer than the turn is old, i.e. once
-        // the session has actually gone quiet rather than merely started.
-        if quiet >= 30 {
-            clocks.append("quiet " + Chatter.duration(until: now, now: session.updatedAt))
+        d.turn = Chatter.duration(until: now, now: session.since)
+        // Only worth reporting once the session has actually gone quiet, rather
+        // than merely started.
+        if now.timeIntervalSince(session.updatedAt) >= 30 {
+            d.quiet = Chatter.duration(until: now, now: session.updatedAt)
         }
-        out.append(clocks.joined(separator: " · "))
 
         if let lastActivity {
-            out.append("last: " + lastActivity.line())
+            d.last = lastActivity.line()
+            d.lastBad = lastActivity.result == .interrupted
         }
-        return out
+        return d
     }
 
     /// Collapses the user's home directory. A hover bubble is 300pt wide and

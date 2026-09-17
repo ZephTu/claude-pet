@@ -537,9 +537,17 @@ struct Runner {
         let high = UsageSnapshot(planName: "Team", fiveHourPercent: 20, sevenDayPercent: 85,
                                  fiveHourResetAt: t0.addingTimeInterval(4 * 3600),
                                  sevenDayResetAt: t0.addingTimeInterval(86400), capturedAt: t0)
-        t.check("a nearly-spent weekly quota is worth saying",
+        // The percentage no longer decides this — QuotaAlarm does, on crossing a
+        // threshold — so Chatter only relays an alarm it is handed.
+        t.check("a high percentage alone no longer says anything",
                 Chatter.next(state: quiet, previous: quiet, usage: high, now: t0,
-                             lastSpoken: [:], lastAnything: nil)?.kind == .quotaHigh)
+                             lastSpoken: [:], lastAnything: nil) == nil)
+        t.check("but an alarm handed in is relayed",
+                Chatter.next(state: quiet, previous: quiet, usage: high, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             quotaAlarm: QuotaAlarm.Alarm(window: .sevenDay, threshold: 85,
+                                                          percent: 85, resetsIn: "1d 0h"))?
+                    .kind == .quotaHigh)
         let highButStale = UsageSnapshot(planName: "Team", fiveHourPercent: 20, sevenDayPercent: 85,
                                          fiveHourResetAt: t0.addingTimeInterval(4 * 3600),
                                          sevenDayResetAt: t0.addingTimeInterval(86400),
@@ -1282,39 +1290,47 @@ struct Runner {
         let hoverLast = ActivityEntry(tool: "Bash", target: "npm test",
                                  finishedAt: t0.addingTimeInterval(-3),
                                  durationMs: 2900, result: .ok)
-        let hoverDetail = SessionDetail.lines(session: hovered, insight: hoverInsight,
-                                         lastActivity: hoverLast, now: t0)
+        let hoverDetail = SessionDetail.detail(session: hovered, insight: hoverInsight,
+                                               lastActivity: hoverLast, now: t0)
         t.check("the home directory is collapsed, not spelled out",
-                hoverDetail[0].hasPrefix("~/Documents/multica") && !hoverDetail[0].contains(NSHomeDirectory()))
-        t.check("the worktree rides along with the path",
-                hoverDetail[0].contains("feat-x"))
-        t.check("context and model come from the statusline",
-                hoverDetail[1] == "context 43% · Opus 5")
-        t.check("the turn's own age is reported",
-                hoverDetail[2].contains("turn 12m"))
+                hoverDetail.path == "~/Documents/multica")
+        t.check("the worktree is its own field, not glued into the path",
+                hoverDetail.worktree == "feat-x")
+        t.check("context arrives as a number the page can draw a bar with",
+                hoverDetail.contextPercent == 43 && hoverDetail.model == "Opus 5")
+        t.check("the turn's own age is reported", hoverDetail.turn == "12m")
         t.check("and what it last did",
-                hoverDetail.last == "last: Bash npm test · 2.9s")
+                hoverDetail.last == "Bash npm test · 2.9s" && !hoverDetail.lastBad)
 
-        // Without a statusline wired up there is simply less to say — never a
-        // blank line and never a made-up number.
-        let hoverBare = SessionDetail.lines(session: hovered, insight: nil, lastActivity: nil, now: t0)
-        t.check("no statusline means fewer lines, not empty ones",
-                !hoverBare.contains { $0.isEmpty } && !hoverBare.contains { $0.contains("context") })
-        // A stale reading is not shown at all: the statusline only runs while
-        // Claude Code is drawing, so a quiet session's number is from whenever
-        // it last was not quiet.
+        // Without a statusline wired up there is simply less to report — never
+        // an empty field pretending to be a value.
+        let hoverBare = SessionDetail.detail(session: hovered, insight: nil,
+                                             lastActivity: nil, now: t0)
+        t.check("no statusline means no context and no model, not zero",
+                hoverBare.contextPercent == nil && hoverBare.model.isEmpty)
+        t.check("but there is still something worth showing",
+                !hoverBare.isEmpty && !hoverBare.path.isEmpty)
+        // A stale reading is withheld: the statusline only runs while Claude
+        // Code is drawing, so a quiet session's number is from whenever it last
+        // was not quiet.
         let staleInsight = SessionInsight(sessionId: "h", contextPercent: 90,
-                                   capturedAt: t0.addingTimeInterval(-9000))
+                                          capturedAt: t0.addingTimeInterval(-9000))
         t.check("a stale context reading is withheld rather than shown as current",
-                !SessionDetail.lines(session: hovered, insight: staleInsight, lastActivity: nil, now: t0)
-                    .contains { $0.contains("context") })
+                SessionDetail.detail(session: hovered, insight: staleInsight,
+                                     lastActivity: nil, now: t0).contextPercent == nil)
         // "quiet" only appears once the session has actually gone quiet.
         let hoverFreshTurn = SessionState(
             sessionId: "h", project: "p", cwd: "", state: .busy, tool: "", detail: "",
             since: t0.addingTimeInterval(-5), updatedAt: t0)
         t.check("a session that just moved is not described as quiet",
-                !SessionDetail.lines(session: hoverFreshTurn, insight: nil, lastActivity: nil,
-                                     now: t0).contains { $0.contains("quiet") })
+                SessionDetail.detail(session: hoverFreshTurn, insight: nil,
+                                     lastActivity: nil, now: t0).quiet.isEmpty)
+        t.check("an interrupted last call is marked as such",
+                SessionDetail.detail(
+                    session: hovered, insight: nil,
+                    lastActivity: ActivityEntry(tool: "Bash", target: "x", finishedAt: t0,
+                                                durationMs: 10, result: .interrupted),
+                    now: t0).lastBad)
 
         // The statusline payload's real shape, from Claude Code's own docs.
         let hoverPayload = Data(#"{"session_id":"s1","session_name":"email reply","model":{"display_name":"Opus 5"},"workspace":{"git_worktree":"feat-x"},"context_window":{"used_percentage":42.7},"rate_limits":{"five_hour":{"used_percentage":31,"resets_at":1789650000}}}"#.utf8)
@@ -1333,6 +1349,79 @@ struct Runner {
         // Each rate-limit window is independently optional per the docs.
         t.check("one window alone is still a usable reading",
                 StatuslineUsage.parse(hoverPayload, now: t0)?.fiveHourPercent == 31)
+
+        // ---- QuotaAlarm: crossing a line, not sitting above one ----
+        func quotaAt(five: Int, week: Int, fiveIn: TimeInterval = 3600,
+                   weekIn: TimeInterval = 4 * 86400) -> UsageSnapshot {
+            UsageSnapshot(planName: "max", fiveHourPercent: five, sevenDayPercent: week,
+                          fiveHourResetAt: t0.addingTimeInterval(fiveIn),
+                          sevenDayResetAt: t0.addingTimeInterval(weekIn),
+                          capturedAt: t0, source: "statusline")
+        }
+
+        let belowAll = QuotaAlarm.evaluate(usage: quotaAt(five: 40, week: 30),
+                                        alreadySaid: [], now: t0)
+        t.check("below every threshold it says nothing", belowAll.speak == nil)
+
+        let firstEighty = QuotaAlarm.evaluate(usage: quotaAt(five: 82, week: 30),
+                                              alreadySaid: [], now: t0)
+        t.check("crossing 80% on the five-hour window is worth one line",
+                firstEighty.speak?.window == .fiveHour && firstEighty.speak?.threshold == 80)
+        // The whole point: having said it, sitting above it says nothing more.
+        let stillEighty = QuotaAlarm.evaluate(usage: quotaAt(five: 88, week: 30),
+                                              alreadySaid: firstEighty.markSaid, now: t0)
+        t.check("staying above the same threshold is not news again",
+                stillEighty.speak == nil)
+        let ninetyFive = QuotaAlarm.evaluate(usage: quotaAt(five: 96, week: 30),
+                                             alreadySaid: firstEighty.markSaid, now: t0)
+        t.check("but the next threshold up is",
+                ninetyFive.speak?.threshold == 95)
+
+        // Leapfrogging: 70 -> 96 is one warning, and 80 must not resurface later.
+        let leap = QuotaAlarm.evaluate(usage: quotaAt(five: 96, week: 30),
+                                       alreadySaid: [], now: t0)
+        t.check("a jump past two thresholds says the higher one once",
+                leap.speak?.threshold == 95 && leap.markSaid.count == 2)
+        t.check("and the skipped threshold never surfaces afterwards",
+                QuotaAlarm.evaluate(usage: quotaAt(five: 96, week: 30),
+                                    alreadySaid: leap.markSaid, now: t0).speak == nil)
+
+        // The weekly window warns earlier — running it out costs days, not hours.
+        let weekEarly = QuotaAlarm.evaluate(usage: quotaAt(five: 40, week: 68),
+                                            alreadySaid: [], now: t0)
+        t.check("weekly warns at 65% where five-hour would say nothing",
+                weekEarly.speak?.window == .sevenDay && weekEarly.speak?.threshold == 65)
+        t.check("and it names itself as the weekly one",
+                weekEarly.speak?.text.contains("weekly") == true)
+
+        // A reset rearms everything, because the reset instant is in the key.
+        let eightySaid = firstEighty.markSaid
+        let afterReset = QuotaAlarm.evaluate(
+            usage: quotaAt(five: 82, week: 30, fiveIn: 6 * 3600), alreadySaid: eightySaid, now: t0)
+        t.check("a window that has reset warns again",
+                afterReset.speak?.threshold == 80)
+
+        // A window whose reset has already passed is not a window.
+        t.check("a rolled-over window raises nothing",
+                QuotaAlarm.evaluate(usage: quotaAt(five: 99, week: 10, fiveIn: -60),
+                                    alreadySaid: [], now: t0).speak == nil)
+        t.check("a stale reading raises nothing either",
+                QuotaAlarm.evaluate(
+                    usage: UsageSnapshot(planName: "", fiveHourPercent: 99, sevenDayPercent: 99,
+                                         fiveHourResetAt: t0.addingTimeInterval(3600),
+                                         sevenDayResetAt: t0.addingTimeInterval(86400),
+                                         capturedAt: t0.addingTimeInterval(-9000)),
+                    alreadySaid: [], now: t0).speak == nil)
+        t.check("no reading at all raises nothing",
+                QuotaAlarm.evaluate(usage: nil, alreadySaid: [], now: t0).speak == nil)
+
+        // Keys for periods that have ended cannot match again, so they go.
+        let oldKey = QuotaAlarm.key(window: .fiveHour,
+                                    resetAt: t0.addingTimeInterval(-3600), threshold: 80)
+        let liveKey = QuotaAlarm.key(window: .fiveHour,
+                                     resetAt: t0.addingTimeInterval(3600), threshold: 80)
+        t.check("keys for finished periods are pruned away",
+                QuotaAlarm.pruned([oldKey, liveKey], now: t0) == [liveKey])
 
         t.finish()
     }
