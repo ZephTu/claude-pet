@@ -41,7 +41,7 @@ A number on the robot's chest counts both kinds of attention. It is not shown at
 - **iTerm2** goes through AppleScript, so the **first jump raises a macOS Automation prompt**; deny it and jumps fail silently afterwards
 - Other terminals cannot be addressed — those rows have no ↗ and clicking them just closes the list
 
-**Hover a row** for 0.45s and the bubble shows that session's name, taken from its terminal tab title. The list's first column is only a directory name, so three sessions open in one repo look identical; the name is what tells them apart. When a directory does have more than one session, the name is shown inline on a second line instead of on hover.
+**Hover a row** for 0.45s and the bubble answers what the row has no space for: the full path and worktree, how full the context window is and on which model (with the statusline wired up), how long this turn has been going versus how long since anything happened at all, and the last tool call with its result. It used to show the session's name — which stopped being worth a hover once the first column started showing it.
 
 **Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
@@ -123,7 +123,9 @@ The pet reads [claude-hud](https://github.com/jarrodwatts/claude-hud)'s cache if
 
 **The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. It also means uninstalling the pet cannot break a statusline it never touched.
 
-Two sources are never blended. Whichever reading is fresh wins; a stale reading from a better source still describes a window that may have rolled over. **Caveat: the shape of the statusline's `rate_limits` payload has not been verified against a live one** — the parser accepts several plausible spellings and returns nothing rather than a wrong number when it recognises none.
+Wiring this up also gives each row a **context-window percentage**, the model's name and the session's `/rename` name — none of which reaches a hook. Hover a row to see them, along with the full path, the turn's age and the last tool call.
+
+Two sources are never blended. Whichever reading is fresh wins; a stale reading from a better source still describes a window that may have rolled over.
 
 ## Uninstall
 

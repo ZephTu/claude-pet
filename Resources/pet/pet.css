@@ -342,6 +342,10 @@ html, body {
   max-width: 300px;
   text-align: left;
   line-height: 1.45;
+  /* pre-line, not normal: the hover detail arrives as several lines joined by
+     \n, and in HTML a newline is just whitespace. Runs of spaces still
+     collapse, so ordinary chatter is unaffected. */
+  white-space: pre-line;
 }
 
 /* The session's own name, set apart from the words around it: the name is the

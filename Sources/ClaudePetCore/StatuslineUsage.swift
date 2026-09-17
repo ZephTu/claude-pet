@@ -2,16 +2,24 @@ import Foundation
 
 /// Pulls quota numbers out of the JSON Claude Code feeds a statusline command.
 ///
-/// **The exact shape of `rate_limits` has not been verified against a live
-/// payload.** The field exists in Claude Code 2.1.274's binary and the docs
-/// describe it, but this machine's statusline is claude-hud's, and wrapping it
-/// to capture one payload would have meant editing a working `settings.json`
-/// for a look. So the parser accepts several plausible spellings of the same
-/// thing and returns nil when it recognises none of them — at which point the
-/// pet falls back to the claude-hud cache exactly as before.
+/// The shape comes from Claude Code's own statusline documentation, which ships
+/// inside the binary (2.1.274):
 ///
-/// Returning nil is a supported outcome here, not a failure. Nothing depends on
-/// this source existing.
+///     "rate_limits": {
+///       "five_hour": { "used_percentage": number, "resets_at": number },
+///       "seven_day": { "used_percentage": number, "resets_at": number },
+///       "spend_limit": { "used_percentage": number, "resets_at": number }
+///     }
+///
+/// `resets_at` is Unix epoch SECONDS, not a string. An earlier version of this
+/// parser guessed at the spelling and listed `used_pct`, `usedPct`,
+/// `used_percent`, `percent` and `used` — every plausible name except the real
+/// one, so it would have recognised nothing. The alternates are kept as a
+/// cushion against the shape changing, but `used_percentage` is the documented
+/// key and the one that works.
+///
+/// Returning nil is a supported outcome here, not a failure: a window is absent
+/// whenever the API has not reported it, and nothing depends on this source.
 public enum StatuslineUsage {
     /// Where the captured reading is kept, so the app can read it without
     /// knowing anything about statuslines.
@@ -25,17 +33,23 @@ public enum StatuslineUsage {
             let limits = root["rate_limits"] as? [String: Any]
         else { return nil }
 
-        guard
-            let five = window(in: limits, matching: ["five_hour", "fiveHour", "5h", "five"]),
-            let week = window(in: limits, matching: ["seven_day", "sevenDay", "weekly", "week"])
-        else { return nil }
+        // Each window is independently optional — the docs say a window is
+        // "present only while the API reports it and its resets_at has not
+        // passed". Requiring both meant a user with only a five-hour limit got
+        // nothing at all.
+        let five = window(in: limits, matching: ["five_hour", "fiveHour", "5h", "five"])
+        let week = window(in: limits, matching: ["seven_day", "sevenDay", "weekly", "week"])
+        guard five != nil || week != nil else { return nil }
 
+        // A missing window is reported as already reset rather than as 0% used:
+        // `quotaRows` drops a window whose reset has passed, so an absent one
+        // simply does not draw a meter. Claiming 0% would be inventing a number.
         return UsageSnapshot(
-            planName: root["plan"] as? String ?? (root["model"] as? [String: Any])?["display_name"] as? String ?? "",
-            fiveHourPercent: five.percent,
-            sevenDayPercent: week.percent,
-            fiveHourResetAt: five.resetsAt ?? now,
-            sevenDayResetAt: week.resetsAt ?? now,
+            planName: (root["model"] as? [String: Any])?["display_name"] as? String ?? "",
+            fiveHourPercent: five?.percent ?? 0,
+            sevenDayPercent: week?.percent ?? 0,
+            fiveHourResetAt: five?.resetsAt ?? now.addingTimeInterval(-1),
+            sevenDayResetAt: week?.resetsAt ?? now.addingTimeInterval(-1),
             capturedAt: now,
             source: "statusline")
     }
@@ -56,7 +70,9 @@ public enum StatuslineUsage {
     }
 
     static func percent(in raw: [String: Any]) -> Int? {
-        for key in ["used_pct", "usedPct", "used_percent", "percent", "used"] {
+        // used_percentage first: it is the documented name.
+        for key in ["used_percentage", "usedPercentage", "used_pct", "usedPct",
+                    "used_percent", "percent", "used"] {
             if let n = raw[key] as? Int { return min(100, max(0, n)) }
             if let d = raw[key] as? Double { return min(100, max(0, Int(d.rounded()))) }
         }
@@ -65,6 +81,9 @@ public enum StatuslineUsage {
 
     static func date(in raw: [String: Any]) -> Date? {
         for key in ["resets_at", "resetsAt", "reset_at", "resetAt"] {
+            // Epoch seconds is what Claude Code actually sends.
+            if let seconds = raw[key] as? Double { return Date(timeIntervalSince1970: seconds) }
+            if let seconds = raw[key] as? Int { return Date(timeIntervalSince1970: Double(seconds)) }
             if let text = raw[key] as? String {
                 let f = ISO8601DateFormatter()
                 f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -73,8 +92,6 @@ public enum StatuslineUsage {
                 plain.formatOptions = [.withInternetDateTime]
                 if let d = plain.date(from: text) { return d }
             }
-            // Epoch seconds are the other common spelling.
-            if let seconds = raw[key] as? Double { return Date(timeIntervalSince1970: seconds) }
         }
         return nil
     }

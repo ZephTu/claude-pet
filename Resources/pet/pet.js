@@ -114,22 +114,6 @@ window.say = function (text, holdMs, emphasis) {
   }
 };
 
-/**
- * The session name of the row under this point, or "" for none.
- *
- * Separate from hitRow because hovering and clicking answer different questions:
- * a row with no terminal we can address is not clickable but still has a name
- * worth showing.
- *
- * @param {number} x
- * @param {number} y
- * @returns {string}
- */
-window.rowTitle = function (x, y) {
-  const el = document.elementFromPoint(x, y);
-  const row = el && el.closest ? el.closest(".row") : null;
-  return (row && row.dataset.title) || "";
-};
 
 /**
  * Show the quota readout as labelled meters.

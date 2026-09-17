@@ -11,14 +11,31 @@ import Foundation
 /// README explains how to add it by hand; uninstalling the pet therefore cannot
 /// break a statusline it never touched.
 enum StatuslineCapture {
-    /// Keeps the reading, if there is one to keep. Silent on every failure.
+    /// Keeps whatever this payload can tell us. Silent on every failure.
+    ///
+    /// Two separate things come out of one payload, and they are kept apart on
+    /// purpose: the quota belongs to the ACCOUNT, the context window belongs to
+    /// THIS SESSION. Mixing them would let a busy session's context read as the
+    /// whole account's usage.
     static func record(_ input: Data) {
-        guard let snapshot = StatuslineUsage.parse(input, now: Date()) else { return }
+        let now = Date()
         let directory = HookEmit.baseDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = StatuslineUsage.encode(snapshot)
-        guard !data.isEmpty else { return }
-        try? data.write(to: StatuslineUsage.cacheURL(petHome: directory))
+
+        if let snapshot = StatuslineUsage.parse(input, now: now) {
+            let data = StatuslineUsage.encode(snapshot)
+            if !data.isEmpty { try? data.write(to: StatuslineUsage.cacheURL(petHome: directory)) }
+        }
+
+        if let insight = SessionInsights.parse(input, now: now) {
+            let folder = SessionInsights.directory(petHome: directory)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let data = SessionInsights.encode(insight)
+            if !data.isEmpty {
+                try? data.write(to: folder.appending(
+                    path: SessionInsights.fileName(sessionId: insight.sessionId)))
+            }
+        }
     }
 
     /// Runs the user's own statusline command with the same input, forwarding

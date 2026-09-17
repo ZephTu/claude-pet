@@ -1271,6 +1271,69 @@ struct Runner {
         t.check("a busy machine still leaves each session a readable amount",
                 ActivityLog.perSessionBudget(sessionCount: 500) == ActivityLog.shown)
 
+        // ---- SessionDetail: what hovering a row is actually for ----
+        let hovered = SessionState(
+            sessionId: "h", project: "multica", cwd: NSHomeDirectory() + "/Documents/multica",
+            state: .busy, tool: "Bash", detail: "", since: t0.addingTimeInterval(-720),
+            updatedAt: t0.addingTimeInterval(-3))
+        let hoverInsight = SessionInsight(sessionId: "h", sessionName: "email reply",
+                                     modelName: "Opus 5", contextPercent: 43,
+                                     worktree: "feat-x", capturedAt: t0)
+        let hoverLast = ActivityEntry(tool: "Bash", target: "npm test",
+                                 finishedAt: t0.addingTimeInterval(-3),
+                                 durationMs: 2900, result: .ok)
+        let hoverDetail = SessionDetail.lines(session: hovered, insight: hoverInsight,
+                                         lastActivity: hoverLast, now: t0)
+        t.check("the home directory is collapsed, not spelled out",
+                hoverDetail[0].hasPrefix("~/Documents/multica") && !hoverDetail[0].contains(NSHomeDirectory()))
+        t.check("the worktree rides along with the path",
+                hoverDetail[0].contains("feat-x"))
+        t.check("context and model come from the statusline",
+                hoverDetail[1] == "context 43% · Opus 5")
+        t.check("the turn's own age is reported",
+                hoverDetail[2].contains("turn 12m"))
+        t.check("and what it last did",
+                hoverDetail.last == "last: Bash npm test · 2.9s")
+
+        // Without a statusline wired up there is simply less to say — never a
+        // blank line and never a made-up number.
+        let hoverBare = SessionDetail.lines(session: hovered, insight: nil, lastActivity: nil, now: t0)
+        t.check("no statusline means fewer lines, not empty ones",
+                !hoverBare.contains { $0.isEmpty } && !hoverBare.contains { $0.contains("context") })
+        // A stale reading is not shown at all: the statusline only runs while
+        // Claude Code is drawing, so a quiet session's number is from whenever
+        // it last was not quiet.
+        let staleInsight = SessionInsight(sessionId: "h", contextPercent: 90,
+                                   capturedAt: t0.addingTimeInterval(-9000))
+        t.check("a stale context reading is withheld rather than shown as current",
+                !SessionDetail.lines(session: hovered, insight: staleInsight, lastActivity: nil, now: t0)
+                    .contains { $0.contains("context") })
+        // "quiet" only appears once the session has actually gone quiet.
+        let hoverFreshTurn = SessionState(
+            sessionId: "h", project: "p", cwd: "", state: .busy, tool: "", detail: "",
+            since: t0.addingTimeInterval(-5), updatedAt: t0)
+        t.check("a session that just moved is not described as quiet",
+                !SessionDetail.lines(session: hoverFreshTurn, insight: nil, lastActivity: nil,
+                                     now: t0).contains { $0.contains("quiet") })
+
+        // The statusline payload's real shape, from Claude Code's own docs.
+        let hoverPayload = Data(#"{"session_id":"s1","session_name":"email reply","model":{"display_name":"Opus 5"},"workspace":{"git_worktree":"feat-x"},"context_window":{"used_percentage":42.7},"rate_limits":{"five_hour":{"used_percentage":31,"resets_at":1789650000}}}"#.utf8)
+        let hoverParsed = SessionInsights.parse(hoverPayload, now: t0)
+        t.check("context percent is read and rounded", hoverParsed?.contextPercent == 43)
+        t.check("the session's own name and model come through",
+                hoverParsed?.sessionName == "email reply" && hoverParsed?.modelName == "Opus 5")
+        // null used_percentage means "no messages yet", which is not 0%.
+        t.check("no messages yet reads as unknown, not as empty",
+                SessionInsights.parse(Data(#"{"session_id":"s","context_window":{"used_percentage":null}}"#.utf8),
+                                      now: t0)?.contextPercent == nil)
+        t.check("a payload with no session id yields nothing",
+                SessionInsights.parse(Data(#"{"context_window":{"used_percentage":5}}"#.utf8), now: t0) == nil)
+        t.check("an insight survives a round trip",
+                SessionInsights.decode(SessionInsights.encode(hoverInsight)) == hoverInsight)
+        // Each rate-limit window is independently optional per the docs.
+        t.check("one window alone is still a usable reading",
+                StatuslineUsage.parse(hoverPayload, now: t0)?.fiveHourPercent == 31)
+
         t.finish()
     }
 }

@@ -165,10 +165,10 @@ final class WebBridge {
         }
     }
 
-    /// Asks the page for the session name under this point, then hands it back.
-    func rowTitle(at point: CGPoint, completion: @escaping @MainActor (String) -> Void) {
+    /// Asks the page which session is under this point.
+    func rowSessionId(at point: CGPoint, completion: @escaping @MainActor (String) -> Void) {
         guard isReady, let webView else { return completion("") }
-        webView.evaluateJavaScript("window.rowTitle(\(point.x), \(point.y));") { result, _ in
+        webView.evaluateJavaScript("window.rowSessionId(\(point.x), \(point.y));") { result, _ in
             MainActor.assumeIsolated { completion(result as? String ?? "") }
         }
     }

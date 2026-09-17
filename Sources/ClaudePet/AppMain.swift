@@ -189,6 +189,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             snoozeMarks = survivingMarks
             saveSnoozed()
         }
+        loadInsights()
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
         bridge?.push(state, motion: currentMotion(state, now: now))
@@ -546,6 +547,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastJumpFailure = ""
     private var healthWindow: HealthWindow?
+    /// sessionId → what the statusline last told us. Empty when no statusline
+    /// is wired up, which simply means the hover says less.
+    private var insights: [String: SessionInsight] = [:]
 
     /// Read-only, and nothing here fixes anything.
     ///
@@ -732,6 +736,43 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         snooze(sessionID: id, minutes: minutes)
     }
 
+    /// Re-reads what the statusline has captured, if anything.
+    ///
+    /// Cheap and infrequent: one small file per session, and only when the
+    /// directory has changed.
+    private var insightStamp: Date?
+    private func loadInsights() {
+        let folder = SessionInsights.directory(petHome: petHome)
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: folder.path)[.modificationDate]) as? Date
+        guard stamp != insightStamp else { return }
+        insightStamp = stamp
+        var loaded: [String: SessionInsight] = [:]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: folder,
+                                                                 includingPropertiesForKeys: nil)) ?? []
+        for url in urls where url.pathExtension == "json" {
+            if let data = try? Data(contentsOf: url), let insight = SessionInsights.decode(data) {
+                loaded[insight.sessionId] = insight
+            }
+        }
+        insights = loaded
+    }
+
+    /// The lines to show while the pointer rests on a row.
+    ///
+    /// Replaced showing the session's name, which stopped being worth a hover
+    /// once the first column started showing it.
+    private func hoverDetail(for sessionID: String) -> String {
+        guard let session = latest.first(where: { $0.sessionId == sessionID }) else { return "" }
+        let file = petHome.appending(path: "activity")
+            .appending(path: sessionID).appendingPathExtension("jsonl")
+        let recent = ActivityLog.recent(
+            ActivityLog.decode((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
+            now: Date(), limit: 1).first
+        return SessionDetail.lines(session: session, insight: insights[sessionID],
+                                   lastActivity: recent, now: Date())
+            .joined(separator: "\n")
+    }
+
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
     /// and the list agree without waiting for the next tick.
     private func markRead(_ ids: [String]) {
@@ -814,10 +855,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                         fallback: Chatter.fallbackLine(state: state)
                     )
                 case .row(let p):
-                    self.bridge?.rowTitle(at: p) { [weak self] title in
-                        guard let self, !title.isEmpty else { return }
+                    // The page reports WHICH row; the detail is assembled here,
+                    // because it needs the activity log and the statusline
+                    // capture, neither of which the page has.
+                    self.bridge?.rowSessionId(at: p) { [weak self] id in
+                        guard let self, !id.isEmpty else { return }
+                        let text = self.hoverDetail(for: id)
+                        guard !text.isEmpty else { return }
                         self.dwellShowing = true
-                        self.bridge?.say(title, hold: 0)
+                        self.bridge?.say(text, hold: 0)
                     }
                 }
             }
