@@ -820,6 +820,79 @@ struct Runner {
         t.check("a corrupt marks file reads as nothing acknowledged",
                 ReadMarks.decode(Data("{{{".utf8)).isEmpty)
 
+        // ---- Snooze: postponing one item, not silencing a session ----
+        let blocked = panelSess("s", .waiting, project: "api", ago: 120)
+        let snoozed = [blocked.sessionId: Snooze.mark(for: blocked, minutes: 15, now: t0)]
+
+        t.check("a postponed wait is quiet",
+                Snooze.isSnoozed(blocked, marks: snoozed, now: t0.addingTimeInterval(60)))
+        t.check("it comes back when the delay is up",
+                !Snooze.isSnoozed(blocked, marks: snoozed, now: t0.addingTimeInterval(16 * 60)))
+        t.check("a session with no mark is never quiet",
+                !Snooze.isSnoozed(panelSess("other", .waiting, project: "x"),
+                                  marks: snoozed, now: t0))
+
+        // The rule that separates this from muting: postponing THIS approval
+        // must not also postpone the next, different one.
+        let newItem = panelSess("s", .waiting, project: "api", ago: 1)
+        t.check("a different wait on the same session does not inherit the delay",
+                !Snooze.isSnoozed(newItem, marks: snoozed, now: t0.addingTimeInterval(60)))
+
+        t.check("a postponed row says how much longer",
+                Snooze.remaining(blocked, marks: snoozed, now: t0.addingTimeInterval(60)) == "14m")
+        t.check("a row that is not postponed says nothing rather than 0m",
+                Snooze.remaining(newItem, marks: snoozed, now: t0).isEmpty)
+
+        // Waking from sleep must not replay anything: expiry is judged against
+        // now, so a mark that elapsed while asleep is simply already gone.
+        t.check("a delay that elapsed during sleep is just over",
+                Snooze.pruned(snoozed, keeping: [blocked], now: t0.addingTimeInterval(86_400))
+                    .isEmpty)
+        t.check("a mark for a departed session is dropped",
+                Snooze.pruned(snoozed, keeping: [], now: t0).isEmpty)
+        t.check("a mark whose item was resolved is dropped",
+                Snooze.pruned(snoozed, keeping: [newItem], now: t0).isEmpty)
+        t.check("a live mark survives pruning",
+                Snooze.pruned(snoozed, keeping: [blocked], now: t0).count == 1)
+
+        // Aggregation: postponed means quiet, NOT gone. Muting is what makes a
+        // session disappear; these two must not blur into each other.
+        let quietened = StateAggregator.aggregate([blocked], now: t0.addingTimeInterval(60),
+                                                  snoozed: snoozed, isLive: { _, _ in true })
+        t.check("a postponed wait stops driving the mood",
+                quietened.mood == .idle && quietened.waitingProject == nil)
+        t.check("but the session is still listed — postponed is not hidden",
+                quietened.sessions.map(\.sessionId) == ["s"])
+        let unquietened = StateAggregator.aggregate([blocked], now: t0.addingTimeInterval(16 * 60),
+                                                    snoozed: snoozed, isLive: { _, _ in true })
+        t.check("once the delay is up it drives the mood again",
+                unquietened.mood == .urgent)
+
+        // The shortcut lands on the most neglected item, postponed ones skipped.
+        let jumpable = panelSess("j", .waiting, project: "api", ago: 500,
+                                 terminal: TerminalRef(kind: "orca", handle: "h-j"))
+        t.check("the shortcut goes to the longest-ignored wait",
+                PanelModel.jumpTarget([blocked, jumpable], snoozed: [:], now: t0)?
+                    .sessionId == "j")
+        t.check("a postponed wait is skipped over",
+                PanelModel.jumpTarget([blocked, jumpable],
+                                      snoozed: [jumpable.sessionId:
+                                        Snooze.mark(for: jumpable, minutes: 15, now: t0)],
+                                      now: t0)?.sessionId == "s")
+        t.check("nothing waiting means no target rather than a wrong one",
+                PanelModel.jumpTarget([panelSess("r", .busy, project: "x")],
+                                      snoozed: [:], now: t0) == nil)
+        // A target we cannot address is still the target: sending the user to a
+        // different session and letting them think that was the blocked one is
+        // worse than saying we cannot get there.
+        t.check("an unreachable wait is still reported as the target",
+                PanelModel.jumpTarget([blocked], snoozed: [:], now: t0)?.sessionId == "s")
+
+        t.check("marks survive a round trip through disk",
+                Snooze.decode(Snooze.encode(snoozed)) == snoozed)
+        t.check("a corrupt snooze file reads as nothing postponed",
+                Snooze.decode(Data("]]".utf8)).isEmpty)
+
         t.finish()
     }
 }

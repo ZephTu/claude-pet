@@ -33,10 +33,14 @@ public enum StateAggregator {
     ///   before anything else happens, so they affect neither the list nor the
     ///   pet's mood: a muted session stuck on a permission prompt must not leave
     ///   the pet waving at something the user cannot see in the panel.
+    /// - Parameter snoozed: sessionId → postponement. A snoozed session stays in
+    ///   the list — the user asked to be reminded later, not to forget — but it
+    ///   does not drive the mood, so the pet stops waving about it.
     public static func aggregate(
         _ all: [SessionState],
         now: Date,
         hidden: [String: Date] = [:],
+        snoozed: [String: Snooze.Mark] = [:],
         isLive: (SessionState, Date) -> Bool = Self.isLive
     ) -> GlobalState {
         let live = all.filter { isLive($0, now) }
@@ -44,7 +48,7 @@ public enum StateAggregator {
         let hiddenCount = live.count - alive.count
 
         let waiting = alive
-            .filter { $0.state == .waiting }
+            .filter { $0.state == .waiting && !Snooze.isSnoozed($0, marks: snoozed, now: now) }
             .sorted { $0.since < $1.since }
 
         if let longest = waiting.first {

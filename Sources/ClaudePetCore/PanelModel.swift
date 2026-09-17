@@ -99,6 +99,22 @@ public enum PanelModel {
         return recorded.isEmpty ? event.sessionId : recorded
     }
 
+    /// Where a "take me to the next thing" shortcut should land.
+    ///
+    /// The oldest unresolved wait that is not postponed — the one that has been
+    /// ignored longest. Deliberately NOT "the oldest one we can jump to": if the
+    /// most neglected session is in a terminal we cannot address, the honest
+    /// answer is to say so, not to quietly send the user somewhere else and let
+    /// them believe that was the thing waiting.
+    public static func jumpTarget(
+        _ sessions: [SessionState],
+        snoozed: [String: Snooze.Mark],
+        now: Date
+    ) -> SessionState? {
+        needsYou(sessions)
+            .first { !Snooze.isSnoozed($0, marks: snoozed, now: now) }
+    }
+
     /// What the pet wears on its chest: how many sessions want something, and
     /// how many finishes have not been looked at.
     ///

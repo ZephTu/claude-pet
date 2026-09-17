@@ -3,6 +3,7 @@ import AppKit
 /// Right-click menu: pause, launch at login, unmute, quit.
 final class PetMenu: NSObject, NSMenuDelegate {
     private let onPauseToggle: () -> Void
+    private let onShortcutToggle: () -> Void
     private let onLoginToggle: () -> Void
     private let onUnmuteAll: () -> Void
     private let onQuit: () -> Void
@@ -11,9 +12,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onPauseToggle: @escaping () -> Void,
         onLoginToggle: @escaping () -> Void,
         onUnmuteAll: @escaping () -> Void,
+        onShortcutToggle: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onPauseToggle = onPauseToggle
+        self.onShortcutToggle = onShortcutToggle
         self.onLoginToggle = onLoginToggle
         self.onUnmuteAll = onUnmuteAll
         self.onQuit = onQuit
@@ -21,17 +24,19 @@ final class PetMenu: NSObject, NSMenuDelegate {
 
     func show(
         at point: NSPoint, in view: NSView,
-        paused: Bool, launchesAtLogin: Bool, mutedCount: Int
+        paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false
     ) {
         let menu = makeMenu(
-            paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount
+            paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
+            shortcutOn: shortcutOn
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
 
     /// Built separately from popUp so the menu's contents can be inspected
     /// without running a modal tracking loop.
-    func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0) -> NSMenu {
+    func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
+                  shortcutOn: Bool = false) -> NSMenu {
         let menu = NSMenu()
 
         let pause = NSMenuItem(
@@ -59,6 +64,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let shortcut = NSMenuItem(
+            title: "Jump to Waiting Session (\(HotKey.displayName))",
+            action: #selector(toggleShortcut), keyEquivalent: "")
+        shortcut.state = shortcutOn ? .on : .off
+        shortcut.target = self
+        menu.addItem(shortcut)
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
@@ -69,5 +82,6 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func togglePause() { onPauseToggle() }
     @objc private func toggleLogin() { onLoginToggle() }
     @objc private func unmuteAll() { onUnmuteAll() }
+    @objc private func toggleShortcut() { onShortcutToggle() }
     @objc private func quit() { onQuit() }
 }

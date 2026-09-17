@@ -185,6 +185,9 @@ function ageText(seconds) {
 }
 
 function whatText(s) {
+  // A postponed item says when it is coming back, so "later" stays a promise
+  // rather than becoming "never".
+  if (s.snoozedFor) return "later — " + s.snoozedFor;
   if (s.state === "waiting") return "needs you";
   if (s.state === "busy") return s.tool || "working";
   // An idle session carrying a notification message is one that finished
@@ -197,12 +200,18 @@ function whatText(s) {
 /** Markup for one live-session row. */
 function sessionRowHTML(s) {
   const jumpable = s.termHandle ? " jumpable" : "";
+  const napped = s.snoozedFor ? " napped" : "";
+  // Only a blocked session can be postponed: there is nothing to put off about
+  // one that is merely running.
+  const clock = s.state === "waiting"
+    ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
   return (
-    '<div class="row' + jumpable + '"><div class="line">' +
+    '<div class="row' + jumpable + napped + '"><div class="line">' +
     '<span class="dot ' + s.state + '"></span>' +
     '<span class="proj"></span><span class="what"></span>' +
     '<span class="age">' + ageText(s.waitedSeconds) + "</span>" +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
+    clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
     '<div class="detail"></div></div>'
@@ -371,6 +380,11 @@ window.hitRow = function (x, y) {
   if (mute) {
     const row = mute.closest(".row");
     return { action: "mute", sessionId: (row && row.dataset.sessionId) || "" };
+  }
+  const clock = el.closest(".snooze");
+  if (clock) {
+    const row = clock.closest(".row");
+    return { action: "snooze", sessionId: (row && row.dataset.sessionId) || "" };
   }
   if (el.closest(".read-all")) return { action: "readAll" };
   const tick = el.closest(".read");

@@ -57,12 +57,19 @@ enum SettingsPatch {
         // Back up before touching anything, but only when there is a file to back up.
         var backup: URL?
         if FileManager.default.fileExists(atPath: path) {
-            let stamp = timestamp()
-            let destination = URL(fileURLWithPath: path + ".bak-claudepet-" + stamp)
+            // Never overwrite an existing backup. The name carries a
+            // seconds-resolution timestamp, so an install followed immediately
+            // by an uninstall used to land on the same name — and the code
+            // deleted the older file to make room, which threw away a backup of
+            // the user's ORIGINAL settings and kept one of our own edit.
+            let base = path + ".bak-claudepet-" + timestamp()
+            var destination = URL(fileURLWithPath: base)
+            var attempt = 2
+            while FileManager.default.fileExists(atPath: destination.path) {
+                destination = URL(fileURLWithPath: base + "-\(attempt)")
+                attempt += 1
+            }
             do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
-                }
                 try FileManager.default.copyItem(at: url, to: destination)
                 backup = destination
                 report("backed up -> \(destination.path)")

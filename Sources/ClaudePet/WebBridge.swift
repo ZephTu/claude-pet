@@ -22,6 +22,9 @@ final class WebBridge {
     var onMarkRead: (([String]) -> Void)?
     /// The user cleared the whole finished list.
     var onMarkAllRead: (() -> Void)?
+    /// The user wants to be reminded about this session later; the point is
+    /// where to put the menu.
+    var onSnooze: ((String, CGPoint) -> Void)?
 
     private weak var webView: WKWebView?
     private var isReady = false
@@ -113,6 +116,8 @@ final class WebBridge {
                     self.onMarkRead?(row["eventIds"] as? [String] ?? [])
                 case "readAll":
                     self.onMarkAllRead?()
+                case "snooze":
+                    self.onSnooze?(row["sessionId"] as? String ?? "", point)
                 case "openFinished":
                     // A finished row that CAN be jumped to: go there, and only
                     // then call it read. A jump that never happened must not
@@ -203,7 +208,8 @@ final class WebBridge {
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       completions: [CompletionEvent] = [],
                       titlesByHandle: [String: String] = [:],
-                      droppedNotice: Int = 0) {
+                      droppedNotice: Int = 0,
+                      snoozed: [String: Snooze.Mark] = [:]) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -218,6 +224,10 @@ final class WebBridge {
                 "detail": s.detail,
                 "waitedSeconds": Int(max(0, now.timeIntervalSince(s.since))),
             ]
+            // A postponed row stays in the list and says how much longer, so
+            // "remind me later" never turns into "forget about it".
+            let left = Snooze.remaining(s, marks: snoozed, now: now)
+            if !left.isEmpty { item["snoozedFor"] = left }
             // Only sessions we can actually jump to carry these, and only those
             // rows render as clickable.
             if let t = s.terminal, TerminalTarget.canJump(kind: t.kind) {

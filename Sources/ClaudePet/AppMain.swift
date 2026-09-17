@@ -25,6 +25,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var paused = false
     private var menu: PetMenu?
     private var completions: CompletionStore?
+    private var hotKey: HotKey?
 
     private var petHome: URL {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet")
@@ -51,6 +52,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // list — never on a timer for a panel nobody has looked at.
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
         loadHidden()
+        loadSnoozed()
+        // Off unless the user asked for it: claiming a system-wide chord
+        // uninvited is taking something that was not offered.
+        let hotKey = HotKey { [weak self] in self?.jumpToNextWaiting() }
+        self.hotKey = hotKey
+        if UserDefaults.standard.bool(forKey: Self.hotKeyKey) { hotKey.register() }
+        bridge.onSnooze = { [weak self] id, point in self?.askSnooze(sessionID: id, at: point) }
         let completions = CompletionStore(petHome: petHome)
         completions.reload(now: Date(), force: true)
         self.completions = completions
@@ -66,6 +74,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             },
             onLoginToggle: { [weak self] in self?.toggleLaunchAtLogin() },
             onUnmuteAll: { [weak self] in self?.unmuteAll() },
+            onShortcutToggle: { [weak self] in self?.toggleHotKey() },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -73,7 +82,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             menu.show(at: point, in: view,
                       paused: self.paused,
                       launchesAtLogin: self.launchesAtLogin,
-                      mutedCount: self.hiddenMarks.count)
+                      mutedCount: self.hiddenMarks.count,
+                      shortcutOn: self.hotKey?.isRegistered ?? false)
         }
         self.menu = menu
 
@@ -106,19 +116,31 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let now = Date()
         let state = paused
             ? GlobalState(mood: .idle, sessions: [], waitingProject: nil)
-            : StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks)
+            : StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
+                                        snoozed: snoozeMarks)
         // The hit region is a pair of fixed rectangles now (PetLayout.bodyBox /
         // antennaBox), so the window no longer needs telling about mood.
+        // Expiry is judged against `now` rather than by a timer, so sleeping
+        // through a delay is a no-op instead of a burst of catch-up reminders.
+        let survivingMarks = Snooze.pruned(snoozeMarks, keeping: state.sessions, now: now)
+        if survivingMarks.count != snoozeMarks.count {
+            snoozeMarks = survivingMarks
+            saveSnoozed()
+        }
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
         bridge?.push(state)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
-                             droppedNotice: completions?.takeDropNotice() ?? 0)
+                             droppedNotice: completions?.takeDropNotice() ?? 0,
+                             snoozed: snoozeMarks)
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
+        // A postponed item does not count toward the badge: the user said "not
+        // now", and a number that keeps standing there is still nagging.
         bridge?.setBadge(PanelModel.badge(
-            needsYou: PanelModel.needsYou(state.sessions).count,
+            needsYou: PanelModel.needsYou(state.sessions)
+                .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count,
             unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
@@ -184,6 +206,73 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    // MARK: - Shortcut
+
+    private static let hotKeyKey = "globalShortcutEnabled"
+
+    private func toggleHotKey() {
+        guard let hotKey else { return }
+        if hotKey.isRegistered {
+            hotKey.unregister()
+            UserDefaults.standard.set(false, forKey: Self.hotKeyKey)
+            return
+        }
+        // Only remember it as on if it actually took: another app may already
+        // own the chord, and a menu tick that lies is worse than no feature.
+        let ok = hotKey.register()
+        UserDefaults.standard.set(ok, forKey: Self.hotKeyKey)
+        if !ok {
+            bridge?.say("\(HotKey.displayName) is taken by another app", hold: 5)
+        }
+    }
+
+    /// Go to whatever has been waiting longest. Every outcome says what
+    /// happened — a shortcut that does nothing visible is one the user stops
+    /// trusting after the first silent press.
+    private func jumpToNextWaiting() {
+        let now = Date()
+        let state = StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
+                                              snoozed: snoozeMarks)
+        guard let target = PanelModel.jumpTarget(state.sessions, snoozed: snoozeMarks, now: now)
+        else {
+            bridge?.say("nothing is waiting on you", hold: 3)
+            return
+        }
+        guard let terminal = target.terminal, TerminalTarget.canJump(kind: terminal.kind) else {
+            bridge?.say("\(target.project) is waiting, but its terminal cannot be addressed",
+                        hold: 5, emphasis: target.project)
+            return
+        }
+        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
+    }
+
+    /// Offers 5 / 15 / 30 minutes at the pointer.
+    ///
+    /// A menu rather than a fixed delay: "remind me later" without saying when
+    /// is how an item quietly becomes an item nobody ever sees again.
+    private func askSnooze(sessionID: String, at point: CGPoint) {
+        guard !sessionID.isEmpty, let view = panel?.contentView else { return }
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Remind me in…", action: nil, keyEquivalent: "").isEnabled = false
+        for minutes in Snooze.options {
+            let item = NSMenuItem(title: "\(minutes) minutes",
+                                  action: #selector(snoozePicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = [sessionID, minutes] as [Any]
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: point, in: view)
+    }
+
+    @objc private func snoozePicked(_ sender: NSMenuItem) {
+        guard
+            let pair = sender.representedObject as? [Any],
+            let id = pair.first as? String,
+            let minutes = pair.last as? Int
+        else { return }
+        snooze(sessionID: id, minutes: minutes)
     }
 
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
@@ -310,6 +399,31 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     private func saveHidden() {
         UserDefaults.standard.set(hiddenMarks, forKey: Self.hiddenKey)
+    }
+
+    // MARK: - Snooze
+
+    private static let snoozeKey = "snoozedSessions"
+    private var snoozeMarks: [String: Snooze.Mark] = [:]
+
+    private func loadSnoozed() {
+        let data = UserDefaults.standard.data(forKey: Self.snoozeKey) ?? Data()
+        snoozeMarks = Snooze.decode(data)
+    }
+
+    private func saveSnoozed() {
+        let data = Snooze.encode(snoozeMarks)
+        guard !data.isEmpty else { return }
+        UserDefaults.standard.set(data, forKey: Self.snoozeKey)
+    }
+
+    /// Postpone this session's current wait. Postponing again replaces the
+    /// previous delay rather than adding to it.
+    private func snooze(sessionID: String, minutes: Int) {
+        guard let session = latest.first(where: { $0.sessionId == sessionID }) else { return }
+        snoozeMarks[sessionID] = Snooze.mark(for: session, minutes: minutes, now: Date())
+        saveSnoozed()
+        render()
     }
 
     private func mute(sessionID: String) {

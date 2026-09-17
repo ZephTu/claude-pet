@@ -121,8 +121,18 @@ check "uninstall returns the file to what it meant before" \
   "$(json_eq "$USER_FILE" "$WORK/user.orig.json")" "yes"
 
 echo "== the backup =="
+# NOT a count: the backup name carries a seconds-resolution timestamp, so the
+# patch and the unpatch above collapse into one file or stay two depending on
+# whether they straddled a second boundary. Asserting a number made this test
+# pass or fail by the clock. What actually matters is that a backup exists and
+# that it holds what the file said before it was touched.
 check "a backup was written" \
-  "$(ls "$WORK" | grep -c 'user.json.bak-claudepet-')" "1"
+  "$([ "$(ls "$WORK" | grep -c 'user.json.bak-claudepet-')" -ge 1 ] && echo yes || echo no)" "yes"
+# Lexical order, not mtime: two backups written inside one second can share a
+# modification time, and the suffix (-2, -3) is what actually orders them.
+OLDEST_BACKUP="$(ls "$WORK"/user.json.bak-claudepet-* 2>/dev/null | head -1)"
+check "the backup holds what the file said before it was touched" \
+  "$(json_eq "$OLDEST_BACKUP" "$WORK/user.orig.json")" "yes"
 
 echo "== upgrading from the old shell hook =="
 LEG="$WORK/legacy.json"

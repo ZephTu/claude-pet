@@ -362,6 +362,20 @@ html, body {
 .row.done.hot .read:hover { color: #67a498; }
 .muted-note.dropped { color: #e0a63c; }
 
+/* Postponing one blocked session. Shares the hover-reveal behaviour of the mute
+   ×, and sits before it: the gentler action is the nearer one. */
+.snooze {
+  flex: none; display: none; color: #6b6560;
+  font-size: 10px; padding-left: 4px; cursor: pointer;
+}
+.row.hot .snooze { display: inline; }
+.row.hot .snooze:hover { color: #e0a63c; }
+/* A postponed row is dimmed but still there — the item was put off, not
+   dismissed, and the panel is where the user goes to find it again. */
+.row.napped .dot { background: #6b6560; }
+.row.napped .proj { color: #a8a29c; }
+.row.napped .what { color: #e0a63c; }
+
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .dot.done    { background: #67a498; }
 .dot.waiting { background: #e8624a; }
