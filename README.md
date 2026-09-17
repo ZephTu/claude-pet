@@ -81,7 +81,7 @@ Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline
 
 Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
 
-**This edits `~/.claude/settings.json`**, appending eight hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
+**This edits `~/.claude/settings.json`**, appending nine hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
 
 Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
 
@@ -91,7 +91,7 @@ Three places, all reversible by `./scripts/uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
 2. `~/.claude/pet/` — the hook binary and the data below
-3. `~/.claude/settings.json` — eight appended hooks
+3. `~/.claude/settings.json` — nine appended hooks
 
 Inside `~/.claude/pet/`:
 

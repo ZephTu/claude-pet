@@ -93,6 +93,9 @@ public struct SessionState: Sendable, Equatable, Decodable {
     public let running: [RunningTool]
     /// Claude Code's own identifier for the current turn, when it sent one.
     public let promptId: String
+    /// A multi-event phase the session is in the middle of — currently only
+    /// "compacting". Empty for the ordinary case and for older state files.
+    public let phase: String
 
     public init(
         sessionId: String,
@@ -108,7 +111,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         lastPromptAt: Date? = nil,
         waitingOn: String = "",
         running: [RunningTool] = [],
-        promptId: String = ""
+        promptId: String = "",
+        phase: String = ""
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -124,11 +128,12 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.waitingOn = waitingOn
         self.running = running
         self.promptId = promptId
+        self.phase = phase
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
-        case terminal, pid, lastPromptAt, waitingOn, running, promptId
+        case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -155,6 +160,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         waitingOn = (try? c.decodeIfPresent(String.self, forKey: .waitingOn)) as? String ?? ""
         running = (try? c.decodeIfPresent([RunningTool].self, forKey: .running)) as? [RunningTool] ?? []
         promptId = (try? c.decodeIfPresent(String.self, forKey: .promptId)) as? String ?? ""
+        phase = (try? c.decodeIfPresent(String.self, forKey: .phase)) as? String ?? ""
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

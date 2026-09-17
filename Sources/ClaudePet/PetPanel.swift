@@ -5,7 +5,7 @@ import WebKit
 /// The pet's window. Every setting here exists to stop the panel behaving like
 /// an ordinary window — see the design doc, section 4.
 ///
-/// The window is `PetLayout.windowSize` (400x280), not the size of the pet:
+/// The window is `PetLayout.windowSize` (480x280), not the size of the pet:
 /// the expanded session panel lives *inside* it, to the left of the star. The
 /// star still sits in the bottom-right 160x160 of the window, so the default
 /// origin puts it exactly where the old 160x160 window put it.
@@ -210,7 +210,7 @@ final class PetPanel: NSPanel {
 
     // MARK: - Pixel-level click-through (design doc section 4)
 
-    /// Most of a 400x280 mostly-transparent window is not the pet. Without this
+    /// Most of a 480x280 mostly-transparent window is not the pet. Without this
     /// the whole rectangle is a dead zone that eats clicks meant for the window
     /// underneath.
     ///

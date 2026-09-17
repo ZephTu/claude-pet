@@ -192,6 +192,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
         bridge?.push(state, motion: currentMotion(state, now: now))
+        // A phase belongs to a session, but the pet shows one figure, so any
+        // session compacting puts the whole pet in that phase. It is a brief
+        // state and showing it late is worse than showing it broadly.
+        bridge?.setPhase(state.sessions.contains { $0.phase == "compacting" } ? "compacting" : "")
+        noticeTransients(state, previous: lastState)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
@@ -438,6 +443,18 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if prefs.isEmpty { labelPrefs.removeValue(forKey: id) } else { labelPrefs[id] = prefs }
         saveLabels()
         render()
+    }
+
+    /// Moments worth a brief reaction, as opposed to states worth a mood.
+    ///
+    /// Both are deliberately quiet. A turn ending means Claude stopped talking,
+    /// not that the work was right; a failed tool call usually is not a failed
+    /// task. Anything louder would be claiming something neither event says.
+    private func noticeTransients(_ state: GlobalState, previous: GlobalState?) {
+        guard !paused, let previous else { return }
+        if !Chatter.justFinished(previous: previous, current: state).isEmpty {
+            bridge?.flash("done")
+        }
     }
 
     // MARK: - Motion and visibility

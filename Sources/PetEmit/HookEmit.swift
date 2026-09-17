@@ -128,6 +128,13 @@ enum HookEmit {
         let running = runningTools(event: event, hook: hook, at: path, now: now)
         document["running"] = running
 
+        // A phase is something the session is in the MIDDLE of that no other
+        // event reports. Compaction is the only one so far: it takes a while,
+        // emits nothing else, and without this the pet shows a session that has
+        // apparently stopped working.
+        let phase = phaseValue(event: event, at: path)
+        if !phase.isEmpty { document["phase"] = phase }
+
         write(document, to: path)
 
         // A finished tool call, with the duration Claude Code measured itself.
@@ -210,6 +217,22 @@ enum HookEmit {
         }
         // A runaway list is a bug somewhere else; cap it rather than write it.
         return Array(running.suffix(12))
+    }
+
+    /// Which multi-event phase the session is in, if any.
+    ///
+    /// Claude Code sends `PreCompact` when compaction starts but nothing when it
+    /// finishes, so the phase is cleared by the first event that can only happen
+    /// afterwards. Being stuck in a phase forever because one optional hook was
+    /// missed is exactly the failure mode to avoid.
+    private static func phaseValue(event: String, at path: URL) -> String {
+        switch event {
+        case "PreCompact": return "compacting"
+        case "UserPromptSubmit", "Stop", "PreToolUse", "PostToolUse", "SessionStart":
+            return ""
+        default:
+            return (readDocument(at: path)?["phase"] as? String) ?? ""
+        }
     }
 
     /// This session's turn counter: bumped by UserPromptSubmit, carried by

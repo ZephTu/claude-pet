@@ -84,7 +84,8 @@ enum HealthCollector {
 
     /// How many of the pet's hooks settings.json actually carries.
     private static func hookState(petHome: URL) -> (installed: Int, expected: Int, binaryOK: Bool) {
-        let expected = 8
+        // Mirrors SettingsPatch.events.count.
+        let expected = 9
         let emit = petHome.appending(path: "pet-emit")
         let binaryOK = FileManager.default.isExecutableFile(atPath: emit.path)
 

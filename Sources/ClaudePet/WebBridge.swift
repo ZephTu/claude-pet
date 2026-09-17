@@ -195,6 +195,19 @@ final class WebBridge {
         evaluate("window.setBadge(\(jsString(text)));")
     }
 
+    /// A brief reaction that is not a state — see window.flash.
+    func flash(_ kind: String) {
+        guard isReady else { return }
+        evaluate("window.flash(\(jsString(kind)));")
+    }
+
+    private var lastPhase: String?
+    func setPhase(_ phase: String) {
+        guard isReady, phase != lastPhase else { return }
+        lastPhase = phase
+        evaluate("window.setPhase(\(jsString(phase)));")
+    }
+
     private var lastCalm: Bool?
     func setCalm(_ on: Bool) {
         guard isReady, on != lastCalm else { return }

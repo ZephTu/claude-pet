@@ -72,7 +72,8 @@ echo "== a machine with no settings.json yet =="
 FRESH="$WORK/fresh.json"
 "$EMIT" --patch-settings "$FRESH" >/dev/null 2>&1
 check "the file is created" "$([ -f "$FRESH" ] && echo yes || echo no)" "yes"
-check "all 8 events get a hook" "$(count_pet_hooks "$FRESH")" "8"
+# Mirrors SettingsPatch.events — update both together.
+check "all 9 events get a hook" "$(count_pet_hooks "$FRESH")" "9"
 
 echo "== running it twice changes nothing =="
 BEFORE="$(cat "$FRESH")"

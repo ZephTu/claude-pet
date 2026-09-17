@@ -11,12 +11,12 @@ html, body {
   cursor: default;
 }
 
-/* The window is 400x280 so the expanded panel fits INSIDE it. The pet keeps
-   its own 160x160 box in the bottom-right corner, which is where a 160x160
-   window used to put it. */
+/* The window is 480x280 so the expanded panel fits INSIDE it. The pet keeps
+   its own 120x120 box in the bottom-right corner. The window was 400 until the
+   panel's columns started arriving truncated; the extra width is transparent. */
 #stage {
   position: relative;
-  width: 400px;
+  width: 480px;
   height: 280px;
 }
 
@@ -40,7 +40,7 @@ html, body {
 #stage.mirrored #bubble.chat,
 #stage.mirrored #bubble.quota { right: auto; left: 14px; text-align: left; }
 #stage.mirrored #bubble:not(.chat):not(.quota) {
-  left: 80px; right: auto; transform: translateX(-50%);
+  left: 80px; right: auto; transform: translateX(-50%);   /* 20 + 120/2 */
 }
 
 #pet {
@@ -191,6 +191,48 @@ html, body {
 #pet[data-mood="busy"][data-motion="awaiting"] .handR { animation-duration: 1.1s; }
 #pet[data-mood="busy"][data-motion="awaiting"] .head { transform: translate(2px, 0) rotate(2deg); }
 
+/* compacting — tidying up. The session is working, but on its own context
+   rather than on anything the user asked for, so the hands sweep side to side
+   instead of typing and the screen shuffles rather than prints. Claude Code
+   sends no event when this finishes, so the phase is cleared by the first event
+   that can only happen afterwards — never by a timer. */
+@keyframes tidy {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-2.5px); }
+  75%      { transform: translateX(2.5px); }
+}
+@keyframes shuffle {
+  0%, 100% { opacity: 0.3; transform: translateX(0); }
+  50%      { opacity: 0.9; transform: translateX(2px); }
+}
+#pet[data-phase="compacting"] .handL,
+#pet[data-phase="compacting"] .handR { animation: tidy 1.3s ease-in-out infinite; }
+#pet[data-phase="compacting"] .handR { animation-delay: 0.65s; }
+#pet[data-phase="compacting"] .code rect { animation: shuffle 1.6s ease-in-out infinite; }
+#pet[data-phase="compacting"] .code rect:nth-child(2) { animation-delay: 0.2s; }
+#pet[data-phase="compacting"] .code rect:nth-child(3) { animation-delay: 0.4s; }
+#pet[data-phase="compacting"] .bulb { fill: #8fc2b8; }
+
+/* A brief reaction laid over whatever the pet is doing.
+
+   done — a nod and one green blink. Deliberately small: a turn ending means
+   Claude stopped talking, NOT that the work was right, and a triumphant
+   animation would be claiming the second thing.
+
+   trouble — the screen warns and the lamp flickers amber, but the figure keeps
+   working, because a failed tool call usually is not a failed task. */
+@keyframes nod {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  40%      { transform: translateY(1.5px) rotate(2deg); }
+}
+#pet[data-flash="done"] .head { animation: nod 0.5s ease-in-out 2; }
+#pet[data-flash="done"] .bulb { fill: #67a498; animation: pulse 0.5s ease-in-out 2; }
+#pet[data-flash="trouble"] .warn { display: block; }
+#pet[data-flash="trouble"] .warn-tri  { stroke: #e0a63c; }
+#pet[data-flash="trouble"] .warn-mark { fill: #e0a63c; }
+#pet[data-flash="trouble"] .code { display: none; }
+#pet[data-flash="trouble"] .bulb { animation: pulse 0.45s steps(2, end) infinite; }
+
 /* idle: asleep at the desk — screen dark, light off, z's rising. */
 @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
 @keyframes puff {
@@ -240,7 +282,7 @@ html, body {
 #bubble {
   position: absolute;
   bottom: 138px;
-  left: 320px;
+  left: 400px;
   transform: translateX(-50%);
   max-width: 150px;
   padding: 5px 9px;
@@ -261,13 +303,13 @@ html, body {
   background: rgba(35, 32, 29, 0.88);
   font-weight: 400;
   white-space: normal;
-  /* Right-anchored, like the quota readout. Centred on the pet at x=320 in a
-     400pt window, a bubble cannot exceed 160pt without being clipped — which is
+  /* Right-anchored, like the quota readout. Centred on the pet at x=400 in a
+     480pt window, a bubble cannot exceed 160pt without being clipped — which is
      what wrapped a session name onto four lines. */
   left: auto;
   right: 14px;
   transform: none;
-  max-width: 232px;
+  max-width: 300px;
   text-align: left;
   line-height: 1.45;
 }
@@ -326,7 +368,7 @@ html, body {
   position: absolute;
   left: 2px;
   bottom: 6px;
-  width: 232px;
+  width: 310px;
   max-height: 260px;
   overflow-y: auto;
   /* Never horizontally. A row that grows past the panel used to raise a

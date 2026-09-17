@@ -26,6 +26,9 @@ enum SettingsPatch {
     static let events = [
         "SessionStart", "UserPromptSubmit", "PreToolUse",
         "PostToolUse", "Notification", "PermissionRequest", "Stop", "SessionEnd",
+        // Context compaction takes a while and produces no other events, so
+        // without this the session looks like it stopped doing anything.
+        "PreCompact",
     ]
 
     /// Returns a process exit code: 0 on success, 1 on failure.

@@ -460,6 +460,35 @@ window.setMirrored = function (on) {
  *
  * @param {boolean} on
  */
+let flashTimer = null;
+
+/**
+ * A brief reaction that is not a state.
+ *
+ * A finished turn and a failed tool are moments, not conditions — the session
+ * is not "in" them, it just passed through one. Holding a mood for them would
+ * mean either lying about the current state or flickering back a second later,
+ * so they get a short overlay on top of whatever the pet is actually doing.
+ *
+ * @param {"done"|"trouble"} kind
+ */
+window.flash = function (kind) {
+  if (flashTimer) clearTimeout(flashTimer);
+  pet.dataset.flash = kind;
+  flashTimer = setTimeout(function () {
+    delete pet.dataset.flash;
+    flashTimer = null;
+  }, kind === "trouble" ? 2600 : 1600);
+};
+
+/**
+ * A phase the session is in the middle of, currently only "compacting".
+ * @param {string} phase "" to clear
+ */
+window.setPhase = function (phase) {
+  if (phase) { pet.dataset.phase = phase; } else { delete pet.dataset.phase; }
+};
+
 window.setCalm = function (on) {
   document.getElementById("stage").classList.toggle("calm", !!on);
 };

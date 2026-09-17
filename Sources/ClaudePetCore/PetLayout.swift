@@ -14,15 +14,20 @@ public enum PetLayout {
     /// The window is big enough to hold the pet AND the expanded panel beside
     /// it. The panel used to be laid out at `right: 100%` of a 160pt-wide body,
     /// which put it entirely off-window at negative x.
-    public static let windowSize = CGSize(width: 400, height: 280)
+    ///
+    /// Widened from 400 to 480 because at a 232pt panel every interesting column
+    /// was arriving truncated — `20260915-n… thin… 9m` says neither which
+    /// session nor what it is doing. The window is mostly transparent, so the
+    /// extra 80pt costs nothing on screen; only the panel grows.
+    public static let windowSize = CGSize(width: 480, height: 280)
 
     /// The `#pet` element's own box: 120x120 at right:20 bottom:20 of the
-    /// 400x280 stage. Its centre is the SVG's viewBox origin, so a viewBox
+    /// 480x280 stage. Its centre is the SVG's viewBox origin, so a viewBox
     /// coordinate (vx, vy) lands at (petCenter.x + vx, petCenter.y + vy).
-    public static let petBox = CGRect(x: 260, y: 140, width: 120, height: 120)
+    public static let petBox = CGRect(x: 340, y: 140, width: 120, height: 120)
 
     /// Centre of petBox, and the origin of the SVG viewBox.
-    public static let petCenter = CGPoint(x: 320, y: 200)
+    public static let petCenter = CGPoint(x: 400, y: 200)
 
     /// The robot-at-a-desk drawing is a wide, squat rectangle, so the hit region
     /// is two rectangles rather than the disc the star used to need.
@@ -32,14 +37,14 @@ public enum PetLayout {
     /// -42...26). The upper margin deliberately covers the `urgent` jolt, which
     /// lifts the figure 5pt and tilts it 3° — folding that into a fixed box is
     /// what lets the hit region stop tracking the animation state at all.
-    public static let bodyBox = CGRect(x: 274, y: 158, width: 92, height: 68)
+    public static let bodyBox = CGRect(x: 354, y: 158, width: 92, height: 68)
 
     /// The bulb on top of the antenna clears the head entirely, so the body box
     /// cannot reach it. Without its own box the brightest, most clickable-looking
     /// part of the pet would pass clicks straight through to whatever is behind
     /// it. Covers viewBox x -15...-3, y -51...-39: the bulb (centre -8.7,-40.5,
     /// r 4.6) plus the same 5pt of urgent lift.
-    public static let antennaBox = CGRect(x: 305, y: 149, width: 12, height: 12)
+    public static let antennaBox = CGRect(x: 385, y: 149, width: 12, height: 12)
 
     /// Where `#pet` sits once the layout flips: same size, other side.
     public static var mirroredPetBox: CGRect {
@@ -118,7 +123,7 @@ public enum PetLayout {
     /// Is this point over something the user can actually see?
     ///
     /// Used to drive `ignoresMouseEvents`, so that the transparent majority of
-    /// a 400x280 window passes clicks through to whatever is underneath
+    /// a 480x280 window passes clicks through to whatever is underneath
     /// (design doc section 4) instead of eating them.
     ///
     /// The regions are rectangles, not the figure's outline: sampling real pixel

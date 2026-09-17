@@ -171,6 +171,14 @@ struct Runner {
                     PetLayout.mirrored(box).minX - PetLayout.mirroredPetBox.minX
                         == box.minX - PetLayout.petBox.minX)
         }
+        // The panel and the pet must not overlap at either width — this is what
+        // stops a wider panel from creeping under the figure.
+        let panelRight: CGFloat = 2 + 310
+        t.check("the panel stops short of the pet",
+                panelRight < PetLayout.petBox.minX)
+        t.check("and the mirrored panel does too",
+                PetLayout.windowSize.width - panelRight > PetLayout.mirroredPetBox.maxX)
+
         t.check("the mirrored boxes stay inside the mirrored pet",
                 PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.bodyBox))
                 && PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.antennaBox)))
