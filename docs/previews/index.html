@@ -1,0 +1,36 @@
+<!doctype html><meta charset="utf-8">
+<title>Claude Pet — the four states</title>
+<!-- This page frames the REAL Resources/pet/index.html four times rather than
+     keeping its own copy of the SVG and CSS. The copy it replaced had drifted a
+     whole redesign behind the app. Needs a server (iframes cannot script each
+     other over file://):
+
+         python3 -m http.server 8777       # from the repo root
+         open http://127.0.0.1:8777/docs/previews/
+-->
+<style>
+ body{margin:0;background:#efece6;display:grid;grid-template-columns:repeat(2,400px);
+      justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#5a534b}
+ h1{grid-column:1/-1;font-size:15px;font-weight:600;margin:16px 0 0;text-align:center}
+ iframe{width:400px;height:280px;border:0;display:block}
+ figure{margin:0}
+ figcaption{text-align:center;padding-bottom:14px;color:#786e63}
+</style>
+<h1>Claude Pet — the four states</h1>
+<figure><iframe src="../../Resources/pet/index.html" data-m="busy"></iframe>
+  <figcaption><b>busy</b> — heads down, code scrolling</figcaption></figure>
+<figure><iframe src="../../Resources/pet/index.html" data-m="waiting"></iframe>
+  <figcaption><b>waiting</b> — turns around and waves, screen warns</figcaption></figure>
+<figure><iframe src="../../Resources/pet/index.html" data-m="urgent"></iframe>
+  <figcaption><b>urgent</b> — both arms up, jolting</figcaption></figure>
+<figure><iframe src="../../Resources/pet/index.html" data-m="idle"></iframe>
+  <figcaption><b>idle</b> — asleep, z's rising</figcaption></figure>
+<script>
+document.querySelectorAll("iframe").forEach(f => {
+  f.addEventListener("load", () => {
+    const m = f.dataset.m;
+    f.contentWindow.setMood(m, m === "urgent" ? "api-server" : null,
+                               m === "urgent" ? "rm -rf build/" : "");
+  });
+});
+</script>

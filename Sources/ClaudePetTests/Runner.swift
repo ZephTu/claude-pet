@@ -139,24 +139,24 @@ struct Runner {
             return opaque(p.x, p.y)
         }
 
-        t.check("the robot's torso is opaque", opaqueAt(-14, 5))
-        t.check("the monitor is opaque", opaqueAt(25, -14))
+        t.check("the robot's torso is opaque", opaqueAt(-9, 6))
+        t.check("the monitor is opaque", opaqueAt(30, 0))
         // The desk runs the full width of the drawing; the old circular region
         // left both of its ends unclickable.
-        t.check("the desk's left end is opaque", opaqueAt(-44, 20))
-        t.check("the desk's right end is opaque", opaqueAt(44, 20))
+        t.check("the desk's left end is opaque", opaqueAt(-44, 21))
+        t.check("the desk's right end is opaque", opaqueAt(44, 21))
         // The bulb sits above the body box and is the brightest thing on screen;
         // without antennaBox it would look clickable and pass clicks through.
-        t.check("the antenna bulb is opaque", opaqueAt(-14, -44))
-        t.check("the top of the antenna is opaque", opaqueAt(-14, -51))
-        t.check("above the antenna is transparent", !opaqueAt(-14, -58))
+        t.check("the antenna bulb is opaque", opaqueAt(-8.7, -40.5))
+        t.check("the top of the antenna is opaque", opaqueAt(-9, -49))
+        t.check("above the antenna is transparent", !opaqueAt(-9, -56))
         // urgent lifts the figure 5pt; the head must stay reachable mid-jolt.
-        t.check("the robot's head is opaque at rest", opaqueAt(-14, -34))
+        t.check("the robot's head is opaque at rest", opaqueAt(-9, -18))
         t.check("the robot's head is still opaque lifted 5pt by the urgent jolt",
-                opaqueAt(-14, -39))
+                opaqueAt(-9, -23))
         // Most of the window is transparent and must pass clicks through to whatever is under it
-        t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 20))
-        t.check("beyond the desk's right end is transparent", !opaqueAt(54, 20))
+        t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 21))
+        t.check("beyond the desk's right end is transparent", !opaqueAt(54, 21))
         t.check("below the desk is transparent", !opaqueAt(0, 40))
         t.check("the window's far corner is transparent", !opaque(10, 10))
         t.check("the collapsed panel's area is transparent", !opaque(100, 250))

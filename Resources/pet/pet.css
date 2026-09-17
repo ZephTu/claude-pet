@@ -35,22 +35,24 @@ html, body {
    Anything that moves the figure outside those rectangles becomes unclickable,
    so the `urgent` lift and tilt below are sized to stay inside them. */
 
-.desk      { fill: #6b5b4e; }
-.mon-body, .mon-neck, .mon-foot { fill: #4a4340; }
-.mon-screen{ fill: #1d2b2a; }
-.code rect { fill: #6fae9b; }
-.kbd       { fill: #857567; }
-.torso     { fill: #d97757; }
-.arm       { fill: none; stroke: #d97757; stroke-width: 5.5; stroke-linecap: round; }
-.hand      { fill: #aab0b8; }
-.skull, .ear, .antenna { fill: #c6cad0; }
-.plate     { fill: #1d2b2a; }
-.bulb      { fill: #6fae9b; }
-/* A plain chest light. Swap this for a <text> element if you want initials or
-   a logo there instead. */
-.badge { fill: #fdf3ec; opacity: 0.8; }
-.eye    { fill: #6fae9b; transform-box: fill-box; transform-origin: center; }
-.mouth  { fill: none; stroke: #6fae9b; stroke-width: 1.8; stroke-linecap: round; }
+.desk      { fill: #7c6c5f; }
+.mon-body, .mon-neck, .mon-foot { fill: #7c6c5f; }
+.mon-screen{ fill: #202d2c; }
+.code rect { fill: #67a498; }
+.kbd       { fill: #857c74; }
+.torso     { fill: #e27d53; }
+.arm       { fill: none; stroke: #e27d53; stroke-width: 5.8; stroke-linecap: round; }
+.hand      { fill: #c6c8ce; }
+.skull, .antenna { fill: #c6c8ce; }
+/* The ears are a shade darker so they separate from the skull at 120px. */
+.ear       { fill: #a5abb2; }
+.plate     { fill: #1f2a29; }
+.bulb      { fill: #67a498; }
+/* The four-pointed spark on the chest. Swap this path for a <text> element if
+   you want initials or a logo there instead. */
+.badge { fill: #8fc2b8; }
+.eye    { fill: #67a498; transform-box: fill-box; transform-origin: center; }
+.mouth  { fill: none; stroke: #67a498; stroke-width: 2.2; stroke-linecap: round; }
 .face   { transform-box: fill-box; transform-origin: center; }
 .person { transform-box: fill-box; transform-origin: 50% 90%; }
 .head   { transform-box: fill-box; transform-origin: 50% 90%; }
@@ -108,6 +110,21 @@ html, body {
 #pet[data-mood="busy"] .face      { transform: translateX(3px); }
 #pet[data-mood="busy"] .bulb      { animation: pulse 1.1s ease-in-out infinite; }
 
+/* The monitor shows one of two things, never both: what it is writing, or
+   what it is stuck on. Same warning ramp as the antenna lamp, because it is
+   answering the same question in a place the eye is already pointed. */
+.warn { display: none; }
+.warn-tri  { fill: none; stroke: #e0a63c; stroke-width: 1.7;
+             stroke-linejoin: round; stroke-linecap: round; }
+.warn-mark { fill: #e0a63c; }
+#pet[data-mood="waiting"] .code,
+#pet[data-mood="urgent"]  .code { display: none; }
+#pet[data-mood="waiting"] .warn,
+#pet[data-mood="urgent"]  .warn { display: block; }
+#pet[data-mood="urgent"] .warn-tri  { stroke: #e0533c; }
+#pet[data-mood="urgent"] .warn-mark { fill: #e0533c; }
+#pet[data-mood="urgent"] .warn      { animation: flicker 0.44s steps(2, end) infinite; }
+
 /* idle: asleep at the desk — screen dark, light off, z's rising. */
 @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
 @keyframes puff {
@@ -118,8 +135,8 @@ html, body {
 #pet[data-mood="idle"] .person   { animation: breathe 4.2s ease-in-out infinite; }
 #pet[data-mood="idle"] .head     { transform: translate(1px, 2.5px) rotate(-4deg); }
 #pet[data-mood="idle"] .code     { display: none; }
-#pet[data-mood="idle"] .eye      { height: 1.6px; y: -26.4px; animation: none; }
-#pet[data-mood="idle"] .mouth    { d: path("M-18,-19 L-10,-19"); }
+#pet[data-mood="idle"] .eye      { height: 1.6px; y: -17px; animation: none; }
+#pet[data-mood="idle"] .mouth    { d: path("M-10.6,-10 L-7,-10"); }
 #pet[data-mood="idle"] .bulb     { fill: #5c6660; }
 #pet[data-mood="idle"] .eye,
 #pet[data-mood="idle"] .mouth    { opacity: 0.55; }
@@ -131,7 +148,7 @@ html, body {
 @keyframes wave { 0%, 100% { transform: rotate(-11deg); } 50% { transform: rotate(14deg); } }
 .wave-arm { transform-box: fill-box; transform-origin: 20% 92%; }
 #pet[data-mood="waiting"] .wave-arm { animation: wave 0.62s ease-in-out infinite; }
-#pet[data-mood="waiting"] .eye      { height: 6.2px; y: -29.2px; }
+#pet[data-mood="waiting"] .eye      { height: 7.4px; y: -19.9px; }
 #pet[data-mood="waiting"] .bulb     { fill: #e0a63c; animation: pulse 0.9s ease-in-out infinite; }
 
 /* urgent: both arms up, red, whole body jolting. The 5pt lift and 3° tilt fit
@@ -145,8 +162,8 @@ html, body {
 #pet[data-mood="urgent"] .person { animation: jolt 0.58s ease-in-out infinite; }
 #pet[data-mood="urgent"] .torso  { fill: #c8553d; }
 #pet[data-mood="urgent"] .arm    { stroke: #c8553d; }
-#pet[data-mood="urgent"] .mouth  { d: path("M-18,-20 Q-14,-14 -10,-20"); stroke: #ef7361; }
-#pet[data-mood="urgent"] .eye    { height: 6.6px; y: -29.4px; fill: #ef7361; }
+#pet[data-mood="urgent"] .mouth  { d: path("M-11.6,-11.4 Q-8.8,-6.6 -6,-11.4"); stroke: #ef7361; }
+#pet[data-mood="urgent"] .eye    { height: 7.6px; y: -20px; fill: #ef7361; }
 #pet[data-mood="urgent"] .bulb   { fill: #e0533c; animation: pulse 0.3s steps(2, end) infinite; }
 
 /* Sits above the pet, centred on it, and grows UPWARD.

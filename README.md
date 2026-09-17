@@ -19,7 +19,7 @@ The bulb on the antenna is the part you can read without focusing on it:
 | Lamp | Meaning | What it does |
 | --- | --- | --- |
 | 🟢 slow blink | a session is working | heads down, typing, code scrolling on its monitor |
-| 🟡 pulse | a session needs your approval | stops typing, turns around, waves at you |
+| 🟡 pulse | a session needs your approval | stops typing, turns around, waves — and its monitor switches to a warning |
 | 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project **and the command it is blocked on** |
 | ⚫ off | everything is done | asleep at the desk with z's drifting up |
 
@@ -100,7 +100,9 @@ swift run ClaudePetTests     # unit tests — not `swift test`, see below
 
 Tests run through a small hand-written harness as an executable target rather than XCTest: with only the Command Line Tools installed (no full Xcode), **neither XCTest nor swift-testing is available**, so `swift test` cannot run at all.
 
-Open `docs/previews/coder-pet.html` in a browser to see all four states animating.
+To watch all four states animate, serve the repo (`python3 -m http.server 8777`) and open
+`http://127.0.0.1:8777/docs/previews/`. That page frames the real `Resources/pet/index.html`
+rather than keeping a copy, so it cannot fall behind the app.
 
 The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is. **It is written in Chinese** — the code, comments and this README are English, but that document has not been translated.
 

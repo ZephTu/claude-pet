@@ -76,7 +76,9 @@ swift run ClaudePetTests     # 单元测试（不是 swift test，本机没装 X
 ./scripts/build-app.sh       # 只打包 ClaudePet.app，不安装
 ```
 
-形象预览（四个状态的动画，浏览器里直接看）：`docs/previews/coder-pet.html`
+想看四个状态动起来：在仓库根目录跑 `python3 -m http.server 8777`，然后开
+`http://127.0.0.1:8777/docs/previews/`。这个页面是直接把真的 `Resources/pet/index.html`
+嵌四遍，不另存一份，所以不会跟代码脱节。
 
 设计文档在 `docs/superpowers/specs/`，讲清楚了架构，以及每个地方为什么是现在这样。
 

@@ -28,16 +28,18 @@ public enum PetLayout {
     /// is two rectangles rather than the disc the star used to need.
     ///
     /// `bodyBox` spans the desk's full width (viewBox x -46...46) and runs from
-    /// just above the robot's head down past the desk's lower edge (viewBox y
-    /// -43...30). The upper margin deliberately covers the `urgent` jolt, which
+    /// just above the antenna's stalk down to the desk's lower edge (viewBox y
+    /// -42...26). The upper margin deliberately covers the `urgent` jolt, which
     /// lifts the figure 5pt and tilts it 3° — folding that into a fixed box is
     /// what lets the hit region stop tracking the animation state at all.
-    public static let bodyBox = CGRect(x: 270, y: 157, width: 100, height: 73)
+    public static let bodyBox = CGRect(x: 274, y: 158, width: 92, height: 68)
 
-    /// The antenna and its status bulb stick up well clear of the head. Without
-    /// their own box the brightest, most clickable-looking part of the pet would
-    /// pass clicks straight through to whatever is behind it.
-    public static let antennaBox = CGRect(x: 299, y: 146, width: 16, height: 16)
+    /// The bulb on top of the antenna clears the head entirely, so the body box
+    /// cannot reach it. Without its own box the brightest, most clickable-looking
+    /// part of the pet would pass clicks straight through to whatever is behind
+    /// it. Covers viewBox x -15...-3, y -51...-39: the bulb (centre -8.7,-40.5,
+    /// r 4.6) plus the same 5pt of urgent lift.
+    public static let antennaBox = CGRect(x: 305, y: 149, width: 12, height: 12)
 
     /// Is this point over something the user can actually see?
     ///
