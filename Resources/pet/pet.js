@@ -189,7 +189,10 @@ function whatText(s) {
   // rather than becoming "never".
   if (s.snoozedFor) return "later — " + s.snoozedFor;
   if (s.state === "waiting") return "needs you";
-  if (s.state === "busy") return s.tool || "working";
+  // `activity` comes from the calls actually in flight. `tool` is only the name
+  // of the last one seen, which goes on reading as "running" after it returned.
+  if (s.activity) return s.activity;
+  if (s.state === "busy") return "thinking";
   // An idle session carrying a notification message is one that finished
   // talking and is waiting on a reply — worth distinguishing from a session
   // that is merely sitting there.
@@ -208,13 +211,19 @@ function sessionRowHTML(s) {
   return (
     '<div class="row' + jumpable + napped + '"><div class="line">' +
     '<span class="dot ' + s.state + '"></span>' +
+    (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
-    '<span class="age">' + ageText(s.waitedSeconds) + "</span>" +
+    // While a tool is running, the number that answers "is this stuck?" is how
+    // long THAT call has been going — not how long the turn has. The turn's own
+    // age comes back the moment nothing is running.
+    '<span class="age">' + ageText(s.toolSeconds != null ? s.toolSeconds : s.waitedSeconds)
+    + "</span>" +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
-    '<div class="detail"></div></div>'
+    '<div class="detail"><span class="branch"></span><span class="note"></span></div>'
+    + "</div>"
   );
 }
 
@@ -309,16 +318,23 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   const rows = panel.querySelectorAll(".row:not(.done)");
   needs.concat(others).forEach(function (s, i) {
     rows[i].querySelector(".proj").textContent = s.project;
+    // The branch lives on the second line, not the first. On one line it
+    // competed with the activity column and won, so "Bash npm test 23s" got
+    // squeezed down to "E 47s" — the branch is a disambiguator, and it must
+    // never cost the row the thing it is actually reporting.
+    rows[i].querySelector(".branch").textContent = s.branch || "";
     rows[i].querySelector(".what").textContent = whatText(s);
     // A session sharing its project with another shows its name here instead of
     // the notification text: the first column cannot tell them apart.
-    const second = rows[i].querySelector(".detail");
+    const note = rows[i].querySelector(".note");
     if (s.nameInline && s.title) {
-      second.textContent = s.title;
-      second.classList.add("name");
+      note.textContent = s.title;
+      note.classList.add("name");
     } else {
-      second.textContent = s.detail || "";
+      note.textContent = s.detail || "";
     }
+    rows[i].querySelector(".detail").classList
+      .toggle("blank", !s.branch && !note.textContent);
     rows[i].dataset.sessionId = s.sessionId || "";
     if (s.title) rows[i].dataset.title = s.title;
     if (s.termHandle) {
@@ -436,6 +452,20 @@ function idsOf(row) {
   if (!row || !row.dataset.eventIds) return [];
   return row.dataset.eventIds.split(" ").filter(Boolean);
 }
+
+/**
+ * The session id of the row under this point, for the row context menu.
+ * Empty string for the pet itself and for empty space.
+ *
+ * @param {number} x
+ * @param {number} y
+ * @returns {string}
+ */
+window.rowSessionId = function (x, y) {
+  const el = document.elementFromPoint(x, y);
+  const row = el && el.closest ? el.closest(".row:not(.done)") : null;
+  return (row && row.dataset.sessionId) || "";
+};
 
 let hoverRow = null;
 

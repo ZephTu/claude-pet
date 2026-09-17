@@ -25,6 +25,8 @@ final class WebBridge {
     /// The user wants to be reminded about this session later; the point is
     /// where to put the menu.
     var onSnooze: ((String, CGPoint) -> Void)?
+    /// Right-click landed on a session row rather than on the pet.
+    var onRowMenu: ((String, CGPoint) -> Void)?
 
     private weak var webView: WKWebView?
     private var isReady = false
@@ -147,6 +149,18 @@ final class WebBridge {
         evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)));")
     }
 
+    /// Routes a right click: a session row gets its own menu, anything else
+    /// falls through to the pet's global menu.
+    func handleRightClick(at point: CGPoint, fallback: @escaping @MainActor () -> Void) {
+        guard isReady, let webView else { return fallback() }
+        webView.evaluateJavaScript("window.rowSessionId(\(point.x), \(point.y));") { result, _ in
+            MainActor.assumeIsolated {
+                let id = result as? String ?? ""
+                if id.isEmpty { fallback() } else { self.onRowMenu?(id, point) }
+            }
+        }
+    }
+
     /// Asks the page for the session name under this point, then hands it back.
     func rowTitle(at point: CGPoint, completion: @escaping @MainActor (String) -> Void) {
         guard isReady, let webView else { return completion("") }
@@ -209,14 +223,20 @@ final class WebBridge {
                       completions: [CompletionEvent] = [],
                       titlesByHandle: [String: String] = [:],
                       droppedNotice: Int = 0,
-                      snoozed: [String: Snooze.Mark] = [:]) {
+                      snoozed: [String: Snooze.Mark] = [:],
+                      prefs: [String: SessionLabels.Prefs] = [:],
+                      branches: [String: String] = [:]) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
+        // Pinned rows rise within their group, never above a blocked session:
+        // pinning says "I care about this one", not "hide the urgent one".
+        let sessions = SessionLabels.ordered(sessions, prefs: prefs)
         let items = sessions.map { s -> [String: Any] in
+            let title = s.terminal.flatMap { titlesByHandle[$0.handle] } ?? ""
             var item: [String: Any] = [
                 "sessionId": s.sessionId,
-                "project": s.project,
+                "project": SessionLabels.displayName(for: s, prefs: prefs, title: title),
                 "state": s.state.rawValue,
                 "tool": s.tool,
                 // Notification message. Design doc section 2 puts it in the
@@ -228,6 +248,18 @@ final class WebBridge {
             // "remind me later" never turns into "forget about it".
             let left = Snooze.remaining(s, marks: snoozed, now: now)
             if !left.isEmpty { item["snoozedFor"] = left }
+
+            // What it is doing RIGHT NOW, from the calls that have started and
+            // not reported back — rather than from the name of the last tool
+            // seen, which kept reading as "running" long after it returned.
+            if s.running.count > 1 {
+                item["activity"] = ActivitySummary.concurrent(s.running.count)
+            } else if let only = s.running.first {
+                item["activity"] = ActivitySummary.phrase(toolName: only.tool, target: only.target)
+                if let began = only.since {
+                    item["toolSeconds"] = Int(max(0, now.timeIntervalSince(began)))
+                }
+            }
             // Only sessions we can actually jump to carry these, and only those
             // rows render as clickable.
             if let t = s.terminal, TerminalTarget.canJump(kind: t.kind) {

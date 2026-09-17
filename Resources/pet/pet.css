@@ -382,20 +382,35 @@ html, body {
 .dot.busy    { background: #d97757; }
 .dot.idle    { background: #6b6560; }
 .proj { font-weight: 600; flex: none; }
+/* A pinned row is marked, not restyled: it is still an ordinary session, it is
+   just one the user asked to keep near the top. */
+.pin { flex: none; color: #e0a63c; font-size: 7px; }
+/* The branch only appears when it is not the default one, so it is allowed to
+   be quiet — it is a disambiguator, not a headline. */
+.branch {
+  flex: none; color: #857c74; font-size: 9.5px;
+  max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.branch:not(:empty)::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
+.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .what { color: #b5aea8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .age  { margin-left: auto; color: #8a837d; flex: none; }
 /* Notification message — design doc section 2 keeps it out of the bubble and
    shows it only here. */
 .detail {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
   color: #8a837d;
   padding-left: 12px;
   font-size: 10px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.detail:empty { display: none; }
+/* :empty cannot do this any more — the line always holds its two spans even
+   when both are blank, so the page marks it instead. */
+.detail.blank { display: none; }
 /* A session name is identity, not chatter, so it reads a shade louder than the
    notification text it replaces. */
-.detail.name { color: #a99f96; }
+.note.name { color: #a99f96; }
 .empty { color: #8a837d; padding: 4px 2px; }

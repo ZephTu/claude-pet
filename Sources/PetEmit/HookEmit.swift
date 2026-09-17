@@ -108,13 +108,26 @@ enum HookEmit {
         let turn = turnNumber(for: event, at: path)
         document["turn"] = turn
 
+        // Claude Code stamps every event of one turn with the same prompt_id.
+        // That is the authoritative turn identifier and it is preferred over the
+        // counter above, which stays only as a fallback for builds that do not
+        // send one.
+        let promptId = (hook["prompt_id"] as? String) ?? ""
+        if !promptId.isEmpty { document["promptId"] = promptId }
+
+        // Which tool calls are in flight, keyed by Claude Code's own
+        // tool_use_id. Without this a PostToolUse left the finished tool showing
+        // as "running", and two parallel calls showed as one.
+        let running = runningTools(event: event, hook: hook, at: path, now: now)
+        document["running"] = running
+
         write(document, to: path)
 
         // Stop is Claude Code telling us a turn ended — a confirmed event, not
         // something inferred from a session going quiet or disappearing.
         if event == "Stop" {
             recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
-                             turnKey: String(turn), at: now)
+                             turnKey: promptId.isEmpty ? String(turn) : promptId, at: now)
         }
     }
 
@@ -145,6 +158,46 @@ enum HookEmit {
             let previous = old["lastPromptAt"] as? String
         else { return "" }
         return previous
+    }
+
+    /// The tool calls currently in flight for this session.
+    ///
+    /// PreToolUse adds one, PostToolUse removes the matching one — matched by
+    /// `tool_use_id`, which Claude Code puts on both. Matching by tool NAME
+    /// would be wrong the moment two Bash calls run at once.
+    ///
+    /// Anything that ends a turn clears the list outright: a tool whose
+    /// PostToolUse never arrived (the session was interrupted, the process was
+    /// killed) must not sit there claiming to still be running.
+    private static func runningTools(event: String, hook: [String: Any],
+                                     at path: URL, now: String) -> [[String: Any]] {
+        if event == "Stop" || event == "UserPromptSubmit" { return [] }
+
+        var running = (readDocument(at: path)?["running"] as? [[String: Any]]) ?? []
+        let id = (hook["tool_use_id"] as? String) ?? ""
+        let tool = (hook["tool_name"] as? String) ?? ""
+
+        switch event {
+        case "PreToolUse":
+            guard !tool.isEmpty else { break }
+            // An id-less build would otherwise accumulate duplicates forever.
+            let key = id.isEmpty ? tool : id
+            running.removeAll { ($0["id"] as? String) == key }
+            running.append([
+                "id": key,
+                "tool": tool,
+                "target": ActivitySummary.target(toolName: tool,
+                                                 toolInput: hook["tool_input"] as? [String: Any] ?? [:]),
+                "since": now,
+            ])
+        case "PostToolUse":
+            let key = id.isEmpty ? tool : id
+            running.removeAll { ($0["id"] as? String) == key }
+        default:
+            break
+        }
+        // A runaway list is a bug somewhere else; cap it rather than write it.
+        return Array(running.suffix(12))
     }
 
     /// This session's turn counter: bumped by UserPromptSubmit, carried by

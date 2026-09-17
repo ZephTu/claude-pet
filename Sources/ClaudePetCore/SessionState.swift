@@ -28,6 +28,36 @@ public struct TerminalRef: Sendable, Equatable, Decodable {
     }
 }
 
+/// One tool call that has started and not yet reported back.
+///
+/// Keyed by Claude Code's own `tool_use_id`, which it puts on both PreToolUse
+/// and PostToolUse. Matching by tool NAME instead would collapse two parallel
+/// Bash calls into one and leave a finished call showing as running.
+public struct RunningTool: Sendable, Equatable, Decodable {
+    public let id: String
+    public let tool: String
+    /// A short, deliberately incomplete description — see ActivitySummary.
+    public let target: String
+    public let since: Date?
+
+    public init(id: String, tool: String, target: String, since: Date? = nil) {
+        self.id = id
+        self.tool = tool
+        self.target = target
+        self.since = since
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, tool, target, since }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decodeIfPresent(String.self, forKey: .id)) as? String ?? ""
+        tool = (try? c.decodeIfPresent(String.self, forKey: .tool)) as? String ?? ""
+        target = (try? c.decodeIfPresent(String.self, forKey: .target)) as? String ?? ""
+        since = try? c.decodeIfPresent(Date.self, forKey: .since)
+    }
+}
+
 /// One session's state, mirrored from ~/.claude/pet/sessions/<sessionId>.json
 /// Decodable only: nothing in the project ever encodes one. A synthesised
 /// Encodable would not round-trip anyway — decode sets .iso8601 for dates and
@@ -57,6 +87,12 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// "rm -rf build/" or "Edit AppMain.swift". Empty when it is not waiting, or
     /// when the session predates PermissionRequest support.
     public let waitingOn: String
+    /// Tool calls in flight right now. Empty for state files written before this
+    /// existed, which read as "nothing known to be running" rather than as an
+    /// error.
+    public let running: [RunningTool]
+    /// Claude Code's own identifier for the current turn, when it sent one.
+    public let promptId: String
 
     public init(
         sessionId: String,
@@ -70,7 +106,9 @@ public struct SessionState: Sendable, Equatable, Decodable {
         terminal: TerminalRef? = nil,
         pid: Int32? = nil,
         lastPromptAt: Date? = nil,
-        waitingOn: String = ""
+        waitingOn: String = "",
+        running: [RunningTool] = [],
+        promptId: String = ""
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -84,11 +122,13 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.pid = pid
         self.lastPromptAt = lastPromptAt
         self.waitingOn = waitingOn
+        self.running = running
+        self.promptId = promptId
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
-        case terminal, pid, lastPromptAt, waitingOn
+        case terminal, pid, lastPromptAt, waitingOn, running, promptId
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -113,6 +153,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         pid = try? c.decodeIfPresent(Int32.self, forKey: .pid)
         lastPromptAt = try? c.decodeIfPresent(Date.self, forKey: .lastPromptAt)
         waitingOn = (try? c.decodeIfPresent(String.self, forKey: .waitingOn)) as? String ?? ""
+        running = (try? c.decodeIfPresent([RunningTool].self, forKey: .running)) as? [RunningTool] ?? []
+        promptId = (try? c.decodeIfPresent(String.self, forKey: .promptId)) as? String ?? ""
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

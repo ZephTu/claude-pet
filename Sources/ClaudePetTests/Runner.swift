@@ -893,6 +893,106 @@ struct Runner {
         t.check("a corrupt snooze file reads as nothing postponed",
                 Snooze.decode(Data("]]".utf8)).isEmpty)
 
+        // ---- ActivitySummary: what is running, without keeping secrets ----
+        t.check("a plain command keeps its first words",
+                ActivitySummary.safeCommand("npm test") == "npm test"
+                && ActivitySummary.safeCommand("git status") == "git status")
+        t.check("the program's path is reduced to its name",
+                ActivitySummary.safeCommand("/usr/local/bin/swift build") == "swift build")
+        // The rule that matters: this string is written to disk and kept for a
+        // day, so it stops at the first word that could be carrying a value.
+        t.check("a flag stops the summary before its value",
+                ActivitySummary.safeCommand("curl -H Authorization:Bearer_abc123 https://x")
+                    == "curl …")
+        t.check("an assignment stops it too",
+                ActivitySummary.safeCommand("env API_KEY=sk-live-9999 ./deploy") == "env …")
+        t.check("a quoted argument stops it",
+                ActivitySummary.safeCommand("psql -c \"select * from users\"") == "psql …")
+        t.check("a pipe stops it",
+                ActivitySummary.safeCommand("cat secrets.env | grep TOKEN")
+                    == "cat secrets.env …")
+        t.check("an empty command summarises to nothing",
+                ActivitySummary.safeCommand("   ").isEmpty)
+        // Not a denylist: a secret nobody thought to name is still withheld.
+        t.check("an unnamed secret is withheld as well",
+                !ActivitySummary.safeCommand("./upload --to s3 hunter2_xyz").contains("hunter2"))
+
+        t.check("a file tool names its file, not its path",
+                ActivitySummary.target(toolName: "Edit",
+                                       toolInput: ["file_path": "/a/b/PetLayout.swift"])
+                    == "PetLayout.swift")
+        t.check("a fetch names its host, not the query string",
+                ActivitySummary.target(toolName: "WebFetch",
+                                       toolInput: ["url": "https://api.example.com/x?token=abc"])
+                    == "api.example.com")
+        t.check("an unknown tool carries no argument at all",
+                ActivitySummary.target(toolName: "SomethingNew",
+                                       toolInput: ["secret": "x"]).isEmpty)
+        t.check("a tool with no target still names itself",
+                ActivitySummary.phrase(toolName: "Task", target: "") == "Task")
+        t.check("parallel calls are counted rather than listed",
+                ActivitySummary.concurrent(3) == "3 tools running"
+                && ActivitySummary.concurrent(1).isEmpty)
+
+        // ---- SessionLabels: naming and pinning, per session not per folder ----
+        let twinA = panelSess("t1", .idle, project: "daily_work",
+                              terminal: TerminalRef(kind: "orca", handle: "h1"))
+        let twinB = panelSess("t2", .idle, project: "daily_work",
+                              terminal: TerminalRef(kind: "orca", handle: "h2"))
+        var prefs: [String: SessionLabels.Prefs] = [
+            "t1": SessionLabels.Prefs(alias: "email reply", pinned: true),
+        ]
+        t.check("the user's own name wins over everything",
+                SessionLabels.displayName(for: twinA, prefs: prefs, title: "some tab")
+                    == "email reply")
+        t.check("the tab title is next",
+                SessionLabels.displayName(for: twinB, prefs: prefs, title: "regression triage")
+                    == "regression triage")
+        t.check("a useless tab title falls through to the project",
+                SessionLabels.displayName(for: twinB, prefs: prefs, title: "Terminal 1")
+                    == "daily_work")
+        // Two sessions in one folder are two things. Keying by path would give
+        // both of them the same name and pin both when one was pinned.
+        t.check("naming one twin does not name the other",
+                SessionLabels.displayName(for: twinB, prefs: prefs) == "daily_work")
+        t.check("pinning one twin does not pin the other",
+                SessionLabels.isPinned(twinA, prefs: prefs)
+                && !SessionLabels.isPinned(twinB, prefs: prefs))
+
+        t.check("a pinned session rises within its group",
+                SessionLabels.ordered([twinB, twinA], prefs: prefs).map(\.sessionId)
+                    == ["t1", "t2"])
+        t.check("order is otherwise left exactly as handed in",
+                SessionLabels.ordered([twinB, twinA], prefs: [:]).map(\.sessionId)
+                    == ["t2", "t1"])
+
+        t.check("an alias is kept to one line and a sane length",
+                SessionLabels.sanitiseAlias("two\nlines") == "two lines"
+                && SessionLabels.sanitiseAlias(String(repeating: "x", count: 99)).count
+                    == SessionLabels.maxAliasLength)
+        prefs["gone"] = SessionLabels.Prefs(alias: "x")
+        t.check("preferences for departed sessions are dropped",
+                SessionLabels.pruned(prefs, keeping: [twinA, twinB]).keys.sorted() == ["t1"])
+        t.check("preferences survive a round trip",
+                SessionLabels.decode(SessionLabels.encode(prefs))["t1"]?.alias == "email reply")
+        t.check("a corrupt preferences file reads as no preferences",
+                SessionLabels.decode(Data("nope".utf8)).isEmpty)
+
+        // Branch names come from reading .git/HEAD, not from running git: a hook
+        // fires on every event and cannot afford a subprocess.
+        t.check("a branch is read straight out of HEAD",
+                GitLabel.branch(fromHEAD: "ref: refs/heads/main\n") == "main")
+        t.check("a slashed branch keeps its whole name",
+                GitLabel.branch(fromHEAD: "ref: refs/heads/feat/claude-pet\n")
+                    == "feat/claude-pet")
+        t.check("a detached HEAD shows a short sha",
+                GitLabel.branch(fromHEAD: "9d6c0c8f1234567890abcdef\n") == "9d6c0c8")
+        t.check("garbage in HEAD yields no branch rather than nonsense",
+                GitLabel.branch(fromHEAD: "not a ref at all").isEmpty)
+        t.check("the default branch is not worth a badge",
+                !GitLabel.isWorthShowing("main") && !GitLabel.isWorthShowing("master")
+                && GitLabel.isWorthShowing("feat/x"))
+
         t.finish()
     }
 }

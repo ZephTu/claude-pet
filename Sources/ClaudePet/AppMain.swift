@@ -26,6 +26,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var menu: PetMenu?
     private var completions: CompletionStore?
     private var hotKey: HotKey?
+    private let git = GitCache()
+    private var labelPrefs: [String: SessionLabels.Prefs] = [:]
 
     private var petHome: URL {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet")
@@ -53,6 +55,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
         loadHidden()
         loadSnoozed()
+        loadLabels()
+        git.onUpdate = { [weak self] in self?.render() }
+        bridge.onRowMenu = { [weak self] id, point in self?.showRowMenu(sessionID: id, at: point) }
         // Off unless the user asked for it: claiming a system-wide chord
         // uninvited is taking something that was not offered.
         let hotKey = HotKey { [weak self] in self?.jumpToNextWaiting() }
@@ -79,11 +84,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
-            menu.show(at: point, in: view,
-                      paused: self.paused,
-                      launchesAtLogin: self.launchesAtLogin,
-                      mutedCount: self.hiddenMarks.count,
-                      shortcutOn: self.hotKey?.isRegistered ?? false)
+            // A row's own menu when the pointer is on one; the pet's menu
+            // otherwise. Asking the page is asynchronous, hence the closure.
+            bridge.handleRightClick(at: point) { [weak self] in
+                guard let self else { return }
+                menu.show(at: point, in: view,
+                          paused: self.paused,
+                          launchesAtLogin: self.launchesAtLogin,
+                          mutedCount: self.hiddenMarks.count,
+                          shortcutOn: self.hotKey?.isRegistered ?? false)
+            }
         }
         self.menu = menu
 
@@ -133,7 +143,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
-                             snoozed: snoozeMarks)
+                             snoozed: snoozeMarks, prefs: labelPrefs,
+                             branches: branches(for: state.sessions))
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
@@ -206,6 +217,128 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    // MARK: - Labels
+
+    private static let labelsKey = "sessionLabels"
+
+    private func loadLabels() {
+        labelPrefs = SessionLabels.decode(UserDefaults.standard.data(forKey: Self.labelsKey) ?? Data())
+    }
+
+    private func saveLabels() {
+        let data = SessionLabels.encode(labelPrefs)
+        guard !data.isEmpty else { return }
+        UserDefaults.standard.set(data, forKey: Self.labelsKey)
+    }
+
+    /// cwd → branch, for the directories currently on screen.
+    private func branches(for sessions: [SessionState]) -> [String: String] {
+        var out: [String: String] = [:]
+        for session in sessions where out[session.cwd] == nil {
+            let branch = git.branch(for: session.cwd)
+            if GitLabel.isWorthShowing(branch) { out[session.cwd] = branch }
+        }
+        return out
+    }
+
+    /// Right-clicking a row: the things that belong to THAT session rather than
+    /// to the pet as a whole.
+    private func showRowMenu(sessionID: String, at point: CGPoint) {
+        guard
+            !sessionID.isEmpty,
+            let view = panel?.contentView,
+            let session = latest.first(where: { $0.sessionId == sessionID })
+        else { return }
+
+        let menu = NSMenu()
+        let current = labelPrefs[sessionID] ?? SessionLabels.Prefs()
+
+        let rename = NSMenuItem(title: current.alias.isEmpty ? "Name This Session…" : "Rename…",
+                                action: #selector(renamePicked(_:)), keyEquivalent: "")
+        rename.target = self
+        rename.representedObject = sessionID
+        menu.addItem(rename)
+
+        if !current.alias.isEmpty {
+            let clear = NSMenuItem(title: "Clear Name", action: #selector(clearNamePicked(_:)),
+                                   keyEquivalent: "")
+            clear.target = self
+            clear.representedObject = sessionID
+            menu.addItem(clear)
+        }
+
+        let pin = NSMenuItem(title: current.pinned ? "Unpin" : "Pin to Top",
+                             action: #selector(pinPicked(_:)), keyEquivalent: "")
+        pin.target = self
+        pin.representedObject = sessionID
+        menu.addItem(pin)
+
+        menu.addItem(.separator())
+        let mute = NSMenuItem(title: "Mute Until I Speak To It",
+                              action: #selector(mutePicked(_:)), keyEquivalent: "")
+        mute.target = self
+        mute.representedObject = sessionID
+        menu.addItem(mute)
+
+        // The title line names what the menu is acting on: three rows from one
+        // repo look identical, and acting on the wrong one is silent.
+        let title = SessionLabels.displayName(for: session, prefs: labelPrefs,
+                                              title: titleFor(session))
+        menu.addItem(.separator())
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        menu.popUp(positioning: nil, at: point, in: view)
+    }
+
+    private func titleFor(_ session: SessionState) -> String {
+        guard let handle = session.terminal?.handle else { return "" }
+        return bridge?.titles[handle] ?? ""
+    }
+
+    @objc private func renamePicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let session = latest.first(where: { $0.sessionId == id }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Name this session"
+        alert.informativeText = "Shown instead of the folder name and the tab title."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = labelPrefs[id]?.alias ?? ""
+        field.placeholderString = session.project
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        // The panel is a non-activating window, so the alert needs the app
+        // brought forward or it opens behind whatever has focus.
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        setPrefs(id) { $0.alias = SessionLabels.sanitiseAlias(field.stringValue) }
+    }
+
+    @objc private func clearNamePicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        setPrefs(id) { $0.alias = "" }
+    }
+
+    @objc private func pinPicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        setPrefs(id) { $0.pinned.toggle() }
+    }
+
+    @objc private func mutePicked(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        mute(sessionID: id)
+    }
+
+    private func setPrefs(_ id: String, _ change: (inout SessionLabels.Prefs) -> Void) {
+        var prefs = labelPrefs[id] ?? SessionLabels.Prefs()
+        change(&prefs)
+        if prefs.isEmpty { labelPrefs.removeValue(forKey: id) } else { labelPrefs[id] = prefs }
+        saveLabels()
+        render()
     }
 
     // MARK: - Shortcut
