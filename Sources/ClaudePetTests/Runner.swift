@@ -212,6 +212,39 @@ struct Runner {
                 !PetLayout.shouldMirror(windowOrigin: CGPoint(x: -120, y: 100),
                                         visibleFrame: CGRect(x: 0, y: 0, width: 260, height: 900)))
 
+        // The flip has to hold the PET still. It slides the drawing 320pt across
+        // the window, and at the left edge that is a leap straight out of view —
+        // which is exactly what dragging the pet to the left edge used to do.
+        t.check("flipping moves the window by the width the drawing moves",
+                PetLayout.flipShift(toMirrored: true) == 320
+                    && PetLayout.flipShift(toMirrored: false) == -320)
+
+        // ...and having moved the window, the rule must not change its mind.
+        // Reading the WINDOW's origin, it would: the shifted window is back
+        // inside the screen, so the next answer is "unmirror", which shifts it
+        // out again — a pet flapping between two places forever.
+        let off = CGPoint(x: -120, y: 100)
+        let flipped = CGPoint(x: off.x + PetLayout.flipShift(toMirrored: true), y: off.y)
+        t.check("a window that flipped and moved stays flipped",
+                PetLayout.shouldMirror(windowOrigin: flipped, visibleFrame: screen,
+                                       mirrored: true))
+        t.check("and the pet is in the same place before and after the flip",
+                off.x + PetLayout.petBox.minX
+                    == flipped.x + PetLayout.mirroredPetBox.minX)
+
+        // Coming back the other way it does unflip — once there is room for the
+        // panel on the left again, plus the hysteresis band. "Room" is measured
+        // from the PET: the panel lives in the 340pt to its left.
+        func mirroredWindow(petLeftAt x: CGFloat) -> CGPoint {
+            CGPoint(x: x - PetLayout.mirroredPetBox.minX, y: 100)
+        }
+        t.check("dragged back towards the middle, it flips back",
+                !PetLayout.shouldMirror(windowOrigin: mirroredWindow(petLeftAt: 420),
+                                        visibleFrame: screen, mirrored: true))
+        t.check("but not while it is still sitting on the line",
+                PetLayout.shouldMirror(windowOrigin: mirroredWindow(petLeftAt: 350),
+                                       visibleFrame: screen, mirrored: true))
+
         // Unplugging a display, or a resolution change, can leave the pet
         // outside every screen. Only the PET has to be rescued, not the whole
         // window — most of it is transparent, and insisting all 400pt fit would

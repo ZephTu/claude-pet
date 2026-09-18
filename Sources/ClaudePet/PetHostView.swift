@@ -16,6 +16,11 @@ import WebKit
 /// forwarded, so a long session list still scrolls natively.
 @MainActor
 final class PetHostView: NSView {
+    /// A drag finished. The panel settles which side it opens on here rather
+    /// than mid-drag — flipping moves the window, and a drag in flight would
+    /// undo that from its own anchor.
+    var onDragEnded: (() -> Void)?
+
     /// Left click that was not a drag, in CSS coordinates. Carries the point
     /// because a click on a session row jumps to that terminal while a click
     /// anywhere else on the pet toggles the panel — and only the page knows
@@ -121,8 +126,11 @@ final class PetHostView: NSView {
         isDragging = false
         if !wasDragging {
             onClick?(cssPoint(from: convert(event.locationInWindow, from: nil)))
+        } else {
+            onDragEnded?()
         }
     }
+
 
     override func rightMouseDown(with event: NSEvent) {
         onRightClick?(convert(event.locationInWindow, from: nil))

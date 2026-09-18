@@ -33,6 +33,9 @@ final class PetPanel: NSPanel {
     // and reusing it would place the new window 240pt off from where the pet
     // visually was.
     private static let originKey = "petOrigin.v2"
+    /// Saved beside the origin: the origin alone no longer says where the pet
+    /// IS, because a mirrored window draws it 320pt further left.
+    private static let mirroredKey = "petMirrored"
 
     private var layoutHandler: LayoutMessageHandler?
     private var globalMouseMonitor: Any?
@@ -80,6 +83,8 @@ final class PetPanel: NSPanel {
         contentView = host
 
         host.onClick = { [weak self] point in self?.onClick?(point) }
+        // The side is decided on release, not during the drag: see updateLayoutSide.
+        host.onDragEnded = { [weak self] in self?.updateLayoutSide() }
         host.onRightClick = { [weak self] point in self?.onRightClick?(point) }
 
         let handler = LayoutMessageHandler { [weak self] panel, bubble in
@@ -153,12 +158,22 @@ final class PetPanel: NSPanel {
     /// Recomputed on every move rather than once at launch, so dragging between
     /// displays and unplugging one both go through the same path as a drag.
     func updateLayoutSide() {
+        // Never mid-drag. The flip moves the window, and the drag would undo
+        // that on its very next event from its own anchor — which is the jump
+        // this guard exists to prevent. Decided on release instead.
+        guard !host.isDragging else { return }
         let visible = (screen ?? NSScreen.main)?.visibleFrame ?? .zero
         guard visible.width > 0 else { return }
-        let flip = PetLayout.shouldMirror(windowOrigin: frame.origin, visibleFrame: visible)
+        let flip = PetLayout.shouldMirror(windowOrigin: frame.origin, visibleFrame: visible,
+                                          mirrored: host.isMirrored)
         guard flip != host.isMirrored else { return }
         host.isMirrored = flip
+        UserDefaults.standard.set(flip, forKey: Self.mirroredKey)
         onMirrorChanged?(flip)
+        // The drawing just moved 320pt across the window; move the window the
+        // other way so the pet stays under the spot it was dropped on.
+        setFrameOrigin(NSPoint(x: frame.origin.x + PetLayout.flipShift(toMirrored: flip),
+                               y: frame.origin.y))
     }
 
     /// The layout flipped; the page has to be told so it can move the drawing.
@@ -179,6 +194,7 @@ final class PetPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
 
     private func loadPetPage() {
         guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html") else {
@@ -218,6 +234,9 @@ final class PetPanel: NSPanel {
         let p = NSPointFromString(s)
         guard NSScreen.screens.contains(where: { $0.frame.intersects(NSRect(origin: p, size: frame.size)) })
         else { return false }  // saved spot is on a screen that is no longer attached
+        // Before the origin: the origin was saved for THIS side, and applying it
+        // to the other one puts the pet 320pt from where it was left.
+        host.isMirrored = UserDefaults.standard.bool(forKey: Self.mirroredKey)
         setFrameOrigin(p)
         return true
     }

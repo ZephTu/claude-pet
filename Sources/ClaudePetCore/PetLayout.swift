@@ -91,18 +91,47 @@ public enum PetLayout {
         box.offsetBy(dx: mirroredPetBox.minX - petBox.minX, dy: 0)
     }
 
+    /// How far the WINDOW has to move so the PET does not move when the layout
+    /// flips.
+    ///
+    /// Flipping slides the drawing 320pt across the window. Left uncompensated
+    /// that is a 320pt leap on screen, and it happens at the left edge — where
+    /// the leap is straight out of view. The pet must stay exactly where the
+    /// hand that dragged it let go.
+    public static func flipShift(toMirrored: Bool) -> CGFloat {
+        let delta = petBox.minX - mirroredPetBox.minX
+        return toMirrored ? delta : -delta
+    }
+
+    /// How far back towards the middle the pet must come before a mirrored
+    /// layout flips back. Without it a pet parked on the line flaps between
+    /// sides on every one-pixel nudge.
+    public static let flipHysteresis: CGFloat = 24
+
     /// Should the layout flip, given where the window sits on its screen?
+    ///
+    /// Measured through the PET, not the window. Flipping moves the window (see
+    /// `flipShift`), so a rule that read the window's own origin would give a
+    /// different answer the instant it acted on its previous one, and the
+    /// layout would oscillate.
     ///
     /// - Parameters:
     ///   - windowOrigin: the window's lower-left corner in screen coordinates.
     ///   - visibleFrame: the screen's usable area.
-    public static func shouldMirror(windowOrigin: CGPoint, visibleFrame: CGRect) -> Bool {
-        // Would the panel's left edge fall off the screen as things stand?
-        let panelLeft = windowOrigin.x
-        guard panelLeft < visibleFrame.minX else { return false }
+    ///   - mirrored: the layout the window is in right now.
+    public static func shouldMirror(windowOrigin: CGPoint, visibleFrame: CGRect,
+                                    mirrored: Bool = false) -> Bool {
+        // Where the window would be for this same pet position, unmirrored.
+        let petMinX = windowOrigin.x + (mirrored ? mirroredPetBox.minX : petBox.minX)
+        let origin = petMinX - petBox.minX
         // Only flip if flipping actually helps: on a window already hanging off
         // the right edge, mirroring would push the panel off THAT side instead.
-        return windowOrigin.x + windowSize.width <= visibleFrame.maxX
+        let helps = origin + windowSize.width <= visibleFrame.maxX
+        if mirrored {
+            return origin < visibleFrame.minX + flipHysteresis && helps
+        }
+        // Would the panel's left edge fall off the screen as things stand?
+        return origin < visibleFrame.minX && helps
     }
 
     /// Where to put the window so the pet stays reachable on this screen.
