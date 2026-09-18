@@ -1484,8 +1484,9 @@ struct Runner {
         t.check("a known one is kept", PetSkin.named("cat") == .cat)
 
         func look(_ mood: String, phase: String = "", flash: String = "",
-                  wanted: Bool = false) -> CatSkin.Look {
-            CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted)
+                  wanted: Bool = false, blockedOn: String = "") -> CatSkin.Look {
+            CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted,
+                         blockedOn: blockedOn)
         }
         // The pose is lossy on purpose — three busy poses, compaction and
         // waiting on an agent are one picture — so what is asserted here is that
@@ -1504,7 +1505,30 @@ struct Runner {
                 look("busy", phase: "awaiting-agent").lamp == .awaiting)
 
         t.check("wanting approval and wanting an answer share the one picture",
-                look("waiting").pose == .waiting)
+                look("waiting").pose == .waiting
+                    && look("waiting", blockedOn: "rm -rf build/").pose == .waiting)
+        // The bug this replaced: one texture with a question mark painted into
+        // it served both, so the cat held up a paw under a QUESTION MARK while
+        // asking permission to run `rm -rf`. A question mark says "I am
+        // unsure"; approval says "you decide".
+        t.check("...and the glyph is what tells them apart",
+                look("waiting").mark == .question
+                    && look("waiting", blockedOn: "rm -rf build/").mark == .warn)
+        t.check("a session that wants nothing shows no glyph",
+                look("busy").mark == .none && look("idle").mark == .none)
+        // urgent already has an alarm painted into its own texture; a second
+        // glyph beside it would be two warnings for one thing.
+        t.check("being ignored does not add a second warning",
+                look("urgent", blockedOn: "rm -rf build/").mark == .none)
+        t.check("an interrupted tool warns over a cat that is still working",
+                look("busy", flash: "trouble").mark == .warn
+                    && look("busy", flash: "trouble").pose == .working)
+        // A finished turn has no picture, so the renderer bobs the idle one.
+        // Nothing else may replace the pose: an interrupted tool happens while
+        // the session carries on, and swapping the picture would say it stopped.
+        t.check("a finished turn gets the bob", look("idle", flash: "done").pose == .finished)
+        t.check("and nothing else does",
+                CatSkin.flashPose("done") == .finished && CatSkin.flashPose("trouble") == nil)
         t.check("being ignored has its own", look("urgent").pose == .urgent)
         t.check("urgent's lamp outranks waiting's",
                 look("urgent").lamp == .urgent && look("waiting").lamp == .waiting)

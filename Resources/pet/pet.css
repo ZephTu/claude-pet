@@ -91,6 +91,28 @@ html, body {
 }
 #count[hidden] { display: none; }
 
+/* Where the artwork used to paint its question mark: right of the head, above
+   the raised paw. Kept in that exact spot so the pose still reads as pointing
+   at it. 20x20 inside the 120pt box, measured off the original texture. */
+#mark {
+  position: absolute; right: 13px; top: 25px; width: 20px; height: 20px;
+  display: grid; place-items: center;
+  color: #fdf3ec; font: 700 13px/1 -apple-system, system-ui, sans-serif;
+}
+#mark[data-mark="none"] { display: none; }
+/* "Answer me": a question, so a question mark, on the amber that already means
+   "it wants you". */
+#mark[data-mark="question"] { background: #e0a63c; border-radius: 50%; }
+#mark[data-mark="question"]::after { content: "?"; }
+/* "Decide this", and also "that call came back interrupted". One glyph for two
+   situations, exactly as the robot does it — its monitor shows the same warning
+   for both, and the pose is what tells them apart. */
+#mark[data-mark="warn"] {
+  background: #e0a63c;
+  clip-path: polygon(50% 4%, 96% 92%, 4% 92%);
+}
+#mark[data-mark="warn"]::after { content: "!"; color: #3a2f22; padding-top: 5px; }
+
 /* The robot's `pulse` dips to 0.25, which is fine for a bulb on an antenna and
    too faint for a 15px dot — a snapshot of the urgent state caught it at the
    trough and the lamp had all but vanished. Same rhythm, higher floor. */

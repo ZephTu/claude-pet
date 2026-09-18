@@ -542,17 +542,22 @@ let flashTimer = null;
  *
  * @param {"done"|"trouble"} kind
  */
-window.flash = function (kind, lamp) {
+window.flash = function (kind, lamp, pose, mark) {
   if (flashTimer) clearTimeout(flashTimer);
   pet.dataset.flash = kind;
-  // For a skin with no picture for this, the lamp is the whole of the signal —
-  // so the transient overrides the steady lamp and puts it back afterwards
-  // rather than being lost.
+  // A skin with no picture for this has only the lamp and the glyph, so the
+  // transient overrides both and puts the steady pair back afterwards rather
+  // than letting them be lost. An empty `pose` means "keep the one you have":
+  // an interrupted tool happens while the session carries on working.
   if (lamp) setLamp(lamp);
+  if (mark) setMark(mark);
+  if (pose) setPose(pose);
   flashTimer = setTimeout(function () {
     delete pet.dataset.flash;
     flashTimer = null;
     setLamp(steadyLamp);
+    setMark(steadyMark);
+    setPose(steadyPose);
   }, kind === "trouble" ? 2600 : 1600);
 };
 
@@ -642,11 +647,22 @@ window.setHoverAt = function (x, y) {
 
 /** The live CatPet renderer, or null while the robot is showing. */
 let cat = null;
-/** The lamp the current state calls for, as opposed to a transient flash. */
+/** What the current STATE calls for, as opposed to a transient flash. */
 let steadyLamp = "off";
+let steadyMark = "none";
+let steadyPose = "idle";
 
 function setLamp(token) {
   document.getElementById("lamp").dataset.lamp = token || "off";
+}
+
+function setMark(token) {
+  document.getElementById("mark").dataset.mark = token || "none";
+}
+
+function setPose(pose) {
+  lastPose = pose || "idle";
+  if (cat) cat.setState(lastPose);
 }
 
 /**
@@ -688,11 +704,17 @@ let lastPose = "idle";
  * Called from Swift on every render. The pose may be one of five; the lamp
  * carries everything the five pictures cannot.
  */
-window.setCatLook = function (pose, lamp) {
-  lastPose = pose || "idle";
+window.setCatLook = function (pose, lamp, mark) {
+  steadyPose = pose || "idle";
   steadyLamp = lamp || "off";
-  if (!flashTimer) setLamp(steadyLamp);
-  if (cat) cat.setState(lastPose);
+  steadyMark = mark || "none";
+  // A flash in progress owns all three; it restores these when it ends. Without
+  // this guard a state push arriving mid-flash would cut the "done" bob short —
+  // and one of those arrives on every tick.
+  if (flashTimer) return;
+  setLamp(steadyLamp);
+  setMark(steadyMark);
+  setPose(steadyPose);
 };
 
 /**

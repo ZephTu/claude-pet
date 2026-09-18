@@ -254,7 +254,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge?.setCatLook(CatSkin.look(mood: state.mood.rawValue,
                                         phase: StateAggregator.phase(state.sessions),
                                         flash: "",
-                                        wanted: !badge.isEmpty))
+                                        wanted: !badge.isEmpty,
+                                        blockedOn: state.waitingOn))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
         // plainly seen the news or stopped caring about it.
@@ -759,7 +760,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // the skin too. Without this the cat sat in one pose through all twelve
         // captions while the captions claimed otherwise.
         bridge?.setCatLook(CatSkin.look(mood: step.mood.rawValue, phase: step.phase,
-                                        flash: "", wanted: !badge.isEmpty))
+                                        flash: "", wanted: !badge.isEmpty,
+                                        blockedOn: step.waitingOn))
         if !step.flash.isEmpty { bridge?.flash(step.flash) }
         // The caption says both what is being shown AND that it is not real.
         // A demo that looks like live state is a demo that gets acted on.

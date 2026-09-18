@@ -54,9 +54,13 @@ enum SkinProbe {
         retained = (handler, window, webView)
 
         after(2.5) {
-            webView.evaluateJavaScript(script.isEmpty ? "null" : script) { _, error in
+            webView.evaluateJavaScript(script.isEmpty ? "null" : script) { result, error in
                 MainActor.assumeIsolated {
                     if let error { print("script failed: \(error.localizedDescription)") }
+                    // Printed so the script can answer questions as well as set
+                    // things up. Without this the only way to find out why a
+                    // render looked wrong was to guess and re-render.
+                    if let result, !(result is NSNull) { print("\(result)") }
                     // Textures load asynchronously; a snapshot taken the instant
                     // the script returns catches the frame before the first one
                     // arrived, which looks exactly like a skin that is broken.

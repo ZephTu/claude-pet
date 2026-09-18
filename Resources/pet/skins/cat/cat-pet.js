@@ -28,10 +28,24 @@ void main(){
  }else if(state<3.5){
   d.y-=.008*sin(t*1.45)*weight(p,vec2(.49,.53),vec2(.47,.54));
   d.x+=.005*sin(t*1.1)*weight(p,vec2(.79,.77),vec2(.19,.20));
- }else{
+ }else if(state<4.5){
   float burst=pow(max(0.0,sin(t*1.8)),3.0);
   d.x+=.004*sin(t*24.0)*burst*weight(p,vec2(.52,.45),vec2(.65,.70));
   d.y-=.006*sin(t*5.0)*weight(p,vec2(.725,.53),vec2(.10,.11));
+ }else{
+  // finished: one short bob on the idle picture, anchored at the feet and
+  // decaying to nothing. There is no artwork for a finished turn, and a still
+  // picture could not say "just now" even if there were — what carries this
+  // state is that it MOVES and then stops. setState resets time, so t is
+  // seconds since the turn ended.
+  float k=exp(-t*1.9)*sin(t*12.0);
+  // 1.0 - smoothstep(lo,hi,..), not smoothstep(hi,lo,..): GLSL ES leaves
+  // smoothstep undefined when edge0 >= edge1, and the reversed form
+  // silently produced a bob of exactly zero — two renders 0.15s apart
+  // came out pixel-identical.
+  float lift=1.0-smoothstep(0.25,1.0,p.y);
+  d.y-=.035*k*lift;
+  d.x+=.005*k*weight(p,vec2(.5,.3),vec2(.45,.35));
  }
  p+=d*strength;
  // Common 6% safety margin, invariant ground anchor.
@@ -40,7 +54,9 @@ void main(){
 }`;
 const FRAG=`precision mediump float; varying vec2 uv; uniform sampler2D texture0;
 void main(){ gl_FragColor=texture2D(texture0,uv); }`;
-const states={idle:0,working:1,waiting:2,sleeping:3,urgent:4};
+const states={idle:0,working:1,waiting:2,sleeping:3,urgent:4,finished:5};
+// `finished` is a deformation of an existing picture, not a picture of its own.
+const textureFor={finished:'idle'};
 class CatPet{
  constructor(canvas, assets, options={}){
   this.canvas=canvas; this.assets=assets; this.state='idle'; this.strength=1;
@@ -89,9 +105,10 @@ class CatPet{
  setReducedMotion(value){this.reduced=!!value;this.draw();return this;}
  setStrength(value){const n=Number(value);this.strength=Number.isFinite(n)?Math.max(0,Math.min(1.5,n)):1;this.draw();return this;}
  draw(){
-  if(this.disposed||!this.textures[this.state])return;
+  const key=textureFor[this.state]||this.state;
+  if(this.disposed||!this.textures[key])return;
   const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.textures[this.state]);
+  gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.textures[key]);
   gl.uniform1f(this.u.time,this.time);gl.uniform1f(this.u.strength,this.reduced?0:this.strength);
   gl.uniform1f(this.u.state,states[this.state]);gl.drawArrays(gl.TRIANGLES,0,this.count);
  }

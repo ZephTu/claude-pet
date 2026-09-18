@@ -206,7 +206,13 @@ final class WebBridge {
     func flash(_ kind: String) {
         guard isReady else { return }
         let lamp = CatSkin.lamp(mood: "", phase: "", flash: kind).rawValue
-        evaluate("window.flash(\(jsString(kind)), \(jsString(lamp)));")
+        let mark = CatSkin.mark(mood: "", flash: kind, blockedOn: "").rawValue
+        // Empty means "keep the pose you have": an interrupted tool happens
+        // while the session carries on working, and replacing the picture would
+        // say it stopped.
+        let pose = CatSkin.flashPose(kind)?.rawValue ?? ""
+        evaluate("window.flash(\(jsString(kind)), \(jsString(lamp)), "
+            + "\(jsString(pose)), \(jsString(mark)));")
     }
 
     private var lastSkin: PetSkin?
@@ -223,7 +229,7 @@ final class WebBridge {
         guard isReady, look != lastLook else { return }
         lastLook = look
         evaluate("window.setCatLook(\(jsString(look.pose.rawValue)), "
-            + "\(jsString(look.lamp.rawValue)));")
+            + "\(jsString(look.lamp.rawValue)), \(jsString(look.mark.rawValue)));")
     }
 
     private var lastPhase: String?
