@@ -545,20 +545,18 @@ let flashTimer = null;
  *
  * @param {"done"|"trouble"} kind
  */
-window.flash = function (kind, lamp, pose, mark) {
+window.flash = function (kind, pose, mark) {
   if (flashTimer) clearTimeout(flashTimer);
   pet.dataset.flash = kind;
-  // A skin with no picture for this has only the lamp and the glyph, so the
-  // transient overrides both and puts the steady pair back afterwards rather
-  // than letting them be lost. An empty `pose` means "keep the one you have":
-  // an interrupted tool happens while the session carries on working.
-  if (lamp) setLamp(lamp);
+  // The transient owns the pose and the glyph and puts the steady pair back
+  // afterwards rather than letting them be lost. An empty `pose` means "keep
+  // the one you have": an interrupted tool happens while the session carries
+  // on working.
   if (mark) setMark(mark);
   if (pose) setPose(pose);
   flashTimer = setTimeout(function () {
     delete pet.dataset.flash;
     flashTimer = null;
-    setLamp(steadyLamp);
     setMark(steadyMark);
     setPose(steadyPose);
   }, kind === "trouble" ? 2600 : 1600);
@@ -643,7 +641,7 @@ window.setHoverAt = function (x, y) {
 /* ---- Skins ---------------------------------------------------------------
  * The robot is CSS: every state it has is a rule, and swapping states costs
  * an attribute write. A painted skin cannot work that way — it has as many
- * poses as it has pictures — so the pose and the lamp are decided in Swift
+ * poses as it has pictures — so the pose and the glyph are decided in Swift
  * (ClaudePetCore/PetSkin.swift, where they are unit-tested against all eleven
  * pet states) and pushed here. This file only applies them.
  */
@@ -651,13 +649,8 @@ window.setHoverAt = function (x, y) {
 /** The live CatPet renderer, or null while the robot is showing. */
 let cat = null;
 /** What the current STATE calls for, as opposed to a transient flash. */
-let steadyLamp = "off";
 let steadyMark = "none";
 let steadyPose = "idle";
-
-function setLamp(token) {
-  document.getElementById("lamp").dataset.lamp = token || "off";
-}
 
 function setMark(token) {
   document.getElementById("mark").dataset.mark = token || "none";
@@ -704,18 +697,16 @@ window.setSkin = function (name) {
 let lastPose = "idle";
 
 /**
- * Called from Swift on every render. The pose may be one of five; the lamp
- * carries everything the five pictures cannot.
+ * Called from Swift on every render. The pose is one of six; the glyph says
+ * which KIND of waiting, which the one raised-paw picture cannot.
  */
-window.setCatLook = function (pose, lamp, mark) {
+window.setCatLook = function (pose, mark) {
   steadyPose = pose || "idle";
-  steadyLamp = lamp || "off";
   steadyMark = mark || "none";
-  // A flash in progress owns all three; it restores these when it ends. Without
-  // this guard a state push arriving mid-flash would cut the "done" bob short —
-  // and one of those arrives on every tick.
+  // A flash in progress owns both; it restores these when it ends. Without this
+  // guard a state push arriving mid-flash would cut the "done" bob short — and
+  // one of those arrives on every tick.
   if (flashTimer) return;
-  setLamp(steadyLamp);
   setMark(steadyMark);
   setPose(steadyPose);
 };

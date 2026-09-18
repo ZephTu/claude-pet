@@ -203,19 +203,18 @@ final class WebBridge {
 
     /// A brief reaction that is not a state — see window.flash.
     ///
-    /// The lamp token travels with it because a finished turn and an
-    /// interrupted tool are exactly the two states a painted skin has no
-    /// picture for. On the robot the flash is a pose; on the cat it is only
-    /// ever the lamp, so losing it here would lose it entirely.
+    /// The pose and the glyph travel with it because the robot's flash is a
+    /// CSS rule and a painted skin has no rule to run: a finished turn is a bob
+    /// of the idle picture, an interrupted tool is a warning glyph over
+    /// whatever the cat is already doing.
     func flash(_ kind: String) {
         guard isReady else { return }
-        let lamp = CatSkin.lamp(mood: "", phase: "", flash: kind).rawValue
         let mark = CatSkin.mark(mood: "", flash: kind, blockedOn: "").rawValue
         // Empty means "keep the pose you have": an interrupted tool happens
         // while the session carries on working, and replacing the picture would
         // say it stopped.
         let pose = CatSkin.flashPose(kind)?.rawValue ?? ""
-        evaluate("window.flash(\(jsString(kind)), \(jsString(lamp)), "
+        evaluate("window.flash(\(jsString(kind)), "
             + "\(jsString(pose)), \(jsString(mark)));")
     }
 
@@ -226,14 +225,14 @@ final class WebBridge {
         evaluate("window.setSkin(\(jsString(skin.rawValue)));")
     }
 
-    /// The pose and lamp a painted skin should show. Pushed on every render;
+    /// The pose and glyph a painted skin should show. Pushed on every render;
     /// the page ignores it while the robot is up.
     private var lastLook: CatSkin.Look?
     func setCatLook(_ look: CatSkin.Look) {
         guard isReady, look != lastLook else { return }
         lastLook = look
         evaluate("window.setCatLook(\(jsString(look.pose.rawValue)), "
-            + "\(jsString(look.lamp.rawValue)), \(jsString(look.mark.rawValue)));")
+            + "\(jsString(look.mark.rawValue)));")
     }
 
     private var lastPhase: String?

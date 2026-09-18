@@ -1495,21 +1495,16 @@ struct Runner {
             CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted,
                          blockedOn: blockedOn)
         }
-        // The pose is lossy on purpose — three busy poses, compaction and
-        // waiting on an agent are one picture — so what is asserted here is that
-        // the LAMP still tells them apart. That is the whole bargain.
+        // The cost of taking the lamp away, written down as a test rather than
+        // left as a surprise: the three busy states are one picture and say
+        // exactly the same thing. Anyone who makes them differ again has to
+        // come here and say how.
         t.check("every busy state draws the same picture",
                 [look("busy"), look("busy", phase: "compacting"),
                  look("busy", phase: "awaiting-agent")].allSatisfy { $0.pose == .working })
-        t.check("...and the lamp is where the difference survives",
-                Set([look("busy").lamp, look("busy", phase: "compacting").lamp,
-                     look("busy", phase: "awaiting-agent").lamp]).count == 3)
-        // The regression this guards: an amber lamp means "it wants you", and
-        // waiting on a background agent wants nothing. Getting this wrong sends
-        // the user to a terminal that has no question for them — which is the
-        // bug the awaiting-agent state was added to fix, reintroduced in a lamp.
-        t.check("waiting on an agent keeps a working lamp, not a waiting one",
-                look("busy", phase: "awaiting-agent").lamp == .awaiting)
+        t.check("...and with no lamp, nothing tells the three apart",
+                look("busy") == look("busy", phase: "compacting")
+                    && look("busy") == look("busy", phase: "awaiting-agent"))
 
         t.check("wanting approval and wanting an answer share the one picture",
                 look("waiting").pose == .waiting
@@ -1537,21 +1532,21 @@ struct Runner {
         t.check("and nothing else does",
                 CatSkin.flashPose("done") == .finished && CatSkin.flashPose("trouble") == nil)
         t.check("being ignored has its own", look("urgent").pose == .urgent)
-        t.check("urgent's lamp outranks waiting's",
-                look("urgent").lamp == .urgent && look("waiting").lamp == .waiting)
 
         // The kit's two resting pictures, earning their keep.
         t.check("a desk with something unread stays awake", look("idle", wanted: true).pose == .idle)
         t.check("a desk with nothing on it sleeps", look("idle").pose == .sleeping)
 
-        // The two states with NO picture at all. If the lamp drops these, the
-        // cat silently stops reporting the one thing this project exists for.
-        t.check("a finished turn reaches the lamp",
-                look("idle", flash: "done").lamp == .done)
-        t.check("an interrupted tool reaches the lamp",
-                look("busy", flash: "trouble").lamp == .trouble)
+        // The two states with NO picture of their own, now that the lamp is not
+        // there to carry them: a finished turn has to reach the bob and an
+        // interrupted tool has to reach the glyph, or the cat stops reporting
+        // the one thing this project exists for.
+        t.check("a finished turn survives without a lamp",
+                look("idle", flash: "done").pose == .finished)
+        t.check("an interrupted tool survives without a lamp",
+                look("busy", flash: "trouble").mark == .warn)
         t.check("a transient outranks the state it happens during",
-                look("busy", phase: "compacting", flash: "done").lamp == .done)
+                look("busy", phase: "compacting", flash: "done").pose == .finished)
 
         // Hit regions: two shapes, two answers. A cat clickable in the robot's
         // rectangle is a cat with a dead head and a live patch of desk.

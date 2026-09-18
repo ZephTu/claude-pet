@@ -29,7 +29,6 @@ html, body {
    by simply staying lit rather than sitting at whatever opacity the animation
    was paused on. */
 #stage.calm .bulb { opacity: 1 !important; }
-#stage.calm #lamp { opacity: 1 !important; }
 #stage.calm .zzz text { opacity: 0.6 !important; }
 
 /* Mirrored layout: pet on the left, panel on the right. Used when the window
@@ -68,23 +67,23 @@ html, body {
 #robot { display: block; width: 100%; height: 100%; overflow: visible; }
 #cat   { display: block; width: 120px; height: 120px; }
 
-/* The lamp and the count, drawn by the host above whatever skin is loaded.
+/* The count and the glyph, drawn by the host above whatever skin is loaded.
    The robot draws its own — it has an antenna and a chest — so these are for
    skins whose artwork has neither. Their positions are inside
-   PetLayout.catBodyBox, so they are clickable rather than decorative. */
+   PetLayout.catBodyBox, so they are clickable rather than decorative.
+
+   A lamp used to sit above the count. It was removed: a coloured disc laid on
+   top of painted artwork reads as a sticker stuck to the cat rather than part
+   of it, and the poses already carry everything it said except which KIND of
+   busy — see CatSkin in PetSkin.swift for what that costs. */
 #signals { position: absolute; inset: 0; pointer-events: none; }
-/* Top LEFT, stacked, and inside PetLayout.catBodyBox.
+/* Top LEFT, and inside PetLayout.catBodyBox.
    Not the top right, which looked like the natural place until all five poses
    were rendered: that is where the cat's own `?`, its warning triangle and its
-   z's all live, so a lamp there collides with the artwork in three states out
+   z's all live, so a badge there collides with the artwork in three states out
    of five. The left column is empty in every pose. */
-#lamp {
-  position: absolute; left: 15px; top: 9px; width: 15px; height: 15px;
-  border-radius: 50%; background: #5c6660;
-  box-shadow: 0 0 0 2.5px rgba(38, 34, 30, 0.38);
-}
 #count {
-  position: absolute; left: 14px; top: 31px; min-width: 17px; height: 17px;
+  position: absolute; left: 14px; top: 10px; min-width: 17px; height: 17px;
   box-sizing: border-box; padding: 0 4px; border-radius: 9px;
   background: #e0533c; color: #fff; text-align: center;
   font: 600 11px/17px -apple-system, system-ui, sans-serif;
@@ -112,27 +111,6 @@ html, body {
   clip-path: polygon(50% 4%, 96% 92%, 4% 92%);
 }
 #mark[data-mark="warn"]::after { content: "!"; color: #3a2f22; padding-top: 5px; }
-
-/* The robot's `pulse` dips to 0.25, which is fine for a bulb on an antenna and
-   too faint for a 15px dot — a snapshot of the urgent state caught it at the
-   trough and the lamp had all but vanished. Same rhythm, higher floor. */
-@keyframes lampPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.42; } }
-
-/* One vocabulary for both skins. These are the robot's own bulb colours, so a
-   user who switches skins is not learning a second colour language — and the
-   two cannot drift apart, because this is where both of them come from. */
-#lamp[data-lamp="working"]    { background: #67a498; animation: lampPulse 1.1s ease-in-out infinite; }
-#lamp[data-lamp="compacting"] { background: #8fc2b8; }
-/* Same green as working, slowed right down: waiting on a background agent is
-   working, and amber would send the user to a terminal with no question. */
-#lamp[data-lamp="awaiting"]   { background: #67a498; animation: lampPulse 2.6s ease-in-out infinite; }
-#lamp[data-lamp="waiting"]    { background: #e0a63c; animation: lampPulse 0.9s ease-in-out infinite; }
-#lamp[data-lamp="urgent"]     { background: #e0533c; animation: lampPulse 0.3s steps(2, end) infinite; }
-/* The two states the cat's artwork cannot draw at all. If the lamp does not
-   carry them, nothing does. */
-#lamp[data-lamp="done"]       { background: #67a498; animation: lampPulse 0.5s ease-in-out infinite; }
-#lamp[data-lamp="trouble"]    { background: #e0a63c; animation: lampPulse 0.45s steps(2, end) infinite; }
-#lamp[data-lamp="off"]        { background: #5c6660; }
 
 /* ---- The robot ------------------------------------------------------------
    The hit region for this drawing is PetLayout.bodyBox + PetLayout.antennaBox.

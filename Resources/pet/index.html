@@ -113,13 +113,12 @@
   </svg>
 
   <!-- The cat skin: painted artwork warped by a WebGL mesh, so it has as many
-       poses as it has pictures — five, against the pet's eleven states. What it
-       cannot lose is the lamp and the count, which is why those are drawn HERE,
-       by the host, in the same place whichever skin is loaded. The cat gives up
-       poses; it does not give up signals. -->
+       poses as it has pictures — five, against the pet's eleven states. The
+       count and the waiting glyph are drawn HERE, by the host, because the
+       artwork has neither. The lamp used to be drawn here too and was taken
+       out: on top of a painted cat it read as a sticker. -->
   <canvas id="cat" width="240" height="240" aria-hidden="true"></canvas>
   <div id="signals" aria-hidden="true">
-    <span id="lamp" data-lamp="off"></span>
     <span id="count" hidden>0</span>
     <!-- The glyph that used to be painted into the waiting texture. Drawn here
          so one "raised paw" picture can mean both "answer me" and "decide

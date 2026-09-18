@@ -31,11 +31,18 @@ public enum PetSkin: String, Sendable, Equatable, CaseIterable {
 /// a background agent all become one picture of a cat at a laptop. Two of the
 /// eleven — a finished turn and an interrupted tool — have no picture at all.
 ///
-/// What is NOT lossy is the lamp. The lamp is the pet's one peripherally
-/// readable signal ("you can read it without focusing on it") and the artwork
-/// has nothing like it, so the host draws it above the canvas, in the same
-/// place whichever skin is loaded. That is what keeps the cat honest: it loses
-/// poses, not signals, and the two states with no picture still say so.
+/// The cat has no lamp. It had one — a host-drawn dot above the canvas, in the
+/// robot's own colours — and it was taken out on purpose: a coloured disc
+/// sitting on top of painted artwork reads as a sticker stuck to the cat, not
+/// as part of it.
+///
+/// What that costs, exactly: the three busy states (working, compacting,
+/// waiting on a background agent) are one picture now and nothing tells them
+/// apart. Everything else survives in the artwork itself — a raised paw plus a
+/// glyph for the two kinds of waiting, the kit's own painted alarm for being
+/// ignored, a bob of the idle picture for a finished turn, and a warning glyph
+/// over a working cat for an interrupted tool. The robot keeps its bulb, so a
+/// user who needs the busy states told apart has a skin that tells them.
 public enum CatSkin {
     /// The five pictures the kit ships, plus one the renderer makes from an
     /// existing picture.
@@ -67,34 +74,22 @@ public enum CatSkin {
         case warn
     }
 
-    /// A lamp token, not a colour. `pet.css` owns the palette, so the robot's
-    /// bulb and the cat's lamp cannot drift apart into two greens.
-    public enum Lamp: String, Sendable, Equatable, CaseIterable {
-        case working
-        case compacting
-        case awaiting
-        case waiting
-        case urgent
-        case done
-        case trouble
-        case off
-    }
-
     public struct Look: Sendable, Equatable {
         public let pose: Pose
-        public let lamp: Lamp
         public let mark: Mark
 
-        public init(pose: Pose, lamp: Lamp, mark: Mark = .none) {
+        public init(pose: Pose, mark: Mark = .none) {
             self.pose = pose
-            self.lamp = lamp
             self.mark = mark
         }
     }
 
     /// - Parameters:
     ///   - mood: busy / waiting / urgent / idle, as `GlobalMood` spells them.
-    ///   - phase: "compacting", "awaiting-agent", or empty.
+    ///   - phase: "compacting", "awaiting-agent", or empty. Unused: it is the
+    ///     one thing the cat cannot draw, and the lamp that used to carry it is
+    ///     gone. Kept in the signature because the caller has it and a skin with
+    ///     more pictures would need it.
     ///   - flash: "done", "trouble", or empty — a transient, not a state.
     ///   - wanted: something wants the user (the chest badge is non-empty).
     ///   - blockedOn: what a waiting session is blocked on, empty when it is
@@ -105,7 +100,6 @@ public enum CatSkin {
     public static func look(mood: String, phase: String, flash: String,
                             wanted: Bool, blockedOn: String = "") -> Look {
         Look(pose: pose(mood: mood, wanted: wanted, flash: flash),
-             lamp: lamp(mood: mood, phase: phase, flash: flash),
              mark: mark(mood: mood, flash: flash, blockedOn: blockedOn))
     }
 
@@ -140,31 +134,6 @@ public enum CatSkin {
             // that just finished is not the same thing as a desk nobody has
             // anything waiting on. Awake with something unread, asleep without.
             return wanted ? .idle : .sleeping
-        }
-    }
-
-    public static func lamp(mood: String, phase: String, flash: String) -> Lamp {
-        // A transient outranks the state it happens during. `done` especially:
-        // a finished turn is the one thing this project exists to show, and it
-        // is exactly one of the two states the artwork cannot draw. If the lamp
-        // does not carry it, nothing does.
-        switch flash {
-        case "done": return .done
-        case "trouble": return .trouble
-        default: break
-        }
-        switch mood {
-        case "urgent": return .urgent
-        case "waiting": return .waiting
-        case "busy":
-            // The poses these three share are identical, so the lamp is the
-            // only place the difference survives at all.
-            switch phase {
-            case "compacting": return .compacting
-            case "awaiting-agent": return .awaiting
-            default: return .working
-            }
-        default: return .off
         }
     }
 }
