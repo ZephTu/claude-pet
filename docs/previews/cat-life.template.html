@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>猫 · 尾巴和眼睛动效对比</title>
+<style>
+  :root {
+    --bg: #f4f1ec; --card: #fffdfa; --ink: #2b2723; --muted: #7a726a;
+    --line: #e2dbd2; --accent: #c2703c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#191715; --card:#232020; --ink:#ece6df; --muted:#9b9089; --line:#383231; --accent:#e08a4e; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+    padding: 28px 16px 60px;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lede { color: var(--muted); margin: 0 0 22px; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 18px;
+  }
+  .poses { display: flex; gap: 6px; flex-wrap: wrap; }
+  button {
+    font: inherit; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+  }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  label.toggle { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .pair { display: flex; gap: 16px; flex-wrap: wrap; }
+  .cell {
+    flex: 1 1 300px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px; text-align: center;
+  }
+  .cell h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  canvas { width: 260px; height: 260px; display: block; margin: 0 auto; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 22px; }
+  .note b { color: var(--ink); }
+  .sliders { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center;
+             margin-top: 14px; background: var(--card); border: 1px solid var(--line);
+             border-radius: 12px; padding: 12px 14px; font-size: 13px; }
+  input[type=range] { width: 100%; }
+  .err { color: #c0392b; }
+</style>
+</head>
+<body>
+<main>
+  <h1>尾巴 / 眨眼 / 眼珠 —— 效果对比</h1>
+  <p class="lede">左边是没有这三样的原版，右边是加了的（三样都已经进 cat-pet.js）。
+     开关单独关掉每一项，滑块调幅度和频率，用来定参数。</p>
+
+  <div class="controls">
+    <div class="poses" id="poses"></div>
+    <label class="toggle"><input type="checkbox" id="tail" checked> 尾巴摆动</label>
+    <label class="toggle"><input type="checkbox" id="blink" checked> 眨眼</label>
+    <label class="toggle"><input type="checkbox" id="gaze" checked> 眼珠微动</label>
+  </div>
+
+  <div class="pair">
+    <div class="cell"><h2>原版（无动效）</h2><canvas id="before" width="520" height="520"></canvas></div>
+    <div class="cell"><h2>加了动效</h2><canvas id="after" width="520" height="520"></canvas></div>
+  </div>
+
+  <div class="sliders">
+    <span>尾巴幅度</span><input type="range" id="tailAmp" min="0" max="40" value="16"><span id="tailAmpV">0.16</span>
+    <span>尾巴速度</span><input type="range" id="tailSpd" min="5" max="45" value="22"><span id="tailSpdV">2.2</span>
+    <span>眨眼间隔</span><input type="range" id="blinkGap" min="15" max="90" value="38"><span id="blinkGapV">3.8s</span>
+    <span>眼珠幅度</span><input type="range" id="gazeAmp" min="0" max="20" value="7"><span id="gazeAmpV">0.007</span>
+  </div>
+
+  <p class="note" id="status"></p>
+  <p class="note">
+    <b>说明。</b>眨眼是把眼睛那条带快速纵向压扁再弹回——贴图里没有眼皮，所以它是“挤”不是“合”，
+    近看会有点假，这条最需要你眼判。眼珠微动是平移瞳孔那一小块，高光是画死在贴图上的，
+    动了之后高光不跟着动。尾巴是绕根部旋转，末端摆幅最大、根部不动，这个最安全。
+    睡觉那张眼睛本来就是闭的，眨眼对它不生效。
+  </p>
+</main>
+
+<script>
+const ASSETS = /*__ASSETS__*/;
+const LIFE   = /*__LIFE__*/;
+const POSES  = ["idle", "working", "waiting", "sleeping", "urgent"];
+const LABEL  = { idle: "闲着", working: "干活", waiting: "等你", sleeping: "睡觉", urgent: "急了" };
+
+/* A COPY of the shader, taken when these three motions were chosen. The
+   shipped one is Resources/pet/skins/cat/cat-pet.js and is what actually runs;
+   this page exists to compare with and without, and to try amplitudes. If the
+   two drift apart, the shipped file is the truth. */
+const VERT = `
+attribute vec2 position;
+varying vec2 uv;
+uniform float time;
+uniform float strength;
+uniform float state;
+uniform vec4 tailRegion;
+uniform vec2 tailRoot;
+uniform vec4 eyeRegion;
+uniform vec4 pupils;
+uniform float blink;
+uniform vec2 gaze;
+uniform vec3 life;
+uniform vec2 tailMotion;
+float weight(vec2 p, vec2 c, vec2 r){vec2 d=(p-c)/r; return exp(-dot(d,d)*2.5);}
+void main(){
+ uv=position; vec2 p=position; float t=time; vec2 d=vec2(0.0);
+ if(state<0.5){
+  float b=sin(t*1.85); d.y-=0.005*b*weight(p,vec2(.55,.60),vec2(.48,.68));
+  d.x+=.010*sin(t*1.35)*weight(p,vec2(.23,.70),vec2(.18,.24));
+ }else if(state<1.5){
+  float a=sin(t*12.566); float b=sin(t*12.566+3.14159);
+  d.y+=.009*a*weight(p,vec2(.477,.742),vec2(.09,.068));
+  d.y+=.007*b*weight(p,vec2(.638,.705),vec2(.058,.060));
+  d.y+=.0025*sin(t*3.14159)*weight(p,vec2(.54,.33),vec2(.38,.40));
+ }else if(state<2.5){
+  vec2 pivot=vec2(.675,.650); vec2 r=p-pivot;
+  float angle=.12*sin(t*5.2); float w=weight(p,vec2(.758,.534),vec2(.145,.19));
+  d+=vec2(-r.y,r.x)*angle*w;
+  d.y-=.0025*sin(t*2.0)*weight(p,vec2(.47,.44),vec2(.4,.55));
+ }else if(state<3.5){
+  d.y-=.008*sin(t*1.45)*weight(p,vec2(.49,.53),vec2(.47,.54));
+  d.x+=.005*sin(t*1.1)*weight(p,vec2(.79,.77),vec2(.19,.20));
+ }else if(state<4.5){
+  float burst=pow(max(0.0,sin(t*1.8)),3.0);
+  d.x+=.004*sin(t*24.0)*burst*weight(p,vec2(.52,.45),vec2(.65,.70));
+  d.y-=.006*sin(t*5.0)*weight(p,vec2(.725,.53),vec2(.10,.11));
+ }else{
+  float k=exp(-t*1.9)*sin(t*12.0);
+  float lift=1.0-smoothstep(0.25,1.0,p.y);
+  d.y-=.035*k*lift;
+  d.x+=.005*k*weight(p,vec2(.5,.3),vec2(.45,.35));
+ }
+
+ /* ---- life ------------------------------------------------------------
+    The tail turns about its root, so the root does not move and the tip
+    moves most — a tail that slid sideways as a block would detach from
+    the body. The blink squashes the eye band toward its own centre line.
+    The gaze shifts two small discs at the pupils. */
+ vec2 r = p - tailRoot;
+ float wTail = weight(p, tailRegion.xy, tailRegion.zw);
+ float ang = tailMotion.x * sin(t * tailMotion.y);
+ d += vec2(-r.y, r.x) * ang * wTail * life.x;
+
+ /* The blink cannot use the same round gaussian the rest of this shader uses:
+    the points that have to move MOST are the top and bottom of the eye, which
+    is exactly where a round falloff is weakest — the first attempt squashed
+    the nose by two pixels and left the eyes alone. Separable instead: a
+    gaussian across x, and a plateau across y that only tapers outside the
+    eye. */
+ float bx = exp(-pow((p.x - eyeRegion.x) / max(eyeRegion.z, 1e-4), 2.0) * 2.0);
+ float by = 1.0 - smoothstep(0.7, 1.6, abs(p.y - eyeRegion.y) / max(eyeRegion.w, 1e-4));
+ d.y += (eyeRegion.y - p.y) * blink * bx * by * life.y;
+
+ float wPup = weight(p, pupils.xy, vec2(.055)) + weight(p, pupils.zw, vec2(.055));
+ d += gaze * wPup * life.z;
+
+ p+=d*strength;
+ p=vec2(.06)+p*.88;
+ gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0);
+}`;
+const FRAG = `precision mediump float; varying vec2 uv; uniform sampler2D texture0;
+void main(){ gl_FragColor=texture2D(texture0,uv); }`;
+const STATES = { idle:0, working:1, waiting:2, sleeping:3, urgent:4, finished:5 };
+
+class Cat {
+  constructor(canvas, live) {
+    this.canvas = canvas; this.live = live; this.state = "idle"; this.time = 0;
+    // Blinking runs on its OWN clock. `time` restarts whenever the pose does
+    // (the finished bob needs "seconds since the turn ended"), and a blink
+    // scheduled on that clock is lost at every pose change: the next blink sits
+    // several seconds in the future on a clock that just went back to zero, and
+    // a blink caught mid-way keeps a start time the clock can no longer reach,
+    // which makes the term NEGATIVE — the eyes stretch instead of closing.
+    this.lifeTime = 0;
+    this.textures = {}; this.blink = 0; this.gaze = [0, 0];
+    this.nextBlink = 2 + Math.random() * 2; this.blinkStart = -1;
+    this.nextGaze = 1.5; this.gazeTarget = [0, 0];
+    // preserveDrawingBuffer matches the shipped renderer: without it a
+    // snapshot of this page comes back blank, because the buffer is undefined
+    // once the frame has been composited.
+    const gl = this.gl = canvas.getContext("webgl", {
+      alpha: true, antialias: true, premultipliedAlpha: false,
+      preserveDrawingBuffer: true });
+    if (!gl) throw new Error("WebGL 不可用");
+    const sh = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    this.program = gl.createProgram();
+    gl.attachShader(this.program, sh(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(this.program, sh(gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(this.program);
+    if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(this.program));
+    gl.useProgram(this.program);
+    const pts = [], N = 56;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const a = x/N, b = y/N, c = (x+1)/N, d = (y+1)/N;
+      pts.push(a,b, c,b, a,d, c,b, c,d, a,d);
+    }
+    this.count = pts.length / 2;
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pts), gl.STATIC_DRAW);
+    const a = gl.getAttribLocation(this.program, "position");
+    gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+    this.u = {};
+    for (const k of ["time","strength","state","tailRegion","tailRoot","eyeRegion",
+                     "pupils","blink","gaze","life","tailMotion"]) {
+      this.u[k] = gl.getUniformLocation(this.program, k);
+    }
+    gl.uniform1i(gl.getUniformLocation(this.program, "texture0"), 0);
+    gl.clearColor(0, 0, 0, 0);
+    this.ready = Promise.all(Object.entries(ASSETS).map(([key, url]) => new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => {
+        const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        this.textures[key] = tex; res();
+      };
+      img.onerror = () => rej(new Error("贴图加载失败：" + key));
+      img.src = url;
+    })));
+  }
+
+  setState(s) { this.state = s; this.time = 0; }
+
+  step(dt) {
+    this.time += dt;
+    this.lifeTime += dt;
+    if (!this.live) return;
+    // A blink is 130ms: 55ms shut, 75ms open. Kept on the CPU so the timing
+    // can be irregular — a blink on a fixed beat reads as a machine.
+    if (this.blinkStart < 0 && this.lifeTime >= this.nextBlink) this.blinkStart = this.lifeTime;
+    if (this.blinkStart >= 0) {
+      const k = (this.lifeTime - this.blinkStart) / 0.13;
+      this.blink = k >= 1 ? 0 : Math.sin(Math.PI * k) * 0.9;
+      if (k >= 1) {
+        this.blinkStart = -1;
+        this.nextBlink = this.lifeTime + CONTROLS.blinkGap * (0.6 + Math.random() * 0.9);
+      }
+    }
+    if (this.lifeTime >= this.nextGaze) {
+      const amp = CONTROLS.gazeAmp;
+      this.gazeTarget = [(Math.random() - 0.5) * 2 * amp, (Math.random() - 0.5) * amp];
+      this.nextGaze = this.lifeTime + 1.4 + Math.random() * 2.4;
+    }
+    // Eases toward the target rather than jumping: a hard cut looks like a
+    // glitch at this size, and the eye is 12px on screen.
+    this.gaze[0] += (this.gazeTarget[0] - this.gaze[0]) * Math.min(1, dt * 9);
+    this.gaze[1] += (this.gazeTarget[1] - this.gaze[1]) * Math.min(1, dt * 9);
+  }
+
+  draw() {
+    const gl = this.gl, key = this.state;
+    if (!this.textures[key]) return;
+    const cfg = LIFE[key];
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(this.program);
+    gl.bindTexture(gl.TEXTURE_2D, this.textures[key]);
+    gl.uniform1f(this.u.time, this.time);
+    gl.uniform1f(this.u.strength, 1);
+    gl.uniform1f(this.u.state, STATES[key]);
+    gl.uniform4fv(this.u.tailRegion, cfg.tail);
+    gl.uniform2fv(this.u.tailRoot, cfg.root);
+    gl.uniform4fv(this.u.eyeRegion, cfg.eyes);
+    gl.uniform4fv(this.u.pupils, cfg.pupils);
+    gl.uniform1f(this.u.blink, this.live ? this.blink : 0);
+    gl.uniform2fv(this.u.gaze, this.live ? this.gaze : [0, 0]);
+    gl.uniform2fv(this.u.tailMotion, [CONTROLS.tailAmp, CONTROLS.tailSpd]);
+    gl.uniform3fv(this.u.life, this.live
+      ? [CONTROLS.tail ? 1 : 0, CONTROLS.blink ? 1 : 0, CONTROLS.gaze ? 1 : 0]
+      : [0, 0, 0]);
+    gl.drawArrays(gl.TRIANGLES, 0, this.count);
+  }
+}
+
+const CONTROLS = {
+  tail: true, blink: true, gaze: true,
+  tailAmp: 0.16, tailSpd: 2.2, blinkGap: 3.8, gazeAmp: 0.007,
+};
+
+const status = document.getElementById("status");
+let before, after, pose = "idle";
+
+function buildPoseButtons() {
+  const box = document.getElementById("poses");
+  POSES.forEach(function (p) {
+    const b = document.createElement("button");
+    b.textContent = LABEL[p];
+    b.setAttribute("aria-pressed", String(p === pose));
+    b.onclick = function () {
+      pose = p;
+      [...box.children].forEach(function (c, i) {
+        c.setAttribute("aria-pressed", String(POSES[i] === pose));
+      });
+      before.setState(pose); after.setState(pose);
+    };
+    box.appendChild(b);
+  });
+}
+
+function bind(id, key, scale, fmt) {
+  const el = document.getElementById(id), out = document.getElementById(id + "V");
+  const apply = function () {
+    CONTROLS[key] = Number(el.value) * scale;
+    out.textContent = fmt(CONTROLS[key]);
+  };
+  el.oninput = apply; apply();
+}
+
+try {
+  before = new Cat(document.getElementById("before"), false);
+  after  = new Cat(document.getElementById("after"), true);
+  buildPoseButtons();
+  ["tail", "blink", "gaze"].forEach(function (k) {
+    const el = document.getElementById(k);
+    el.onchange = function () { CONTROLS[k] = el.checked; };
+  });
+  bind("tailAmp", "tailAmp", 0.01, function (v) { return v.toFixed(2); });
+  bind("tailSpd", "tailSpd", 0.1, function (v) { return v.toFixed(1); });
+  bind("blinkGap", "blinkGap", 0.1, function (v) { return v.toFixed(1) + "s"; });
+  bind("gazeAmp", "gazeAmp", 0.001, function (v) { return v.toFixed(3); });
+
+  Promise.all([before.ready, after.ready]).then(function () {
+    // One draw before the loop: a page that is hidden (a background tab, or an
+    // off-screen snapshot) gets no requestAnimationFrame at all, and a canvas
+    // that has never been drawn is blank rather than merely still.
+    before.draw(); after.draw();
+    let last = 0;
+    function frame(now) {
+      const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;
+      last = now;
+      before.step(dt); after.step(dt);
+      before.draw(); after.draw();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }).catch(function (e) { status.className = "note err"; status.textContent = String(e); });
+} catch (e) {
+  status.className = "note err";
+  status.textContent = String(e);
+}
+</script>
+</body>
+</html>
