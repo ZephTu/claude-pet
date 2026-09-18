@@ -52,7 +52,7 @@ A number on the robot's chest counts both kinds of attention. It is not shown at
 
 **Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
-**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed, the row says so and offers the ✓ instead. `clear` on the group heading marks them all.
+**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed there is no jump left to protect the record from, so clicking the row clears it and says why nothing opened. `clear` on the group heading marks them all.
 
 **Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
 

@@ -341,11 +341,13 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
 };
 
 /**
- * Says why a finished row could not be jumped to, instead of closing the panel
- * and letting the user believe it worked.
+ * Says why clicking a finished row cleared it instead of opening anything.
+ *
+ * The row is already marked read by the time this runs — the click did do
+ * something, and the line is here so it does not look like nothing happened.
  */
-window.explainNoJump = function () {
-  window.say("that session's terminal is gone — marking it read is all that is left", 4000);
+window.explainClosedRow = function () {
+  window.say("that session's terminal is gone — cleared the row instead", 4000);
 };
 
 /**
@@ -402,7 +404,8 @@ window.hitRow = function (x, y) {
     return { action: "read", eventIds: idsOf(row) };
   }
   // A finished row opens its session AND clears itself, but only in that order:
-  // Swift marks it read after the jump, never before.
+  // Swift marks it read after the jump, never before. A row with no handle has
+  // nothing to open, so there the click is only the clearing.
   const finished = el.closest(".row.done");
   if (finished) {
     return {
