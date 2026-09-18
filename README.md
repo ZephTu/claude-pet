@@ -72,6 +72,14 @@ A session stays listed for as long as its process is alive, however long it sits
 
 **Right-click → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
 
+**Right-click → Appearance** swaps who is drawing. Two figures ship: the **Robot**, an SVG whose every state is a CSS rule, and the **Cat**, painted artwork warped by a WebGL mesh — it swishes its tail, blinks on an irregular beat, and its eyes drift.
+
+<img src="docs/images/cat.png" alt="The cat skin, at work on a laptop" width="180">
+
+A painted skin has as many poses as it has pictures, so the cat is a lossy projection of the pet's eleven states onto five drawings: **working, compacting and waiting-on-an-agent are one picture and nothing tells them apart** — the robot's lamp is where that distinction lives. Everything else survives. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this"; being ignored has its own alarm painted in; a finished turn bobs the idle drawing; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
+
+The choice is remembered. If WebGL is unavailable or a texture will not decode, the page falls back to the robot on its own and tells the app, so the hit region never ends up belonging to a figure that is not on screen.
+
 **Right-click → Demo the States** cycles the pet through everything it can show, writing nothing to disk.
 
 ## Requirements
