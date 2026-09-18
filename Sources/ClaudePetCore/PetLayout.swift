@@ -46,6 +46,26 @@ public enum PetLayout {
     /// r 4.6) plus the same 5pt of urgent lift.
     public static let antennaBox = CGRect(x: 385, y: 149, width: 12, height: 12)
 
+    /// The cat's single box, measured off the artwork rather than guessed.
+    ///
+    /// It is the union of the alpha bounding boxes of all five textures, mapped
+    /// through the renderer's own 6% margin (`p = 0.06 + p * 0.88`) into the
+    /// 120x120 pet box. One rectangle for all five poses, for the same reason
+    /// the robot has one: a hit region that tracked the animation would change
+    /// under the cursor.
+    ///
+    /// The cat has no antenna, so there is no second box — its lamp is drawn by
+    /// the host inside this rectangle.
+    public static let catBodyBox = CGRect(x: 354, y: 148, width: 98, height: 104)
+
+    /// The rectangles that count as "the pet" for this skin.
+    public static func hitBoxes(skin: PetSkin) -> [CGRect] {
+        switch skin {
+        case .robot: return [bodyBox, antennaBox]
+        case .cat: return [catBodyBox]
+        }
+    }
+
     /// Where `#pet` sits once the layout flips: same size, other side.
     public static var mirroredPetBox: CGRect {
         CGRect(x: windowSize.width - petBox.maxX, y: petBox.origin.y,
@@ -71,18 +91,47 @@ public enum PetLayout {
         box.offsetBy(dx: mirroredPetBox.minX - petBox.minX, dy: 0)
     }
 
+    /// How far the WINDOW has to move so the PET does not move when the layout
+    /// flips.
+    ///
+    /// Flipping slides the drawing 320pt across the window. Left uncompensated
+    /// that is a 320pt leap on screen, and it happens at the left edge — where
+    /// the leap is straight out of view. The pet must stay exactly where the
+    /// hand that dragged it let go.
+    public static func flipShift(toMirrored: Bool) -> CGFloat {
+        let delta = petBox.minX - mirroredPetBox.minX
+        return toMirrored ? delta : -delta
+    }
+
+    /// How far back towards the middle the pet must come before a mirrored
+    /// layout flips back. Without it a pet parked on the line flaps between
+    /// sides on every one-pixel nudge.
+    public static let flipHysteresis: CGFloat = 24
+
     /// Should the layout flip, given where the window sits on its screen?
+    ///
+    /// Measured through the PET, not the window. Flipping moves the window (see
+    /// `flipShift`), so a rule that read the window's own origin would give a
+    /// different answer the instant it acted on its previous one, and the
+    /// layout would oscillate.
     ///
     /// - Parameters:
     ///   - windowOrigin: the window's lower-left corner in screen coordinates.
     ///   - visibleFrame: the screen's usable area.
-    public static func shouldMirror(windowOrigin: CGPoint, visibleFrame: CGRect) -> Bool {
-        // Would the panel's left edge fall off the screen as things stand?
-        let panelLeft = windowOrigin.x
-        guard panelLeft < visibleFrame.minX else { return false }
+    ///   - mirrored: the layout the window is in right now.
+    public static func shouldMirror(windowOrigin: CGPoint, visibleFrame: CGRect,
+                                    mirrored: Bool = false) -> Bool {
+        // Where the window would be for this same pet position, unmirrored.
+        let petMinX = windowOrigin.x + (mirrored ? mirroredPetBox.minX : petBox.minX)
+        let origin = petMinX - petBox.minX
         // Only flip if flipping actually helps: on a window already hanging off
         // the right edge, mirroring would push the panel off THAT side instead.
-        return windowOrigin.x + windowSize.width <= visibleFrame.maxX
+        let helps = origin + windowSize.width <= visibleFrame.maxX
+        if mirrored {
+            return origin < visibleFrame.minX + flipHysteresis && helps
+        }
+        // Would the panel's left edge fall off the screen as things stand?
+        return origin < visibleFrame.minX && helps
     }
 
     /// Where to put the window so the pet stays reachable on this screen.
@@ -138,12 +187,40 @@ public enum PetLayout {
         at point: CGPoint,
         panel: CGRect?,
         bubble: CGRect?,
-        mirrored isMirrored: Bool = false
+        mirrored isMirrored: Bool = false,
+        skin: PetSkin = .robot
     ) -> Bool {
         if let panel, panel.contains(point) { return true }
         if let bubble, bubble.contains(point) { return true }
-        let body = isMirrored ? mirrored(bodyBox) : bodyBox
-        let antenna = isMirrored ? mirrored(antennaBox) : antennaBox
-        return body.contains(point) || antenna.contains(point)
+        return hitBoxes(skin: skin).contains {
+            (isMirrored ? mirrored($0) : $0).contains(point)
+        }
+    }
+
+    /// Is the pointer on the figure itself, in this skin and this layout?
+    ///
+    /// The same rectangle a click uses, because "the pointer is on the pet" has
+    /// to have ONE answer — resting on the cat's paws and clicking the cat's
+    /// paws cannot be two different questions. It was two: the hover readout
+    /// asked `bodyBox` directly, which is the ROBOT's desk, so a quarter of the
+    /// cat (its lower body) and all of it on a mirrored layout showed no quota
+    /// at all while still being clickable.
+    public static func isOnPet(_ point: CGPoint, skin: PetSkin = .robot,
+                               mirrored isMirrored: Bool = false) -> Bool {
+        let box = clickBox(skin: skin)
+        return (isMirrored ? mirrored(box) : box).contains(point)
+    }
+
+    /// The one box a click on the figure must land in, for this skin.
+    ///
+    /// The robot's antenna is deliberately not included: clicking the bulb
+    /// should not toggle the panel any more than clicking the desk should, and
+    /// the antenna box exists only so the brightest part of the drawing does not
+    /// pass clicks through to whatever is behind it.
+    public static func clickBox(skin: PetSkin) -> CGRect {
+        switch skin {
+        case .robot: return bodyBox
+        case .cat: return catBodyBox
+        }
     }
 }

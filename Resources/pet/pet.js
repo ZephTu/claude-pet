@@ -341,11 +341,13 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
 };
 
 /**
- * Says why a finished row could not be jumped to, instead of closing the panel
- * and letting the user believe it worked.
+ * Says why clicking a finished row cleared it instead of opening anything.
+ *
+ * The row is already marked read by the time this runs — the click did do
+ * something, and the line is here so it does not look like nothing happened.
  */
-window.explainNoJump = function () {
-  window.say("that session's terminal is gone — marking it read is all that is left", 4000);
+window.explainClosedRow = function () {
+  window.say("that session's terminal is gone — cleared the row instead", 4000);
 };
 
 /**
@@ -402,7 +404,8 @@ window.hitRow = function (x, y) {
     return { action: "read", eventIds: idsOf(row) };
   }
   // A finished row opens its session AND clears itself, but only in that order:
-  // Swift marks it read after the jump, never before.
+  // Swift marks it read after the jump, never before. A row with no handle has
+  // nothing to open, so there the click is only the clearing.
   const finished = el.closest(".row.done");
   if (finished) {
     return {
@@ -542,12 +545,20 @@ let flashTimer = null;
  *
  * @param {"done"|"trouble"} kind
  */
-window.flash = function (kind) {
+window.flash = function (kind, pose, mark) {
   if (flashTimer) clearTimeout(flashTimer);
   pet.dataset.flash = kind;
+  // The transient owns the pose and the glyph and puts the steady pair back
+  // afterwards rather than letting them be lost. An empty `pose` means "keep
+  // the one you have": an interrupted tool happens while the session carries
+  // on working.
+  if (mark) setMark(mark);
+  if (pose) setPose(pose);
   flashTimer = setTimeout(function () {
     delete pet.dataset.flash;
     flashTimer = null;
+    setMark(steadyMark);
+    setPose(steadyPose);
   }, kind === "trouble" ? 2600 : 1600);
 };
 
@@ -561,9 +572,19 @@ window.setPhase = function (phase) {
 
 window.setCalm = function (on) {
   document.getElementById("stage").classList.toggle("calm", !!on);
+  // CSS cannot stop a WebGL renderer: the cat keeps warping its mesh however
+  // many `animation: none` rules are aimed at the canvas element.
+  if (cat) cat.setReducedMotion(!!on);
 };
 
 window.setBadge = function (text) {
+  // The host-drawn count, for skins whose artwork has no chest to put one on.
+  // Kept in step with the robot's rather than replacing it: the robot's sits
+  // inside its own drawing and moves with it.
+  const host = document.getElementById("count");
+  host.textContent = text || "";
+  host.hidden = !text;
+
   const g = document.getElementById("badge-count");
   if (!text) { g.classList.remove("on"); return; }
   const w = text.length <= 2 ? 11 : 16;
@@ -615,3 +636,91 @@ window.setHoverAt = function (x, y) {
   hoverRow = row;
   if (row) row.classList.add("hot");
 };
+
+
+/* ---- Skins ---------------------------------------------------------------
+ * The robot is CSS: every state it has is a rule, and swapping states costs
+ * an attribute write. A painted skin cannot work that way — it has as many
+ * poses as it has pictures — so the pose and the glyph are decided in Swift
+ * (ClaudePetCore/PetSkin.swift, where they are unit-tested against all eleven
+ * pet states) and pushed here. This file only applies them.
+ */
+
+/** The live CatPet renderer, or null while the robot is showing. */
+let cat = null;
+/** What the current STATE calls for, as opposed to a transient flash. */
+let steadyMark = "none";
+let steadyPose = "idle";
+
+function setMark(token) {
+  document.getElementById("mark").dataset.mark = token || "none";
+}
+
+function setPose(pose) {
+  lastPose = pose || "idle";
+  if (cat) cat.setState(lastPose);
+}
+
+/**
+ * Switch the figure. Safe to call with the skin that is already showing.
+ * @param {"robot"|"cat"} name
+ */
+window.setSkin = function (name) {
+  const skin = name === "cat" ? "cat" : "robot";
+  if (pet.dataset.skin === skin) return;
+  pet.dataset.skin = skin;
+
+  if (skin !== "cat") {
+    // Disposed rather than hidden: a hidden canvas still holds its textures
+    // and its animation frame, and this thing sits on the desktop all day.
+    if (cat) { cat.dispose(); cat = null; }
+    return;
+  }
+  if (cat) return;
+  try {
+    cat = new CatPet(document.getElementById("cat"), {
+      idle: "skins/cat/assets/idle.png",
+      working: "skins/cat/assets/working.png",
+      waiting: "skins/cat/assets/waiting.png",
+      sleeping: "skins/cat/assets/sleeping.png",
+      urgent: "skins/cat/assets/urgent.png",
+    });
+    cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
+    cat.ready.then(function () { if (cat) cat.setState(lastPose); })
+             .catch(function (e) { skinFailed(e); });
+  } catch (e) {
+    skinFailed(e);
+  }
+};
+
+/** Whatever pose Swift last asked for, replayed once the textures arrive. */
+let lastPose = "idle";
+
+/**
+ * Called from Swift on every render. The pose is one of six; the glyph says
+ * which KIND of waiting, which the one raised-paw picture cannot.
+ */
+window.setCatLook = function (pose, mark) {
+  steadyPose = pose || "idle";
+  steadyMark = mark || "none";
+  // A flash in progress owns both; it restores these when it ends. Without this
+  // guard a state push arriving mid-flash would cut the "done" bob short — and
+  // one of those arrives on every tick.
+  if (flashTimer) return;
+  setMark(steadyMark);
+  setPose(steadyPose);
+};
+
+/**
+ * A skin that cannot draw itself falls back to the one that always can.
+ * Silently showing nothing is the failure this whole app is against.
+ */
+function skinFailed(error) {
+  // eslint-disable-next-line no-console
+  console.error("skin failed, falling back to the robot:", error);
+  if (cat) { cat.dispose(); cat = null; }
+  pet.dataset.skin = "robot";
+  const handler =
+    window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.layout;
+  if (handler) handler.postMessage({ skinFailed: String(error) });
+}

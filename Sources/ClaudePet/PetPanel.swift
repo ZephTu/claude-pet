@@ -33,15 +33,27 @@ final class PetPanel: NSPanel {
     // and reusing it would place the new window 240pt off from where the pet
     // visually was.
     private static let originKey = "petOrigin.v2"
+    /// Saved beside the origin: the origin alone no longer says where the pet
+    /// IS, because a mirrored window draws it 320pt further left.
+    private static let mirroredKey = "petMirrored"
 
     private var layoutHandler: LayoutMessageHandler?
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
     private var clickThroughPoll: Timer?
 
+    /// Retained for as long as the web view: WKWebView does not own it.
+    private let petScheme: PetSchemeHandler?
+
     init() {
         let size = PetLayout.windowSize
         let config = WKWebViewConfiguration()
+        // One origin for the page and everything it loads — see PetSchemeHandler.
+        petScheme = Bundle.module.url(forResource: "pet", withExtension: nil)
+            .map { PetSchemeHandler(root: $0) }
+        if let petScheme {
+            config.setURLSchemeHandler(petScheme, forURLScheme: PetSchemeHandler.scheme)
+        }
         webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
         host = PetHostView(webView: webView)
 
@@ -71,6 +83,8 @@ final class PetPanel: NSPanel {
         contentView = host
 
         host.onClick = { [weak self] point in self?.onClick?(point) }
+        // The side is decided on release, not during the drag: see updateLayoutSide.
+        host.onDragEnded = { [weak self] in self?.updateLayoutSide() }
         host.onRightClick = { [weak self] point in self?.onRightClick?(point) }
 
         let handler = LayoutMessageHandler { [weak self] panel, bubble in
@@ -144,12 +158,22 @@ final class PetPanel: NSPanel {
     /// Recomputed on every move rather than once at launch, so dragging between
     /// displays and unplugging one both go through the same path as a drag.
     func updateLayoutSide() {
+        // Never mid-drag. The flip moves the window, and the drag would undo
+        // that on its very next event from its own anchor — which is the jump
+        // this guard exists to prevent. Decided on release instead.
+        guard !host.isDragging else { return }
         let visible = (screen ?? NSScreen.main)?.visibleFrame ?? .zero
         guard visible.width > 0 else { return }
-        let flip = PetLayout.shouldMirror(windowOrigin: frame.origin, visibleFrame: visible)
+        let flip = PetLayout.shouldMirror(windowOrigin: frame.origin, visibleFrame: visible,
+                                          mirrored: host.isMirrored)
         guard flip != host.isMirrored else { return }
         host.isMirrored = flip
+        UserDefaults.standard.set(flip, forKey: Self.mirroredKey)
         onMirrorChanged?(flip)
+        // The drawing just moved 320pt across the window; move the window the
+        // other way so the pet stays under the spot it was dropped on.
+        setFrameOrigin(NSPoint(x: frame.origin.x + PetLayout.flipShift(toMirrored: flip),
+                               y: frame.origin.y))
     }
 
     /// The layout flipped; the page has to be told so it can move the drawing.
@@ -171,8 +195,22 @@ final class PetPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// AppKit keeps a window's top edge below the menu bar. Measured on this
+    /// machine: asking a borderless panel for origin y=980 on a 1080pt screen
+    /// gives back y=770 — its top pinned to the menu bar at 1050. The pet is
+    /// drawn 140pt below the window's top, so that constraint is a 140pt band
+    /// under the menu bar that the pet simply cannot be dragged into, and from
+    /// the outside it looks like the pet is hitting an invisible shelf.
+    ///
+    /// The window is mostly transparent, so there is nothing to protect here —
+    /// what has to stay reachable is the PET, and `PetHostView` clamps that
+    /// against the screen the cursor is on while the drag is happening.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
     private func loadPetPage() {
-        guard let dir = Bundle.module.url(forResource: "pet", withExtension: nil) else {
+        guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html") else {
             // assertionFailure alone is a no-op in release, which is the only
             // build that ships — without this the failure mode is a blank
             // window and no clue anywhere.
@@ -180,8 +218,17 @@ final class PetPanel: NSPanel {
             assertionFailure("pet resources missing from bundle")
             return
         }
-        let index = dir.appendingPathComponent("index.html")
-        webView.loadFileURL(index, allowingReadAccessTo: dir)
+        webView.load(URLRequest(url: index))
+    }
+
+    /// Which figure to draw. Changing it re-renders the page's pet slot; it does
+    /// not reload anything.
+    func setSkin(_ skin: PetSkin) { host.skin = skin }
+
+    /// The page could not draw the skin it was given and is showing the robot.
+    var onSkinFailed: ((String) -> Void)? {
+        get { layoutHandler?.onSkinFailed }
+        set { layoutHandler?.onSkinFailed = newValue }
     }
 
     /// Show without activating the app or pulling focus.
@@ -200,6 +247,9 @@ final class PetPanel: NSPanel {
         let p = NSPointFromString(s)
         guard NSScreen.screens.contains(where: { $0.frame.intersects(NSRect(origin: p, size: frame.size)) })
         else { return false }  // saved spot is on a screen that is no longer attached
+        // Before the origin: the origin was saved for THIS side, and applying it
+        // to the other one puts the pet 320pt from where it was left.
+        host.isMirrored = UserDefaults.standard.bool(forKey: Self.mirroredKey)
         setFrameOrigin(p)
         return true
     }
@@ -278,6 +328,9 @@ extension PetPanel: WKNavigationDelegate {
 @MainActor
 final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
     private let onLayout: (CGRect?, CGRect?) -> Void
+    /// A skin that could not draw itself; the page has already fallen back to
+    /// the robot and this is how Swift finds out.
+    var onSkinFailed: ((String) -> Void)?
 
     init(onLayout: @escaping (CGRect?, CGRect?) -> Void) {
         self.onLayout = onLayout
@@ -285,6 +338,9 @@ final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
+        // The page draws the robot instead, but the hit rectangles live on this
+        // side — without this the cat's box would be tested against a robot.
+        if let why = body["skinFailed"] as? String { onSkinFailed?(why) }
         onLayout(Self.rect(body["panel"]), Self.rect(body["bubble"]))
     }
 

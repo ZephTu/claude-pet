@@ -53,6 +53,65 @@ html, body {
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35));
 }
 
+/* ---- Skins ----------------------------------------------------------------
+   #pet is the slot; exactly one skin is visible in it. The state attributes
+   live on the slot, so the robot's rules below are untouched by any of this.
+
+   Each skin has its own hit region — PetLayout.hitBoxes(skin:) — because the
+   two figures are nothing like the same shape: the robot is a wide, squat desk,
+   the cat is an upright animal. */
+#pet[data-skin="cat"] > #robot { display: none; }
+#pet:not([data-skin="cat"]) > #cat,
+#pet:not([data-skin="cat"]) > #signals { display: none; }
+
+#robot { display: block; width: 100%; height: 100%; overflow: visible; }
+#cat   { display: block; width: 120px; height: 120px; }
+
+/* The count and the glyph, drawn by the host above whatever skin is loaded.
+   The robot draws its own — it has an antenna and a chest — so these are for
+   skins whose artwork has neither. Their positions are inside
+   PetLayout.catBodyBox, so they are clickable rather than decorative.
+
+   A lamp used to sit above the count. It was removed: a coloured disc laid on
+   top of painted artwork reads as a sticker stuck to the cat rather than part
+   of it, and the poses already carry everything it said except which KIND of
+   busy — see CatSkin in PetSkin.swift for what that costs. */
+#signals { position: absolute; inset: 0; pointer-events: none; }
+/* Top LEFT, and inside PetLayout.catBodyBox.
+   Not the top right, which looked like the natural place until all five poses
+   were rendered: that is where the cat's own `?`, its warning triangle and its
+   z's all live, so a badge there collides with the artwork in three states out
+   of five. The left column is empty in every pose. */
+#count {
+  position: absolute; left: 14px; top: 10px; min-width: 17px; height: 17px;
+  box-sizing: border-box; padding: 0 4px; border-radius: 9px;
+  background: #e0533c; color: #fff; text-align: center;
+  font: 600 11px/17px -apple-system, system-ui, sans-serif;
+}
+#count[hidden] { display: none; }
+
+/* Where the artwork used to paint its question mark: right of the head, above
+   the raised paw. Kept in that exact spot so the pose still reads as pointing
+   at it. 20x20 inside the 120pt box, measured off the original texture. */
+#mark {
+  position: absolute; right: 13px; top: 25px; width: 20px; height: 20px;
+  display: grid; place-items: center;
+  color: #fdf3ec; font: 700 13px/1 -apple-system, system-ui, sans-serif;
+}
+#mark[data-mark="none"] { display: none; }
+/* "Answer me": a question, so a question mark, on the amber that already means
+   "it wants you". */
+#mark[data-mark="question"] { background: #e0a63c; border-radius: 50%; }
+#mark[data-mark="question"]::after { content: "?"; }
+/* "Decide this", and also "that call came back interrupted". One glyph for two
+   situations, exactly as the robot does it — its monitor shows the same warning
+   for both, and the pose is what tells them apart. */
+#mark[data-mark="warn"] {
+  background: #e0a63c;
+  clip-path: polygon(50% 4%, 96% 92%, 4% 92%);
+}
+#mark[data-mark="warn"]::after { content: "!"; color: #3a2f22; padding-top: 5px; }
+
 /* ---- The robot ------------------------------------------------------------
    The hit region for this drawing is PetLayout.bodyBox + PetLayout.antennaBox.
    Anything that moves the figure outside those rectangles becomes unclickable,

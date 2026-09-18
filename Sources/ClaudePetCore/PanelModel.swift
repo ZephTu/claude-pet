@@ -99,6 +99,30 @@ public enum PanelModel {
         return recorded.isEmpty ? event.sessionId : recorded
     }
 
+    /// What a left click on a finished row should do.
+    ///
+    /// Two cases, and the difference is the whole rule: a row whose session is
+    /// still there opens it, and is cleared BY having been opened — a jump that
+    /// never happened must not clear the one record that it happened at all. A
+    /// row whose terminal is gone has nothing to open, so the click itself is
+    /// the acknowledgement.
+    ///
+    /// Refusing to clear that second one is what left a badge no click on the
+    /// row could remove: the ✓ and `clear` still worked, the row did not, and
+    /// the only thing the click produced was a line saying it had not worked.
+    public enum FinishedClick: Sendable, Equatable {
+        /// Jump there, then mark it read.
+        case openThenRead
+        /// Nowhere to go; marking it read is the whole action.
+        case read
+    }
+
+    /// - Parameter handle: the row's terminal handle, empty when there is none
+    ///   to address — a closed session, or a terminal we cannot drive.
+    public static func finishedClick(handle: String) -> FinishedClick {
+        handle.isEmpty ? .read : .openThenRead
+    }
+
     /// Where a "take me to the next thing" shortcut should land.
     ///
     /// The oldest unresolved wait that is not postponed — the one that has been

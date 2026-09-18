@@ -6,7 +6,11 @@
   <!-- Every coordinate below was measured off docs/images/reference-sheet.png
        and mapped with sx = (X - 626) * 0.09246, sy = (Y - 1030) * 0.09246 + 26,
        which puts the desk's near edge at y=26 and its centre at x=0. -->
-  <svg id="pet" viewBox="-60 -60 120 120" aria-hidden="true">
+  <!-- #pet is the 120x120 slot, not the drawing. One skin fills it at a time;
+       `data-mood` / `data-motion` / `data-phase` / `data-flash` stay on the slot
+       so every rule written against the robot keeps working unchanged. -->
+  <div id="pet" data-skin="robot">
+  <svg id="robot" viewBox="-60 -60 120 120" aria-hidden="true">
     <g id="body">
       <g class="monitor">
         <rect class="mon-body"   x="14.3" y="-10.3" width="31"   height="22.6" rx="3.5"/>
@@ -107,6 +111,24 @@
       </g>
     </g>
   </svg>
+
+  <!-- The cat skin: painted artwork warped by a WebGL mesh, so it has as many
+       poses as it has pictures — five, against the pet's eleven states. The
+       count and the waiting glyph are drawn HERE, by the host, because the
+       artwork has neither. The lamp used to be drawn here too and was taken
+       out: on top of a painted cat it read as a sticker. -->
+  <canvas id="cat" width="240" height="240" aria-hidden="true"></canvas>
+  <div id="signals" aria-hidden="true">
+    <span id="count" hidden>0</span>
+    <!-- The glyph that used to be painted into the waiting texture. Drawn here
+         so one "raised paw" picture can mean both "answer me" and "decide
+         this" — which it could not while the artwork held a question mark. -->
+    <span id="mark" data-mark="none"></span>
+  </div>
+  </div>
   <div id="panel" hidden></div>
 </div>
+<!-- The cat skin's renderer, vendored from the animation kit. Loaded for both
+     skins because it is 6KB and costs nothing until a CatPet is constructed. -->
+<script src="skins/cat/cat-pet.js"></script>
 <script src="pet.js"></script>

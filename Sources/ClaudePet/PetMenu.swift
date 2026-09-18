@@ -1,4 +1,5 @@
 import AppKit
+import ClaudePetCore
 
 /// Right-click menu: pause, launch at login, unmute, quit.
 final class PetMenu: NSObject, NSMenuDelegate {
@@ -7,6 +8,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onShowHealth: () -> Void
     private let onDemoToggle: () -> Void
     private let onReduceMotionToggle: () -> Void
+    private let onSkinPick: (PetSkin) -> Void
     private let onLoginToggle: () -> Void
     private let onUnmuteAll: () -> Void
     private let onQuit: () -> Void
@@ -19,6 +21,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onShowHealth: @escaping () -> Void,
         onDemoToggle: @escaping () -> Void,
         onReduceMotionToggle: @escaping () -> Void,
+        onSkinPick: @escaping (PetSkin) -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onPauseToggle = onPauseToggle
@@ -26,6 +29,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         self.onShowHealth = onShowHealth
         self.onDemoToggle = onDemoToggle
         self.onReduceMotionToggle = onReduceMotionToggle
+        self.onSkinPick = onSkinPick
         self.onLoginToggle = onLoginToggle
         self.onUnmuteAll = onUnmuteAll
         self.onQuit = onQuit
@@ -34,11 +38,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        demoOn: Bool = false, reduceMotionOn: Bool = false
+        demoOn: Bool = false, reduceMotionOn: Bool = false, skin: PetSkin = .robot
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, demoOn: demoOn, reduceMotionOn: reduceMotionOn
+            shortcutOn: shortcutOn, demoOn: demoOn, reduceMotionOn: reduceMotionOn, skin: skin
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -47,7 +51,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     /// without running a modal tracking loop.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, demoOn: Bool = false,
-                  reduceMotionOn: Bool = false) -> NSMenu {
+                  reduceMotionOn: Bool = false, skin: PetSkin = .robot) -> NSMenu {
         let menu = NSMenu()
 
         let pause = NSMenuItem(
@@ -80,6 +84,22 @@ final class PetMenu: NSObject, NSMenuDelegate {
         calm.state = reduceMotionOn ? .on : .off
         calm.target = self
         menu.addItem(calm)
+
+        // A submenu rather than a toggle: there are two skins today and the
+        // whole point of the slot is that there can be more, at which point a
+        // "Use the Cat" checkbox would have to be rewritten anyway.
+        let appearance = NSMenuItem(title: "Appearance", action: nil, keyEquivalent: "")
+        let skins = NSMenu()
+        for option in PetSkin.allCases {
+            let item = NSMenuItem(title: option.displayName, action: #selector(pickSkin),
+                                  keyEquivalent: "")
+            item.target = self
+            item.state = option == skin ? .on : .off
+            item.representedObject = option.rawValue
+            skins.addItem(item)
+        }
+        appearance.submenu = skins
+        menu.addItem(appearance)
 
         let health = NSMenuItem(title: "Connection Status…", action: #selector(showHealth),
                                 keyEquivalent: "")
@@ -114,5 +134,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func showHealth() { onShowHealth() }
     @objc private func toggleDemo() { onDemoToggle() }
     @objc private func toggleReduceMotion() { onReduceMotionToggle() }
+    @objc private func pickSkin(_ sender: NSMenuItem) {
+        onSkinPick(PetSkin.named(sender.representedObject as? String))
+    }
     @objc private func quit() { onQuit() }
 }

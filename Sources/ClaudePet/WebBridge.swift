@@ -45,6 +45,8 @@ final class WebBridge {
         isReady = true
         last = nil
         lastSessionsPayload = nil
+        lastSkin = nil
+        lastLook = nil
     }
 
     func push(_ state: GlobalState, motion: ActivitySummary.Motion? = nil) {
@@ -125,20 +127,24 @@ final class WebBridge {
                 case "snooze":
                     self.onSnooze?(row["sessionId"] as? String ?? "", point)
                 case "openFinished":
-                    // A finished row that CAN be jumped to: go there, and only
-                    // then call it read. A jump that never happened must not
-                    // clear the one record that it happened at all.
-                    guard
-                        let kind = row["kind"] as? String,
-                        let handle = row["handle"] as? String,
-                        !handle.isEmpty
-                    else {
-                        self.evaluate("window.explainNoJump();")
-                        return
+                    let ids = row["eventIds"] as? [String] ?? []
+                    let handle = row["handle"] as? String ?? ""
+                    switch PanelModel.finishedClick(handle: handle) {
+                    case .openThenRead:
+                        // Go there, and only then call it read: a jump that
+                        // never happened must not clear the one record that it
+                        // happened at all.
+                        TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle)
+                        self.onMarkRead?(ids)
+                        self.evaluate("window.togglePanel();")
+                    case .read:
+                        // The terminal is gone, so there is no jump left to
+                        // protect the record from. The click clears the row and
+                        // says why it did not open anything. The list stays up,
+                        // same as the ✓.
+                        self.onMarkRead?(ids)
+                        self.evaluate("window.explainClosedRow();")
                     }
-                    TerminalJump.jump(kind: kind, handle: handle)
-                    self.onMarkRead?(row["eventIds"] as? [String] ?? [])
-                    self.evaluate("window.togglePanel();")
                 default:
                     self.togglePanel()
                 }
@@ -196,9 +202,37 @@ final class WebBridge {
     }
 
     /// A brief reaction that is not a state — see window.flash.
+    ///
+    /// The pose and the glyph travel with it because the robot's flash is a
+    /// CSS rule and a painted skin has no rule to run: a finished turn is a bob
+    /// of the idle picture, an interrupted tool is a warning glyph over
+    /// whatever the cat is already doing.
     func flash(_ kind: String) {
         guard isReady else { return }
-        evaluate("window.flash(\(jsString(kind)));")
+        let mark = CatSkin.mark(mood: "", flash: kind, blockedOn: "").rawValue
+        // Empty means "keep the pose you have": an interrupted tool happens
+        // while the session carries on working, and replacing the picture would
+        // say it stopped.
+        let pose = CatSkin.flashPose(kind)?.rawValue ?? ""
+        evaluate("window.flash(\(jsString(kind)), "
+            + "\(jsString(pose)), \(jsString(mark)));")
+    }
+
+    private var lastSkin: PetSkin?
+    func setSkin(_ skin: PetSkin) {
+        guard isReady, skin != lastSkin else { return }
+        lastSkin = skin
+        evaluate("window.setSkin(\(jsString(skin.rawValue)));")
+    }
+
+    /// The pose and glyph a painted skin should show. Pushed on every render;
+    /// the page ignores it while the robot is up.
+    private var lastLook: CatSkin.Look?
+    func setCatLook(_ look: CatSkin.Look) {
+        guard isReady, look != lastLook else { return }
+        lastLook = look
+        evaluate("window.setCatLook(\(jsString(look.pose.rawValue)), "
+            + "\(jsString(look.mark.rawValue)));")
     }
 
     private var lastPhase: String?

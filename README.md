@@ -52,7 +52,7 @@ A number on the robot's chest counts both kinds of attention. It is not shown at
 
 **Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
-**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed, the row says so and offers the ✓ instead. `clear` on the group heading marks them all.
+**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed there is no jump left to protect the record from, so clicking the row clears it and says why nothing opened. `clear` on the group heading marks them all.
 
 **Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
 
@@ -71,6 +71,14 @@ A session stays listed for as long as its process is alive, however long it sits
 **Optional: a global shortcut.** Off by default. Turn on ⌃⌥⌘J in the right-click menu to jump to whatever has been waiting longest. Claiming a system-wide chord uninvited is taking something that was not offered, so you have to ask for it — and if another app already owns it, the menu says so instead of quietly failing.
 
 **Right-click → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
+
+**Right-click → Appearance** swaps who is drawing. Two figures ship: the **Robot**, an SVG whose every state is a CSS rule, and the **Cat**, painted artwork warped by a WebGL mesh — it swishes its tail, blinks on an irregular beat, and its eyes drift.
+
+<img src="docs/images/cat.png" alt="The cat skin, at work on a laptop" width="180">
+
+A painted skin has as many poses as it has pictures, so the cat is a lossy projection of the pet's eleven states onto five drawings: **working, compacting and waiting-on-an-agent are one picture and nothing tells them apart** — the robot's lamp is where that distinction lives. Everything else survives. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this"; being ignored has its own alarm painted in; a finished turn bobs the idle drawing; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
+
+The choice is remembered. If WebGL is unavailable or a texture will not decode, the page falls back to the robot on its own and tells the app, so the hit region never ends up belonging to a figure that is not on screen.
 
 **Right-click → Demo the States** cycles the pet through everything it can show, writing nothing to disk.
 

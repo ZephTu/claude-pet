@@ -212,6 +212,39 @@ struct Runner {
                 !PetLayout.shouldMirror(windowOrigin: CGPoint(x: -120, y: 100),
                                         visibleFrame: CGRect(x: 0, y: 0, width: 260, height: 900)))
 
+        // The flip has to hold the PET still. It slides the drawing 320pt across
+        // the window, and at the left edge that is a leap straight out of view —
+        // which is exactly what dragging the pet to the left edge used to do.
+        t.check("flipping moves the window by the width the drawing moves",
+                PetLayout.flipShift(toMirrored: true) == 320
+                    && PetLayout.flipShift(toMirrored: false) == -320)
+
+        // ...and having moved the window, the rule must not change its mind.
+        // Reading the WINDOW's origin, it would: the shifted window is back
+        // inside the screen, so the next answer is "unmirror", which shifts it
+        // out again — a pet flapping between two places forever.
+        let off = CGPoint(x: -120, y: 100)
+        let flipped = CGPoint(x: off.x + PetLayout.flipShift(toMirrored: true), y: off.y)
+        t.check("a window that flipped and moved stays flipped",
+                PetLayout.shouldMirror(windowOrigin: flipped, visibleFrame: screen,
+                                       mirrored: true))
+        t.check("and the pet is in the same place before and after the flip",
+                off.x + PetLayout.petBox.minX
+                    == flipped.x + PetLayout.mirroredPetBox.minX)
+
+        // Coming back the other way it does unflip — once there is room for the
+        // panel on the left again, plus the hysteresis band. "Room" is measured
+        // from the PET: the panel lives in the 340pt to its left.
+        func mirroredWindow(petLeftAt x: CGFloat) -> CGPoint {
+            CGPoint(x: x - PetLayout.mirroredPetBox.minX, y: 100)
+        }
+        t.check("dragged back towards the middle, it flips back",
+                !PetLayout.shouldMirror(windowOrigin: mirroredWindow(petLeftAt: 420),
+                                        visibleFrame: screen, mirrored: true))
+        t.check("but not while it is still sitting on the line",
+                PetLayout.shouldMirror(windowOrigin: mirroredWindow(petLeftAt: 350),
+                                       visibleFrame: screen, mirrored: true))
+
         // Unplugging a display, or a resolution change, can leave the pet
         // outside every screen. Only the PET has to be rescued, not the whole
         // window — most of it is transparent, and insisting all 400pt fit would
@@ -911,6 +944,13 @@ struct Runner {
                 !PanelModel.shouldShowNameInline(displayed: "daily_work",
                                                  title: "Terminal 1", ambiguous: true))
 
+        // The click that had no effect: a row whose terminal is gone used to
+        // explain itself and leave the badge exactly where it was.
+        t.check("a finished row with a live terminal is opened, then cleared",
+                PanelModel.finishedClick(handle: "h-a") == .openThenRead)
+        t.check("a finished row with nowhere to jump is cleared by the click itself",
+                PanelModel.finishedClick(handle: "") == .read)
+
         t.check("nothing to report means no badge at all",
                 PanelModel.badge(needsYou: 0, unreadFinishes: 0) == "")
         t.check("the badge counts both kinds of attention",
@@ -1477,6 +1517,107 @@ struct Runner {
                                        phased("compacting", running: [busyTool])]) == "compacting")
         t.check("no phase at all is the ordinary case",
                 StateAggregator.phase([phased("")]).isEmpty)
+
+        // ---- Skins: five pictures for eleven states ----
+        t.check("an unknown skin name falls back to the one that always draws",
+                PetSkin.named("weasel") == .robot && PetSkin.named(nil) == .robot)
+        t.check("a known one is kept", PetSkin.named("cat") == .cat)
+
+        func look(_ mood: String, phase: String = "", flash: String = "",
+                  wanted: Bool = false, blockedOn: String = "") -> CatSkin.Look {
+            CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted,
+                         blockedOn: blockedOn)
+        }
+        // The cost of taking the lamp away, written down as a test rather than
+        // left as a surprise: the three busy states are one picture and say
+        // exactly the same thing. Anyone who makes them differ again has to
+        // come here and say how.
+        t.check("every busy state draws the same picture",
+                [look("busy"), look("busy", phase: "compacting"),
+                 look("busy", phase: "awaiting-agent")].allSatisfy { $0.pose == .working })
+        t.check("...and with no lamp, nothing tells the three apart",
+                look("busy") == look("busy", phase: "compacting")
+                    && look("busy") == look("busy", phase: "awaiting-agent"))
+
+        t.check("wanting approval and wanting an answer share the one picture",
+                look("waiting").pose == .waiting
+                    && look("waiting", blockedOn: "rm -rf build/").pose == .waiting)
+        // The bug this replaced: one texture with a question mark painted into
+        // it served both, so the cat held up a paw under a QUESTION MARK while
+        // asking permission to run `rm -rf`. A question mark says "I am
+        // unsure"; approval says "you decide".
+        t.check("...and the glyph is what tells them apart",
+                look("waiting").mark == .question
+                    && look("waiting", blockedOn: "rm -rf build/").mark == .warn)
+        t.check("a session that wants nothing shows no glyph",
+                look("busy").mark == .none && look("idle").mark == .none)
+        // urgent already has an alarm painted into its own texture; a second
+        // glyph beside it would be two warnings for one thing.
+        t.check("being ignored does not add a second warning",
+                look("urgent", blockedOn: "rm -rf build/").mark == .none)
+        t.check("an interrupted tool warns over a cat that is still working",
+                look("busy", flash: "trouble").mark == .warn
+                    && look("busy", flash: "trouble").pose == .working)
+        // A finished turn has no picture, so the renderer bobs the idle one.
+        // Nothing else may replace the pose: an interrupted tool happens while
+        // the session carries on, and swapping the picture would say it stopped.
+        t.check("a finished turn gets the bob", look("idle", flash: "done").pose == .finished)
+        t.check("and nothing else does",
+                CatSkin.flashPose("done") == .finished && CatSkin.flashPose("trouble") == nil)
+        t.check("being ignored has its own", look("urgent").pose == .urgent)
+
+        // The kit's two resting pictures, earning their keep.
+        t.check("a desk with something unread stays awake", look("idle", wanted: true).pose == .idle)
+        t.check("a desk with nothing on it sleeps", look("idle").pose == .sleeping)
+
+        // The two states with NO picture of their own, now that the lamp is not
+        // there to carry them: a finished turn has to reach the bob and an
+        // interrupted tool has to reach the glyph, or the cat stops reporting
+        // the one thing this project exists for.
+        t.check("a finished turn survives without a lamp",
+                look("idle", flash: "done").pose == .finished)
+        t.check("an interrupted tool survives without a lamp",
+                look("busy", flash: "trouble").mark == .warn)
+        t.check("a transient outranks the state it happens during",
+                look("busy", phase: "compacting", flash: "done").pose == .finished)
+
+        // Hit regions: two shapes, two answers. A cat clickable in the robot's
+        // rectangle is a cat with a dead head and a live patch of desk.
+        let catHead = CGPoint(x: 400, y: 152)      // high in the cat, above the robot's box
+        t.check("the cat is clickable where the cat is",
+                PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .cat))
+        t.check("...and the robot is not, because nothing is drawn there",
+                !PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .robot))
+        t.check("the robot's antenna is still its own box",
+                PetLayout.isOpaque(at: CGPoint(x: 390, y: 154), panel: nil, bubble: nil,
+                                   skin: .robot))
+        t.check("both skins are clickable where both are drawn",
+                PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil, skin: .cat)
+                    && PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil,
+                                          skin: .robot))
+        t.check("the cat's box moves with a mirrored layout too",
+                PetLayout.isOpaque(at: CGPoint(x: PetLayout.catBodyBox.midX - 320,
+                                               y: PetLayout.catBodyBox.midY),
+                                   panel: nil, bubble: nil, mirrored: true, skin: .cat))
+
+        // Resting the pointer and clicking have to ask the same question. The
+        // quota readout asked the robot's rectangle whatever was drawn, so the
+        // cat's lower quarter was clickable and hoverless at the same time.
+        let catPaws = CGPoint(x: 400, y: 240)      // low in the cat, below the robot's desk
+        t.check("resting on the cat's paws counts as resting on the pet",
+                PetLayout.isOnPet(catPaws, skin: .cat))
+        t.check("...and on the robot the same point is not the pet at all",
+                !PetLayout.isOnPet(catPaws, skin: .robot))
+        t.check("the middle of the figure is the pet in either skin",
+                PetLayout.isOnPet(PetLayout.petCenter, skin: .cat)
+                    && PetLayout.isOnPet(PetLayout.petCenter, skin: .robot))
+        // Same translation the hit region uses: the pet moved, so the question
+        // "is the pointer on it" has to move with it.
+        t.check("a mirrored layout moves what counts as the pet",
+                PetLayout.isOnPet(CGPoint(x: PetLayout.petCenter.x - 320,
+                                          y: PetLayout.petCenter.y),
+                                  skin: .cat, mirrored: true)
+                    && !PetLayout.isOnPet(PetLayout.petCenter, skin: .cat, mirrored: true))
 
         t.finish()
     }
