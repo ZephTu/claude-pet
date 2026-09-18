@@ -753,7 +753,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                      motion: step.tool.isEmpty ? nil : ActivitySummary.motion(forTool: step.tool))
         bridge?.setPhase(step.phase)
         bridge?.pushSessions([fake], now: now)
-        bridge?.setBadge(step.mood == .idle ? "" : "1")
+        let badge = step.mood == .idle ? "" : "1"
+        bridge?.setBadge(badge)
+        // The demo is how anyone actually looks at a skin, so it has to drive
+        // the skin too. Without this the cat sat in one pose through all twelve
+        // captions while the captions claimed otherwise.
+        bridge?.setCatLook(CatSkin.look(mood: step.mood.rawValue, phase: step.phase,
+                                        flash: "", wanted: !badge.isEmpty))
         if !step.flash.isEmpty { bridge?.flash(step.flash) }
         // The caption says both what is being shown AND that it is not real.
         // A demo that looks like live state is a demo that gets acted on.
