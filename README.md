@@ -40,6 +40,14 @@ Ordered by how much it wants from you, from nothing to a great deal, and back:
 
 A number on the robot's chest counts both kinds of attention. It is not shown at zero.
 
+A running row that has said nothing for 90 seconds, with no tool call in flight,
+reads **gone quiet** on a hollow dot, and stops counting as busy — the pet will go
+to sleep over it and says nothing about it finishing. That is almost always a turn
+somebody cancelled with Esc: Claude Code emits no hook at all for an interrupt, so
+the last thing written stays "busy" and nothing ever comes to take it back. It is
+deliberately not called "done", which nothing here is in a position to know, and it
+rights itself the moment that session does anything again.
+
 **Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 
 **Click a row marked ↗** to jump straight to the terminal tab that session is running in.

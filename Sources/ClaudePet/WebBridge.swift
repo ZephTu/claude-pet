@@ -324,6 +324,10 @@ final class WebBridge {
                 "detail": s.detail,
                 "waitedSeconds": Int(max(0, now.timeIntervalSince(s.since))),
             ]
+            // Busy on paper, but nothing in flight and nothing heard for a
+            // while: the row stops claiming to be thinking, without claiming to
+            // be done — see StateAggregator.isQuiet.
+            if StateAggregator.isQuiet(s, now: now) { item["quiet"] = true }
             // A postponed row stays in the list and says how much longer, so
             // "remind me later" never turns into "forget about it".
             let left = Snooze.remaining(s, marks: snoozed, now: now)

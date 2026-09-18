@@ -137,7 +137,8 @@ public enum Chatter {
 
         // Everything below is a transition, so it needs a previous state to
         // compare against.
-        if ready(.finished), previous.mood == .busy, state.mood == .idle {
+        if ready(.finished), previous.mood == .busy, state.mood == .idle,
+           !onlyWentQuiet(previous: previous, current: state, now: now) {
             return Utterance(kind: .finished, text: finishedLine(count: previous.sessions.count))
         }
 
@@ -232,6 +233,25 @@ public enum Chatter {
             .filter { p in current.sessions.contains { $0.sessionId == p.sessionId } }
     }
 
+    /// Did the busy sessions merely fall silent, rather than come to rest?
+    ///
+    /// Going quiet drops the mood out of busy exactly the way finishing does, so
+    /// this is what tells the two apart. A session that ended, or that went away
+    /// with its terminal, is a finish and keeps its line; one still sitting at
+    /// `busy` that has simply stopped saying anything is a turn somebody
+    /// interrupted, and announcing "all done" about it is the same lie the row
+    /// was telling before any of this.
+    private static func onlyWentQuiet(previous: GlobalState, current: GlobalState,
+                                      now: Date) -> Bool {
+        let wasBusy = previous.sessions.filter { $0.state == .busy }
+        guard !wasBusy.isEmpty else { return false }
+        return wasBusy.allSatisfy { old in
+            guard let still = current.sessions.first(where: { $0.sessionId == old.sessionId })
+            else { return false }
+            return still.state == .busy && StateAggregator.isQuiet(still, now: now)
+        }
+    }
+
     /// Sessions that were not busy a moment ago and are now.
     ///
     /// The mirror of `justFinished`, and what retires a sticky "done" line: once
@@ -262,8 +282,13 @@ public enum Chatter {
         count > 1 ? "All \(count) done" : "Done"
     }
 
+    /// The session that has been busy longest — skipping any that has gone
+    /// quiet, because "still at it after half an hour" is a claim about work in
+    /// progress and a silent session is not evidence of any.
     private static func longestBusy(_ sessions: [SessionState], now: Date) -> SessionState? {
-        sessions.filter { $0.state == .busy }.min { $0.since < $1.since }
+        sessions
+            .filter { $0.state == .busy && !StateAggregator.isQuiet($0, now: now) }
+            .min { $0.since < $1.since }
     }
 
     private static func minutes(_ interval: TimeInterval) -> Int {

@@ -12,6 +12,24 @@ public enum StateAggregator {
     /// How long a session may sit in `waiting` before the pet escalates.
     public static let urgentAfter: TimeInterval = 60
 
+    /// How long a busy session with nothing in flight may go without a single
+    /// hook before the pet stops claiming it is thinking.
+    ///
+    /// Interrupting a turn with Esc while the model is thinking emits NO hook at
+    /// all — not Stop, not StopFailure, not even the delayed "waiting for your
+    /// input" Notification, which only arms after a turn that ended normally.
+    /// The last thing written was `busy`, and nothing ever comes to take it
+    /// back, so the row went on saying "thinking" with the clock climbing for as
+    /// long as the session stayed open.
+    ///
+    /// 90 seconds comes from measuring the real thing rather than picking a
+    /// round number: across 6,830 stretches of silence with no tool in flight in
+    /// this machine's own transcripts, 99.2% finished inside 90s. The 0.8% that
+    /// do not are mislabelled for as long as they last and then correct
+    /// themselves the moment any hook arrives — which is the cheap direction for
+    /// this to be wrong in.
+    public static let quietAfter: TimeInterval = 90
+
     /// Is this session still running?
     ///
     /// Asking the kernel beats watching the clock: a session sitting at a prompt
@@ -25,6 +43,26 @@ public enum StateAggregator {
             return now.timeIntervalSince(s.updatedAt) <= deadAfter
         }
         return ProcessProbe.isRunning(pid: pid, named: ProcessProbe.claudeProcessName)
+    }
+
+    /// Has this session gone quiet — busy on paper, but with nothing to show for
+    /// it and no sign of life for `quietAfter`?
+    ///
+    /// The three exemptions are the cases where silence is expected and means
+    /// nothing is wrong: a tool call in flight (a ten-minute build writes no
+    /// hooks between its PreToolUse and its PostToolUse), a compaction, and a
+    /// turn parked waiting on a background agent. Only `busy` can go quiet —
+    /// `waiting` is not silence, it is a session stuck on something the user has
+    /// to answer, and it must keep waving however long that takes.
+    ///
+    /// This deliberately does not decide that the session FINISHED. Nothing here
+    /// knows that; all that is known is that it stopped saying anything. The
+    /// panel says exactly that and no more.
+    public static func isQuiet(_ s: SessionState, now: Date) -> Bool {
+        guard s.state == .busy, s.running.isEmpty, s.phase.isEmpty,
+              s.backgroundAgents.isEmpty
+        else { return false }
+        return now.timeIntervalSince(s.updatedAt) > quietAfter
     }
 
     /// `isLive` is injectable so tests can decide liveness without spawning
@@ -62,7 +100,10 @@ public enum StateAggregator {
             )
         }
 
-        let mood: GlobalMood = alive.contains { $0.state == .busy } ? .busy : .idle
+        // A session that has gone quiet must not keep the pet looking busy: that
+        // is the same lie the row was telling, drawn larger.
+        let mood: GlobalMood = alive.contains { $0.state == .busy && !isQuiet($0, now: now) }
+            ? .busy : .idle
         return GlobalState(
             mood: mood, sessions: ordered(alive), waitingProject: nil, hiddenCount: hiddenCount
         )

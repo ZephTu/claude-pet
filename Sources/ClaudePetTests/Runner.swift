@@ -28,11 +28,15 @@ struct Runner {
         // ---- StateAggregator ----
         let t0 = Date(timeIntervalSince1970: 1_789_467_600)  // Reference "now" = 2026-09-15T10:20:00Z, the same instant as the decode test above
         func mk(_ id: String, _ st: SessionActivity, sinceAgo: TimeInterval = 0,
-                updatedAgo: TimeInterval = 0, project: String = "p") -> SessionState {
+                updatedAgo: TimeInterval = 0, project: String = "p",
+                running: [RunningTool] = [], phase: String = "",
+                backgroundAgents: [String] = []) -> SessionState {
             SessionState(sessionId: id, project: project, cwd: "/tmp/\(project)",
                          state: st, tool: "", detail: "",
                          since: t0.addingTimeInterval(-sinceAgo),
-                         updatedAt: t0.addingTimeInterval(-updatedAgo))
+                         updatedAt: t0.addingTimeInterval(-updatedAgo),
+                         running: running, phase: phase,
+                         backgroundAgents: backgroundAgents)
         }
 
         t.check("empty input is idle",
@@ -46,11 +50,13 @@ struct Runner {
         t.check("waiting beats busy regardless of order",
                 StateAggregator.aggregate([mk("a", .waiting), mk("b", .busy)], now: t0).mood == .waiting)
 
-        // Dead-session boundary: 900s is still alive, 901s is dead
+        // Dead-session boundary: 900s is still alive, 901s is dead. Asserted on
+        // the LIST rather than the mood, because a busy session silent that long
+        // has also gone quiet and so no longer drives the mood — see below.
         t.check("899s stale still counts",
-                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 899)], now: t0).mood == .busy)
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 899)], now: t0).sessions.count == 1)
         t.check("exactly 900s still counts",
-                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 900)], now: t0).mood == .busy)
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 900)], now: t0).sessions.count == 1)
         t.check("901s is dropped",
                 StateAggregator.aggregate([mk("a", .busy, updatedAgo: 901)], now: t0).mood == .idle)
         t.check("dead sessions leave the list",
@@ -81,6 +87,51 @@ struct Runner {
         // A dead waiting session must not keep the pet alarmed forever
         t.check("dead waiting session does not keep pet urgent",
                 StateAggregator.aggregate([mk("a", .waiting, sinceAgo: 5000, updatedAgo: 5000)], now: t0).mood == .idle)
+
+        // ---- Gone quiet: a turn nobody ended ----
+        // Interrupting a turn with Esc while the model is thinking emits NO hook
+        // at all — verified against a captured hook stream, where a session sat
+        // at `busy` for a quarter of an hour after the interrupt and Claude Code
+        // sent neither Stop nor StopFailure nor a Notification. The last write
+        // said busy, so without this the row claims to be thinking forever.
+        let tool = RunningTool(id: "t1", tool: "Bash", target: "ls …",
+                               since: t0.addingTimeInterval(-600))
+        t.check("busy and silent 89s is still thinking",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 89), now: t0))
+        t.check("busy and silent exactly 90s is still thinking",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 90), now: t0))
+        t.check("busy and silent 91s has gone quiet",
+                StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 91), now: t0))
+
+        // A tool call in flight is the one case where silence is expected: a ten
+        // minute build writes no hooks between its PreToolUse and its PostToolUse.
+        t.check("a long tool call in flight is not quiet",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 600, running: [tool]), now: t0))
+        t.check("compacting is not quiet",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 600, phase: "compacting"), now: t0))
+        t.check("awaiting a background agent is not quiet",
+                !StateAggregator.isQuiet(
+                    mk("a", .busy, updatedAgo: 600, phase: "awaiting-agent",
+                       backgroundAgents: ["Agent"]), now: t0))
+        // Only busy can go quiet: a blocked session is not silent, it is stuck on
+        // something the user has to answer, and must keep waving.
+        t.check("a waiting session never counts as quiet",
+                !StateAggregator.isQuiet(mk("a", .waiting, updatedAgo: 600), now: t0))
+        t.check("an idle session never counts as quiet",
+                !StateAggregator.isQuiet(mk("a", .idle, updatedAgo: 600), now: t0))
+
+        t.check("a quiet session stops driving the busy mood",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 91)], now: t0).mood == .idle)
+        t.check("a quiet session stays in the list",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 91)], now: t0)
+                    .sessions.map(\.sessionId) == ["a"])
+        t.check("one live busy session still makes the pet busy",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 91),
+                                           mk("b", .busy, updatedAgo: 5)], now: t0).mood == .busy)
+        // A quiet session must not suppress the alarm for a blocked one.
+        t.check("waiting still wins over a quiet session",
+                StateAggregator.aggregate([mk("a", .busy, updatedAgo: 600),
+                                           mk("b", .waiting, sinceAgo: 5)], now: t0).mood == .waiting)
 
         // ---- StateAggregator.ordered(_:) — row order ----
         // Group order is waiting > busy > idle; the input is deliberately not in that order
@@ -597,6 +648,41 @@ struct Runner {
                 Chatter.next(state: quiet, previous: nil, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
 
+        // Going quiet drops the mood out of busy, which is the same transition a
+        // finish makes — but nothing finished. Saying "all done" about a turn the
+        // user cancelled is the original lie wearing a hat.
+        func silent(_ id: String, silentFor: TimeInterval) -> SessionState {
+            SessionState(sessionId: id, project: id, cwd: "/tmp", state: .busy, tool: "",
+                         detail: "", since: t0.addingTimeInterval(-1800),
+                         updatedAt: t0.addingTimeInterval(-silentFor))
+        }
+        let stillTalking = GlobalState(mood: .busy, sessions: [silent("x", silentFor: 0)],
+                                       waitingProject: nil)
+        let wentQuiet = GlobalState(mood: .idle, sessions: [silent("x", silentFor: 600)],
+                                    waitingProject: nil)
+        t.check("a session that merely went quiet is not announced as finished",
+                Chatter.next(state: wentQuiet, previous: stillTalking, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
+        // A session that is GONE closed its terminal, which is a finish and stays one.
+        t.check("a session that went away is still announced as finished",
+                Chatter.next(state: quiet, previous: stillTalking, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .finished)
+        // One quiet session must not silence a real finish beside it.
+        let twoBusy = GlobalState(
+            mood: .busy,
+            sessions: [silent("x", silentFor: 0), session("y", .busy, prompt: nil)],
+            waitingProject: nil)
+        let oneFinished = GlobalState(
+            mood: .idle,
+            sessions: [silent("x", silentFor: 600), session("y", .idle, prompt: nil)],
+            waitingProject: nil)
+        // The named line outranks the generic one, and it reads the session file's
+        // own `busy`, which a quiet session still carries — so it names y and
+        // leaves x alone.
+        t.check("a real finish is still announced while another session sits quiet",
+                Chatter.next(state: oneFinished, previous: twoBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil)?.kind == .sessionDone)
+
         // Long-running is worth a line; just-started is not
         let longBusy = GlobalState(
             mood: .busy,
@@ -607,6 +693,18 @@ struct Runner {
         t.check("a long-running session is remarked on",
                 Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil)?.kind == .longRun)
+        // "Still at it after half an hour" is a claim about work in progress, so
+        // the session it names has to be one that is actually still saying things.
+        let quietAndFresh = GlobalState(
+            mood: .busy,
+            sessions: [silent("stale", silentFor: 600),
+                       SessionState(sessionId: "fresh", project: "fresh", cwd: "/tmp",
+                                    state: .busy, tool: "", detail: "",
+                                    since: t0.addingTimeInterval(-60), updatedAt: t0)],
+            waitingProject: nil)
+        t.check("a session that has gone quiet is not remarked on as long-running",
+                Chatter.next(state: quietAndFresh, previous: quietAndFresh, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil) == nil)
         let justStarted = GlobalState(
             mood: .busy,
             sessions: [SessionState(sessionId: "j", project: "p", cwd: "/tmp", state: .busy,

@@ -185,6 +185,12 @@ function whatText(s) {
   // `activity` comes from the calls actually in flight. `tool` is only the name
   // of the last one seen, which goes on reading as "running" after it returned.
   if (s.activity) return s.activity;
+  // Busy on paper, but nothing heard for a while — see StateAggregator.isQuiet.
+  // Interrupting a turn emits no hook, so the last thing written stays "busy"
+  // forever. This says what is actually known: it stopped saying anything. It
+  // deliberately does not say "done", which nothing here is in a position to
+  // know, and it corrects itself the moment the next hook lands.
+  if (s.quiet) return "gone quiet";
   if (s.state === "busy") return "thinking";
   // An idle session carrying a notification message is one that finished
   // talking and is waiting on a reply — worth distinguishing from a session
@@ -203,7 +209,7 @@ function sessionRowHTML(s) {
     ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
   return (
     '<div class="row' + jumpable + napped + '"><div class="line">' +
-    '<span class="dot ' + s.state + '"></span>' +
+    '<span class="dot ' + (s.quiet ? "quiet" : s.state) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
     // While a tool is running, the number that answers "is this stuck?" is how

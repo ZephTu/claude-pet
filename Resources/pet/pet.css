@@ -641,6 +641,9 @@ html, body {
 .dot.waiting { background: #e8624a; }
 .dot.busy    { background: #d97757; }
 .dot.idle    { background: #6b6560; }
+/* Gone quiet: busy on paper, but nothing heard for a while. Hollow rather
+   than filled — the pet is saying it does not know, not that it is done. */
+.dot.quiet   { background: none; box-shadow: inset 0 0 0 1.5px #8a6a52; }
 /* The name gives before anything else does.
    flex:none here meant a long session name simply made the row wider than the
    panel, which raised a horizontal scrollbar — and that bar takes vertical
