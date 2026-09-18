@@ -125,20 +125,24 @@ final class WebBridge {
                 case "snooze":
                     self.onSnooze?(row["sessionId"] as? String ?? "", point)
                 case "openFinished":
-                    // A finished row that CAN be jumped to: go there, and only
-                    // then call it read. A jump that never happened must not
-                    // clear the one record that it happened at all.
-                    guard
-                        let kind = row["kind"] as? String,
-                        let handle = row["handle"] as? String,
-                        !handle.isEmpty
-                    else {
-                        self.evaluate("window.explainNoJump();")
-                        return
+                    let ids = row["eventIds"] as? [String] ?? []
+                    let handle = row["handle"] as? String ?? ""
+                    switch PanelModel.finishedClick(handle: handle) {
+                    case .openThenRead:
+                        // Go there, and only then call it read: a jump that
+                        // never happened must not clear the one record that it
+                        // happened at all.
+                        TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle)
+                        self.onMarkRead?(ids)
+                        self.evaluate("window.togglePanel();")
+                    case .read:
+                        // The terminal is gone, so there is no jump left to
+                        // protect the record from. The click clears the row and
+                        // says why it did not open anything. The list stays up,
+                        // same as the ✓.
+                        self.onMarkRead?(ids)
+                        self.evaluate("window.explainClosedRow();")
                     }
-                    TerminalJump.jump(kind: kind, handle: handle)
-                    self.onMarkRead?(row["eventIds"] as? [String] ?? [])
-                    self.evaluate("window.togglePanel();")
                 default:
                     self.togglePanel()
                 }

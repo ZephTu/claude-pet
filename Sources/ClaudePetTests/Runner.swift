@@ -911,6 +911,13 @@ struct Runner {
                 !PanelModel.shouldShowNameInline(displayed: "daily_work",
                                                  title: "Terminal 1", ambiguous: true))
 
+        // The click that had no effect: a row whose terminal is gone used to
+        // explain itself and leave the badge exactly where it was.
+        t.check("a finished row with a live terminal is opened, then cleared",
+                PanelModel.finishedClick(handle: "h-a") == .openThenRead)
+        t.check("a finished row with nowhere to jump is cleared by the click itself",
+                PanelModel.finishedClick(handle: "") == .read)
+
         t.check("nothing to report means no badge at all",
                 PanelModel.badge(needsYou: 0, unreadFinishes: 0) == "")
         t.check("the badge counts both kinds of attention",
