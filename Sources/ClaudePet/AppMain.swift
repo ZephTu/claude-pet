@@ -26,6 +26,15 @@ struct AppMain {
                 HealthWindow.renderPreview(checks: sample, to: arguments[i + 1]) ? 0 : 1
             })
         }
+        // Spike: WebGL inside the pet's own web view. Remove with SkinProbe.
+        if let i = arguments.firstIndex(of: "--probe-skin"), i + 2 < arguments.count {
+            app.setActivationPolicy(.prohibited)
+            MainActor.assumeIsolated {
+                SkinProbe.run(page: URL(fileURLWithPath: arguments[i + 1]),
+                              imagePath: arguments[i + 2]) { exit($0) }
+            }
+            app.run()
+        }
         // .accessory keeps it out of the Dock and out of Cmd-Tab.
         app.setActivationPolicy(.accessory)
         let delegate = PetAppDelegate()

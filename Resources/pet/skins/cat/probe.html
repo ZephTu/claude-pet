@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Spike, not a feature. Answers the one question that decides whether a
+     second skin is buildable at all: does WebGL run inside the pet's own
+     WKWebView, and does a WebGL canvas composite cleanly against the page?
+
+     The window is transparent, so a wrong alpha mode shows up as a dark halo
+     around the figure. That halo appears against ANY background, which is why
+     this probe can use an opaque one and still be conclusive — and a snapshot
+     of the web view needs no screen-recording permission, unlike a picture of
+     the desktop.
+
+     The left half is the page background; the right half is a magenta block.
+     A correctly composited cat has clean edges over both. -->
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #cfcac2; }
+  #split { position: absolute; inset: 0 0 0 50%; background: #ff00aa; }
+  #wrap { position: absolute; left: 60px; top: 30px; width: 120px; height: 120px; }
+  canvas { width: 120px; height: 120px; display: block; }
+  /* The idea under test: the SKIN owns the character, the HOST owns the
+     signals. The lamp is the pet's one peripherally-readable primitive and the
+     cat art has nothing like it, so it is drawn here, above the canvas, in
+     exactly the same place whichever skin is loaded. */
+  #lamp {
+    position: absolute; right: 6px; top: 2px; width: 13px; height: 13px;
+    border-radius: 50%; background: #67a498;
+    box-shadow: 0 0 0 2.5px rgba(0, 0, 0, 0.28);
+  }
+  #badge {
+    position: absolute; left: -4px; top: 0; min-width: 17px; height: 17px;
+    border-radius: 9px; background: #d8452f; color: #fff;
+    font: 600 11px -apple-system, system-ui, sans-serif;
+    display: grid; place-items: center; padding: 0 4px;
+  }
+</style>
+<div id="split"></div>
+<div id="wrap">
+  <canvas id="cat" width="240" height="240"></canvas>
+  <div id="lamp"></div>
+  <div id="badge">2</div>
+</div>
+<script src="cat-pet.js"></script>
+<script>
+window.__probe = { webgl: null, renderer: "", error: "", frames: 0, ms: 0 };
+try {
+  const cat = new CatPet(document.getElementById("cat"), {
+    idle: "assets/idle.png",
+    working: "assets/working.png",
+    waiting: "assets/waiting.png",
+    sleeping: "assets/sleeping.png",
+    urgent: "assets/urgent.png",
+  });
+  const gl = cat.gl;
+  const info = gl.getExtension("WEBGL_debug_renderer_info");
+  window.__probe.webgl = true;
+  window.__probe.renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "(masked)";
+  cat.ready.then(() => {
+    cat.setState("waiting");
+    // Cost of one frame, measured rather than assumed: this runs 30 times a
+    // second for as long as the pet is on screen.
+    const t0 = performance.now();
+    for (let i = 0; i < 60; i++) { cat.time += 0.033; cat.draw(); }
+    gl.finish();
+    window.__probe.ms = (performance.now() - t0) / 60;
+    window.__probe.frames = 60;
+    window.__probe.ready = true;
+  }).catch((e) => { window.__probe.error = String(e); window.__probe.ready = true; });
+} catch (e) {
+  window.__probe.webgl = false;
+  window.__probe.error = String(e);
+  window.__probe.ready = true;
+}
+</script>
