@@ -298,7 +298,14 @@ final class WebBridge {
             // What it is doing RIGHT NOW, from the calls that have started and
             // not reported back — rather than from the name of the last tool
             // seen, which kept reading as "running" long after it returned.
-            if s.running.count > 1 {
+            //
+            // A session waiting on a background agent has no tool call in
+            // flight — Stop cleared them — so without this its row would say
+            // nothing at all while looking busy, which is the least helpful
+            // combination available.
+            if !s.backgroundAgents.isEmpty {
+                item["activity"] = BackgroundWork.phrase(s.backgroundAgents)
+            } else if s.running.count > 1 {
                 item["activity"] = ActivitySummary.concurrent(s.running.count)
             } else if let only = s.running.first {
                 item["activity"] = ActivitySummary.phrase(toolName: only.tool, target: only.target)

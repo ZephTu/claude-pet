@@ -213,6 +213,33 @@ html, body {
 #pet[data-phase="compacting"] .code rect:nth-child(3) { animation-delay: 0.4s; }
 #pet[data-phase="compacting"] .bulb { fill: #8fc2b8; }
 
+/* awaiting-agent — the turn ended but the work did not: a background agent is
+   still running somewhere and will wake this session when it is done. So the
+   pet takes its hands off the keys and watches the screen, which keeps
+   printing because the agent keeps working. Deliberately NOT idle: idle means
+   nobody is doing anything, and saying that here is the mistake this whole
+   state exists to stop. The awake bulb is what separates the two at a glance.
+
+   This never coexists with data-motion — StateAggregator only reports the
+   phase when no session has a tool call in flight — so nothing here has to
+   out-specify the motion variants. */
+@keyframes watch {
+  0%, 100% { transform: translate(2px, 0) rotate(2deg); }
+  50%      { transform: translate(2px, 1px) rotate(2deg); }
+}
+#pet[data-phase="awaiting-agent"] .handL,
+#pet[data-phase="awaiting-agent"] .handR { animation: none; transform: translateY(1.4px); }
+#pet[data-phase="awaiting-agent"] .head  { animation: watch 3.4s ease-in-out infinite; }
+#pet[data-phase="awaiting-agent"] .code rect { animation: flicker 2.4s ease-in-out infinite; }
+#pet[data-phase="awaiting-agent"] .code rect:nth-child(2) { animation-delay: 0.5s; }
+#pet[data-phase="awaiting-agent"] .code rect:nth-child(3) { animation-delay: 1s; }
+/* The working green, slowed right down. NOT the waiting amber, however much
+   "waiting on an agent" sounds like waiting: amber means the pet wants
+   something from YOU, and this state wants nothing at all. Getting that wrong
+   would send the user to a terminal that has no question for them — which is
+   the bug this state was added to fix, reintroduced through the lamp. */
+#pet[data-phase="awaiting-agent"] .bulb { fill: #67a498; animation: pulse 2.6s ease-in-out infinite; }
+
 /* idle: asleep at the desk — screen dark, light off, z's rising. */
 @keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.6px); } }
 @keyframes puff {

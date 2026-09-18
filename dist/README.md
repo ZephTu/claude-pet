@@ -16,6 +16,7 @@ The lamp on its antenna is the part you can read without focusing on it:
 | Amber, brief flash | monitor turns amber, keeps working | a tool call was interrupted. Usually not a failed task |
 | Green, slow blink | hands on the keys. Types when editing, leans at the screen when reading, slows down while a command runs | a session is working |
 | Green, steady | hands sweeping, screen reshuffling | compacting its context |
+| Green, slow pulse | hands off the keys, watching the screen | it parked a background agent and ended the turn. It will speak again by itself, so this turn gets no finish notice |
 | Green, brief flash | two small nods | a turn just finished. Not a claim that the work was right |
 | Off | asleep at the desk with z's drifting up | everything is done |
 

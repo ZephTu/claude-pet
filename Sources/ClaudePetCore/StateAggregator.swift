@@ -68,6 +68,20 @@ public enum StateAggregator {
         )
     }
 
+    /// The one phase the pet's single figure shows, out of however many
+    /// sessions are in one.
+    ///
+    /// Compaction wins outright: it is brief, it is rare, and showing it late is
+    /// worse than showing it broadly. "Awaiting an agent" is the opposite — it
+    /// can last a quarter of an hour — so it yields to any session that has a
+    /// tool call actually in flight. Drawing the pet watching the screen while
+    /// another session is typing would be a lie about the busier of the two.
+    public static func phase(_ sessions: [SessionState]) -> String {
+        if sessions.contains(where: { $0.phase == "compacting" }) { return "compacting" }
+        guard sessions.allSatisfy({ $0.running.isEmpty }) else { return "" }
+        return sessions.contains { $0.phase == "awaiting-agent" } ? "awaiting-agent" : ""
+    }
+
     /// Projects with more than one live session, i.e. the ones whose rows are
     /// indistinguishable without a session name.
     ///

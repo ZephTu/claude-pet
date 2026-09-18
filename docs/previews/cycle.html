@@ -1,0 +1,71 @@
+<!doctype html><meta charset="utf-8">
+<title>Claude Pet — the cycle</title>
+<!-- The source of docs/images/pet.gif: one frame of the REAL pet page, cropped
+     to the box the drawing and its speech bubble actually occupy, with a script
+     that walks every state in the same order as the README's lamp table.
+
+     Capture (from the repo root, with `python3 -m http.server 8777` running):
+       drive window.show(i) for each step, freeze the animations at a known
+       time with window.freeze(ms), and screenshot #view.
+
+     Freezing matters: a screenshot takes longer than a frame, so animations
+     left running come out at whatever moment the capture happened to land on,
+     and the GIF stutters. Setting currentTime by hand makes frame N of the GIF
+     genuinely 110ms after frame N-1.
+-->
+<style>
+ body{margin:0;background:#efece6}
+ #view{width:197px;height:142px;overflow:hidden;position:relative}
+ #view iframe{position:absolute;left:-283px;top:-118px;width:480px;height:280px;border:0}
+</style>
+<div id="view"><iframe id="pet" src="../../Resources/pet/index.html"></iframe></div>
+<script>
+// Every distinct thing the pet can show, plus the lines it actually says. The
+// bubbles are real Chatter output, not captions invented for the picture.
+const STEPS = [
+  { mood: "busy", motion: "writing" },
+  { mood: "busy", motion: "reading" },
+  { mood: "busy", motion: "awaiting" },
+  { mood: "busy", phase: "compacting" },
+  { mood: "busy", phase: "awaiting-agent" },
+  { mood: "busy", motion: "awaiting", flash: "trouble" },
+  { mood: "waiting", on: "rm -rf build/", badge: "1" },
+  { mood: "waiting", badge: "1" },
+  { mood: "urgent", on: "rm -rf build/", badge: "2", project: "api-server" },
+  { mood: "idle", badge: "1", flash: "done", say: "api-server done", em: "api-server" },
+  { mood: "idle", say: "5-hour quota resets in 9m" },
+  { mood: "idle" },
+];
+window.STEP_COUNT = STEPS.length;
+
+const frame = document.getElementById("pet");
+const w = () => frame.contentWindow;
+
+window.show = function (i) {
+  const s = STEPS[i];
+  const cw = w();
+  cw.setMood(s.mood, s.project || null, s.on || "", s.motion || "");
+  cw.setPhase(s.phase || "");
+  cw.setBadge(s.badge || "");
+  const pet = cw.document.getElementById("pet");
+  if (s.flash) { pet.dataset.flash = s.flash; } else { delete pet.dataset.flash; }
+  // hold 0 = stay up until something replaces it, which is what a still needs.
+  // Clearing it means hiding the element, not saying an empty string: say("")
+  // leaves an empty pill floating above the pet, which is how the first cut of
+  // this GIF ended up with a small black blob in four of its twelve states.
+  const bubble = cw.document.getElementById("bubble");
+  if (s.say) {
+    cw.say(s.say, 0, s.em || "");
+  } else if (s.mood !== "urgent") {
+    bubble.hidden = true;
+    bubble.textContent = "";
+  }
+};
+
+window.freeze = function (ms) {
+  for (const a of w().document.getAnimations()) {
+    a.pause();
+    a.currentTime = ms;
+  }
+};
+</script>

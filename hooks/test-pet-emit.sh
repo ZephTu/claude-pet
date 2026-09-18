@@ -204,6 +204,73 @@ emit PreToolUse sB /Users/dev/Projects/web Bash
 emit Notification sB /Users/dev/Projects/web "" "needs your permission"
 check "only Stop writes a record" "$(events)" "3"
 
+# ---- a Stop held open by background work ------------------------------------
+# Claude Code ends the turn the moment it dispatches a background agent, so Stop
+# arrives while the work has not even started. Calling that a finish put a red
+# dot on a session nine minutes before it had anything to show.
+stop_with_tasks() {  # stop_with_tasks <session> <cwd> <background_tasks JSON>
+  printf '{"hook_event_name":"Stop","session_id":"%s","cwd":"%s","background_tasks":%s}' \
+    "$1" "$2" "$3" | "$EMIT"
+}
+
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sBG /Users/dev/Projects/api-server
+stop_with_tasks sBG /Users/dev/Projects/api-server \
+  '[{"id":"t1","type":"subagent","status":"running","description":"Audit CORE-16919","agent_type":"merge-gate-audit-agent"}]'
+check "a Stop waiting on an agent records no finish" "$(events)" "0"
+check "...and the session keeps looking busy" "$(field sBG state)" "busy"
+check "...and says what it is waiting for" "$(field sBG phase)" "awaiting-agent"
+check "...naming the agent, not its free-text description" \
+  "$(field sBG backgroundAgents)" "['merge-gate-audit-agent']"
+
+# The turn the agent wakes ends with nothing in flight. THAT one is the finish,
+# and it must still be recorded — a finish the user never sees is the one
+# failure this whole queue exists to prevent.
+stop_with_tasks sBG /Users/dev/Projects/api-server '[]'
+check "the turn the agent wakes is recorded" "$(events)" "1"
+check "...and the session is idle again" "$(field sBG state)" "idle"
+check "...and the phase is cleared" "$(field sBG phase)" ""
+
+# When a background agent finishes, Claude Code wakes the session with a real
+# UserPromptSubmit carrying a <task-notification> envelope. That is the machine
+# talking to itself, and it must not count as the user speaking — otherwise an
+# agent dispatched an hour ago silently unmutes a session you put away.
+prompt_with() {  # prompt_with <session> <cwd> <prompt text>
+  /usr/bin/python3 -c "
+import json,sys
+print(json.dumps({'hook_event_name':'UserPromptSubmit','session_id':sys.argv[1],
+                  'cwd':sys.argv[2],'prompt':sys.argv[3]}))" "$1" "$2" "$3" | "$EMIT"
+}
+
+prompt_with sTYPED /Users/dev/Projects/web "fix the flaky test"
+check "a typed prompt is the user speaking" \
+  "$([ -n "$(field sTYPED lastPromptAt)" ] && echo yes)" "yes"
+# Asserted on a session nobody has ever typed into, rather than by comparing two
+# timestamps: these are second-resolution, so two writes inside one second are
+# indistinguishable and the comparison would pass with the check removed. Empty
+# versus not-empty cannot collapse that way.
+prompt_with sWAKE /Users/dev/Projects/web '<task-notification>
+<task-id>abc</task-id>
+</task-notification>'
+check "an agent waking a session is not" "$(field sWAKE lastPromptAt)" ""
+
+# A backgrounded shell is NOT held work. Claude Code's own "Waiting for N
+# background agents" line excludes it, and treating a parked dev server as
+# unfinished would silence that session's finish notice for the rest of the day.
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sSH /Users/dev/Projects/web
+stop_with_tasks sSH /Users/dev/Projects/web \
+  '[{"id":"t2","type":"shell","status":"running","description":"dev server","command":"npm run dev"}]'
+check "a parked shell still counts as finished" "$(events)" "1"
+check "...and the session goes idle" "$(field sSH state)" "idle"
+
+# An older Claude Code sends no background_tasks at all. Absent must read as
+# "nothing in flight", not as "unknown, so stay quiet".
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sOLD /Users/dev/Projects/web
+emit Stop sOLD /Users/dev/Projects/web
+check "a payload with no background_tasks still finishes" "$(events)" "1"
+
 # No temp files may be left lying around in either directory.
 check "no stray temp files" \
   "$(ls "$PET_HOME/events" "$PET_HOME/sessions" 2>/dev/null | grep -c '\.tmp' || true)" "0"

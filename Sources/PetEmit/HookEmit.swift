@@ -30,7 +30,35 @@ enum HookEmit {
     /// saw is the one thing this project is supposed to not do.
     static var eventsDirectory: URL { baseDirectory.appending(path: "events") }
 
+    /// Appends the raw payload to `$PET_DUMP` when that variable is set.
+    ///
+    /// Off unless you ask for it, and it is the only thing here that writes a
+    /// payload verbatim — a hook payload carries the prompt text, so this is a
+    /// debugging tool rather than a feature. It exists because guessing at
+    /// payload shapes has been wrong twice: a parser once listed five plausible
+    /// spellings of the quota field and missed the real one, reading nothing
+    /// while claiming to work. One captured payload settles what a whole
+    /// afternoon of reasoning cannot.
+    ///
+    ///     PET_DUMP=/tmp/hooks.jsonl claude
+    private static func dump(_ payload: Data) {
+        guard let path = ProcessInfo.processInfo.environment["PET_DUMP"], !path.isEmpty
+        else { return }
+        var line = payload
+        line.append(0x0a)
+        // O_APPEND rather than seek-then-write: several hooks fire at once, and
+        // seeking first let two of them land on the same offset. The first cut
+        // of this produced a file whose lines were spliced into each other,
+        // which is a poor start for a tool whose whole job is to show you
+        // exactly what arrived.
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        line.withUnsafeBytes { _ = Darwin.write(fd, $0.baseAddress, $0.count) }
+    }
+
     static func run(payload: Data) {
+        dump(payload)
         guard
             let raw = try? JSONSerialization.jsonObject(with: payload),
             let hook = raw as? [String: Any]
@@ -57,7 +85,13 @@ enum HookEmit {
             return
         }
 
-        guard let state = state(for: event, message: message) else { return }
+        guard var state = state(for: event, message: message) else { return }
+
+        // Work this session parked in the background. A Stop with an agent still
+        // running is the session pausing, not finishing — see BackgroundWork.
+        let waitingForWork = BackgroundWork.waking(
+            BackgroundWork.parse(hook["background_tasks"]))
+        if event == "Stop", !waitingForWork.isEmpty { state = "busy" }
 
         // PermissionRequest names the tool and its arguments, so the pet can say
         // WHAT is blocked rather than just that something is. Carried forward on
@@ -102,7 +136,7 @@ enum HookEmit {
         // turn — must not count as "we are back in conversation".
         // Never write an empty string here: the reader decodes this as a Date,
         // and "" is a value it rejects rather than a value it ignores.
-        let prompt = lastPromptAt(for: event, at: path, now: now)
+        let prompt = lastPromptAt(for: event, hook: hook, at: path, now: now)
         if !prompt.isEmpty { document["lastPromptAt"] = prompt }
 
         // Which turn this is, counted from the session's own history.
@@ -132,8 +166,21 @@ enum HookEmit {
         // event reports. Compaction is the only one so far: it takes a while,
         // emits nothing else, and without this the pet shows a session that has
         // apparently stopped working.
-        let phase = phaseValue(event: event, at: path)
+        // A Stop held open by a background agent is its own phase: the session
+        // has stopped talking but has not stopped working, and nothing else in
+        // the file says so. Only Stop carries `background_tasks`, and only Stop
+        // sets this — a mid-turn event describes the tool it is running, which
+        // is the more useful truth while a tool is running.
+        let phase = event == "Stop" && !waitingForWork.isEmpty
+            ? "awaiting-agent"
+            : phaseValue(event: event, at: path)
         if !phase.isEmpty { document["phase"] = phase }
+
+        // Named so the row can say what it is waiting for. Structural labels
+        // only — never the task's free-text description.
+        if event == "Stop", !waitingForWork.isEmpty {
+            document["backgroundAgents"] = waitingForWork.map(\.label)
+        }
 
         // When a tool call last came back interrupted. The app watches this for
         // CHANGES rather than for a flag being set, so the brief warning fires
@@ -149,8 +196,12 @@ enum HookEmit {
         }
 
         // Stop is Claude Code telling us a turn ended — a confirmed event, not
-        // something inferred from a session going quiet or disappearing.
-        if event == "Stop" {
+        // something inferred from a session going quiet or disappearing. It is
+        // not, however, a finish while a background agent is still running: that
+        // turn's Stop is a pause, and the turn that the agent wakes will fire
+        // its own Stop with nothing left in flight. Recording both put a red dot
+        // on a session nine minutes before it had anything to show.
+        if event == "Stop", waitingForWork.isEmpty {
             recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
                              turnKey: promptId.isEmpty ? String(turn) : promptId, at: now)
         }
@@ -174,8 +225,9 @@ enum HookEmit {
     /// UserPromptSubmit, which is the only one that means the human said
     /// something. Empty string for a session the user has not spoken to since
     /// this field existed, which reads as "no conversation yet".
-    private static func lastPromptAt(for event: String, at path: URL, now: String) -> String {
-        if event == "UserPromptSubmit" { return now }
+    private static func lastPromptAt(for event: String, hook: [String: Any],
+                                     at path: URL, now: String) -> String {
+        if event == "UserPromptSubmit", isHuman(hook) { return now }
         guard
             let data = try? Data(contentsOf: path),
             let raw = try? JSONSerialization.jsonObject(with: data),
@@ -183,6 +235,28 @@ enum HookEmit {
             let previous = old["lastPromptAt"] as? String
         else { return "" }
         return previous
+    }
+
+    /// Did a person type this prompt, or did the session wake itself up?
+    ///
+    /// When a background agent finishes, Claude Code resumes the session by
+    /// submitting a prompt of its own — a real `UserPromptSubmit`, carrying a
+    /// `<task-notification>` envelope instead of anything a human wrote. There
+    /// is no flag on the payload that says so, so the opening tag is the only
+    /// signal available.
+    ///
+    /// The distinction is load-bearing for muting: a muted session is supposed
+    /// to come back "the next time YOU type into it", and an agent finishing is
+    /// not the user speaking. Without this, an agent you dispatched an hour ago
+    /// would silently unmute the session you had deliberately put away.
+    ///
+    /// This is the only place that looks at prompt text at all, it reads the
+    /// first tag and nothing else, and it stores none of it. The pet does not
+    /// read conversations.
+    private static func isHuman(_ hook: [String: Any]) -> Bool {
+        let prompt = (hook["prompt"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !prompt.hasPrefix("<task-notification>")
     }
 
     /// The tool calls currently in flight for this session.

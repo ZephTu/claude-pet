@@ -99,6 +99,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// When a tool call last came back interrupted, if one has. Watched for
     /// changes, so it fires a warning once rather than continuously.
     public let troubleAt: Date?
+    /// Background agents and workflows this session is waiting on, by their
+    /// structural names. Non-empty only on a turn that ended while one was still
+    /// running — which is the turn the pet must NOT call finished.
+    public let backgroundAgents: [String]
 
     public init(
         sessionId: String,
@@ -116,7 +120,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         running: [RunningTool] = [],
         promptId: String = "",
         phase: String = "",
-        troubleAt: Date? = nil
+        troubleAt: Date? = nil,
+        backgroundAgents: [String] = []
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -134,11 +139,13 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.promptId = promptId
         self.phase = phase
         self.troubleAt = troubleAt
+        self.backgroundAgents = backgroundAgents
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
+        case backgroundAgents
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -167,6 +174,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         promptId = (try? c.decodeIfPresent(String.self, forKey: .promptId)) as? String ?? ""
         phase = (try? c.decodeIfPresent(String.self, forKey: .phase)) as? String ?? ""
         troubleAt = try? c.decodeIfPresent(Date.self, forKey: .troubleAt)
+        backgroundAgents =
+            (try? c.decodeIfPresent([String].self, forKey: .backgroundAgents)) as? [String] ?? []
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

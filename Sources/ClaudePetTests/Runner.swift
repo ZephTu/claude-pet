@@ -1423,6 +1423,61 @@ struct Runner {
         t.check("keys for finished periods are pruned away",
                 QuotaAlarm.pruned([oldKey, liveKey], now: t0) == [liveKey])
 
+        // ---- Background work: a turn ending is not the work ending ----
+        let bgRaw: [[String: Any]] = [
+            ["id": "1", "type": "subagent", "status": "running",
+             "description": "Audit CORE-16919 against the merge gate",
+             "agent_type": "merge-gate-audit-agent"],
+            ["id": "2", "type": "shell", "status": "running",
+             "description": "dev server", "command": "npm run dev"],
+            ["id": "3", "type": "workflow", "status": "pending",
+             "description": "spec review", "name": "spec"],
+            ["id": "4", "type": "monitor", "status": "running",
+             "description": "watching CI", "server": "ci", "tool": "watch"],
+        ]
+        let bgTasks = BackgroundWork.parse(bgRaw)
+        t.check("every in-flight task is read", bgTasks.count == 4)
+        let bgWaking = BackgroundWork.waking(bgTasks)
+        t.check("only agents and workflows hold the turn open",
+                bgWaking.map(\.type) == ["subagent", "workflow"])
+        // The label is a structural name. The description is free text the user
+        // was working on and the command is a shell line; neither may leak into
+        // a bubble the pet shows on screen.
+        t.check("an agent is named by its type",
+                bgWaking.first?.label == "merge-gate-audit-agent")
+        t.check("a workflow is named by its workflow name",
+                bgWaking.last?.label == "spec")
+        t.check("no label carries the free-text description",
+                bgTasks.allSatisfy { !$0.label.contains(" ") })
+        t.check("a task with no type at all is dropped",
+                BackgroundWork.parse([["id": "x", "status": "running"]]).isEmpty)
+        t.check("an absent background_tasks reads as nothing in flight",
+                BackgroundWork.parse(nil).isEmpty)
+        t.check("one agent is named", BackgroundWork.phrase(["auditor"]) == "waiting for auditor")
+        t.check("several are counted",
+                BackgroundWork.phrase(["a", "b"]) == "waiting for 2 background agents")
+        t.check("none says nothing at all", BackgroundWork.phrase([]).isEmpty)
+
+        // ---- One figure, several sessions: which phase does the pet show ----
+        func phased(_ phase: String, running: [RunningTool] = []) -> SessionState {
+            SessionState(sessionId: "p" + phase, project: "p", cwd: "/tmp", state: .busy,
+                         tool: "", detail: "", since: t1, updatedAt: t0,
+                         running: running, phase: phase)
+        }
+        let busyTool = RunningTool(id: "r", tool: "Bash", target: "swift build", since: t0)
+        t.check("waiting on an agent is shown when that is all that is happening",
+                StateAggregator.phase([phased("awaiting-agent")]) == "awaiting-agent")
+        // The regression this guards: drawing the pet sitting and watching while
+        // another session is typing tells the user about the quieter of the two.
+        t.check("a session with a tool in flight outranks one waiting on an agent",
+                StateAggregator.phase([phased("awaiting-agent"),
+                                       phased("", running: [busyTool])]).isEmpty)
+        t.check("compaction wins outright, brief and rare as it is",
+                StateAggregator.phase([phased("awaiting-agent"),
+                                       phased("compacting", running: [busyTool])]) == "compacting")
+        t.check("no phase at all is the ordinary case",
+                StateAggregator.phase([phased("")]).isEmpty)
+
         t.finish()
     }
 }

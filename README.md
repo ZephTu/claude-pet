@@ -22,6 +22,7 @@ Ordered by how much it wants from you, from nothing to a great deal, and back:
 | --- | --- | --- |
 | 🟢 slow blink | a session is working | hands on the keys, code scrolling. The pose follows the tool: **editing** types, **reading** leans in at the screen, **running a command** slows down and watches |
 | 🟢 steady | compacting its context | hands sweeping side to side, the screen reshuffling rather than printing. Still work — just not work you asked for |
+| 🟢 slow pulse | waiting on a background agent | hands off the keys, watching the screen. Claude parked an agent and ended its turn; it will speak again by itself. **No finish notice for that turn** — nothing finished, and walking over to it would find a session that has not started |
 | 🟡 brief flash | a tool call was interrupted | the monitor turns amber and it carries on working. A failed call is usually not a failed task |
 | 🟡 pulse | a session needs your approval | raises a hand, monitor switches to a warning |
 | 🟡 pulse | a session needs an answer | tilts its head, a question mark floats up. No raised hand — this one wants typing, not a decision |
@@ -54,6 +55,8 @@ A number on the robot's chest counts both kinds of attention. It is not shown at
 **A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed, the row says so and offers the ✓ instead. `clear` on the group heading marks them all.
 
 **Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
+
+**A turn that ended is not always a turn that finished.** Dispatch a background agent and Claude ends its turn immediately — the terminal says `Waiting for 1 background agent to finish`, and the pet used to put a red dot on it nine minutes before there was anything to see. `Stop` carries `background_tasks`, so a turn still holding an agent or a workflow is recorded as a pause: the session keeps its lamp on and its row says what it is waiting for. The turn the agent eventually wakes is the one that counts as finished. A backgrounded **shell** does not hold a turn open — Claude Code's own "waiting for" count excludes it, and a dev server parked for the afternoon would otherwise silence that session for the rest of the day.
 
 **⏱ on a blocked row** postpones it for 5, 15 or 30 minutes. The row stays visible and says how much longer — this is not muting. The delay belongs to that one approval: if the session resolves it and blocks on a different one, the new one is not postponed. Sleeping through a delay replays nothing.
 
@@ -158,11 +161,21 @@ swift run ClaudePetTests     # unit tests — not `swift test`, see below
 ./scripts/build-app.sh       # build ClaudePet.app without installing
 ```
 
+`PET_DUMP=/tmp/hooks.jsonl claude` makes the hook binary append every payload it receives to
+that file, and does nothing at all when the variable is unset. It is a debugging tool, not a
+feature — a payload carries the prompt text — but it is the only honest way to learn what a
+hook actually sends. Guessing has been wrong more than once here: an earlier quota parser
+listed five plausible spellings of the field it needed and missed the real one, so it read
+nothing while the README called it unverified.
+
 Tests run through a small hand-written harness as an executable target rather than XCTest: with only the Command Line Tools installed (no full Xcode), **neither XCTest nor swift-testing is available**, so `swift test` cannot run at all.
 
-To watch all four states animate, serve the repo (`python3 -m http.server 8777`) and open
-`http://127.0.0.1:8777/docs/previews/`. That page frames the real `Resources/pet/index.html`
-rather than keeping a copy, so it cannot fall behind the app.
+To watch every state animate, serve the repo (`python3 -m http.server 8777`) and open
+`http://127.0.0.1:8777/docs/previews/`. Its neighbour `cycle.html` is the one the README's
+animation is captured from. Both frame the real `Resources/pet/index.html` rather than keeping
+a copy, and both are also what the two pictures above are generated from — one artifact per
+job is what stops the documentation drifting a state behind the app, which is exactly how the
+last contact sheet ended up short.
 
 The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is. **It is written in Chinese** — the code, comments and this README are English, but that document has not been translated.
 

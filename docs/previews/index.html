@@ -1,36 +1,86 @@
 <!doctype html><meta charset="utf-8">
-<title>Claude Pet — the four states</title>
-<!-- This page frames the REAL Resources/pet/index.html four times rather than
-     keeping its own copy of the SVG and CSS. The copy it replaced had drifted a
-     whole redesign behind the app. Needs a server (iframes cannot script each
-     other over file://):
+<title>Claude Pet — every state</title>
+<!-- This page frames the REAL Resources/pet/index.html once per state rather
+     than keeping its own copy of the SVG and CSS. The copy it replaced had
+     drifted a whole redesign behind the app.
+
+     It is also the source of docs/images/states.png: capture #grid at 2x.
+     Keeping one artifact for "watch them animate" and "the picture in the
+     README" is what stops the two disagreeing, which is how the last strip
+     ended up a state short.
+
+     Needs a server (iframes cannot script each other over file://):
 
          python3 -m http.server 8777       # from the repo root
          open http://127.0.0.1:8777/docs/previews/
 -->
 <style>
- body{margin:0;background:#efece6;display:grid;grid-template-columns:repeat(2,400px);
-      justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#5a534b}
- h1{grid-column:1/-1;font-size:15px;font-weight:600;margin:16px 0 0;text-align:center}
- iframe{width:400px;height:280px;border:0;display:block}
+ /* The window is 480x280 and mostly transparent; the pet, its badge, its
+    speech and the z's live in the box below. Cropping to it is what makes a
+    cell 160pt wide instead of 480. */
+ :root { --cw: 152px; --ch: 134px; --cx: -320px; --cy: -120px; }
+ body{margin:0;background:#efece6;font:13px -apple-system,system-ui,sans-serif;color:#5a534b}
+ h1{font-size:15px;font-weight:600;margin:18px 0 6px;text-align:center}
+ p.note{margin:0 0 14px;text-align:center;color:#8a8076;font-size:12px}
+ #grid{display:grid;grid-template-columns:repeat(6,var(--cw));justify-content:center;
+       gap:0 6px;width:max-content;margin:0 auto;padding:6px 10px 10px;background:#fff}
  figure{margin:0}
- figcaption{text-align:center;padding-bottom:14px;color:#786e63}
+ .view{width:var(--cw);height:var(--ch);overflow:hidden;position:relative}
+ .view iframe{position:absolute;left:var(--cx);top:var(--cy);width:480px;height:280px;border:0}
+ figcaption{text-align:center;padding:2px 0 12px;color:#6d6459;font-size:12px}
 </style>
-<h1>Claude Pet — the four states</h1>
-<figure><iframe src="../../Resources/pet/index.html" data-m="busy"></iframe>
-  <figcaption><b>busy</b> — heads down, code scrolling</figcaption></figure>
-<figure><iframe src="../../Resources/pet/index.html" data-m="waiting"></iframe>
-  <figcaption><b>waiting</b> — turns around and waves, screen warns</figcaption></figure>
-<figure><iframe src="../../Resources/pet/index.html" data-m="urgent"></iframe>
-  <figcaption><b>urgent</b> — both arms up, jolting</figcaption></figure>
-<figure><iframe src="../../Resources/pet/index.html" data-m="idle"></iframe>
-  <figcaption><b>idle</b> — asleep, z's rising</figcaption></figure>
+<h1>Claude Pet — every state</h1>
+<p class="note">Top row: working, and wanting nothing from you. Bottom row: wanting something, then done.</p>
+<div id="grid"></div>
 <script>
-document.querySelectorAll("iframe").forEach(f => {
-  f.addEventListener("load", () => {
-    const m = f.dataset.m;
-    f.contentWindow.setMood(m, m === "urgent" ? "api-server" : null,
-                               m === "urgent" ? "rm -rf build/" : "");
-  });
-});
+// Ordered the same way the README's lamp table is: by how much it wants from
+// you, from nothing to a great deal, and back.
+const STATES = [
+  { caption: "editing",             mood: "busy", motion: "writing" },
+  { caption: "reading",             mood: "busy", motion: "reading" },
+  { caption: "running a tool",      mood: "busy", motion: "awaiting" },
+  { caption: "compacting",          mood: "busy", phase: "compacting" },
+  { caption: "waiting on an agent", mood: "busy", phase: "awaiting-agent" },
+  { caption: "tool interrupted",    mood: "busy", motion: "awaiting", flash: "trouble" },
+  { caption: "wants approval",      mood: "waiting", on: "rm -rf build/", badge: "1" },
+  { caption: "wants an answer",     mood: "waiting", badge: "1" },
+  { caption: "ignored 60s+",        mood: "urgent", on: "rm -rf build/", badge: "2" },
+  { caption: "turn finished",       mood: "idle", badge: "1", flash: "done" },
+  { caption: "idle",                mood: "idle" },
+];
+
+const grid = document.getElementById("grid");
+for (const s of STATES) {
+  const fig = document.createElement("figure");
+  const view = document.createElement("div");
+  view.className = "view";
+  const frame = document.createElement("iframe");
+  frame.src = "../../Resources/pet/index.html";
+  frame.addEventListener("load", () => apply(frame.contentWindow, s));
+  view.appendChild(frame);
+  const cap = document.createElement("figcaption");
+  cap.textContent = s.caption;
+  fig.append(view, cap);
+  grid.appendChild(fig);
+}
+
+function apply(w, s) {
+  // No project name for the urgent cell, which is what keeps its alarm bubble
+  // shut. The bubble is 200pt wide beside a 150pt cell — it belongs in the
+  // animation, where there is room for it, not in a contact sheet.
+  w.setMood(s.mood, null, s.on || "", s.motion || "");
+  w.setPhase(s.phase || "");
+  w.setBadge(s.badge || "");
+  // Set directly rather than through window.flash: flash is transient by
+  // design, and a still that has to be taken within 2.6 seconds is a still
+  // that comes out differently every time.
+  const pet = w.document.getElementById("pet");
+  if (s.flash) { pet.dataset.flash = s.flash; } else { delete pet.dataset.flash; }
+  // The bulb pulses, so a still catches it at a random point of the fade and
+  // eleven cells come out at eleven different brightnesses. Colour is the
+  // signal here; the fade is not.
+  const hold = w.document.createElement("style");
+  hold.textContent = ".bulb { opacity: 1 !important; }";
+  w.document.head.appendChild(hold);
+}
 </script>

@@ -197,7 +197,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // A phase belongs to a session, but the pet shows one figure, so any
         // session compacting puts the whole pet in that phase. It is a brief
         // state and showing it late is worse than showing it broadly.
-        bridge?.setPhase(state.sessions.contains { $0.phase == "compacting" } ? "compacting" : "")
+        //
+        // "Awaiting an agent" does not get that treatment: it can last a quarter
+        // of an hour, and a session that is genuinely typing must not be drawn
+        // as one that is sitting and watching. So it shows only when no session
+        // has a tool call in flight — when waiting really is all that is
+        // happening.
+        bridge?.setPhase(StateAggregator.phase(state.sessions))
         noticeTransients(state, previous: lastState)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
@@ -649,6 +655,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                  project: "api-server", waitingOn: "", phase: "", flash: "trouble"),
         DemoStep(caption: "compacting its context", mood: .busy, tool: "",
                  project: "api-server", waitingOn: "", phase: "compacting", flash: ""),
+        DemoStep(caption: "waiting on a background agent", mood: .busy, tool: "",
+                 project: "api-server", waitingOn: "", phase: "awaiting-agent", flash: ""),
         DemoStep(caption: "asking to run something", mood: .waiting, tool: "",
                  project: "api-server", waitingOn: "rm -rf build/", phase: "", flash: ""),
         DemoStep(caption: "asking you a question", mood: .waiting, tool: "",
