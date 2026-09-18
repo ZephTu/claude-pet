@@ -195,6 +195,19 @@ final class PetPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// AppKit keeps a window's top edge below the menu bar. Measured on this
+    /// machine: asking a borderless panel for origin y=980 on a 1080pt screen
+    /// gives back y=770 — its top pinned to the menu bar at 1050. The pet is
+    /// drawn 140pt below the window's top, so that constraint is a 140pt band
+    /// under the menu bar that the pet simply cannot be dragged into, and from
+    /// the outside it looks like the pet is hitting an invisible shelf.
+    ///
+    /// The window is mostly transparent, so there is nothing to protect here —
+    /// what has to stay reachable is the PET, and `PetHostView` clamps that
+    /// against the screen the cursor is on while the drag is happening.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 
     private func loadPetPage() {
         guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html") else {

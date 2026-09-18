@@ -116,7 +116,8 @@ final class PetHostView: NSView {
         let dy = now.y - anchor.y
         if !isDragging, hypot(dx, dy) < Self.dragThreshold { return }
         isDragging = true
-        window.setFrameOrigin(NSPoint(x: origin.x + dx, y: origin.y + dy))
+        let proposed = NSPoint(x: origin.x + dx, y: origin.y + dy)
+        window.setFrameOrigin(clamped(proposed, cursor: now))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -131,6 +132,20 @@ final class PetHostView: NSView {
         }
     }
 
+    /// Keeps the PET inside the screen the CURSOR is on.
+    ///
+    /// The window itself is free to hang off any edge — it is 480x280 of mostly
+    /// nothing — so the thing to fence in is the figure. Clamping against the
+    /// cursor's screen rather than the window's is what still allows a drag
+    /// onto a second display: the wall moves to the display the hand is on,
+    /// instead of standing at the first display's edge and refusing to let go.
+    private func clamped(_ origin: NSPoint, cursor: NSPoint) -> NSPoint {
+        let screen = NSScreen.screens.first { $0.frame.contains(cursor) }
+            ?? window?.screen ?? NSScreen.main
+        guard let visible = screen?.visibleFrame, visible.width > 0 else { return origin }
+        return PetLayout.rescued(windowOrigin: origin, visibleFrame: visible,
+                                 mirrored: isMirrored) ?? origin
+    }
 
     override func rightMouseDown(with event: NSEvent) {
         onRightClick?(convert(event.locationInWindow, from: nil))
