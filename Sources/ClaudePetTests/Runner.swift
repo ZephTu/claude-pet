@@ -1567,6 +1567,25 @@ struct Runner {
                                                y: PetLayout.catBodyBox.midY),
                                    panel: nil, bubble: nil, mirrored: true, skin: .cat))
 
+        // Resting the pointer and clicking have to ask the same question. The
+        // quota readout asked the robot's rectangle whatever was drawn, so the
+        // cat's lower quarter was clickable and hoverless at the same time.
+        let catPaws = CGPoint(x: 400, y: 240)      // low in the cat, below the robot's desk
+        t.check("resting on the cat's paws counts as resting on the pet",
+                PetLayout.isOnPet(catPaws, skin: .cat))
+        t.check("...and on the robot the same point is not the pet at all",
+                !PetLayout.isOnPet(catPaws, skin: .robot))
+        t.check("the middle of the figure is the pet in either skin",
+                PetLayout.isOnPet(PetLayout.petCenter, skin: .cat)
+                    && PetLayout.isOnPet(PetLayout.petCenter, skin: .robot))
+        // Same translation the hit region uses: the pet moved, so the question
+        // "is the pointer on it" has to move with it.
+        t.check("a mirrored layout moves what counts as the pet",
+                PetLayout.isOnPet(CGPoint(x: PetLayout.petCenter.x - 320,
+                                          y: PetLayout.petCenter.y),
+                                  skin: .cat, mirrored: true)
+                    && !PetLayout.isOnPet(PetLayout.petCenter, skin: .cat, mirrored: true))
+
         t.finish()
     }
 }

@@ -905,9 +905,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // No panel rect needed: with the list open, anything that is not the pet
         // is a candidate row, and the page answers "" for points that are not on
         // one.
+        let onPet = PetLayout.isOnPet(point, skin: skin,
+                                      mirrored: panel?.isMirrored ?? false)
         let target: DwellTarget? = {
-            if panelOpen, !PetLayout.bodyBox.contains(point) { return .row(point) }
-            if !panelOpen, PetLayout.bodyBox.contains(point) { return .pet }
+            if panelOpen, !onPet { return .row(point) }
+            if !panelOpen, onPet { return .pet }
             return nil
         }()
 

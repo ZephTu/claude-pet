@@ -168,6 +168,20 @@ public enum PetLayout {
         }
     }
 
+    /// Is the pointer on the figure itself, in this skin and this layout?
+    ///
+    /// The same rectangle a click uses, because "the pointer is on the pet" has
+    /// to have ONE answer — resting on the cat's paws and clicking the cat's
+    /// paws cannot be two different questions. It was two: the hover readout
+    /// asked `bodyBox` directly, which is the ROBOT's desk, so a quarter of the
+    /// cat (its lower body) and all of it on a mirrored layout showed no quota
+    /// at all while still being clickable.
+    public static func isOnPet(_ point: CGPoint, skin: PetSkin = .robot,
+                               mirrored isMirrored: Bool = false) -> Bool {
+        let box = clickBox(skin: skin)
+        return (isMirrored ? mirrored(box) : box).contains(point)
+    }
+
     /// The one box a click on the figure must land in, for this skin.
     ///
     /// The robot's antenna is deliberately not included: clicking the bulb
