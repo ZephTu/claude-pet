@@ -157,6 +157,40 @@ public enum PanelModel {
         return displayed != title
     }
 
+    /// How long a pinned panel waits between two trips out to the terminals.
+    public static let titleRefreshCooldown: TimeInterval = 30
+
+    /// Should a pinned panel go back out and re-read the terminal tab titles?
+    ///
+    /// Titles are normally fetched at the moment the user OPENS the list, because
+    /// fetching them spawns a process (a terminal's CLI, or osascript) and a list
+    /// nobody is looking at has no business doing that. A pinned list is never
+    /// opened, so that moment never arrives: without this, a session started
+    /// after launch would show its directory name for as long as it lived.
+    ///
+    /// The comparison is against the sessions present at the last FETCH rather
+    /// than at the last frame, which is what makes a change that arrives during
+    /// the cooldown still get picked up once the cooldown expires instead of
+    /// being missed for good.
+    ///
+    /// A tab renamed without any session starting or ending is not noticed until
+    /// the next change. That is the price of not polling another process on a
+    /// timer, and it is the cheap direction: the name is stale, never wrong about
+    /// which session it belongs to.
+    public static func shouldRefreshTitles(
+        pinned: Bool,
+        currentIds: Set<String>,
+        refreshedIds: Set<String>,
+        lastRefresh: Date?,
+        now: Date
+    ) -> Bool {
+        // Unpinned panels still have their on-open fetch, which is better timed
+        // than anything this could decide.
+        guard pinned, !currentIds.isEmpty, currentIds != refreshedIds else { return false }
+        guard let lastRefresh else { return true }
+        return now.timeIntervalSince(lastRefresh) >= titleRefreshCooldown
+    }
+
     /// What the pet wears on its chest: how many sessions want something, and
     /// how many finishes have not been looked at.
     ///

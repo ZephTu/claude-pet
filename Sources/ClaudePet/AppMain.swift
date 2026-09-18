@@ -63,6 +63,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// The user's own preference, independent of whether the window happens to
     /// be visible right now.
     private var reduceMotion = false
+    /// The session list stays up instead of being opened per glance.
+    private var keepListOpen = false
+    /// Which sessions were live the last time terminal titles were actually
+    /// fetched, and when. Only a pinned panel uses these — an unpinned one is
+    /// still served by the fetch that runs when the user opens it.
+    private var titlesRefreshedIds: Set<String> = []
+    private var lastTitleRefresh: Date?
     /// Which figure is drawn. Persisted, so it survives a restart.
     private var skin: PetSkin = .robot
     private var windowVisible = true
@@ -88,6 +95,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 bridge.setSkin(self.skin)
             }
             self?.applyMotionSetting()
+            // The page reloaded at its defaults, which means shut. A pinned list
+            // has to be put back up, and this is the first moment it can be.
+            if self?.keepListOpen == true { bridge.setPanelOpen(true) }
             self?.render()
         }
         panel.onMirrorChanged = { on in bridge.setMirrored(on) }
@@ -112,6 +122,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             startTicker(interval: visible ? Self.tickInterval : Self.hiddenTickInterval)
         }
         reduceMotion = UserDefaults.standard.bool(forKey: Self.reduceMotionKey)
+        keepListOpen = UserDefaults.standard.bool(forKey: Self.keepListOpenKey)
+        bridge.panelPinned = keepListOpen
         skin = PetSkin.named(UserDefaults.standard.string(forKey: Self.skinKey))
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
@@ -157,6 +169,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShowHealth: { [weak self] in self?.showHealth() },
             onDemoToggle: { [weak self] in self?.toggleDemo() },
             onReduceMotionToggle: { [weak self] in self?.toggleReduceMotion() },
+            onKeepListOpenToggle: { [weak self] in self?.toggleKeepListOpen() },
             onSkinPick: { [weak self] in self?.setSkin($0) },
             onQuit: { NSApp.terminate(nil) }
         )
@@ -173,6 +186,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           demoOn: self.demo != nil,
                           reduceMotionOn: self.reduceMotion,
+                          keepListOpenOn: self.keepListOpen,
                           skin: self.skin)
             }
         }
@@ -232,6 +246,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // has a tool call in flight — when waiting really is all that is
         // happening.
         bridge?.setPhase(StateAggregator.phase(state.sessions))
+        refreshTitlesIfPinned(for: state.sessions, now: now)
         noticeTransients(state, previous: lastState)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
@@ -592,6 +607,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// state from whenever it was covered up.
     private static let hiddenTickInterval: TimeInterval = 30
     private static let reduceMotionKey = "reduceMotion"
+    private static let keepListOpenKey = "keepListOpen.v1"
     private static let skinKey = "petSkin"
 
     private func startTicker(interval: TimeInterval) {
@@ -631,6 +647,18 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         reduceMotion.toggle()
         UserDefaults.standard.set(reduceMotion, forKey: Self.reduceMotionKey)
         applyMotionSetting()
+    }
+
+    /// Keep the session list up instead of opening it per glance.
+    ///
+    /// Pinning is a lock, not a default: while it is on, neither a click on the
+    /// pet nor a jump to a terminal closes the list. Turning it back off is the
+    /// only thing that does.
+    private func toggleKeepListOpen() {
+        keepListOpen.toggle()
+        UserDefaults.standard.set(keepListOpen, forKey: Self.keepListOpenKey)
+        bridge?.panelPinned = keepListOpen
+        bridge?.setPanelOpen(keepListOpen)
     }
 
     // MARK: - Health and demo
@@ -975,6 +1003,23 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         case row(CGPoint)
 
         var isRow: Bool { if case .row = self { return true }; return false }
+    }
+
+    /// A pinned list never gets opened, so it never gets the fetch that opening
+    /// one performs — and a session started after launch would show its
+    /// directory name for as long as it lived. This puts that fetch back on the
+    /// only other honest trigger there is: the set of live sessions changing.
+    private func refreshTitlesIfPinned(for sessions: [SessionState], now: Date) {
+        let ids = Set(sessions.map(\.sessionId))
+        guard PanelModel.shouldRefreshTitles(pinned: keepListOpen, currentIds: ids,
+                                             refreshedIds: titlesRefreshedIds,
+                                             lastRefresh: lastTitleRefresh, now: now)
+        else { return }
+        // Recorded before the fetch returns, so a slow subprocess cannot let the
+        // next tick start a second one.
+        titlesRefreshedIds = ids
+        lastTitleRefresh = now
+        refreshTitles()
     }
 
     private func refreshTitles() {

@@ -1056,6 +1056,44 @@ struct Runner {
         t.check("a runaway count is capped rather than widening the badge",
                 PanelModel.badge(needsYou: 0, unreadFinishes: 140) == "99+")
 
+        // ---- When a pinned panel goes back for terminal tab titles ----
+        // Titles are fetched when the user OPENS the list, because fetching them
+        // spawns a process and a list nobody is looking at has no business doing
+        // that. A pinned list is never opened, so that moment never comes and a
+        // session started afterwards would show its directory name forever.
+        let ids: Set<String> = ["a", "b"]
+        t.check("an unpinned panel is left to the on-open fetch",
+                !PanelModel.shouldRefreshTitles(pinned: false, currentIds: ids,
+                                                refreshedIds: [], lastRefresh: nil, now: t0))
+        t.check("a pinned panel fetches once for the sessions it has never seen",
+                PanelModel.shouldRefreshTitles(pinned: true, currentIds: ids,
+                                               refreshedIds: [], lastRefresh: nil, now: t0))
+        t.check("nothing is fetched while the same sessions are up",
+                !PanelModel.shouldRefreshTitles(pinned: true, currentIds: ids,
+                                                refreshedIds: ids, lastRefresh: t0, now: t0))
+        // The cooldown keeps a burst of sessions opening at once from spawning a
+        // process per tick.
+        t.check("a change inside the cooldown waits",
+                !PanelModel.shouldRefreshTitles(pinned: true, currentIds: ids.union(["c"]),
+                                                refreshedIds: ids,
+                                                lastRefresh: t0.addingTimeInterval(-29), now: t0))
+        // ...and is not lost while it waits: comparing against what was actually
+        // fetched last, rather than against the previous frame, is what makes
+        // this self-healing.
+        t.check("a change that waited out the cooldown is still picked up",
+                PanelModel.shouldRefreshTitles(pinned: true, currentIds: ids.union(["c"]),
+                                               refreshedIds: ids,
+                                               lastRefresh: t0.addingTimeInterval(-30), now: t0))
+        t.check("a session closing counts as a change too",
+                PanelModel.shouldRefreshTitles(pinned: true, currentIds: ["a"],
+                                               refreshedIds: ids,
+                                               lastRefresh: t0.addingTimeInterval(-60), now: t0))
+        // Everything closed is not a reason to go and ask about nothing.
+        t.check("no sessions at all means nothing to ask about",
+                !PanelModel.shouldRefreshTitles(pinned: true, currentIds: [],
+                                                refreshedIds: ids,
+                                                lastRefresh: t0.addingTimeInterval(-60), now: t0))
+
         // Read marks must not outlive the events they acknowledge.
         let marks: Set<String> = ["a#T1", "a#T2", "gone#T9"]
         t.check("marks for events that aged out are dropped",

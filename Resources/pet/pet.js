@@ -377,6 +377,23 @@ window.togglePanel = function () {
 };
 
 /**
+ * Put the panel in a KNOWN state, rather than flipping whatever it is in.
+ *
+ * The toggle above is fine for a click, which is a request to flip. Everything
+ * else — opening a pinned list at launch, the "we are done with the list now"
+ * after a jump — knows which state it wants, and a blind flip in those places
+ * closes an open panel exactly as happily as it opens a closed one.
+ */
+window.setPanelOpen = function (open) {
+  const want = !open;
+  if (panel.hidden !== want) {
+    panel.hidden = want;
+    reportLayout();
+  }
+  return !panel.hidden;
+};
+
+/**
  * Which session row is under this point, if it is one we can jump to.
  *
  * Swift owns the mouse (see PetHostView), so the page never receives a click of

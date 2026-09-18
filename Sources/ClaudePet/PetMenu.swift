@@ -8,6 +8,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onShowHealth: () -> Void
     private let onDemoToggle: () -> Void
     private let onReduceMotionToggle: () -> Void
+    private let onKeepListOpenToggle: () -> Void
     private let onSkinPick: (PetSkin) -> Void
     private let onLoginToggle: () -> Void
     private let onUnmuteAll: () -> Void
@@ -21,6 +22,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onShowHealth: @escaping () -> Void,
         onDemoToggle: @escaping () -> Void,
         onReduceMotionToggle: @escaping () -> Void,
+        onKeepListOpenToggle: @escaping () -> Void,
         onSkinPick: @escaping (PetSkin) -> Void,
         onQuit: @escaping () -> Void
     ) {
@@ -29,6 +31,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         self.onShowHealth = onShowHealth
         self.onDemoToggle = onDemoToggle
         self.onReduceMotionToggle = onReduceMotionToggle
+        self.onKeepListOpenToggle = onKeepListOpenToggle
         self.onSkinPick = onSkinPick
         self.onLoginToggle = onLoginToggle
         self.onUnmuteAll = onUnmuteAll
@@ -38,11 +41,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        demoOn: Bool = false, reduceMotionOn: Bool = false, skin: PetSkin = .robot
+        demoOn: Bool = false, reduceMotionOn: Bool = false, keepListOpenOn: Bool = false,
+        skin: PetSkin = .robot
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, demoOn: demoOn, reduceMotionOn: reduceMotionOn, skin: skin
+            shortcutOn: shortcutOn, demoOn: demoOn, reduceMotionOn: reduceMotionOn,
+            keepListOpenOn: keepListOpenOn, skin: skin
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -51,7 +56,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
     /// without running a modal tracking loop.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, demoOn: Bool = false,
-                  reduceMotionOn: Bool = false, skin: PetSkin = .robot) -> NSMenu {
+                  reduceMotionOn: Bool = false, keepListOpenOn: Bool = false,
+                  skin: PetSkin = .robot) -> NSMenu {
         let menu = NSMenu()
 
         let pause = NSMenuItem(
@@ -78,6 +84,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+
+        // Above Reduce Motion: both are "how much of this do I want on screen",
+        // and this is the one a user reaches for far more often.
+        let keepOpen = NSMenuItem(title: "Keep List Open", action: #selector(toggleKeepListOpen),
+                                  keyEquivalent: "")
+        keepOpen.state = keepListOpenOn ? .on : .off
+        keepOpen.target = self
+        menu.addItem(keepOpen)
 
         let calm = NSMenuItem(title: "Reduce Motion", action: #selector(toggleReduceMotion),
                               keyEquivalent: "")
@@ -134,6 +148,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func showHealth() { onShowHealth() }
     @objc private func toggleDemo() { onDemoToggle() }
     @objc private func toggleReduceMotion() { onReduceMotionToggle() }
+
+    @objc private func toggleKeepListOpen() { onKeepListOpenToggle() }
     @objc private func pickSkin(_ sender: NSMenuItem) {
         onSkinPick(PetSkin.named(sender.representedObject as? String))
     }

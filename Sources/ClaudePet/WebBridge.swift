@@ -68,11 +68,39 @@ final class WebBridge {
     /// can see it — see PetHostView.
     func togglePanel() {
         guard isReady, let webView else { return }
+        // Pinned: a click is not a request to close, and there is nothing to
+        // open either. Asserting the state rather than returning outright covers
+        // the one case where they disagree — pinning while the panel is shut.
+        if panelPinned { return setPanelOpen(true) }
         webView.evaluateJavaScript("window.togglePanel();") { [weak self] result, _ in
             MainActor.assumeIsolated {
                 if result as? Bool == true { self?.onPanelOpened?() }
             }
         }
+    }
+
+    /// The user asked for the list to stay up — AppMain's "Keep List Open".
+    /// While this is on, nothing closes the panel except turning it back off.
+    var panelPinned = false
+
+    /// Put the panel in a known state. Used where the caller knows which state
+    /// it wants, as opposed to a click, which is a request to flip.
+    ///
+    /// Deliberately does NOT fire `onPanelOpened`: that means "the user just
+    /// opened the list", which is what makes it the right moment to go and read
+    /// terminal titles. Asserting the state of a pinned panel is not that, and a
+    /// pinned panel has its own trigger for titles — see
+    /// PanelModel.shouldRefreshTitles.
+    func setPanelOpen(_ open: Bool) {
+        guard isReady else { return }
+        evaluate("window.setPanelOpen(\(open));")
+    }
+
+    /// "Done with the list now" — after a jump, say. A no-op while pinned, which
+    /// is the whole difference between a pinned panel and an open one.
+    func closePanel() {
+        guard !panelPinned else { return }
+        setPanelOpen(false)
     }
 
     /// Resolve a left click: a session row we can jump to wins, anything else
@@ -116,7 +144,7 @@ final class WebBridge {
                     }
                     TerminalJump.jump(kind: kind, handle: handle)
                     // The list has served its purpose once we are jumping away.
-                    self.evaluate("window.togglePanel();")
+                    self.closePanel()
                 case "read":
                     // Acknowledging a finished turn. The list stays open: the
                     // user is working through it, and closing it after each one
@@ -136,7 +164,7 @@ final class WebBridge {
                         // happened at all.
                         TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle)
                         self.onMarkRead?(ids)
-                        self.evaluate("window.togglePanel();")
+                        self.closePanel()
                     case .read:
                         // The terminal is gone, so there is no jump left to
                         // protect the record from. The click clears the row and

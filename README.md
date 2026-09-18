@@ -48,7 +48,7 @@ the last thing written stays "busy" and nothing ever comes to take it back. It i
 deliberately not called "done", which nothing here is in a position to know, and it
 rights itself the moment that session does anything again.
 
-**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
+**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for keep-list-open / pause / reduce motion / connection status / demo / launch-at-login / quit. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 
 **Click a row marked ↗** to jump straight to the terminal tab that session is running in.
 
