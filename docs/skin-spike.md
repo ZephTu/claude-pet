@@ -89,7 +89,19 @@ README 第一句是「The lamp is the signal——不用聚焦就能读」。猫
 2. 猫 waiting 那张的问号是画死的，"等授权"用它会一直显示问号，那是错的。要么接受，要么
    把问号拆出来交给宿主层画。
 
-## 探针是临时的
+## 探针留下来了
 
-`SkinProbe.swift`、`AppMain` 里的 `--probe-skin` 分支、`Resources/pet/probe-robot.html`、
-`Resources/pet/skins/cat/probe.html` 都跟 spike 一起删。
+spike 时打算用完就删，做完决定留着：这个项目里「图和命中矩形对不对得上」是测试结构上
+抓不到的（README 里专门写了这条，镜像布局那次就是所有测试全绿、天线还是在命中区外面），
+只能画出来看。皮肤系统把这个面翻倍，所以把「看」做便宜比把探针删掉值。
+
+    ClaudePet --probe-skin index.html /tmp/cat.png 'window.setSkin("cat")'
+
+把真页面渲染成 PNG，走真的 `pet://` 加载路径，不需要录屏权限。两张临时探针页
+（`probe-robot.html`、`skins/cat/probe.html`）已经删了，它们的活现在由 `--probe-skin`
+的第三个参数干。
+
+## 还缺的素材
+
+五张贴图覆盖 11 个状态里的 5 个。缺的清单和对生成那边的技术要求（底边对齐、左上角留白、
+符号拆图层）见 PR 描述。
