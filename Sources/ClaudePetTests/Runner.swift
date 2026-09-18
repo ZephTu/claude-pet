@@ -1478,6 +1478,69 @@ struct Runner {
         t.check("no phase at all is the ordinary case",
                 StateAggregator.phase([phased("")]).isEmpty)
 
+        // ---- Skins: five pictures for eleven states ----
+        t.check("an unknown skin name falls back to the one that always draws",
+                PetSkin.named("weasel") == .robot && PetSkin.named(nil) == .robot)
+        t.check("a known one is kept", PetSkin.named("cat") == .cat)
+
+        func look(_ mood: String, phase: String = "", flash: String = "",
+                  wanted: Bool = false) -> CatSkin.Look {
+            CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted)
+        }
+        // The pose is lossy on purpose — three busy poses, compaction and
+        // waiting on an agent are one picture — so what is asserted here is that
+        // the LAMP still tells them apart. That is the whole bargain.
+        t.check("every busy state draws the same picture",
+                [look("busy"), look("busy", phase: "compacting"),
+                 look("busy", phase: "awaiting-agent")].allSatisfy { $0.pose == .working })
+        t.check("...and the lamp is where the difference survives",
+                Set([look("busy").lamp, look("busy", phase: "compacting").lamp,
+                     look("busy", phase: "awaiting-agent").lamp]).count == 3)
+        // The regression this guards: an amber lamp means "it wants you", and
+        // waiting on a background agent wants nothing. Getting this wrong sends
+        // the user to a terminal that has no question for them — which is the
+        // bug the awaiting-agent state was added to fix, reintroduced in a lamp.
+        t.check("waiting on an agent keeps a working lamp, not a waiting one",
+                look("busy", phase: "awaiting-agent").lamp == .awaiting)
+
+        t.check("wanting approval and wanting an answer share the one picture",
+                look("waiting").pose == .waiting)
+        t.check("being ignored has its own", look("urgent").pose == .urgent)
+        t.check("urgent's lamp outranks waiting's",
+                look("urgent").lamp == .urgent && look("waiting").lamp == .waiting)
+
+        // The kit's two resting pictures, earning their keep.
+        t.check("a desk with something unread stays awake", look("idle", wanted: true).pose == .idle)
+        t.check("a desk with nothing on it sleeps", look("idle").pose == .sleeping)
+
+        // The two states with NO picture at all. If the lamp drops these, the
+        // cat silently stops reporting the one thing this project exists for.
+        t.check("a finished turn reaches the lamp",
+                look("idle", flash: "done").lamp == .done)
+        t.check("an interrupted tool reaches the lamp",
+                look("busy", flash: "trouble").lamp == .trouble)
+        t.check("a transient outranks the state it happens during",
+                look("busy", phase: "compacting", flash: "done").lamp == .done)
+
+        // Hit regions: two shapes, two answers. A cat clickable in the robot's
+        // rectangle is a cat with a dead head and a live patch of desk.
+        let catHead = CGPoint(x: 400, y: 152)      // high in the cat, above the robot's box
+        t.check("the cat is clickable where the cat is",
+                PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .cat))
+        t.check("...and the robot is not, because nothing is drawn there",
+                !PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .robot))
+        t.check("the robot's antenna is still its own box",
+                PetLayout.isOpaque(at: CGPoint(x: 390, y: 154), panel: nil, bubble: nil,
+                                   skin: .robot))
+        t.check("both skins are clickable where both are drawn",
+                PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil, skin: .cat)
+                    && PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil,
+                                          skin: .robot))
+        t.check("the cat's box moves with a mirrored layout too",
+                PetLayout.isOpaque(at: CGPoint(x: PetLayout.catBodyBox.midX - 320,
+                                               y: PetLayout.catBodyBox.midY),
+                                   panel: nil, bubble: nil, mirrored: true, skin: .cat))
+
         t.finish()
     }
 }

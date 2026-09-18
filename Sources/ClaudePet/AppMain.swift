@@ -26,12 +26,14 @@ struct AppMain {
                 HealthWindow.renderPreview(checks: sample, to: arguments[i + 1]) ? 0 : 1
             })
         }
-        // Spike: WebGL inside the pet's own web view. Remove with SkinProbe.
+        // Renders the real page to a PNG, because the one thing no test here can
+        // check is whether the drawing and the hit rectangles agree.
         if let i = arguments.firstIndex(of: "--probe-skin"), i + 2 < arguments.count {
             app.setActivationPolicy(.prohibited)
+            let script = i + 3 < arguments.count ? arguments[i + 3] : ""
             MainActor.assumeIsolated {
-                SkinProbe.run(page: URL(fileURLWithPath: arguments[i + 1]),
-                              imagePath: arguments[i + 2]) { exit($0) }
+                SkinProbe.run(path: arguments[i + 1], imagePath: arguments[i + 2],
+                              script: script) { exit($0) }
             }
             app.run()
         }
@@ -61,6 +63,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// The user's own preference, independent of whether the window happens to
     /// be visible right now.
     private var reduceMotion = false
+    /// Which figure is drawn. Persisted, so it survives a restart.
+    private var skin: PetSkin = .robot
     private var windowVisible = true
 
     private var petHome: URL {
@@ -79,10 +83,22 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             // The page has just loaded at its defaults, so whichever side it
             // should be on has to be pushed again.
             bridge.setMirrored(panel?.isMirrored ?? false)
+            if let self {
+                panel?.setSkin(self.skin)
+                bridge.setSkin(self.skin)
+            }
             self?.applyMotionSetting()
             self?.render()
         }
         panel.onMirrorChanged = { on in bridge.setMirrored(on) }
+        // WebGL can be unavailable, and a texture can fail to decode. The page
+        // falls back to the robot on its own; this puts the setting and the hit
+        // rectangles back in step with what is actually on screen, so the user
+        // does not end up with a robot that is only clickable where a cat was.
+        panel.onSkinFailed = { [weak self] why in
+            NSLog("ClaudePet: skin failed, reverting to the robot: \(why)")
+            self?.revertToRobot()
+        }
         // A pet nobody can see has no reason to repaint. Covered by another
         // window, on another Space, or on a sleeping display all land here.
         panel.onVisibilityChanged = { [weak self] visible in
@@ -96,6 +112,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             startTicker(interval: visible ? Self.tickInterval : Self.hiddenTickInterval)
         }
         reduceMotion = UserDefaults.standard.bool(forKey: Self.reduceMotionKey)
+        skin = PetSkin.named(UserDefaults.standard.string(forKey: Self.skinKey))
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
@@ -140,6 +157,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShowHealth: { [weak self] in self?.showHealth() },
             onDemoToggle: { [weak self] in self?.toggleDemo() },
             onReduceMotionToggle: { [weak self] in self?.toggleReduceMotion() },
+            onSkinPick: { [weak self] in self?.setSkin($0) },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -154,7 +172,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           demoOn: self.demo != nil,
-                          reduceMotionOn: self.reduceMotion)
+                          reduceMotionOn: self.reduceMotion,
+                          skin: self.skin)
             }
         }
         self.menu = menu
@@ -223,10 +242,19 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
         // now", and a number that keeps standing there is still nagging.
-        bridge?.setBadge(PanelModel.badge(
+        let badge = PanelModel.badge(
             needsYou: PanelModel.needsYou(state.sessions)
                 .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count,
-            unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count))
+            unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count)
+        bridge?.setBadge(badge)
+        // A painted skin has five pictures for eleven states, so what it shows
+        // is decided here and pushed — see CatSkin. Sent whichever skin is up:
+        // the page ignores it while the robot is showing, and the alternative is
+        // a stale pose appearing the instant somebody switches.
+        bridge?.setCatLook(CatSkin.look(mood: state.mood.rawValue,
+                                        phase: StateAggregator.phase(state.sessions),
+                                        flash: "",
+                                        wanted: !badge.isEmpty))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
         // plainly seen the news or stopped caring about it.
@@ -563,6 +591,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// state from whenever it was covered up.
     private static let hiddenTickInterval: TimeInterval = 30
     private static let reduceMotionKey = "reduceMotion"
+    private static let skinKey = "petSkin"
 
     private func startTicker(interval: TimeInterval) {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -574,6 +603,27 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// for it to stop.
     private func applyMotionSetting() {
         bridge?.setCalm(reduceMotion || !windowVisible)
+    }
+
+    /// Both halves have to move together: the page swaps the drawing, the host
+    /// view swaps the rectangles it hit-tests against. A skin change that only
+    /// did the first would leave the cat clickable in the robot's shape.
+    private func setSkin(_ next: PetSkin) {
+        guard next != skin else { return }
+        skin = next
+        UserDefaults.standard.set(next.rawValue, forKey: Self.skinKey)
+        panel?.setSkin(next)
+        bridge?.setSkin(next)
+        render()
+    }
+
+    /// Not `setSkin(.robot)`: that would be a no-op when the stored skin is
+    /// already the robot, and the point here is to correct a mismatch.
+    private func revertToRobot() {
+        skin = .robot
+        UserDefaults.standard.set(PetSkin.robot.rawValue, forKey: Self.skinKey)
+        panel?.setSkin(.robot)
+        render()
     }
 
     private func toggleReduceMotion() {

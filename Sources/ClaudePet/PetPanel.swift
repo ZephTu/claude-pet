@@ -39,9 +39,18 @@ final class PetPanel: NSPanel {
     private var localMouseMonitor: Any?
     private var clickThroughPoll: Timer?
 
+    /// Retained for as long as the web view: WKWebView does not own it.
+    private let petScheme: PetSchemeHandler?
+
     init() {
         let size = PetLayout.windowSize
         let config = WKWebViewConfiguration()
+        // One origin for the page and everything it loads — see PetSchemeHandler.
+        petScheme = Bundle.module.url(forResource: "pet", withExtension: nil)
+            .map { PetSchemeHandler(root: $0) }
+        if let petScheme {
+            config.setURLSchemeHandler(petScheme, forURLScheme: PetSchemeHandler.scheme)
+        }
         webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
         host = PetHostView(webView: webView)
 
@@ -172,7 +181,7 @@ final class PetPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     private func loadPetPage() {
-        guard let dir = Bundle.module.url(forResource: "pet", withExtension: nil) else {
+        guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html") else {
             // assertionFailure alone is a no-op in release, which is the only
             // build that ships — without this the failure mode is a blank
             // window and no clue anywhere.
@@ -180,8 +189,17 @@ final class PetPanel: NSPanel {
             assertionFailure("pet resources missing from bundle")
             return
         }
-        let index = dir.appendingPathComponent("index.html")
-        webView.loadFileURL(index, allowingReadAccessTo: dir)
+        webView.load(URLRequest(url: index))
+    }
+
+    /// Which figure to draw. Changing it re-renders the page's pet slot; it does
+    /// not reload anything.
+    func setSkin(_ skin: PetSkin) { host.skin = skin }
+
+    /// The page could not draw the skin it was given and is showing the robot.
+    var onSkinFailed: ((String) -> Void)? {
+        get { layoutHandler?.onSkinFailed }
+        set { layoutHandler?.onSkinFailed = newValue }
     }
 
     /// Show without activating the app or pulling focus.
@@ -278,6 +296,9 @@ extension PetPanel: WKNavigationDelegate {
 @MainActor
 final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
     private let onLayout: (CGRect?, CGRect?) -> Void
+    /// A skin that could not draw itself; the page has already fallen back to
+    /// the robot and this is how Swift finds out.
+    var onSkinFailed: ((String) -> Void)?
 
     init(onLayout: @escaping (CGRect?, CGRect?) -> Void) {
         self.onLayout = onLayout
@@ -285,6 +306,9 @@ final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
+        // The page draws the robot instead, but the hit rectangles live on this
+        // side — without this the cat's box would be tested against a robot.
+        if let why = body["skinFailed"] as? String { onSkinFailed?(why) }
         onLayout(Self.rect(body["panel"]), Self.rect(body["bubble"]))
     }
 

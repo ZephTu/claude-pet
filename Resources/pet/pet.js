@@ -542,12 +542,17 @@ let flashTimer = null;
  *
  * @param {"done"|"trouble"} kind
  */
-window.flash = function (kind) {
+window.flash = function (kind, lamp) {
   if (flashTimer) clearTimeout(flashTimer);
   pet.dataset.flash = kind;
+  // For a skin with no picture for this, the lamp is the whole of the signal —
+  // so the transient overrides the steady lamp and puts it back afterwards
+  // rather than being lost.
+  if (lamp) setLamp(lamp);
   flashTimer = setTimeout(function () {
     delete pet.dataset.flash;
     flashTimer = null;
+    setLamp(steadyLamp);
   }, kind === "trouble" ? 2600 : 1600);
 };
 
@@ -561,9 +566,19 @@ window.setPhase = function (phase) {
 
 window.setCalm = function (on) {
   document.getElementById("stage").classList.toggle("calm", !!on);
+  // CSS cannot stop a WebGL renderer: the cat keeps warping its mesh however
+  // many `animation: none` rules are aimed at the canvas element.
+  if (cat) cat.setReducedMotion(!!on);
 };
 
 window.setBadge = function (text) {
+  // The host-drawn count, for skins whose artwork has no chest to put one on.
+  // Kept in step with the robot's rather than replacing it: the robot's sits
+  // inside its own drawing and moves with it.
+  const host = document.getElementById("count");
+  host.textContent = text || "";
+  host.hidden = !text;
+
   const g = document.getElementById("badge-count");
   if (!text) { g.classList.remove("on"); return; }
   const w = text.length <= 2 ? 11 : 16;
@@ -615,3 +630,81 @@ window.setHoverAt = function (x, y) {
   hoverRow = row;
   if (row) row.classList.add("hot");
 };
+
+
+/* ---- Skins ---------------------------------------------------------------
+ * The robot is CSS: every state it has is a rule, and swapping states costs
+ * an attribute write. A painted skin cannot work that way — it has as many
+ * poses as it has pictures — so the pose and the lamp are decided in Swift
+ * (ClaudePetCore/PetSkin.swift, where they are unit-tested against all eleven
+ * pet states) and pushed here. This file only applies them.
+ */
+
+/** The live CatPet renderer, or null while the robot is showing. */
+let cat = null;
+/** The lamp the current state calls for, as opposed to a transient flash. */
+let steadyLamp = "off";
+
+function setLamp(token) {
+  document.getElementById("lamp").dataset.lamp = token || "off";
+}
+
+/**
+ * Switch the figure. Safe to call with the skin that is already showing.
+ * @param {"robot"|"cat"} name
+ */
+window.setSkin = function (name) {
+  const skin = name === "cat" ? "cat" : "robot";
+  if (pet.dataset.skin === skin) return;
+  pet.dataset.skin = skin;
+
+  if (skin !== "cat") {
+    // Disposed rather than hidden: a hidden canvas still holds its textures
+    // and its animation frame, and this thing sits on the desktop all day.
+    if (cat) { cat.dispose(); cat = null; }
+    return;
+  }
+  if (cat) return;
+  try {
+    cat = new CatPet(document.getElementById("cat"), {
+      idle: "skins/cat/assets/idle.png",
+      working: "skins/cat/assets/working.png",
+      waiting: "skins/cat/assets/waiting.png",
+      sleeping: "skins/cat/assets/sleeping.png",
+      urgent: "skins/cat/assets/urgent.png",
+    });
+    cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
+    cat.ready.then(function () { if (cat) cat.setState(lastPose); })
+             .catch(function (e) { skinFailed(e); });
+  } catch (e) {
+    skinFailed(e);
+  }
+};
+
+/** Whatever pose Swift last asked for, replayed once the textures arrive. */
+let lastPose = "idle";
+
+/**
+ * Called from Swift on every render. The pose may be one of five; the lamp
+ * carries everything the five pictures cannot.
+ */
+window.setCatLook = function (pose, lamp) {
+  lastPose = pose || "idle";
+  steadyLamp = lamp || "off";
+  if (!flashTimer) setLamp(steadyLamp);
+  if (cat) cat.setState(lastPose);
+};
+
+/**
+ * A skin that cannot draw itself falls back to the one that always can.
+ * Silently showing nothing is the failure this whole app is against.
+ */
+function skinFailed(error) {
+  // eslint-disable-next-line no-console
+  console.error("skin failed, falling back to the robot:", error);
+  if (cat) { cat.dispose(); cat = null; }
+  pet.dataset.skin = "robot";
+  const handler =
+    window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.layout;
+  if (handler) handler.postMessage({ skinFailed: String(error) });
+}

@@ -45,6 +45,8 @@ final class WebBridge {
         isReady = true
         last = nil
         lastSessionsPayload = nil
+        lastSkin = nil
+        lastLook = nil
     }
 
     func push(_ state: GlobalState, motion: ActivitySummary.Motion? = nil) {
@@ -196,9 +198,32 @@ final class WebBridge {
     }
 
     /// A brief reaction that is not a state — see window.flash.
+    ///
+    /// The lamp token travels with it because a finished turn and an
+    /// interrupted tool are exactly the two states a painted skin has no
+    /// picture for. On the robot the flash is a pose; on the cat it is only
+    /// ever the lamp, so losing it here would lose it entirely.
     func flash(_ kind: String) {
         guard isReady else { return }
-        evaluate("window.flash(\(jsString(kind)));")
+        let lamp = CatSkin.lamp(mood: "", phase: "", flash: kind).rawValue
+        evaluate("window.flash(\(jsString(kind)), \(jsString(lamp)));")
+    }
+
+    private var lastSkin: PetSkin?
+    func setSkin(_ skin: PetSkin) {
+        guard isReady, skin != lastSkin else { return }
+        lastSkin = skin
+        evaluate("window.setSkin(\(jsString(skin.rawValue)));")
+    }
+
+    /// The pose and lamp a painted skin should show. Pushed on every render;
+    /// the page ignores it while the robot is up.
+    private var lastLook: CatSkin.Look?
+    func setCatLook(_ look: CatSkin.Look) {
+        guard isReady, look != lastLook else { return }
+        lastLook = look
+        evaluate("window.setCatLook(\(jsString(look.pose.rawValue)), "
+            + "\(jsString(look.lamp.rawValue)));")
     }
 
     private var lastPhase: String?
