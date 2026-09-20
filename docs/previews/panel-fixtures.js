@@ -176,10 +176,102 @@ const SCENARIOS = [
     ],
   },
   {
+    // The three shapes of "this session has an unread finish": still idle (the
+    // duplicate), busy again, and blocked again. Only the first may be folded.
+    id: "dedupe",
+    title: "未读完成 + 同一 session 的实时状态",
+    note: "idle 的那条折叠；重新 busy / waiting 的必须照常显示",
+    sessions: [
+      session({ sessionId: "s-idle", project: "settled-repo", state: "idle",
+                replied: true, waitedSeconds: 44, ...term }),
+      session({ sessionId: "s-busy", project: "restarted-repo", state: "busy",
+                activity: "Bash npm test", toolSeconds: 7, ...term }),
+      session({ sessionId: "s-wait", project: "blocked-repo", state: "waiting",
+                asks: "permission", detail: "git push --force",
+                urgent: true, waitedSeconds: 120, ...term }),
+      session({ sessionId: "s-alone", project: "no-finish-repo", state: "idle",
+                replied: true, waitedSeconds: 900, ...term }),
+    ],
+    finished: [
+      finished({ sessionId: "s-idle", label: "settled-repo", agoSeconds: 44, ...term }),
+      finished({ sessionId: "s-busy", label: "restarted-repo", agoSeconds: 300, ...term }),
+      finished({ sessionId: "s-wait", label: "blocked-repo", agoSeconds: 600, ...term }),
+    ],
+  },
+  {
+    // Every row genuinely executing, which is the only time the heading may
+    // claim it.
+    id: "all-running",
+    title: "全部在跑",
+    note: "只有这种情况标题才写 Running",
+    sessions: [
+      session({ project: "alpha", state: "busy", activity: "Bash make", toolSeconds: 4, ...term }),
+      session({ project: "beta", state: "busy", activity: "Edit main.swift", toolSeconds: 9, ...term }),
+    ],
+    finished: [finished({ label: "gamma", agoSeconds: 120, ...term })],
+  },
+  {
     id: "empty",
     title: "空列表",
     note: "没有会话时的文案",
     sessions: [],
+  },
+];
+
+/**
+ * Panel AND message window at once.
+ *
+ * These are the ones that matter for overlap: a bubble measured on its own is
+ * always "inside the window", and that is exactly the check that let the
+ * completion notice sit on top of the list's top-right corner.
+ */
+const COMBOS = [
+  {
+    id: "combo-notice",
+    title: "面板打开 + 完成通知",
+    note: "普通完成气泡应当让位给列表",
+    sessions: SCENARIOS.find(s => s.id === "four-idle").sessions,
+    finished: [{ sessionId: "f1", eventIds: ["e1"], label: "\ud83e\udd16 20260920-enhancement",
+                 count: 1, closed: false, agoSeconds: 44, termKind: "iterm", termHandle: "w0t1p0" }],
+    call: ["say", ["\ud83e\udd16 20260920-enhancement came to rest", 0,
+                   "\ud83e\udd16 20260920-enhancement", "notice"]],
+  },
+  {
+    id: "combo-alert",
+    title: "面板打开 + 紧急提醒",
+    note: "alert 不能盖住列表，也不能被列表盖住",
+    sessions: SCENARIOS.find(s => s.id === "three-waiting").sessions,
+    call: ["setMood", ["urgent", "api-server", "rm -rf build/", null]],
+  },
+  {
+    id: "combo-readout",
+    title: "面板打开 + Session Hover 详情",
+    note: "hover readout 只在面板打开时出现，必须共存",
+    sessions: SCENARIOS.find(s => s.id === "four-idle").sessions,
+    call: ["showDetail", [{
+      path: "~/Code/claude-pet", worktree: "ui/panel", context: 64,
+      model: "opus", turn: "3m12s", quiet: "",
+      last: "Edit pet.css", lastBad: false,
+    }]],
+  },
+  {
+    id: "combo-readout-full",
+    title: "满高面板 + Hover 详情",
+    note: "20 条 session 时面板顶到 max-height，避让空间最小",
+    sessions: SCENARIOS.find(s => s.id === "twenty").sessions,
+    call: ["showDetail", [{
+      path: "~/Code/enterprise-lending-origination", worktree: "feature/settlement",
+      context: 91, model: "sonnet", tool: "23s", turn: "18m04s", quiet: "6m",
+      last: "Bash pytest — exit 1", lastBad: true,
+    }]],
+  },
+  {
+    id: "combo-warn",
+    title: "面板打开 + 额度告警",
+    note: "quota warning 是推送的，面板开着也可能来",
+    sessions: SCENARIOS.find(s => s.id === "mixed").sessions,
+    finished: SCENARIOS.find(s => s.id === "mixed").finished,
+    call: ["say", ["the 5h window is 92% used", 0, "", "warn"]],
   },
 ];
 
@@ -222,7 +314,8 @@ const BUBBLES = [
     title: "readout（上一步失败）",
     call: ["showDetail", [{
       path: "~/Code/ledger-core", context: 91, model: "sonnet",
-      turn: "18m04s", quiet: "6m", last: "Bash pytest — exit 1", lastBad: true,
+      tool: "23s", turn: "18m04s", quiet: "6m",
+      last: "Bash pytest — exit 1", lastBad: true,
     }]],
   },
   {
@@ -253,5 +346,5 @@ const BUBBLES = [
 ];
 
 if (typeof window !== "undefined") {
-  window.PANEL_FIXTURES = { SCENARIOS, BUBBLES, WAITING_HOOK };
+  window.PANEL_FIXTURES = { SCENARIOS, COMBOS, BUBBLES, WAITING_HOOK };
 }

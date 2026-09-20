@@ -80,6 +80,29 @@ public enum Chatter {
         case chat
     }
 
+    /// Does this kind of message step aside while the session list is open?
+    ///
+    /// The bubble hangs above the pet and the list opens to the pet's left, so
+    /// with enough rows on screen the two share a corner — which is how a
+    /// completion notice ended up sitting on the list's own top-right, its text
+    /// tangled with the `clear` control underneath it.
+    ///
+    /// Yielding rather than moving, for the two kinds whose news the list is
+    /// already carrying: a finished turn IS a row in Finished, and chatter is
+    /// not news at all. A quota warning stays, because nothing in the list says
+    /// it; so does the alarm, which outranks everything by definition.
+    ///
+    /// Yielding is a DISPLAY decision and nothing more. Nothing is marked read,
+    /// no queue is touched, and the line is not recorded as having been said —
+    /// so when the list closes, the next render decides again from the state of
+    /// the world at that moment rather than replaying something stale.
+    public static func yieldsToList(_ bubble: Bubble) -> Bool {
+        switch bubble {
+        case .notice, .chat: return true
+        case .warn: return false
+        }
+    }
+
     public static func bubble(for kind: Kind) -> Bubble {
         switch kind {
         case .quotaHigh, .quotaResetting: return .warn

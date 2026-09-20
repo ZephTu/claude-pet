@@ -45,6 +45,43 @@ html, body {
    `.chat`, so it needs saying twice. */
 #stage.mirrored #bubble.alert { right: auto; left: 14px; }
 
+/* ---- Giving way to the list -----------------------------------------------
+   The bubble hangs above the pet; the list opens to the pet's LEFT and grows
+   upward. Past a certain number of rows the two share a corner, which is how a
+   completion notice came to sit across the list's own top-right with its text
+   tangled in the `clear` control underneath.
+
+   Ordinary completions and chatter simply stand down — the list is already
+   carrying that news (see Chatter.yieldsToList). What is left is the alarm, the
+   quota warning and the hover readout, none of which the list says, so those
+   give up width instead: 148 = 466 (the bubble's right anchor) - 312 (the
+   list's right edge) - 6, which is the clear strip above the pet.
+
+   `crowded` is set from a MEASUREMENT of the list, in syncCrowding(), so a
+   short list costs the readout nothing. Both layouts, because the two swap
+   sides together and the strip is the same width either way. */
+#stage.crowded #bubble.chat,
+#stage.crowded #bubble.alert { max-width: 148px; }
+/* The command is the whole reason the card exists, so in the narrow strip it
+   wraps rather than truncating. */
+#stage.crowded #bubble.alert .abody { display: block; }
+#stage.crowded #bubble.alert .awhat { white-space: normal; }
+#stage.crowded #bubble.alert .akey { padding-right: 4px; }
+/* Where it is, on its own line. Side by side the branch is flex:none and took
+   the whole strip, leaving the path as "~…" — and the path is the more
+   identifying half of the pair. There is height to spare above the bubble, so
+   this buys a line rather than a truncation. */
+#stage.crowded #bubble.readout .dpath { display: block; }
+#stage.crowded #bubble.readout .dtree { display: block; }
+/* Three clocks in a 148pt strip do not fit on one line, and the one that falls
+   off the end is `quiet` — which is the one that answers "is this stuck". */
+#stage.crowded #bubble.readout .dclocks { flex-wrap: wrap; }
+/* The context meter keeps all four of its columns; the bar is what gives, since
+   its job is proportion and a short bar still shows proportion. */
+#stage.crowded #bubble.readout .qlabel { width: 20px; }
+#stage.crowded #bubble.readout .qbar   { width: 30px; }
+#stage.crowded #bubble.readout .qpct   { width: 26px; }
+
 #pet {
   position: absolute;
   right: 20px;
@@ -821,6 +858,13 @@ html, body {
 .age  {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
+}
+/* "ago" is the whole difference between a duration and an instant, and it is
+   the quietest thing in the row that can carry it: a number alone reads as
+   whichever the reader was already expecting. Dim and small, because it is
+   grammar rather than data — the number is the data. */
+.ago {
+  padding-left: 3px; color: #6b6560; font-size: 9px;
 }
 /* Notification message — design doc section 2 keeps it out of the bubble and
    shows it only here. */

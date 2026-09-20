@@ -14,6 +14,13 @@ final class PetPanel: NSPanel {
     let webView: WKWebView
     private let host: PetHostView
 
+    /// Is the session list on screen right now?
+    ///
+    /// Read from the rect the page last reported rather than from any flag kept
+    /// here: the page owns whether the list is up (a click toggles it there),
+    /// and a second copy of that fact is a second thing to get out of step.
+    var isListOpen: Bool { host.panelRect != nil }
+
     /// Called once the pet page is ready to receive setMood().
     var onReady: (() -> Void)?
 

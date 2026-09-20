@@ -1,6 +1,29 @@
 const pet = document.getElementById("pet");
 const bubble = document.getElementById("bubble");
 const panel = document.getElementById("panel");
+const stage = document.getElementById("stage");
+
+/* The bubble's bottom edge in stage coordinates: 280 (stage height) - 138
+   (#bubble's `bottom`). The list grows upward from the bottom too, so this is
+   the line at which the two start sharing a corner. */
+const BUBBLE_FLOOR = 142;
+/* Right edge of the list (2 + 310) plus a gap, taken off the bubble's own right
+   anchor (480 - 14). What is left is the clear strip above the pet. */
+const CLEAR_STRIP = 466 - 312 - 6;
+
+/**
+ * Does the list currently reach up into the bubble's corner?
+ *
+ * Measured, not assumed: the list is as tall as its contents, so four rows
+ * leave the bubble alone and twenty do not. Only when the two would really
+ * intersect does the bubble give up width — capping it unconditionally would
+ * squeeze the hover readout in the common case for nothing.
+ */
+function syncCrowding() {
+  const crowded = !panel.hidden && !bubble.hidden
+    && panel.getBoundingClientRect().top < BUBBLE_FLOOR;
+  stage.classList.toggle("crowded", crowded);
+}
 
 /**
  * Tell Swift where the panel and bubble actually ended up, so the window can
@@ -8,6 +31,9 @@ const panel = document.getElementById("panel");
  * measured rather than assumed.
  */
 function reportLayout() {
+  // Before measuring, not after: crowding changes how wide the bubble is, and
+  // Swift is told the rect it ends up with rather than the one it started from.
+  syncCrowding();
   const box = (el) => {
     if (el.hidden) return null;
     const r = el.getBoundingClientRect();
@@ -34,7 +60,12 @@ const TEXT = {
   // Group headings.
   needsYou: "Needs you",
   finished: "Finished",
+  // "Running" is a claim, and a group holding three answered sessions and an
+  // idle one is not running anything. It is only used when the group really is
+  // all work in flight; otherwise the heading says what the rows have in
+  // common, which is nothing more than being sessions.
   running: "Running",
+  sessions: "Sessions",
   // Row status, first line.
   approval: "Needs approval",
   reply: "Awaiting reply",
@@ -95,11 +126,32 @@ function variant(name) {
   shown = name || "";
 }
 
+/* Messages the open list is already carrying, so they step aside rather than
+   draw across its top-right corner — mirrors Chatter.yieldsToList, which is
+   where the reasoning lives. A quota warning stays (nothing in the list says
+   it) and so does the alarm. */
+const YIELDS = { notice: true, chat: true };
+
 /** May a pushed line of this kind take the bubble from what is in it now? */
 function mayShow(name) {
   if (pet.dataset.mood === "urgent") return false;   // the alarm owns it outright
+  if (YIELDS[name] && !panel.hidden) return false;   // the list has this covered
   if (!speaking || !shown) return true;
   return RANK[name] >= RANK[shown];
+}
+
+/**
+ * Take down a line the list has just taken over.
+ *
+ * Opening the list does not mark anything read and does not touch the
+ * completion queue — the row stays in Finished, and closing the list lets the
+ * next render decide again whether there is still news. All that happens here
+ * is that the bubble stops covering the thing the user just asked to see.
+ */
+function yieldBubble() {
+  if (!speaking || !YIELDS[shown]) return;
+  clearSpeech();
+  bubble.hidden = true;
 }
 
 /**
@@ -315,6 +367,30 @@ function ageText(seconds) {
   return Math.floor(seconds / 3600) + "h";
 }
 
+/** The age column, with the one word that says which reading it is. */
+function ageHTML(seconds, ago) {
+  return '<span class="age">' + ageText(seconds)
+    + (ago ? '<span class="ago">ago</span>' : "") + "</span>";
+}
+
+/**
+ * How long, and how long since — the two readings of the same number.
+ *
+ * `SessionState.since` is when the CURRENT state began, so on a running or
+ * blocked row it is a duration (how long this has been going) and on an idle
+ * one it is an instant (when the answer landed). "Answered 6h" read as a
+ * six-hour answer; "Answered 6h ago" is the fact.
+ *
+ * A row with a call in flight shows that call's own clock instead, because the
+ * question it answers — is this stuck? — is about the call, not the turn. The
+ * hover readout names both, so the bare number is never the only thing.
+ */
+function rowAge(s) {
+  if (s.state === "idle") return { seconds: s.waitedSeconds, ago: true };
+  if (s.toolSeconds != null) return { seconds: s.toolSeconds, ago: false };
+  return { seconds: s.waitedSeconds, ago: false };
+}
+
 /**
  * What the status column says, and whether those words are ours.
  *
@@ -375,11 +451,8 @@ function sessionRowHTML(s) {
     '<span class="dot ' + (s.quiet ? "quiet" : s.state) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
-    // While a tool is running, the number that answers "is this stuck?" is how
-    // long THAT call has been going — not how long the turn has. The turn's own
-    // age comes back the moment nothing is running.
-    '<span class="age">' + ageText(s.toolSeconds != null ? s.toolSeconds : s.waitedSeconds)
-    + "</span>" +
+    // See rowAge: which clock this is, and whether it counts up or counts back.
+    (function () { const a = rowAge(s); return ageHTML(a.seconds, a.ago); })() +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
@@ -399,11 +472,11 @@ function sessionRowHTML(s) {
 function finishedRowHTML(f) {
   const jumpable = f.termHandle ? " jumpable" : "";
   return (
-    '<div class="row done' + jumpable + '"><div class="line">' +
+    '<div class="row done' + (f.closed ? " gone" : "") + jumpable + '"><div class="line">' +
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
     '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
-    '<span class="age">' + ageText(f.agoSeconds) + "</span>" +
+    ageHTML(f.agoSeconds, true) +
     (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
@@ -443,7 +516,26 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   // Three groups, in the order they deserve attention: what wants something
   // from you, what just finished, then everything still running.
   const needs = list.filter(function (s) { return s.state === "waiting"; });
-  const others = list.filter(function (s) { return s.state !== "waiting"; });
+  // One turn, said once. A session sitting idle under an unread finish is the
+  // same event twice — the Finished row IS that turn, and the row below it adds
+  // only that the session has done nothing since. Marking it read brings the
+  // session row straight back, because this is a display rule and nothing here
+  // touches either list's data.
+  //
+  // Only idle rows. A session that has gone busy or blocked again is reporting
+  // something newer than the finish, and that must never be hidden behind it.
+  const settled = {};
+  done.forEach(function (f) { if (f.sessionId) settled[f.sessionId] = true; });
+  const others = list.filter(function (s) {
+    if (s.state === "waiting") return false;
+    return !(s.state === "idle" && settled[s.sessionId]);
+  });
+  // The heading may only say "Running" when every row under it actually is.
+  // `quiet` is busy on paper with nothing heard for a while, and a postponed
+  // row is not running either.
+  const allRunning = others.length > 0 && others.every(function (s) {
+    return s.state === "busy" && !s.quiet && !s.snoozedFor;
+  });
   /**
    * A heading carries its own count.
    *
@@ -471,7 +563,9 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   if (others.length) {
     // One group and nothing to tell it apart from is not a group. A lone
     // "Running" heading above the only rows there are is pure furniture.
-    html += (needs.length || done.length ? heading(TEXT.running, others.length) : "")
+    html += (needs.length || done.length
+              ? heading(allRunning ? TEXT.running : TEXT.sessions, others.length)
+              : "")
           + others.map(sessionRowHTML).join("");
   }
   panel.innerHTML = html + footer;
@@ -492,6 +586,9 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   });
 
   const rows = panel.querySelectorAll(".row:not(.done)");
+  // `others` is already filtered, so this walks exactly the rows that were
+  // drawn — the two must not drift, or every row below a hidden one is filled
+  // with its neighbour's name.
   needs.concat(others).forEach(function (s, i) {
     rows[i].querySelector(".proj").textContent = s.project;
     // The branch lives on the second line, not the first. On one line it
@@ -553,6 +650,7 @@ window.scrollPanel = function (dy) {
  */
 window.togglePanel = function () {
   panel.hidden = !panel.hidden;
+  if (!panel.hidden) yieldBubble();
   reportLayout();
   return !panel.hidden;
 };
@@ -569,6 +667,7 @@ window.setPanelOpen = function (open) {
   const want = !open;
   if (panel.hidden !== want) {
     panel.hidden = want;
+    if (open) yieldBubble();
     reportLayout();
   }
   return !panel.hidden;
@@ -686,10 +785,18 @@ window.showDetail = function (d) {
     span(row("dclocks"), "dmodel", d.model);
   }
 
-  if (d.turn) {
+  if (d.turn || d.tool) {
     const clocks = row("dclocks");
-    span(clocks, "dkey", "turn");
-    span(clocks, "dval", d.turn);
+    // The row shows ONE number; this is where it says which one. With a call in
+    // flight the row is showing `tool`, so that is named first.
+    if (d.tool) {
+      span(clocks, "dkey", "tool");
+      span(clocks, "dval", d.tool);
+    }
+    if (d.turn) {
+      span(clocks, "dkey", "turn");
+      span(clocks, "dval", d.turn);
+    }
     if (d.quiet) {
       span(clocks, "dkey", "quiet");
       span(clocks, "dval", d.quiet);
@@ -813,9 +920,18 @@ function idsOf(row) {
  * @param {number} y
  * @returns {string}
  */
+/**
+ * Which session is under this point, for the right-click menu.
+ *
+ * A finished row answers too, as long as its session is still alive. That is
+ * what keeps rename, pin and mute reachable for a session whose own row is
+ * folded away under its unread finish — hiding the duplicate must not hide the
+ * only way to act on it. A row whose session is gone still answers nothing:
+ * there is nothing left to rename.
+ */
 window.rowSessionId = function (x, y) {
   const el = document.elementFromPoint(x, y);
-  const row = el && el.closest ? el.closest(".row:not(.done)") : null;
+  const row = el && el.closest ? el.closest(".row:not(.gone)") : null;
   return (row && row.dataset.sessionId) || "";
 };
 
