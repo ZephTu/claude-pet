@@ -296,7 +296,8 @@ final class WebBridge {
         guard isReady, !d.isEmpty else { return }
         var doc: [String: Any] = [
             "path": d.path, "worktree": d.worktree, "model": d.model,
-            "turn": d.turn, "quiet": d.quiet, "last": d.last, "lastBad": d.lastBad,
+            "turn": d.turn, "tool": d.tool, "quiet": d.quiet,
+            "last": d.last, "lastBad": d.lastBad,
         ]
         if let percent = d.contextPercent { doc["context"] = percent }
         guard

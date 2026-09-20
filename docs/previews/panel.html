@@ -74,6 +74,7 @@ document.body.dataset.bg = q.get("bg") || "dark";
 const FX = window.PANEL_FIXTURES;
 const cells = [
   ...FX.SCENARIOS.map(s => ({ kind: "panel", ...s })),
+  ...FX.COMBOS.map(c => ({ kind: "combo", ...c })),
   ...FX.BUBBLES.map(b => ({ kind: "bubble", ...b })),
 ].filter(c => !only || c.id === only);
 
@@ -83,11 +84,11 @@ const cells = [
 if (only && !cells.length) {
   document.body.insertAdjacentHTML("afterbegin",
     "<p style='color:#e0533c'>no scenario with id <b>" + only + "</b>. Known ids: "
-    + [...FX.SCENARIOS, ...FX.BUBBLES].map(c => c.id).join(", ") + "</p>");
+    + [...FX.SCENARIOS, ...FX.COMBOS, ...FX.BUBBLES].map(c => c.id).join(", ") + "</p>");
 }
 
 document.getElementById("bar").innerHTML =
-  cells.length + " / " + (FX.SCENARIOS.length + FX.BUBBLES.length) + " 个场景 · "
+  cells.length + " / " + (FX.SCENARIOS.length + FX.COMBOS.length + FX.BUBBLES.length) + " 个场景 · "
   + "<a href='?'>全部</a> · <a href='?mirror=1'>mirrored</a> · "
   + "<a href='?calm=1'>reduced motion</a> · <a href='?bg=light'>浅色桌面</a>";
 
@@ -132,19 +133,24 @@ function drive(w, cell) {
   // and a single-cell view (?only=…) gets the cat.
   w.setSkin(q.get("skin") || (only ? "cat" : "robot"));
 
-  if (cell.kind === "panel") {
+  // A cell may carry BOTH a list and a message — that combination is the whole
+  // point of the overlap scenarios, and a harness that could only draw one at a
+  // time is why the panel and the bubble were never seen to collide.
+  if (cell.sessions) {
     w.setSessions(cell.sessions, cell.hidden || 0, cell.finished || [], cell.dropped || 0);
     w.setPanelOpen(true);
     const needs = cell.sessions.filter(s => s.state === "waiting").length;
     const unread = (cell.finished || []).reduce((n, f) => n + f.count, 0);
     w.setBadge(needs + unread > 0 ? String(needs + unread) : "");
     w.setMood(needs ? "waiting" : cell.sessions.some(s => s.state === "busy") ? "busy" : "idle", null);
-    return;
+  } else {
+    // A message-only cell keeps the list shut: the point is the window itself.
+    w.setPanelOpen(false);
   }
 
-  // Bubble cells keep the panel shut: the point is the message window.
-  w.setPanelOpen(false);
-  const [fn, args] = cell.call;
-  w[fn].apply(null, args);
+  if (cell.call) {
+    const [fn, args] = cell.call;
+    w[fn].apply(null, args);
+  }
 }
 </script>

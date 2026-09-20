@@ -50,7 +50,7 @@ const GEOM = `
 
 // ---- every panel scenario: no horizontal overflow, panel inside the stage ----
 for (const id of ["single-busy","mixed","three-waiting","snoozed-pinned","long-cn",
-                  "long-en","no-terminal","twenty","four-idle","empty"]) {
+                  "long-en","no-terminal","twenty","four-idle","dedupe","all-running","empty"]) {
   for (const mir of ["", "&mirror=1"]) {
     const g = await scenario(`?only=${id}${mir}`, GEOM);
     check(`${id}${mir ? " mirrored" : ""}: no horizontal scroll`, g.overflowX === 0, `overflow=${g.overflowX}`);
@@ -77,7 +77,7 @@ for (const id of ["quota-50","quota-92","quota-empty","readout","readout-bad",
 // row because the name and the status shrank in proportion to their own
 // content. The project name is the thing that gives.
 for (const id of ["single-busy","mixed","three-waiting","snoozed-pinned","long-cn",
-                  "long-en","no-terminal","twenty","four-idle"]) {
+                  "long-en","no-terminal","twenty","four-idle","dedupe","all-running"]) {
   const cols = await scenario(`?only=${id}`, `
     const d = document.querySelector('iframe').contentDocument;
     return [...d.querySelectorAll('.row .what.fixed')]
@@ -86,6 +86,190 @@ for (const id of ["single-busy","mixed","three-waiting","snoozed-pinned","long-c
   `);
   check(`${id}: no status word is truncated`, cols.length === 0, cols.join(" / "));
 }
+
+// ---- the list and the message window may not share a pixel ------------------
+//
+// THE check this file was missing. Every bubble was "inside the 480pt window"
+// while sitting squarely on the list's top-right corner: being in the window
+// and being clear of the list are different questions, and only the second one
+// is about whether you can read either of them.
+const RECTS = `
+  const d = document.querySelector('iframe').contentDocument;
+  const box = el => el.hidden ? null : (r => ({l:r.left, r:r.right, t:r.top, b:r.bottom, w:r.width}))
+                                        (el.getBoundingClientRect());
+  const P = box(d.getElementById('panel')), B = box(d.getElementById('bubble'));
+  const hit = (a,c) => !!a && !!c
+    && Math.min(a.r,c.r) - Math.max(a.l,c.l) > 0.5
+    && Math.min(a.b,c.b) - Math.max(a.t,c.t) > 0.5;
+  return { panel: P, bubble: B, cls: d.getElementById('bubble').className,
+           overlap: hit(P,B), stageW: d.getElementById('stage').getBoundingClientRect().width };
+`;
+for (const id of ["combo-notice","combo-alert","combo-readout","combo-readout-full","combo-warn"]) {
+  for (const mir of ["", "&mirror=1"]) {
+    const g = await scenario(`?only=${id}${mir}`, RECTS);
+    const tag = `${id}${mir ? " mirrored" : ""}`;
+    check(`${tag}: list and message window do not intersect`, !g.overlap,
+          g.bubble ? `bubble ${Math.round(g.bubble.l)}..${Math.round(g.bubble.r)} `
+                   + `panel ${Math.round(g.panel.l)}..${Math.round(g.panel.r)}` : "bubble down");
+    if (g.bubble) {
+      check(`${tag}: message window still inside the window`,
+            g.bubble.l >= -0.5 && g.bubble.r <= g.stageW + 0.5);
+    }
+  }
+}
+
+// ---- what the list takes over, and what it does not -------------------------
+const yield_ = await scenario("?only=combo-notice", `
+  const f = document.querySelector('iframe'), w = f.contentWindow, d = f.contentDocument;
+  const b = d.getElementById('bubble'), p = d.getElementById('panel');
+  const seen = () => ({ cls: b.className, up: !b.hidden, doneRows: d.querySelectorAll('.row.done').length });
+  const out = {};
+  // The list is open in this fixture; a completion arriving now stands aside.
+  w.say("something finished", 0, "", "notice");   out.noticeWhileOpen = seen();
+  w.say("stretch your legs", 0, "", "chat");      out.chatWhileOpen = seen();
+  // These two are not in the list, so they still get through.
+  w.say("the 5h window is 92% used", 0, "", "warn"); out.warnWhileOpen = seen();
+  w.setMood("urgent", "api-server", "rm -rf build/", null); out.alertWhileOpen = seen();
+  w.setMood("busy", null, "", null);
+  // Shut the list: a completion is welcome again, and it is sticky.
+  w.setPanelOpen(false);
+  w.say("something finished", 0, "", "notice");   out.noticeWhileShut = seen();
+  // Re-opening takes it down without touching the queue...
+  w.setPanelOpen(true);                           out.afterReopen = seen();
+  // ...and shutting again does not resurrect it; Swift's next render decides.
+  w.setPanelOpen(false);                          out.afterReclose = seen();
+  return out;
+`);
+check("an open list stands a completion down", !yield_.noticeWhileOpen.up, yield_.noticeWhileOpen.cls);
+check("...and chatter too", !yield_.chatWhileOpen.up, yield_.chatWhileOpen.cls);
+check("a quota warning still gets through", yield_.warnWhileOpen.up && yield_.warnWhileOpen.cls.includes("warn"));
+check("so does the alarm", yield_.alertWhileOpen.cls === "alert", yield_.alertWhileOpen.cls);
+check("with the list shut, a completion is sticky again",
+      yield_.noticeWhileShut.up && yield_.noticeWhileShut.cls.includes("notice"));
+check("opening the list takes it down", !yield_.afterReopen.up, yield_.afterReopen.cls);
+check("...without clearing the unread record",
+      yield_.afterReopen.doneRows === yield_.noticeWhileShut.doneRows
+        && yield_.afterReopen.doneRows > 0, String(yield_.afterReopen.doneRows));
+check("closing it again does not resurrect the old line", !yield_.afterReclose.up);
+
+// ---- one turn, said once ----------------------------------------------------
+const dd = await scenario("?only=dedupe", `
+  const d = document.querySelector('iframe').contentDocument;
+  const live = [...d.querySelectorAll('.row:not(.done)')].map(r => r.querySelector('.proj').textContent);
+  const groups = [...d.querySelectorAll('.group')].map(g => g.firstChild.textContent + "|" + g.querySelector('.gcount').textContent);
+  const counts = {};
+  let g = null;
+  for (const el of d.getElementById('panel').children) {
+    if (el.classList.contains('group')) { g = el.firstChild.textContent; counts[g] = 0; }
+    else if (el.classList.contains('row') && g) counts[g]++;
+  }
+  return { live, groups, counts };
+`);
+check("an idle session under its own unread finish is folded away",
+      !dd.live.includes("settled-repo"), dd.live.join(", "));
+check("...but one that went back to work is not", dd.live.includes("restarted-repo"));
+check("...nor one that is blocked again", dd.live.includes("blocked-repo"));
+check("an idle session with no unread finish stays", dd.live.includes("no-finish-repo"));
+check("every heading's count matches the rows under it",
+      dd.groups.every(g => { const [name, n] = g.split("|"); return dd.counts[name] === Number(n); }),
+      JSON.stringify(dd.groups) + " vs " + JSON.stringify(dd.counts));
+
+// ---- the heading may not claim work that is not happening -------------------
+const naming = {};
+for (const id of ["dedupe","four-idle","all-running","mixed"]) {
+  naming[id] = await scenario(`?only=${id}`, `
+    const d = document.querySelector('iframe').contentDocument;
+    return [...d.querySelectorAll('.group')].map(g => g.firstChild.textContent);
+  `);
+}
+check("a mixed group is not called Running",
+      naming.dedupe.includes("Sessions") && !naming.dedupe.includes("Running"),
+      JSON.stringify(naming.dedupe));
+check("a group of answered sessions is not called Running either",
+      !naming.mixed.includes("Running"), JSON.stringify(naming.mixed));
+check("a group that really is all running says so",
+      naming["all-running"].includes("Running"), JSON.stringify(naming["all-running"]));
+check("a lone group still gets no heading at all", naming["four-idle"].length === 0,
+      JSON.stringify(naming["four-idle"]));
+
+// ---- a duration and an instant are not the same number ----------------------
+const clocks = await scenario("?only=dedupe", `
+  const d = document.querySelector('iframe').contentDocument;
+  const read = r => ({ proj: (r.querySelector('.proj')||{}).textContent,
+                       age: r.querySelector('.age').textContent,
+                       ago: !!r.querySelector('.age .ago') });
+  return { live: [...d.querySelectorAll('.row:not(.done)')].map(read),
+           done: [...d.querySelectorAll('.row.done')].map(read) };
+`);
+check("a finished row counts backwards", clocks.done.every(r => r.ago && /ago$/.test(r.age)),
+      JSON.stringify(clocks.done));
+check("an answered row counts backwards too",
+      clocks.live.filter(r => r.proj === "no-finish-repo").every(r => r.ago));
+check("a running row does not — its number is a duration",
+      clocks.live.filter(r => r.proj === "restarted-repo").every(r => !r.ago));
+check("nor does a blocked one — that is how long it has waited",
+      clocks.live.filter(r => r.proj === "blocked-repo").every(r => !r.ago));
+
+// ---- narrowing must not cost the readout its content ------------------------
+// `wantKeys` is what each fixture's DATA implies, not a fixed list: a session
+// with nothing in flight and nothing quiet has one clock, and printing three
+// would be the bug.
+for (const [id, want, wantKeys] of [["combo-readout", false, ["turn"]],
+                                    ["combo-readout-full", true, ["tool", "turn", "quiet"]]]) {
+  const r = await scenario(`?only=${id}`, `
+    const d = document.querySelector('iframe').contentDocument;
+    const b = d.getElementById('bubble');
+    return { crowded: d.getElementById('stage').classList.contains('crowded'),
+             path: !!b.querySelector('.dwhere'), tree: !!b.querySelector('.dtree'),
+             meter: !!b.querySelector('.qbar'),
+             keys: [...b.querySelectorAll('.dkey')].map(e => e.textContent),
+             last: !!b.querySelector('.dlast'),
+             clipped: [...b.querySelectorAll('.dkey, .dval')]
+                        .filter(e => e.scrollWidth > e.clientWidth + 0.5).length };
+  `);
+  const tag = want ? "crowded" : "roomy";
+  check(`${tag} readout: narrows only when the list is really in the way`, r.crowded === want);
+  check(`${tag} readout: keeps every kind of fact`,
+        r.path && r.tree && r.meter && r.last, JSON.stringify(r));
+  check(`${tag} readout: names exactly the clocks it has`,
+        r.keys.length === wantKeys.length && wantKeys.every(k => r.keys.includes(k)),
+        r.keys.join(",") + " want " + wantKeys.join(","));
+  check(`${tag} readout: no clock is cut off`, r.clipped === 0, String(r.clipped));
+}
+
+// ---- the controls the list is the only way to reach -------------------------
+//
+// Folding a duplicate row away must not fold away the only way to act on it,
+// and the hit test was touched to keep that true.
+const hits = await scenario("?only=dedupe", `
+  const f = document.querySelector('iframe'), w = f.contentWindow, d = f.contentDocument;
+  const mid = el => { const r = el.getBoundingClientRect();
+                      return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const at = el => w.hitRow.apply(null, mid(el));
+  const live = [...d.querySelectorAll('.row:not(.done)')];
+  const doneRows = [...d.querySelectorAll('.row.done')];
+  const blocked = live.find(r => r.querySelector('.proj').textContent === "blocked-repo");
+  const folded = doneRows.find(r => r.querySelector('.proj').textContent === "settled-repo");
+  return {
+    jump:   at(live.find(r => r.querySelector('.proj').textContent === "restarted-repo")),
+    mute:   at(blocked.querySelector('.mute')),
+    snooze: at(blocked.querySelector('.snooze')),
+    read:   at(folded.querySelector('.read')),
+    readAll: at(d.querySelector('.read-all')),
+    finishedClick: at(folded.querySelector('.proj')),
+    // right-click: a folded session is still addressable, a dead one is not
+    menuOnFolded: w.rowSessionId.apply(null, mid(folded.querySelector('.proj'))),
+    menuOnLive:   w.rowSessionId.apply(null, mid(blocked.querySelector('.proj'))),
+  };
+`);
+check("a running row still jumps to its terminal", hits.jump && hits.jump.action === "jump", JSON.stringify(hits.jump));
+check("the × still mutes rather than jumping", hits.mute && hits.mute.action === "mute", JSON.stringify(hits.mute));
+check("the clock still snoozes rather than jumping", hits.snooze && hits.snooze.action === "snooze");
+check("the ✓ still marks one finish read", hits.read && hits.read.action === "read");
+check("`clear` still marks them all", hits.readAll && hits.readAll.action === "readAll");
+check("a finished row still opens then clears", hits.finishedClick && hits.finishedClick.action === "openFinished");
+check("a folded session is still reachable by right click", hits.menuOnFolded === "s-idle", hits.menuOnFolded);
+check("...and so is one whose own row is showing", hits.menuOnLive === "s-wait", hits.menuOnLive);
 
 // ---- hovering a row must not resize anything -------------------------------
 const hover = await scenario("?only=twenty", `

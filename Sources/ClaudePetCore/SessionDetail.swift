@@ -26,6 +26,11 @@ public enum SessionDetail {
         public var contextPercent: Int?
         public var model = ""
         public var turn = ""
+        /// How long the call currently in flight has been running, when there is
+        /// one. Separate from `turn` because the row's own number is whichever
+        /// of the two exists, and "23s" beside a busy row is unreadable until
+        /// something says whether it is this tool or this whole turn.
+        public var tool = ""
         /// Only set once the session has actually gone quiet.
         public var quiet = ""
         public var last = ""
@@ -54,6 +59,10 @@ public enum SessionDetail {
         }
 
         d.turn = Chatter.duration(until: now, now: session.since)
+        // The oldest call still in flight: the same number the row shows, named.
+        if let began = session.running.compactMap(\.since).min() {
+            d.tool = Chatter.duration(until: now, now: began)
+        }
         // Only worth reporting once the session has actually gone quiet, rather
         // than merely started.
         if now.timeIntervalSince(session.updatedAt) >= 30 {

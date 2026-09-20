@@ -1215,6 +1215,20 @@ struct Runner {
                 Chatter.bubble(for: .greeting) == .chat
                     && Chatter.bubble(for: .sitLong) == .chat
                     && Chatter.bubble(for: .longRun) == .chat)
+        // Which messages stand down while the list is open. The list carries a
+        // finished turn as a row of its own and chatter is not news; a quota
+        // warning appears nowhere in the list, so it stays.
+        t.check("a completion steps aside for the list",
+                Chatter.yieldsToList(.notice))
+        t.check("...and so does chatter", Chatter.yieldsToList(.chat))
+        t.check("a quota warning does not — nothing in the list says it",
+                !Chatter.yieldsToList(.warn))
+        t.check("every kind that can be spoken has a yield answer",
+                Chatter.Kind.allCases.allSatisfy { kind in
+                    let b = Chatter.bubble(for: kind)
+                    return Chatter.yieldsToList(b) == (b == .notice || b == .chat)
+                })
+
         t.check("every kind has a window, so none can fall through to the default",
                 Chatter.Kind.allCases.allSatisfy { _ in true }
                     && Chatter.Kind.allCases.count == 7)
@@ -1770,6 +1784,40 @@ struct Runner {
         // Each rate-limit window is independently optional per the docs.
         t.check("one window alone is still a usable reading",
                 StatuslineUsage.parse(hoverPayload, now: t0)?.fiveHourPercent == 31)
+
+        // ---- Which clock the row's number is ----
+        //
+        // A busy row shows the call in flight, a blocked one shows how long it
+        // has waited, an idle one shows when the answer landed. One number,
+        // three meanings, so the readout has to name the one it is showing.
+        let toolAt = t0.addingTimeInterval(-23)
+        let withTool = SessionState(
+            sessionId: "tl", project: "p", cwd: "/tmp/p", state: .busy, tool: "Bash",
+            detail: "", since: t0.addingTimeInterval(-600), updatedAt: t0,
+            running: [RunningTool(id: "1", tool: "Bash", target: "npm test", since: toolAt)])
+        let toolDetail = SessionDetail.detail(session: withTool, insight: nil,
+                                              lastActivity: nil, now: t0)
+        t.check("a call in flight gets its own clock", !toolDetail.tool.isEmpty)
+        t.check("...which is the call's age, not the turn's",
+                toolDetail.tool != toolDetail.turn)
+        t.check("...and the turn is still reported beside it", !toolDetail.turn.isEmpty)
+
+        let noTool = SessionState(
+            sessionId: "nt", project: "p", cwd: "/tmp/p", state: .idle, tool: "",
+            detail: "", since: t0.addingTimeInterval(-600), updatedAt: t0)
+        t.check("a session with nothing running reports no tool clock",
+                SessionDetail.detail(session: noTool, insight: nil,
+                                     lastActivity: nil, now: t0).tool.isEmpty)
+        // Two calls in flight: the one that has been going longest is the one
+        // that answers "is this stuck?".
+        let two = SessionState(
+            sessionId: "tw", project: "p", cwd: "/tmp/p", state: .busy, tool: "Bash",
+            detail: "", since: t0.addingTimeInterval(-600), updatedAt: t0,
+            running: [RunningTool(id: "1", tool: "Bash", target: "a", since: t0.addingTimeInterval(-5)),
+                      RunningTool(id: "2", tool: "Bash", target: "b", since: toolAt)])
+        t.check("with two calls in flight it reports the older one",
+                SessionDetail.detail(session: two, insight: nil, lastActivity: nil, now: t0).tool
+                    == toolDetail.tool)
 
         // ---- QuotaAlarm: crossing a line, not sitting above one ----
         func quotaAt(five: Int, week: Int, fiveIn: TimeInterval = 3600,

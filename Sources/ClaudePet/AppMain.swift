@@ -395,6 +395,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
             quotaAlarm: decision.speak, wellness: wellnessNudge(state, now: now)
         ) else { return }
+        // The list is open and carrying this news itself: step aside rather than
+        // draw a bubble across its top-right corner. Deliberately BEFORE every
+        // piece of bookkeeping below — nothing was said, so nothing is marked
+        // said, and closing the list lets the next tick decide again from the
+        // state of the world then. See Chatter.yieldsToList.
+        if panel?.isListOpen == true,
+           Chatter.yieldsToList(Chatter.bubble(for: line.kind)) {
+            return
+        }
         // Recorded only when it is actually SAID. That is what makes a warning
         // suppressed by an alarm come back afterwards instead of being lost:
         // nothing was said, so nothing was marked, so it is still pending next
