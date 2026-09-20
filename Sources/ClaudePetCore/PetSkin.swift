@@ -17,10 +17,21 @@ public enum PetSkin: String, Sendable, Equatable, CaseIterable {
         }
     }
 
-    /// Unknown values decode to the robot rather than to nothing: a settings
+    /// What a machine with nothing stored yet draws. The cat: it has a picture
+    /// for nearly every state the pet has, and the robot's one advantage — a
+    /// lamp that separates the busy states — stopped being an advantage when
+    /// compaction, reading and waiting-on-an-agent got drawings of their own.
+    ///
+    /// Not the same thing as the WebGL fallback. If the cat cannot draw, the
+    /// page reverts to the robot and says so (see `revertToRobot`); that path
+    /// has to stay the robot whatever the default is, because the robot is the
+    /// one that cannot fail.
+    public static let standard: PetSkin = .cat
+
+    /// Unknown values decode to the default rather than to nothing: a settings
     /// file written by a newer build must not leave the user with no pet.
     public static func named(_ raw: String?) -> PetSkin {
-        PetSkin(rawValue: raw ?? "") ?? .robot
+        PetSkin(rawValue: raw ?? "") ?? standard
     }
 }
 

@@ -1834,9 +1834,12 @@ struct Runner {
                 StateAggregator.phase([phased("")]).isEmpty)
 
         // ---- Skins: distinct artwork for phases and reading ----
-        t.check("an unknown skin name falls back to the one that always draws",
-                PetSkin.named("weasel") == .robot && PetSkin.named(nil) == .robot)
-        t.check("a known one is kept", PetSkin.named("cat") == .cat)
+        t.check("nothing stored yet draws the cat",
+                PetSkin.named(nil) == .cat && PetSkin.standard == .cat)
+        t.check("an unknown skin name falls back to the same default",
+                PetSkin.named("weasel") == PetSkin.standard)
+        t.check("a known one is kept",
+                PetSkin.named("cat") == .cat && PetSkin.named("robot") == .robot)
 
         func look(_ mood: String, phase: String = "", flash: String = "",
                   wanted: Bool = false, blockedOn: String = "",

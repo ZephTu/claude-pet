@@ -4,13 +4,19 @@
 
 [![CI](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml/badge.svg)](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml)
 
-A little robot that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
+A cat that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
 
-<img src="docs/images/pet.gif" width="360" alt="The robot cycling through every state it can show, speech bubbles included">
+<img src="docs/images/cat.gif" width="360" alt="The cat cycling through every state it can show, speech bubbles included">
 
 You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
 
 ## The lamp is the signal
+
+The other figure that ships is a robot, and its antenna lamp is the most
+readable summary of what the pet knows — so the table below is written against
+it. The cat shows the same states as drawings; **Right-click → Appearance**
+switches between them, and the section on it lists what each one can and cannot
+say.
 
 The bulb on the antenna is the part you can read without focusing on it:
 
@@ -38,7 +44,7 @@ Ordered by how much it wants from you, from nothing to a great deal, and back:
 - **Finished** — turns that ended while you were not looking, folded to one row per session
 - **Running** — everything else that is alive
 
-A number on the robot's chest counts both kinds of attention. It is not shown at zero.
+A number counts both kinds of attention — on the robot's chest, by the cat's ear. It is not shown at zero.
 
 A running row that has said nothing for 90 seconds, with no tool call in flight,
 reads **gone quiet** on a hollow dot, and stops counting as busy — the pet will go
@@ -58,7 +64,7 @@ rights itself the moment that session does anything again.
 
 **Hover a row** for 0.45s and the bubble answers what the row has no space for: the full path and worktree, how full the context window is and on which model (with the statusline wired up), how long this turn has been going versus how long since anything happened at all, and the last tool call with its result. It used to show the session's name — which stopped being worth a hover once the first column started showing it.
 
-**Hover the robot itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
+**Hover the pet itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
 
 **A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed there is no jump left to protect the record from, so clicking the row clears it and says why nothing opened. `clear` on the group heading marks them all.
 
@@ -68,7 +74,7 @@ rights itself the moment that session does anything again.
 
 **⏱ on a blocked row** postpones it for 5, 15 or 30 minutes. The row stays visible and says how much longer — this is not muting. The delay belongs to that one approval: if the session resolves it and blocks on a different one, the new one is not postponed. Sleeping through a delay replays nothing.
 
-**Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the robot's mood — it can sit blocked on a permission prompt without making the robot wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
+**Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the pet's mood — it can sit blocked on a permission prompt without making the pet wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
 
 When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
 
@@ -86,13 +92,15 @@ A session stays listed for as long as its process is alive, however long it sits
 
 **Right-click → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
 
-**Right-click → Appearance** swaps who is drawing. Two figures ship: the **Robot**, an SVG whose every state is a CSS rule, and the **Cat**, painted artwork warped by a WebGL mesh — it swishes its tail, blinks on an irregular beat, and its eyes drift.
+**Right-click → Appearance** swaps who is drawing. Two figures ship.
 
-<img src="docs/images/cat.png" alt="The cat skin, at work on a laptop" width="180">
+The **Cat** is the default: painted artwork warped by a WebGL mesh. It swishes its tail, blinks on an irregular beat, its eyes drift, and its ears flick every few seconds. It has nine drawings against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration rather than a bob of the idle one. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
 
-A painted skin has as many poses as it has pictures, so the cat is a lossy projection of the pet's eleven states onto five drawings: **working, compacting and waiting-on-an-agent are one picture and nothing tells them apart** — the robot's lamp is where that distinction lives. Everything else survives. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this"; being ignored has its own alarm painted in; a finished turn bobs the idle drawing; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
+The **Robot** is an SVG whose every state is a CSS rule, and it keeps the one thing the cat cannot do: the lamp and the pose separate **every** busy state, including editing from waiting on a command. Pick it if that distinction is worth more to you than the artwork.
 
-The choice is remembered. If WebGL is unavailable or a texture will not decode, the page falls back to the robot on its own and tells the app, so the hit region never ends up belonging to a figure that is not on screen.
+<img src="docs/images/pet.gif" width="360" alt="The robot cycling through every state it can show, speech bubbles included">
+
+The choice is remembered. If WebGL is unavailable or a texture will not decode, the page falls back to the robot on its own and tells the app, so the hit region never ends up belonging to a figure that is not on screen — which is also why the robot, not the cat, is the one the fallback goes to.
 
 **Right-click → Demo the States** cycles the pet through everything it can show, writing nothing to disk.
 
@@ -214,7 +222,7 @@ This is not hypothetical. The mirrored layout was first written as a reflection 
 ## Known limitations
 
 - No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
-- Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the robot still swallow clicks.
+- Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the figure still swallow clicks.
 - Roughly **0.9% CPU and 63MB** while idle, measured on an M-series Mac by CPU-time delta over 20s. That figure did not move when the session count went from 4 to 14, and **Reduce Motion did not lower it either** (0.8% vs 0.9%, inside the measurement noise) — the CSS animation is composited and costs almost nothing. Reduce Motion is there for people who do not want movement on their desktop, not as a way to save power.
 
 ## License

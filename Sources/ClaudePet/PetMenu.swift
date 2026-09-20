@@ -45,7 +45,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
         demoOn: Bool = false, reduceMotionOn: Bool = false, wellnessOn: Bool = false,
-        keepListOpenOn: Bool = false, skin: PetSkin = .robot
+        keepListOpenOn: Bool = false, skin: PetSkin = .standard
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
@@ -60,7 +60,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, demoOn: Bool = false,
                   reduceMotionOn: Bool = false, wellnessOn: Bool = false,
-                  keepListOpenOn: Bool = false, skin: PetSkin = .robot) -> NSMenu {
+                  keepListOpenOn: Bool = false, skin: PetSkin = .standard) -> NSMenu {
         let menu = NSMenu()
 
         let pause = NSMenuItem(

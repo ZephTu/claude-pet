@@ -16,16 +16,34 @@ import WebKit
 /// `pet://` handler, so a texture that would hang in production hangs here too.
 ///
 ///     ClaudePet --probe-skin index.html /tmp/cat.png 'window.setSkin("cat")'
+///
+/// `film` is the same thing over time, for the README's animation. The page
+/// drives its own state — the setup script installs whatever schedule it wants
+/// — and this only decides when to press the shutter, so a new sequence costs
+/// a JavaScript string rather than Swift.
+///
+///     ClaudePet --probe-film index.html /tmp/frames 130 9 '<setup js>'
 @MainActor
 enum SkinProbe {
     static func run(path: String, imagePath: String, script: String,
                     then finish: @escaping (Int32) -> Void) {
+        load(path: path, script: script,
+             onReady: { snapshot($0, to: imagePath, then: finish) },
+             onFailure: finish)
+    }
+
+    /// What both modes need: the real page through the real scheme handler, in
+    /// a window the size of the real one, with the setup script run and the
+    /// textures given time to arrive.
+    private static func load(path: String, script: String,
+                             onReady: @escaping @MainActor (WKWebView) -> Void,
+                             onFailure: @escaping (Int32) -> Void) {
         guard
             let root = Bundle.module.url(forResource: "pet", withExtension: nil),
             let url = PetSchemeHandler.url(path: path)
         else {
             print("pet resources missing from the bundle")
-            return finish(1)
+            return onFailure(1)
         }
         let handler = PetSchemeHandler(root: root)
         let config = WKWebViewConfiguration()
@@ -64,7 +82,45 @@ enum SkinProbe {
                     // Textures load asynchronously; a snapshot taken the instant
                     // the script returns catches the frame before the first one
                     // arrived, which looks exactly like a skin that is broken.
-                    after(2.5) { snapshot(webView, to: imagePath, then: finish) }
+                    after(2.5) { onReady(webView) }
+                }
+            }
+        }
+    }
+
+    /// Captures `frames` snapshots at `fps`, named `frame-0000.png` upward.
+    ///
+    /// Chained rather than timed, but paced against a fixed start: shots are
+    /// taken one at a time so a slow `takeSnapshot` cannot overlap the next and
+    /// write the pair out of order, and the wait is to the next ABSOLUTE tick
+    /// rather than a flat 1/fps afterwards. Waiting 1/fps after each shot adds
+    /// the snapshot's own cost to every interval — measured at 135ms for a
+    /// requested 111ms — and the page keeps its own wall clock, so the frames
+    /// would sample 21% of the way further along than the GIF then claims.
+    static func film(path: String, directory: String, frames: Int, fps: Double,
+                     script: String, then finish: @escaping (Int32) -> Void) {
+        let dir = URL(fileURLWithPath: directory)
+        load(path: path, script: script, onReady: { webView in
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            shoot(webView, into: dir, index: 0, of: frames, fps: fps,
+                  start: Date(), then: finish)
+        }, onFailure: finish)
+    }
+
+    private static func shoot(_ webView: WKWebView, into dir: URL, index: Int,
+                              of frames: Int, fps: Double, start: Date,
+                              then finish: @escaping (Int32) -> Void) {
+        guard index < frames else { return finish(0) }
+        let name = String(format: "frame-%04d.png", index)
+        snapshot(webView, to: dir.appendingPathComponent(name).path) { code in
+            MainActor.assumeIsolated {
+                guard code == 0 else { return finish(code) }
+                // Never negative: a shutter slower than the frame rate should
+                // fall behind honestly, not fire in a tight loop catching up.
+                let due = start.addingTimeInterval(Double(index + 1) / fps)
+                after(max(0, due.timeIntervalSinceNow)) {
+                    shoot(webView, into: dir, index: index + 1, of: frames,
+                          fps: fps, start: start, then: finish)
                 }
             }
         }
