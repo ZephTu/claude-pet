@@ -1,4 +1,4 @@
-/* Claude Pet cat prototype. Original PNG textures; small procedural mesh motion.
+/* Claude Pet cat life v2. Original PNG textures; procedural mesh + floating sleep glyphs.
    No model, CDN, account, or network required. */
 (function(global){
 'use strict';
@@ -6,6 +6,9 @@ const VERT = `
 attribute vec2 position;
 varying vec2 uv;
 uniform float time;
+uniform float lifeTime;
+uniform vec4 ears;
+uniform vec2 earTwitch;
 uniform float strength;
 uniform float state;
 // Per-pose geometry for the idle motions below. Measured off each texture, not
@@ -23,21 +26,27 @@ void main(){
  uv=position; vec2 p=position; float t=time; vec2 d=vec2(0.0);
  // Local deformations taper smoothly to zero, so there are no cutout seams.
  if(state<0.5){
-  float b=sin(t*1.85); d.y-=0.005*b*weight(p,vec2(.55,.60),vec2(.48,.68));
-  d.x+=.010*sin(t*1.35)*weight(p,vec2(.23,.70),vec2(.18,.24));
+  float b=sin(lifeTime*1.85); d.y-=0.008*b*weight(p,vec2(.55,.60),vec2(.48,.68));
+  // Small weight shift, anchored below the knees; never translate the feet.
+  d.x+=.006*sin(lifeTime*.82)*(1.0-smoothstep(.68,.96,p.y));
+  d.y-=.003*sin(lifeTime*.91)*weight(p,vec2(.53,.30),vec2(.40,.32));
  }else if(state<1.5){
-  float a=sin(t*12.566); float b=sin(t*12.566+3.14159);
-  d.y+=.009*a*weight(p,vec2(.477,.742),vec2(.09,.068));
-  d.y+=.007*b*weight(p,vec2(.638,.705),vec2(.058,.060));
-  d.y+=.0025*sin(t*3.14159)*weight(p,vec2(.54,.33),vec2(.38,.40));
+  // Short typing phrases with rests, not an endless metronome.
+  float phrase=.25+.75*smoothstep(-.5,.0,sin(lifeTime*1.7));
+  float a=sin(t*16.0)*phrase; float b=sin(t*16.0+2.5)*phrase;
+  d.y+=.020*a*weight(p,vec2(.477,.742),vec2(.09,.068));
+  d.y+=.016*b*weight(p,vec2(.638,.705),vec2(.058,.060));
+  d.y+=.0045*sin(t*3.14159)*weight(p,vec2(.54,.33),vec2(.38,.40));
  }else if(state<2.5){
   vec2 pivot=vec2(.675,.650); vec2 r=p-pivot;
-  float angle=.12*sin(t*5.2); float w=weight(p,vec2(.758,.534),vec2(.145,.19));
+  float angle=.17*sin(t*4.6); float w=weight(p,vec2(.758,.534),vec2(.145,.19));
   d+=vec2(-r.y,r.x)*angle*w;
   d.y-=.0025*sin(t*2.0)*weight(p,vec2(.47,.44),vec2(.4,.55));
  }else if(state<3.5){
-  d.y-=.008*sin(t*1.45)*weight(p,vec2(.49,.53),vec2(.47,.54));
-  d.x+=.005*sin(t*1.1)*weight(p,vec2(.79,.77),vec2(.19,.20));
+  // 4.8s breathing cycle: lift the head/chest while keeping the paws grounded.
+  float breath=sin(lifeTime*1.31);
+  d.y-=.015*breath*weight(p,vec2(.48,.52),vec2(.48,.51));
+  d.x+=(p.x-.48)*.023*breath*weight(p,vec2(.48,.61),vec2(.47,.37));
  }else if(state<4.5){
   float burst=pow(max(0.0,sin(t*1.8)),3.0);
   d.x+=.004*sin(t*24.0)*burst*weight(p,vec2(.52,.45),vec2(.65,.70));
@@ -62,25 +71,71 @@ void main(){
  // The tail turns about its root, so the root stays put and the tip moves
  // most; a tail translated as a block would detach from the body.
  vec2 tr = p - tailRoot;
- d += vec2(-tr.y, tr.x) * (.16 * sin(t * 2.2)) * weight(p, tailRegion.xy, tailRegion.zw);
+ d += vec2(-tr.y, tr.x) * ((state>2.5&&state<3.5?.065:.24) * sin(lifeTime * (state>2.5&&state<3.5?1.05:1.65)) + .045*sin(lifeTime*3.1)) * weight(p, tailRegion.xy, tailRegion.zw);
 
- // The blink cannot use the round gaussian everything else here uses: the
- // points that must move MOST are the top and bottom edges of the eye, which
- // is exactly where a round falloff is weakest. Separable instead — a gaussian
- // across x, a plateau across y that only tapers outside the eye.
- float bx = exp(-pow((p.x - eyeRegion.x) / max(eyeRegion.z, 1e-4), 2.0) * 2.0);
- float by = 1.0 - smoothstep(0.7, 1.6, abs(p.y - eyeRegion.y) / max(eyeRegion.w, 1e-4));
- d.y += (eyeRegion.y - p.y) * blink * bx * by;
-
- d += gaze * (weight(p, pupils.xy, vec2(.055)) + weight(p, pupils.zw, vec2(.055)));
+ // Each eye closes about its own centre. A single shared band pulls the
+ // muzzle and the differently tilted eyes toward the wrong horizontal line.
+ if(eyeRegion.z>0.0){
+  for(int i=0;i<2;i++){
+   vec2 c=i==0?pupils.xy:pupils.zw;
+   float bx=1.0-smoothstep(.044,.090,abs(p.x-c.x));
+   float by=1.0-smoothstep(.055,.105,abs(p.y-c.y));
+   d.y+=(c.y-p.y)*blink*.88*bx*by;
+  }
+  d += gaze * (weight(p,pupils.xy,vec2(.055))+weight(p,pupils.zw,vec2(.055)));
+ }
+ // Independent, occasional ear flicks; deformation dies out before the eyes.
+ for(int i=0;i<2;i++){
+  vec2 c=i==0?ears.xy:ears.zw;
+  vec2 r=p-(c+vec2(0.0,.10));
+  float angle=i==0?earTwitch.x:earTwitch.y;
+  d+=vec2(-r.y,r.x)*angle*weight(p,c,vec2(.12,.16));
+ }
+ // The sleep glyphs are moved in the fragment shader, not with the body.
+ if(state>2.5&&state<3.5&&p.x>.735&&p.y<.40)d=vec2(0.0);
 
  p+=d*strength;
  // Common 6% safety margin, invariant ground anchor.
  p=vec2(.06)+p*.88;
  gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0);
 }`;
-const FRAG=`precision mediump float; varying vec2 uv; uniform sampler2D texture0;
-void main(){ gl_FragColor=texture2D(texture0,uv); }`;
+const FRAG=`precision mediump float;
+varying vec2 uv; uniform sampler2D texture0;
+uniform float zTime; uniform float zStrength; uniform float zEnabled;
+float inside(vec2 q,vec4 box){
+ return step(box.x,q.x)*step(box.y,q.y)*(1.0-step(box.z,q.x))*(1.0-step(box.w,q.y));
+}
+vec4 over(vec4 a,vec4 b){
+ float alpha=a.a+b.a*(1.0-a.a);
+ return vec4((a.rgb*a.a+b.rgb*b.a*(1.0-a.a))/max(alpha,.00001),alpha);
+}
+vec4 glyph(vec4 box,float phase){
+ float cycle=fract(zTime/3.6+phase);
+ vec2 offset=vec2(.009*sin(cycle*6.283+phase*2.0),-.037*cycle)*zStrength;
+ vec2 q=uv-offset;
+ vec4 c=texture2D(texture0,q);
+ float fade=smoothstep(0.0,.18,cycle)*(1.0-smoothstep(.72,1.0,cycle));
+ // Overlapping bounding rectangles share a diagonal gap, not any ink.
+ float separate=smoothstep(214.5/384.0,216.5/384.0,q.x-q.y);
+ if(phase>.5)c.a*=separate;
+ else if(phase>.1)c.a*=1.0-separate;
+ c.a*=inside(q,box)*mix(1.0,fade,min(zStrength,1.0));
+ return c;
+}
+void main(){
+ vec4 c=texture2D(texture0,uv);
+ if(zEnabled>.5&&zStrength>0.0){
+  // Pixel bounds of three disconnected Z components in sleeping.png (384px).
+  vec4 small=vec4(284.0,128.0,306.0,150.0)/384.0;
+  vec4 medium=vec4(294.0,99.0,320.0,126.0)/384.0;
+  vec4 large=vec4(313.0,64.0,356.0,108.0)/384.0;
+  c.a*=1.0-max(inside(uv,small),max(inside(uv,medium),inside(uv,large)));
+  c=over(glyph(small,0.0),c);
+  c=over(glyph(medium,.33),c);
+  c=over(glyph(large,.66),c);
+ }
+ gl_FragColor=c;
+}`;
 const states={idle:0,working:1,waiting:2,sleeping:3,urgent:4,finished:5};
 /* Where the tail and the eyes are in each picture, in texture coordinates.
    tail/root read off a labelled 0.1 grid; eyes/pupils measured by connected
@@ -95,6 +150,8 @@ const LIFE={
  urgent:   {tail:[.15,.62,.10,.12], root:[.28,.70], eyes:[.466,.345,.180,.075], pupils:[.348,.361,.589,.330]},
 };
 // `finished` is a deformation of an existing picture, not a picture of its own.
+const EARS={idle:[.27,.14,.70,.10],working:[.30,.16,.78,.20],
+ waiting:[.24,.20,.66,.12],sleeping:[.21,.30,.64,.19],urgent:[.23,.20,.62,.13]};
 const textureFor={finished:'idle'};
 class CatPet{
  constructor(canvas, assets, options={}){
@@ -108,6 +165,7 @@ class CatPet{
   // keeps a start time the clock can never reach. The pet changes state every
   // few seconds, so on a shared clock it would simply never blink.
   this.life=0; this.blink=0; this.blinkStart=-1; this.nextBlink=2+Math.random()*2;
+  this.earTwitch=[0,0]; this.earStart=-1; this.earSide=0; this.nextEar=1.2+Math.random()*2;
   this.gaze=[0,0]; this.gazeTarget=[0,0]; this.nextGaze=1.5;
   this.gl=canvas.getContext('webgl',{alpha:true,antialias:true,premultipliedAlpha:false,preserveDrawingBuffer:true});
   if(!this.gl)throw new Error('WebGL unavailable');
@@ -118,7 +176,7 @@ class CatPet{
   gl.deleteShader(vs);gl.deleteShader(fs);
   if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(this.program));
   gl.useProgram(this.program);
-  const points=[],N=56;
+  const points=[],N=72;
   for(let y=0;y<N;y++)for(let x=0;x<N;x++){
    const a=x/N,b=y/N,c=(x+1)/N,d=(y+1)/N;
    points.push(a,b,c,b,a,d,c,b,c,d,a,d);
@@ -126,7 +184,7 @@ class CatPet{
   this.count=points.length/2; this.buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(points),gl.STATIC_DRAW);
   const a=gl.getAttribLocation(this.program,'position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
-  this.u={};for(const k of ['time','strength','state','tailRegion','tailRoot','eyeRegion','pupils','blink','gaze'])this.u[k]=gl.getUniformLocation(this.program,k);
+  this.u={};for(const k of ['time','strength','state','tailRegion','tailRoot','eyeRegion','pupils','blink','gaze','lifeTime','ears','earTwitch','zTime','zStrength','zEnabled'])this.u[k]=gl.getUniformLocation(this.program,k);
   gl.uniform1i(gl.getUniformLocation(this.program,'texture0'),0);
   gl.clearColor(0,0,0,0);
   this.ready=Promise.all(Object.entries(assets).map(([key,url])=>new Promise((resolve,reject)=>{
@@ -145,7 +203,7 @@ class CatPet{
    else if(!document.hidden&&!this.paused&&!this.reduced){this.time+=delta;this.advanceLife(delta);}
    this.raf=requestAnimationFrame(this.tick);
   };
-  this.ready.then(()=>{if(!this.disposed){this.draw();this.raf=requestAnimationFrame(this.tick);}});
+  this.ready.then(()=>{if(!this.disposed){this.draw();this.raf=requestAnimationFrame(this.tick);}},()=>{});
  }
  /* A blink is 130ms — 55 shut, 75 open — on an irregular interval, because a
     blink on a fixed beat reads as a machine. The pupils drift to a new spot
@@ -153,6 +211,13 @@ class CatPet{
     that is 12pt across on screen. */
  advanceLife(delta){
   this.life+=delta;
+  if(this.earStart<0&&this.life>=this.nextEar){this.earStart=this.life;this.earSide=Math.random()<.5?0:1;}
+  if(this.earStart>=0){
+   const k=(this.life-this.earStart)/.65;
+   this.earTwitch=[0,0];
+   if(k>=1){this.earStart=-1;this.nextEar=this.life+2.8+Math.random()*4.2;}
+   else this.earTwitch[this.earSide]=.24*Math.sin(k*Math.PI*3)*Math.sin(k*Math.PI);
+  }
   if(this.blinkStart<0&&this.life>=this.nextBlink)this.blinkStart=this.life;
   if(this.blinkStart>=0){
    const k=(this.life-this.blinkStart)/0.13;
@@ -167,7 +232,7 @@ class CatPet{
   this.gaze[0]+=(this.gazeTarget[0]-this.gaze[0])*ease;
   this.gaze[1]+=(this.gazeTarget[1]-this.gaze[1])*ease;
  }
- setState(state){if(!(state in states))state='idle';this.state=state;this.time=0;this.draw();return this;}
+ setState(state){if(!Object.prototype.hasOwnProperty.call(states,state))state='idle';if(this.state===state&&state!=='finished')return this;this.state=state;this.time=0;this.draw();return this;}
  setPaused(value){this.paused=!!value;return this;}
  setReducedMotion(value){this.reduced=!!value;this.draw();return this;}
  setStrength(value){const n=Number(value);this.strength=Number.isFinite(n)?Math.max(0,Math.min(1.5,n)):1;this.draw();return this;}
@@ -178,6 +243,13 @@ class CatPet{
   gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.textures[key]);
   gl.uniform1f(this.u.time,this.time);gl.uniform1f(this.u.strength,this.reduced?0:this.strength);
   gl.uniform1f(this.u.state,states[this.state]);
+  gl.uniform1f(this.u.lifeTime,this.life);
+  gl.uniform4fv(this.u.ears,EARS[key]||EARS.idle);
+  const earScale=key==='sleeping'?.3:1;
+  gl.uniform2fv(this.u.earTwitch,this.reduced?[0,0]:this.earTwitch.map(v=>v*earScale));
+  gl.uniform1f(this.u.zEnabled,key==='sleeping'?1:0);
+  gl.uniform1f(this.u.zTime,this.life);
+  gl.uniform1f(this.u.zStrength,this.reduced?0:this.strength);
   const life=LIFE[key]||LIFE.idle;
   gl.uniform4fv(this.u.tailRegion,life.tail);gl.uniform2fv(this.u.tailRoot,life.root);
   gl.uniform4fv(this.u.eyeRegion,life.eyes);gl.uniform4fv(this.u.pupils,life.pupils);
