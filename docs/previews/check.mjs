@@ -50,7 +50,7 @@ const GEOM = `
 
 // ---- every panel scenario: no horizontal overflow, panel inside the stage ----
 for (const id of ["single-busy","mixed","three-waiting","snoozed-pinned","long-cn",
-                  "long-en","no-terminal","twenty","empty"]) {
+                  "long-en","no-terminal","twenty","four-idle","empty"]) {
   for (const mir of ["", "&mirror=1"]) {
     const g = await scenario(`?only=${id}${mir}`, GEOM);
     check(`${id}${mir ? " mirrored" : ""}: no horizontal scroll`, g.overflowX === 0, `overflow=${g.overflowX}`);
@@ -68,6 +68,23 @@ for (const id of ["quota-50","quota-92","quota-empty","readout","readout-bad",
           g.bubble && g.bubble.l >= 0 && g.bubble.r <= g.stageW + 0.5,
           g.bubble ? `${Math.round(g.bubble.l)}..${Math.round(g.bubble.r)} of ${g.stageW}` : "hidden");
   }
+}
+
+// ---- our own words are never truncated -------------------------------------
+//
+// The status column is a closed vocabulary. "Response c…" is not a state
+// anybody can recognise, and it used to come out at a different length on every
+// row because the name and the status shrank in proportion to their own
+// content. The project name is the thing that gives.
+for (const id of ["single-busy","mixed","three-waiting","snoozed-pinned","long-cn",
+                  "long-en","no-terminal","twenty","four-idle"]) {
+  const cols = await scenario(`?only=${id}`, `
+    const d = document.querySelector('iframe').contentDocument;
+    return [...d.querySelectorAll('.row .what.fixed')]
+      .filter(e => e.scrollWidth > e.clientWidth + 0.5)
+      .map(e => e.textContent);
+  `);
+  check(`${id}: no status word is truncated`, cols.length === 0, cols.join(" / "));
 }
 
 // ---- hovering a row must not resize anything -------------------------------

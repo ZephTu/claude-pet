@@ -40,7 +40,12 @@ const TEXT = {
   reply: "Awaiting reply",
   working: "Working",
   quiet: "No recent activity",
-  complete: "Response complete",
+  // Short on purpose. "Response complete" is 17 characters in a column that
+  // shares ~200pt with the project name, and it pushed the name — the row's
+  // first anchor — down to less width than the status word had. It also got
+  // truncated to a different length on every row, because both columns were
+  // shrinking in proportion to their own content.
+  complete: "Answered",
   idle: "Idle",
   later: "later — ",
   done: "done",
@@ -310,32 +315,44 @@ function ageText(seconds) {
   return Math.floor(seconds / 3600) + "h";
 }
 
+/**
+ * What the status column says, and whether those words are ours.
+ *
+ * The distinction matters for layout, not for reading: a phrase out of TEXT is
+ * a closed vocabulary of six or seven items and must never be truncated —
+ * "Response c…" is not a state anybody can recognise. An activity summary is
+ * arbitrary-length text from the tool call in flight, so that one may shrink.
+ *
+ * @returns {{text: string, fixed: boolean}}
+ */
 function whatText(s) {
+  const ours = (text) => ({ text: text, fixed: true });
   // A postponed item says when it is coming back, so "later" stays a promise
   // rather than becoming "never".
-  if (s.snoozedFor) return TEXT.later + s.snoozedFor;
+  if (s.snoozedFor) return ours(TEXT.later + s.snoozedFor);
   // Blocked splits in two, and they are not the same interruption: one wants a
   // decision, the other wants typing. The row used to say "needs you" for both,
   // directly under a heading that already said "Needs you".
   if (s.state === "waiting") {
-    return s.asks === "permission" ? TEXT.approval : TEXT.reply;
+    return ours(s.asks === "permission" ? TEXT.approval : TEXT.reply);
   }
   // `activity` comes from the calls actually in flight. `tool` is only the name
   // of the last one seen, which goes on reading as "running" after it returned.
-  if (s.activity) return s.activity;
+  // The one branch whose text is not ours, and so the one allowed to truncate.
+  if (s.activity) return { text: s.activity, fixed: false };
   // Busy on paper, but nothing heard for a while — see StateAggregator.isQuiet.
   // Interrupting a turn emits no hook, so the last thing written stays "busy"
   // forever. This says what is actually known: it stopped saying anything. It
   // deliberately does not say "done", which nothing here is in a position to
   // know, and it corrects itself the moment the next hook lands.
-  if (s.quiet) return TEXT.quiet;
-  if (s.state === "busy") return TEXT.working;
+  if (s.quiet) return ours(TEXT.quiet);
+  if (s.state === "busy") return ours(TEXT.working);
   // An idle session that has answered is waiting on the next instruction —
   // worth distinguishing from one that is merely sitting there. The flag comes
   // from Swift rather than from the second line's text, so suppressing a
   // boilerplate notification does not silently downgrade the row.
-  if (s.replied) return TEXT.complete;
-  return TEXT.idle;
+  if (s.replied) return ours(TEXT.complete);
+  return ours(TEXT.idle);
 }
 
 /** Markup for one live-session row. */
@@ -482,7 +499,11 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // squeezed down to "E 47s" — the branch is a disambiguator, and it must
     // never cost the row the thing it is actually reporting.
     rows[i].querySelector(".branch").textContent = s.branch || "";
-    rows[i].querySelector(".what").textContent = whatText(s);
+    const what = whatText(s);
+    const whatEl = rows[i].querySelector(".what");
+    whatEl.textContent = what.text;
+    // Our own words hold their width; only an activity summary gives.
+    whatEl.classList.toggle("fixed", what.fixed);
     // A session sharing its project with another shows its name here instead of
     // the notification text: the first column cannot tell them apart.
     const note = rows[i].querySelector(".note");

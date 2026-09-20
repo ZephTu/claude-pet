@@ -158,6 +158,24 @@ const SCENARIOS = [
     finished: [finished({ label: "batch job", count: 4, agoSeconds: 300, ...term })],
   },
   {
+    // Straight off a real screenshot. Four live sessions, nothing blocked, so
+    // there is no heading and every row is competing for the same width — which
+    // is what caught the status column truncating at three different lengths.
+    id: "four-idle",
+    title: "4 个 session，全是 running/idle",
+    note: "状态词是固定词表，不该被截断；该让位的是项目名",
+    sessions: [
+      session({ project: "\ud83e\udd16 20260920-enhancement", state: "busy",
+                activity: "Working", waitedSeconds: 300, ...term }),
+      session({ project: "Schwab客户bug跟进", state: "idle", replied: true,
+                waitedSeconds: 21600, ...term }),
+      session({ project: "\ud83e\udd16 20260918-merge-audit", state: "idle",
+                replied: true, waitedSeconds: 3600, ...term }),
+      session({ project: "\ud83e\udd16 20260920-new requirement", state: "idle",
+                replied: true, waitedSeconds: 2760, ...term }),
+    ],
+  },
+  {
     id: "empty",
     title: "空列表",
     note: "没有会话时的文案",
