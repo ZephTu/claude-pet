@@ -48,7 +48,7 @@ the last thing written stays "busy" and nothing ever comes to take it back. It i
 deliberately not called "done", which nothing here is in a position to know, and it
 rights itself the moment that session does anything again.
 
-**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for keep-list-open / pause / reduce motion / connection status / demo / launch-at-login / quit. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
+**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for keep-list-open / pause / reduce motion / encouragement & breaks / connection status / demo / launch-at-login / quit. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 
 **Click a row marked ↗** to jump straight to the terminal tab that session is running in.
 
@@ -71,6 +71,12 @@ rights itself the moment that session does anything again.
 **Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the robot's mood — it can sit blocked on a permission prompt without making the robot wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
 
 When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
+
+**Two lines are about you rather than about the work.** The first session you start each day gets one line from `Resources/pet/quotes.json`, picked by day number so it is the same all day and different tomorrow. After two hours at the desk with no break it asks you to stand up, refill your water, or look out of the window, and it asks again every forty-five minutes until you do. Both are off until you ask for them — **right-click → Encouragement & Breaks** turns them on together. Every other line the pet says reports on work you started; having opinions about your morning is not the same kind of thing to help itself to.
+
+Two things keep these from becoming the wallpaper that every wellness reminder eventually becomes. They are **last in the order** — anything the pet could say about your actual work outranks them, and a session coming to rest always wins the bubble. And the two hours are **observed rather than counted down**: the clock runs off the sessions' own activity, so half an hour with nothing stirring ends the stretch, and a machine you did not touch this morning has nothing to say about your morning. It undercounts on purpose — reading code with Claude untouched looks exactly like lunch, and a reminder that arrives late beats one that tells an empty chair to stretch.
+
+**The pet makes no network requests.** The quotes were written and reviewed by hand, and `scripts/fetch-quotes.py` is a development-machine tool for topping them up — measured against the free quote APIs in September 2026, none of them could be trusted to hand you something short and kind at nine in the morning.
 
 A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
 
