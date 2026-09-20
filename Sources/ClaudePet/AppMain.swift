@@ -72,6 +72,22 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var lastTitleRefresh: Date?
     /// Which figure is drawn. Persisted, so it survives a restart.
     private var skin: PetSkin = .robot
+    /// How long somebody has been at this machine without a break. Advanced
+    /// from the raw session list on every render — see Wellness.
+    private var deskClock = Wellness.DeskClock()
+    /// The day number already greeted, so the line comes once a day and not
+    /// once a launch. Nil until the pet has greeted anyone.
+    private var greetedDay: Int?
+    /// The daily line and the break nudge, together, as one thing to turn on.
+    /// Off until asked for: the pet's other lines all report on work the user
+    /// started, and having opinions about somebody's morning is not the same
+    /// kind of thing to help yourself to.
+    private var wellnessOn = false
+    /// Resolved once: the locale does not change while the app is running, and
+    /// these are the only lines that translate.
+    private let speechLanguage = Phrases.Language.resolve(Locale.preferredLanguages)
+    /// Read once at launch; see QuoteBook.
+    private lazy var quotes: [String] = QuoteBook.load(speechLanguage)
     private var windowVisible = true
 
     private var petHome: URL {
@@ -123,6 +139,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         reduceMotion = UserDefaults.standard.bool(forKey: Self.reduceMotionKey)
         keepListOpen = UserDefaults.standard.bool(forKey: Self.keepListOpenKey)
+        wellnessOn = UserDefaults.standard.bool(forKey: Self.wellnessKey)
+        let greeted = UserDefaults.standard.integer(forKey: Self.greetedDayKey)
+        greetedDay = greeted == 0 ? nil : greeted
         bridge.panelPinned = keepListOpen
         skin = PetSkin.named(UserDefaults.standard.string(forKey: Self.skinKey))
         panel.onClick = { point in bridge.handleClick(at: point) }
@@ -169,6 +188,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShowHealth: { [weak self] in self?.showHealth() },
             onDemoToggle: { [weak self] in self?.toggleDemo() },
             onReduceMotionToggle: { [weak self] in self?.toggleReduceMotion() },
+            onWellnessToggle: { [weak self] in self?.toggleWellness() },
             onKeepListOpenToggle: { [weak self] in self?.toggleKeepListOpen() },
             onSkinPick: { [weak self] in self?.setSkin($0) },
             onQuit: { NSApp.terminate(nil) }
@@ -186,6 +206,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           demoOn: self.demo != nil,
                           reduceMotionOn: self.reduceMotion,
+                          wellnessOn: self.wellnessOn,
                           keepListOpenOn: self.keepListOpen,
                           skin: self.skin)
             }
@@ -232,6 +253,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             snoozeMarks = survivingMarks
             saveSnoozed()
         }
+        // From `latest` rather than from `state`: a paused pet and a muted
+        // session both render as nothing running, and neither means the person
+        // got up and left.
+        deskClock = Wellness.advance(deskClock, sessions: latest, now: now)
         loadInsights()
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
@@ -354,7 +379,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
-            quotaAlarm: decision.speak
+            quotaAlarm: decision.speak, wellness: wellnessNudge(state, now: now)
         ) else { return }
         // Recorded only when it is actually SAID. That is what makes a warning
         // suppressed by an alarm come back afterwards instead of being lost:
@@ -365,11 +390,33 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
             saveQuotaSaid()
         }
+        // Recorded only when it was actually SAID, for the same reason the quota
+        // thresholds are: a greeting that lost the bubble to a finishing session
+        // has not happened yet, and must still be waiting on the next pass.
+        if line.kind == .greeting {
+            let today = Wellness.day(now)
+            greetedDay = today
+            UserDefaults.standard.set(today, forKey: Self.greetedDayKey)
+        }
         let sticky = Chatter.isSticky(line.kind)
         bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis)
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    /// The wellness line on offer this render, or nil when there is none or the
+    /// user has turned them off.
+    private func wellnessNudge(_ state: GlobalState, now: Date) -> Wellness.Nudge? {
+        guard wellnessOn else { return nil }
+        return Wellness.nudge(
+            clock: deskClock,
+            working: state.sessions.contains { $0.state == .busy },
+            greetedDay: greetedDay,
+            quotes: quotes,
+            language: speechLanguage,
+            now: now
+        )
     }
 
     // MARK: - Labels
@@ -607,6 +654,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// state from whenever it was covered up.
     private static let hiddenTickInterval: TimeInterval = 30
     private static let reduceMotionKey = "reduceMotion"
+    private static let wellnessKey = "wellnessLines"
+    private static let greetedDayKey = "wellnessGreetedDay"
     private static let keepListOpenKey = "keepListOpen.v1"
     private static let skinKey = "petSkin"
 
@@ -647,6 +696,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         reduceMotion.toggle()
         UserDefaults.standard.set(reduceMotion, forKey: Self.reduceMotionKey)
         applyMotionSetting()
+    }
+
+    /// The day's line and the break nudge, on or off together.
+    ///
+    /// They share one switch because they share one objection: somebody who
+    /// does not want a desktop toy with opinions about their morning does not
+    /// want half of one either. And they share a default, which is off.
+    private func toggleWellness() {
+        wellnessOn.toggle()
+        UserDefaults.standard.set(wellnessOn, forKey: Self.wellnessKey)
     }
 
     /// Keep the session list up instead of opening it per glance.

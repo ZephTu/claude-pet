@@ -10,6 +10,13 @@ import Foundation
 /// The governing rule is that speech needs an OCCASION. Nothing here fires on a
 /// timer alone — each line is attached to something that actually happened: a
 /// quota window about to roll over, work finishing, work running long.
+///
+/// The two lines in `Wellness` look like the exception and are not. "You have
+/// been sitting here for three hours" reads as a timer, but the three hours are
+/// measured from the sessions themselves, so a machine nobody touched all
+/// morning has nothing to say about anybody's morning. They arrive here already
+/// decided, the same way quota warnings do, and take the two lowest places in
+/// the order below.
 public enum Chatter {
     /// What a line is about. Cooldowns are per-kind, so a quota reminder does
     /// not silence a "finished" line an hour later.
@@ -19,6 +26,8 @@ public enum Chatter {
         case finished
         case sessionDone
         case longRun
+        case greeting
+        case sitLong
     }
 
     public struct Utterance: Sendable, Equatable {
@@ -60,6 +69,11 @@ public enum Chatter {
         // so it cannot run away on its own.
         case .sessionDone: return 20
         case .longRun: return 20 * 60
+        // The day number in `Wellness` is what actually holds the greeting to
+        // once a day; this is only a guard against saying it twice either side
+        // of midnight.
+        case .greeting: return 12 * 60 * 60
+        case .sitLong: return 45 * 60
         }
     }
 
@@ -84,7 +98,8 @@ public enum Chatter {
         lastSpoken: [Kind: Date],
         lastAnything: Date?,
         names: [String: String] = [:],
-        quotaAlarm: QuotaAlarm.Alarm? = nil
+        quotaAlarm: QuotaAlarm.Alarm? = nil,
+        wellness: Wellness.Nudge? = nil
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
         // and a session waiting on the user is not a moment for small talk.
@@ -133,6 +148,16 @@ public enum Chatter {
             }
         }
 
+        // The day's first line gets one moment, and it is placed above the
+        // lines below rather than after them: `finished` and `longRun` fire
+        // often enough that a greeting queued behind them would be spent on a
+        // render where one of them won, and then never come round again today.
+        // It still yields to a finishing session and to a quota about to roll
+        // over, which are things the user is actually waiting to hear.
+        if let wellness, wellness.kind == .greeting, ready(.greeting) {
+            return Utterance(kind: .greeting, text: wellness.text)
+        }
+
         guard let previous else { return nil }
 
         // Everything below is a transition, so it needs a previous state to
@@ -151,6 +176,14 @@ public enum Chatter {
                 text: "\(longest.project) has been at it for \(mins)m",
                 emphasis: longest.project
             )
+        }
+
+        // Last, and deliberately so: everything above is about the work, and
+        // being told to stretch is never the more useful of two things the pet
+        // could be saying. Unlike the greeting this one loses nothing by
+        // waiting — it comes round again in forty-five minutes.
+        if let wellness, wellness.kind == .sitLong, ready(.sitLong) {
+            return Utterance(kind: .sitLong, text: wellness.text)
         }
 
         return nil

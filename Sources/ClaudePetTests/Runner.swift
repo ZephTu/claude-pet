@@ -743,6 +743,185 @@ struct Runner {
         t.check("a reset already past reads as now",
                 Chatter.duration(until: t0.addingTimeInterval(-60), now: t0) == "now")
 
+
+        // ---- Wellness: how long you have been at the desk ----
+        //
+        // There is no keyboard to watch, so "still here" is the newest updatedAt
+        // across live sessions. Every case below is about the one judgement that
+        // matters: what counts as having got up and walked away.
+        func atDesk(_ signAgo: TimeInterval, at when: Date) -> [SessionState] {
+            [SessionState(sessionId: "w", project: "w", cwd: "/tmp", state: .busy, tool: "",
+                          detail: "", since: when.addingTimeInterval(-signAgo),
+                          updatedAt: when.addingTimeInterval(-signAgo))]
+        }
+
+        // Ten minutes of work, sampled every five: the stretch adds up.
+        var clock = Wellness.DeskClock()
+        for step in stride(from: 0.0, through: 600.0, by: 300.0) {
+            let at = t0.addingTimeInterval(step)
+            clock = Wellness.advance(clock, sessions: atDesk(0, at: at), now: at)
+        }
+        t.check("the desk clock adds up an unbroken stretch",
+                Int(clock.sitting(now: t0.addingTimeInterval(600))) == 600)
+
+        // Seen by a pet that kept running through the break: the stretch ends as
+        // soon as nothing has stirred for half an hour, without waiting for
+        // anyone to come back and prove it.
+        let midBreak = t0.addingTimeInterval(600 + 31 * 60)
+        t.check("a stretch ends while the chair is still empty",
+                Wellness.advance(clock, sessions: atDesk(31 * 60, at: midBreak), now: midBreak)
+                    .startedAt == nil)
+
+        // Seen by a pet that was asleep or shut down for the same break: the gap
+        // is between the two signs of life, not against the wall clock.
+        let backAt = t0.addingTimeInterval(600 + 31 * 60)
+        t.check("half an hour away resets the stretch",
+                Int(Wellness.advance(clock, sessions: atDesk(0, at: backAt), now: backAt)
+                    .sitting(now: backAt)) == 0)
+
+        let shortGap = t0.addingTimeInterval(600 + 29 * 60)
+        t.check("a 29-minute gap is a coffee, not a break",
+                Int(Wellness.advance(clock, sessions: atDesk(0, at: shortGap), now: shortGap)
+                    .sitting(now: shortGap)) == 600 + 29 * 60)
+
+        t.check("no sessions means nobody at the desk",
+                Wellness.advance(clock, sessions: quiet.sessions, now: t0).startedAt == nil)
+
+        // ---- Wellness: what it says, and when it has earned the right ----
+        func sat(_ hours: Double) -> Wellness.DeskClock {
+            Wellness.DeskClock(startedAt: t0.addingTimeInterval(-hours * 3600), lastActive: t0)
+        }
+        let corpus = ["Keep going.", "One thing at a time."]
+        func nudge(_ clock: Wellness.DeskClock, working: Bool = true,
+                   greetedDay: Int? = Wellness.day(t0), when: Date = t0) -> Wellness.Nudge? {
+            Wellness.nudge(clock: clock, working: working, greetedDay: greetedDay,
+                           quotes: corpus, language: .english, now: when)
+        }
+
+        t.check("119 minutes at the desk is not worth mentioning",
+                nudge(sat(119.0 / 60)) == nil)
+        t.check("two hours at the desk is",
+                nudge(sat(2))?.kind == .sitLong)
+        t.check("the break line says how long it has been",
+                nudge(sat(3))?.text.contains("3h") == true)
+
+        t.check("the first work of the day gets a line",
+                nudge(sat(0), greetedDay: nil)?.kind == .greeting)
+        t.check("and only the first",
+                nudge(sat(0))?.kind != .greeting)
+        t.check("nothing to greet while no session is working",
+                nudge(sat(0), working: false, greetedDay: nil) == nil)
+        t.check("yesterday's greeting does not count for today",
+                nudge(sat(0), greetedDay: Wellness.day(t0) - 1)?.kind == .greeting)
+        // Both earned at once: the once-a-day line wins, and the break nudge is
+        // still standing there on the next pass.
+        t.check("the greeting outranks the break nudge",
+                nudge(sat(4), greetedDay: nil)?.kind == .greeting)
+
+        t.check("the greeting is one of the quotes",
+                corpus.contains(nudge(sat(0), greetedDay: nil)?.text ?? ""))
+        // Restarting the pet at lunchtime must not reshuffle the day's line.
+        t.check("the quote does not change during the day",
+                nudge(sat(0), greetedDay: nil)?.text
+                    == nudge(sat(0), greetedDay: nil, when: t0.addingTimeInterval(3 * 3600))?.text)
+        t.check("a new day brings a different line",
+                nudge(sat(0), greetedDay: nil)?.text
+                    != nudge(sat(0), greetedDay: nil, when: t0.addingTimeInterval(86400))?.text)
+
+        // quotes.json is a file on disk and files go missing; the day's first
+        // line is not allowed to be the empty string.
+        t.check("an unreadable quotes file still leaves something to say",
+                Wellness.nudge(clock: sat(0), working: true, greetedDay: nil, quotes: [],
+                               language: .english, now: t0)?.text.isEmpty == false)
+        t.check("and something to say in Chinese",
+                Wellness.nudge(clock: sat(0), working: true, greetedDay: nil, quotes: [],
+                               language: .chinese, now: t0)?.text.isEmpty == false)
+
+        t.check("the break nudge rotates what it asks for",
+                Set((0..<Phrases.sitLongVariants).map {
+                    Phrases.sitLong(hours: 2, variant: $0, language: .english)
+                }).count == Phrases.sitLongVariants)
+        t.check("the Chinese break nudge names the hours too",
+                Phrases.sitLong(hours: 3, variant: 0, language: .chinese).contains("3"))
+        t.check("a Chinese locale gets Chinese",
+                Phrases.Language.resolve(["zh-Hans-CN", "en-US"]) == .chinese)
+        t.check("anything else gets English",
+                Phrases.Language.resolve(["fr-FR"]) == .english
+                    && Phrases.Language.resolve([]) == .english)
+
+        // ---- Wellness: where these lines sit against the rest ----
+        let greetingNudge = Wellness.Nudge(kind: .greeting, text: "Keep going.")
+        let breakNudge = Wellness.Nudge(kind: .sitLong, text: "3h at the desk — stand up")
+        t.check("a wellness line is said when nothing outranks it",
+                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             wellness: greetingNudge)?.kind == .greeting)
+        t.check("no wellness line while a session waits on the user",
+                Chatter.next(state: waitingState, previous: quiet, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             wellness: greetingNudge) == nil)
+        // Which session came to rest is the one line the user is actively waiting
+        // for; a quote must never take its place.
+        t.check("a finished session outranks the greeting",
+                Chatter.next(state: oneFinished, previous: twoBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             wellness: greetingNudge)?.kind == .sessionDone)
+        // The greeting gets one moment a day, so it outranks the low-value lines
+        // rather than being quietly spent on a render where one of them fired.
+        t.check("the greeting is not lost to a long-running session",
+                Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             wellness: greetingNudge)?.kind == .greeting)
+        // The break nudge has no such claim: it comes round again in 45 minutes.
+        t.check("a long-running session outranks the break nudge",
+                Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: nil,
+                             wellness: breakNudge)?.kind == .longRun)
+        t.check("the break nudge keeps its own cooldown",
+                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
+                             lastSpoken: [.sitLong: t0.addingTimeInterval(-60)],
+                             lastAnything: nil, wellness: breakNudge) == nil)
+        t.check("wellness lines wait out the global cooldown like everything else",
+                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
+                             lastSpoken: [:], lastAnything: t0.addingTimeInterval(-60),
+                             wellness: greetingNudge) == nil)
+
+        // ---- The shipped corpus ----
+        //
+        // quotes.json is the one thing here that is data rather than code, and
+        // `scripts/fetch-quotes.py` can append to it from the open internet. So
+        // the contract it has to keep is asserted rather than assumed: a line
+        // too long to fit the bubble, or an empty one, would reach a user as a
+        // broken morning and nothing else would have caught it.
+        //
+        // Located from #filePath rather than the working directory, so it holds
+        // wherever the binary is run from.
+        // Sources/ClaudePetTests/Runner.swift -> Sources/ClaudePetTests -> Sources -> root
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let corpusURL = repoRoot.appending(path: "Resources/pet/quotes.json")
+        let corpusData = (try? Data(contentsOf: corpusURL)) ?? Data()
+        let book = (try? JSONDecoder().decode([String: [String]].self, from: corpusData)) ?? [:]
+        t.check("the corpus is on disk and parses", !book.isEmpty)
+        // Below what a quarter of rotation needs; a corpus this thin is a sign
+        // something overwrote it rather than added to it.
+        t.check("both languages carry enough lines to rotate",
+                (book["en"]?.count ?? 0) >= 90 && (book["zh"]?.count ?? 0) >= 90)
+        t.check("no English line overflows the bubble",
+                book["en"]?.allSatisfy { (12...50).contains($0.count) } == true)
+        t.check("no Chinese line overflows the bubble",
+                book["zh"]?.allSatisfy { (6...22).contains($0.count) } == true)
+        t.check("nothing blank made it in",
+                book.values.allSatisfy { lines in
+                    lines.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                })
+        t.check("nothing is in there twice",
+                book.values.allSatisfy { Set($0).count == $0.count })
+        // The pet reads the file by these two keys and nothing else.
+        t.check("the corpus carries exactly the two languages the pet asks for",
+                Set(book.keys) == ["en", "zh"])
+
         // ---- The terminal tab title IS the session's name ----
         // The project column is only a directory name; three sessions in one repo match
         let orcaList = Data("""
