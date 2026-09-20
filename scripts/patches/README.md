@@ -19,8 +19,23 @@ would be a fix that quietly disappeared.
 
 ## zzz-phase.patch
 
-The sleeping Zs drift up and fade. Upstream gives small / medium / large the
-phases 0 / .33 / .66, which retires them bottom, top, middle — not a direction,
-and it reads on screen as the Zs dropping. This reorders them to bottom,
-middle, top 1.2s apart, and raises the travel from 3.9 to 10.6 screen pixels
-so the drift is visible at all. Measured in a real WebGL render, not by eye.
+The three sleeping Zs are pinned to their own bounding boxes in the texture, so
+nothing can make them travel the trail; the only thing that can carry a
+direction is the order they light up in. Upstream gives small / medium / large
+the phases 0 / .33 / .66, which retires them bottom, top, middle — not a
+direction, and on screen it reads as the Zs dropping. This reorders them to
+bottom, middle, top 1.2s apart, and drops the vertical travel to zero.
+
+Zero travel is the point, not an oversight. Travel was tried at .100 of uv
+(10.6 screen pixels) and was worse than upstream: pinned glyphs on different
+phases drift apart and back together, so the trio loses its spacing, and each
+wrap becomes a visible drop the full height of the travel. Upstream's own .037
+is 3.9px on a 120px canvas — too small to read as drift, big enough to read as
+a drop.
+
+Measured in a real WebGL render, not by eye: per-glyph ink probes for the
+lighting order, and the big Z's vertical centroid held to 152.7-152.9px across
+a cycle to prove nothing moves.
+
+The patch is against the vendored Cat Life v2 file as it shipped (commit
+36b949e), so it replays onto a fresh vendor drop.

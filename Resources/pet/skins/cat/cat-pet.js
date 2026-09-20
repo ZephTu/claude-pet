@@ -110,17 +110,28 @@ vec4 over(vec4 a,vec4 b){
  return vec4((a.rgb*a.a+b.rgb*b.a*(1.0-a.a))/max(alpha,.00001),alpha);
 }
 /* LOCAL FIX on top of the vendored kit (see scripts/patches/zzz-phase.patch).
-   Upstream shipped phases 0 / .33 / .66 for small / medium / large, which
-   retires them bottom, TOP, middle — no direction at all, and the eye reads
-   the adjacent pairs as the Zs dropping. Bottom, middle, top 1.2s apart is
-   what makes it one wave going up. 'side' had to come out of 'phase' first:
-   one value was carrying both the timing and which half of the shared
-   diagonal a glyph keeps, so the phases could not be swapped on their own.
-   Travel went .037 -> .100 of uv as well, because .037 is 3.9px on a 120px
-   canvas and four pixels in 3.6s is a blink, not a drift. */
+
+   The three Zs are pinned to their own bounding boxes in the texture, so they
+   can never actually travel the trail — the only thing that can carry a
+   direction is the ORDER they light up in. Upstream gives small / medium /
+   large the phases 0 / .33 / .66, which retires them bottom, TOP, middle: no
+   direction at all, and the eye reads the adjacent pairs as the Zs dropping.
+   Bottom, middle, top 1.2s apart is what makes it read as going up.
+
+   'side' had to come out of 'phase' first: one value was carrying both the
+   timing and which half of the shared diagonal a glyph keeps, so the phases
+   could not be swapped on their own.
+
+   Vertical travel is zero on purpose, and raising it is the obvious wrong
+   move — it was tried at .100 (10.6px) and made things worse. Pinned glyphs
+   on different phases drift apart and back together, so the trio loses its
+   spacing, and every glyph's wrap becomes a visible DROP the full height of
+   the travel. Upstream's own .037 is 3.9px on a 120px canvas: too small to
+   read as drift, big enough to read as a drop. The horizontal wobble stays;
+   it is under a pixel and reads as shimmer, not position. */
 vec4 glyph(vec4 box,float phase,float side){
  float cycle=fract(zTime/3.6+phase);
- vec2 offset=vec2(.009*sin(cycle*6.283+phase*2.0),-.100*cycle)*zStrength;
+ vec2 offset=vec2(.009*sin(cycle*6.283+phase*2.0),0.0)*zStrength;
  vec2 q=uv-offset;
  vec4 c=texture2D(texture0,q);
  float fade=smoothstep(0.0,.25,cycle)*(1.0-smoothstep(.72,1.0,cycle));
