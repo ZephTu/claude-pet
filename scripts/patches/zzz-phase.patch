@@ -1,8 +1,6 @@
-diff --git a/Resources/pet/skins/cat/cat-pet.js b/Resources/pet/skins/cat/cat-pet.js
-index fd36e4c..e03b50f 100644
 --- a/Resources/pet/skins/cat/cat-pet.js
 +++ b/Resources/pet/skins/cat/cat-pet.js
-@@ -109,16 +109,36 @@ vec4 over(vec4 a,vec4 b){
+@@ -126,16 +126,36 @@
   float alpha=a.a+b.a*(1.0-a.a);
   return vec4((a.rgb*a.a+b.rgb*b.a*(1.0-a.a))/max(alpha,.00001),alpha);
  }
@@ -44,7 +42,7 @@ index fd36e4c..e03b50f 100644
   c.a*=inside(q,box)*mix(1.0,fade,min(zStrength,1.0));
   return c;
  }
-@@ -130,9 +150,9 @@ void main(){
+@@ -147,9 +167,9 @@
    vec4 medium=vec4(294.0,99.0,320.0,126.0)/384.0;
    vec4 large=vec4(313.0,64.0,356.0,108.0)/384.0;
    c.a*=1.0-max(inside(uv,small),max(inside(uv,medium),inside(uv,large)));

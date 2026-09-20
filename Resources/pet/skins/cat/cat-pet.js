@@ -1,4 +1,4 @@
-/* Claude Pet cat life v2. Original PNG textures; procedural mesh + floating sleep glyphs.
+/* Claude Pet cat life v3. Original PNG textures; procedural mesh + floating sleep glyphs.
    No model, CDN, account, or network required. */
 (function(global){
 'use strict';
@@ -39,9 +39,13 @@ void main(){
   d.y+=.0045*sin(t*3.14159)*weight(p,vec2(.54,.33),vec2(.38,.40));
  }else if(state<2.5){
   vec2 pivot=vec2(.675,.650); vec2 r=p-pivot;
-  float angle=.17*sin(t*4.6); float w=weight(p,vec2(.758,.534),vec2(.145,.19));
+  // Two prominent waves on entry, then a quiet gap before the reminder.
+  float attention=1.0-smoothstep(1.3,1.9,mod(t,5.0));
+  float angle=(.48*attention+.045)*sin(t*7.0);
+  float w=weight(p,vec2(.758,.534),vec2(.145,.19));
   d+=vec2(-r.y,r.x)*angle*w;
-  d.y-=.0025*sin(t*2.0)*weight(p,vec2(.47,.44),vec2(.4,.55));
+  d.y-=.009*attention*pow(max(0.0,sin(t*7.0)),2.0)*(1.0-smoothstep(.70,.95,p.y));
+  d.x+=.006*attention*sin(t*3.5)*weight(p,vec2(.47,.38),vec2(.4,.42));
  }else if(state<3.5){
   // 4.8s breathing cycle: lift the head/chest while keeping the paws grounded.
   float breath=sin(lifeTime*1.31);
@@ -51,20 +55,33 @@ void main(){
   float burst=pow(max(0.0,sin(t*1.8)),3.0);
   d.x+=.004*sin(t*24.0)*burst*weight(p,vec2(.52,.45),vec2(.65,.70));
   d.y-=.006*sin(t*5.0)*weight(p,vec2(.725,.53),vec2(.10,.11));
+ }else if(state<5.5){
+  // A brief cheer that settles within the host's 1.6s finished flash.
+  float cheer=exp(-t*2.3)*sin(t*11.0);
+  float body=1.0-smoothstep(.66,.91,p.y);
+  d.y-=.020*cheer*body;
+  d.y-=.017*cheer*(weight(p,vec2(.22,.35),vec2(.12,.20))+weight(p,vec2(.78,.35),vec2(.12,.20)));
+  // Keep the closed laptop at the feet completely still.
+  d*=1.0-smoothstep(.84,.90,p.y);
+ }else if(state<6.5){
+  // Reading: slow scan and tiny nod; the book follows the holding paws.
+  float breath=sin(lifeTime*1.8);
+  d.y-=.004*breath*weight(p,vec2(.53,.39),vec2(.42,.38));
+  d.x+=.003*sin(t*.95)*weight(p,vec2(.53,.38),vec2(.40,.35));
+  d.y-=.003*breath*weight(p,vec2(.55,.76),vec2(.30,.18));
+ }else if(state<7.5){
+  // Compress toward the bottom of the stack; the base remains planted.
+  float press=pow(max(0.0,sin(t*2.9)),2.0);
+  float paper=(1.0-smoothstep(.18,.23,abs(p.x-.59)))*smoothstep(.74,.80,p.y);
+  d.y+=(.974-p.y)*.12*press*paper;
+  d.y+=.018*press*(weight(p,vec2(.477,.749),vec2(.09,.075))+weight(p,vec2(.645,.750),vec2(.09,.075)));
+  d.y+=.004*press*weight(p,vec2(.54,.42),vec2(.39,.34));
  }else{
-  // finished: one short bob on the idle picture, anchored at the feet and
-  // decaying to nothing. There is no artwork for a finished turn, and a still
-  // picture could not say "just now" even if there were — what carries this
-  // state is that it MOVES and then stops. setState resets time, so t is
-  // seconds since the turn ended.
-  float k=exp(-t*1.9)*sin(t*12.0);
-  // 1.0 - smoothstep(lo,hi,..), not smoothstep(hi,lo,..): GLSL ES leaves
-  // smoothstep undefined when edge0 >= edge1, and the reversed form
-  // silently produced a bob of exactly zero — two renders 0.15s apart
-  // came out pixel-identical.
-  float lift=1.0-smoothstep(0.25,1.0,p.y);
-  d.y-=.035*k*lift;
-  d.x+=.005*k*weight(p,vec2(.5,.3),vec2(.45,.35));
+  // Waiting on another agent is quiet: a few taps, then a pause.
+  float taps=pow(max(0.0,sin(t*9.0)),2.0)*(1.0-smoothstep(1.3,1.8,mod(t,4.5)));
+  d.y-=.014*taps*weight(p,vec2(.488,.887),vec2(.085,.085));
+  vec2 r=p-vec2(.56,.66);
+  d+=vec2(-r.y,r.x)*.009*sin(t*.8)*weight(p,vec2(.56,.42),vec2(.43,.43));
  }
 
  // ---- idle life --------------------------------------------------------
@@ -156,23 +173,28 @@ void main(){
  }
  gl_FragColor=c;
 }`;
-const states={idle:0,working:1,waiting:2,sleeping:3,urgent:4,finished:5};
+const states={idle:0,working:1,waiting:2,sleeping:3,urgent:4,finished:5,reading:6,compacting:7,'awaiting-agent':8};
 /* Where the tail and the eyes are in each picture, in texture coordinates.
    tail/root read off a labelled 0.1 grid; eyes/pupils measured by connected
    components (each eye is ~1100 dark pixels, about 0.12 by 0.11).
    sleeping's eyes are drawn shut already, so its eye band is given no width
    and the blink cannot touch it. */
 const LIFE={
+ finished: {tail:[.21,.65,.12,.16],root:[.36,.77],eyes:[0,0,0,.001],pupils:[0,0,0,0]},
+ reading: {tail:[.18,.69,.14,.18],root:[.34,.83],eyes:[.535,.455,.20,.07],pupils:[.429,.455,.656,.470]},
+ compacting: {tail:[.20,.70,.14,.18],root:[.35,.83],eyes:[.55,.480,.20,.06],pupils:[.449,.475,.666,.493]},
+ 'awaiting-agent': {tail:[.18,.71,.14,.18],root:[.32,.84],eyes:[.58,.43,.20,.07],pupils:[.453,.410,.713,.468]},
  idle:     {tail:[.17,.70,.11,.12], root:[.30,.75], eyes:[.532,.330,.190,.075], pupils:[.404,.349,.659,.318]},
  working:  {tail:[.20,.64,.10,.11], root:[.33,.72], eyes:[.559,.420,.194,.078], pupils:[.433,.408,.694,.434]},
  waiting:  {tail:[.17,.70,.11,.12], root:[.30,.76], eyes:[.492,.350,.185,.078], pupils:[.369,.371,.619,.330]},
  sleeping: {tail:[.75,.74,.13,.11], root:[.58,.78], eyes:[.500,.440,.000,.001], pupils:[0,0,0,0]},
  urgent:   {tail:[.15,.62,.10,.12], root:[.28,.70], eyes:[.466,.345,.180,.075], pupils:[.348,.361,.589,.330]},
 };
-// `finished` is a deformation of an existing picture, not a picture of its own.
-const EARS={idle:[.27,.14,.70,.10],working:[.30,.16,.78,.20],
+// Pose-specific registration for the four additional 384px textures.
+const EARS={finished:[.30,.17,.69,.13],reading:[.29,.19,.73,.20],compacting:[.31,.20,.75,.22],'awaiting-agent':[.32,.22,.79,.28],idle:[.27,.14,.70,.10],working:[.30,.16,.78,.20],
  waiting:[.24,.20,.66,.12],sleeping:[.21,.30,.64,.19],urgent:[.23,.20,.62,.13]};
-const textureFor={finished:'idle'};
+// Optional fallback keeps older five-texture integrations usable.
+const fallbackFor={finished:'idle',reading:'working',compacting:'working','awaiting-agent':'working'};
 class CatPet{
  constructor(canvas, assets, options={}){
   this.canvas=canvas; this.assets=assets; this.state='idle'; this.strength=1;
@@ -257,12 +279,12 @@ class CatPet{
  setReducedMotion(value){this.reduced=!!value;this.draw();return this;}
  setStrength(value){const n=Number(value);this.strength=Number.isFinite(n)?Math.max(0,Math.min(1.5,n)):1;this.draw();return this;}
  draw(){
-  const key=textureFor[this.state]||this.state;
+  const key=this.textures[this.state]?this.state:(fallbackFor[this.state]||this.state);
   if(this.disposed||!this.textures[key])return;
   const gl=this.gl;gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(this.program);gl.bindTexture(gl.TEXTURE_2D,this.textures[key]);
   gl.uniform1f(this.u.time,this.time);gl.uniform1f(this.u.strength,this.reduced?0:this.strength);
-  gl.uniform1f(this.u.state,states[this.state]);
+  gl.uniform1f(this.u.state,states[key]);
   gl.uniform1f(this.u.lifeTime,this.life);
   gl.uniform4fv(this.u.ears,EARS[key]||EARS.idle);
   const earScale=key==='sleeping'?.3:1;
@@ -276,7 +298,7 @@ class CatPet{
   // Reduced motion stops the pet moving; a cat frozen mid-blink would be a cat
   // with its eyes shut for as long as the setting is on.
   gl.uniform1f(this.u.blink,this.reduced?0:this.blink);
-  gl.uniform2fv(this.u.gaze,this.reduced?[0,0]:this.gaze);
+  gl.uniform2fv(this.u.gaze,this.reduced||key==='finished'?[0,0]:this.gaze);
   gl.drawArrays(gl.TRIANGLES,0,this.count);
  }
  dispose(){this.disposed=true;cancelAnimationFrame(this.raf);const gl=this.gl;Object.values(this.textures).forEach(t=>gl.deleteTexture(t));gl.deleteBuffer(this.buffer);gl.deleteProgram(this.program);}

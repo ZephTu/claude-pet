@@ -1833,26 +1833,35 @@ struct Runner {
         t.check("no phase at all is the ordinary case",
                 StateAggregator.phase([phased("")]).isEmpty)
 
-        // ---- Skins: five pictures for eleven states ----
+        // ---- Skins: distinct artwork for phases and reading ----
         t.check("an unknown skin name falls back to the one that always draws",
                 PetSkin.named("weasel") == .robot && PetSkin.named(nil) == .robot)
         t.check("a known one is kept", PetSkin.named("cat") == .cat)
 
         func look(_ mood: String, phase: String = "", flash: String = "",
-                  wanted: Bool = false, blockedOn: String = "") -> CatSkin.Look {
+                  wanted: Bool = false, blockedOn: String = "",
+                  motion: ActivitySummary.Motion? = nil) -> CatSkin.Look {
             CatSkin.look(mood: mood, phase: phase, flash: flash, wanted: wanted,
-                         blockedOn: blockedOn)
+                         blockedOn: blockedOn, motion: motion)
         }
-        // The cost of taking the lamp away, written down as a test rather than
-        // left as a surprise: the three busy states are one picture and say
-        // exactly the same thing. Anyone who makes them differ again has to
-        // come here and say how.
-        t.check("every busy state draws the same picture",
-                [look("busy"), look("busy", phase: "compacting"),
-                 look("busy", phase: "awaiting-agent")].allSatisfy { $0.pose == .working })
-        t.check("...and with no lamp, nothing tells the three apart",
-                look("busy") == look("busy", phase: "compacting")
-                    && look("busy") == look("busy", phase: "awaiting-agent"))
+        t.check("busy phases now have distinct artwork",
+                look("busy").pose == .working
+                    && look("busy", phase: "compacting").pose == .compacting
+                    && look("busy", phase: "awaiting-agent").pose == .awaitingAgent)
+        t.check("reading follows stabilized activity, writing still types",
+                look("busy", motion: .reading).pose == .reading
+                    && look("busy", motion: .writing).pose == .working
+                    && look("busy", motion: .awaiting).pose == .working)
+        t.check("a phase outranks tool activity",
+                look("busy", phase: "compacting", motion: .reading).pose == .compacting
+                    && look("busy", phase: "awaiting-agent", motion: .reading).pose == .awaitingAgent)
+        t.check("intervention outranks unrelated background phases",
+                look("waiting", phase: "compacting", motion: .reading).pose == .waiting
+                    && look("urgent", phase: "awaiting-agent").pose == .urgent)
+        t.check("unknown phases fall back to the current tool activity",
+                look("busy", phase: "future-phase", motion: .reading).pose == .reading)
+        t.check("agent pose wire token matches the asset key",
+                CatSkin.Pose.awaitingAgent.rawValue == "awaiting-agent")
 
         t.check("wanting approval and wanting an answer share the one picture",
                 look("waiting").pose == .waiting
@@ -1873,10 +1882,10 @@ struct Runner {
         t.check("an interrupted tool warns over a cat that is still working",
                 look("busy", flash: "trouble").mark == .warn
                     && look("busy", flash: "trouble").pose == .working)
-        // A finished turn has no picture, so the renderer bobs the idle one.
+        // A finished turn has dedicated celebration artwork.
         // Nothing else may replace the pose: an interrupted tool happens while
         // the session carries on, and swapping the picture would say it stopped.
-        t.check("a finished turn gets the bob", look("idle", flash: "done").pose == .finished)
+        t.check("a finished turn gets the celebration", look("idle", flash: "done").pose == .finished)
         t.check("and nothing else does",
                 CatSkin.flashPose("done") == .finished && CatSkin.flashPose("trouble") == nil)
         t.check("being ignored has its own", look("urgent").pose == .urgent)
@@ -1914,6 +1923,9 @@ struct Runner {
                 PetLayout.isOpaque(at: CGPoint(x: PetLayout.catBodyBox.midX - 320,
                                                y: PetLayout.catBodyBox.midY),
                                    panel: nil, bubble: nil, mirrored: true, skin: .cat))
+
+        t.check("new reading tail is inside the cat hit region",
+                PetLayout.isOpaque(at: CGPoint(x: 350, y: 220), panel: nil, bubble: nil, skin: .cat))
 
         // Resting the pointer and clicking have to ask the same question. The
         // quota readout asked the robot's rectangle whatever was drawn, so the

@@ -19,6 +19,12 @@ would be a fix that quietly disappeared.
 
 ## zzz-phase.patch
 
+Rebased onto Cat Life v3. v3 was cut from the vendor's own v2, so it carries the
+bug back; the patch replayed onto it cleanly, which is the whole reason it
+exists. Regenerate against the pristine vendor file, not against a repo commit:
+
+    diff -u --label a/<path> --label b/<path> <vendor file> <our file> > zzz-phase.patch
+
 The three sleeping Zs are pinned to their own bounding boxes in the texture, so
 nothing can make them travel the trail; the only thing that can carry a
 direction is the order they light up in. Upstream gives small / medium / large
@@ -34,8 +40,5 @@ is 3.9px on a 120px canvas — too small to read as drift, big enough to read as
 a drop.
 
 Measured in a real WebGL render, not by eye: per-glyph ink probes for the
-lighting order, and the big Z's vertical centroid held to 152.7-152.9px across
-a cycle to prove nothing moves.
-
-The patch is against the vendored Cat Life v2 file as it shipped (commit
-36b949e), so it replays onto a fresh vendor drop.
+lighting order, and the big Z's vertical centroid held flat across a cycle to
+prove nothing moves.

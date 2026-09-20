@@ -66,6 +66,8 @@ html, body {
 
 #robot { display: block; width: 100%; height: 100%; overflow: visible; }
 #cat   { display: block; width: 120px; height: 120px; }
+/* Cat artwork, including new side props, fits the hit box at local
+   x=8...114, y=6...112; mirrored by PetLayout.catBodyBox. */
 
 /* The count and the glyph, drawn by the host above whatever skin is loaded.
    The robot draws its own — it has an antenna and a chest — so these are for
@@ -690,3 +692,14 @@ html, body {
    notification text it replaces. */
 .note.name { color: #a99f96; }
 .empty { color: #8a837d; padding: 4px 2px; }
+
+/* Cat Life v3: persistent symbol, two gentle scale pulses then a quiet gap.
+   The existing calm rule disables this along with the shader motion. */
+#pet[data-skin="cat"][data-mood="waiting"] #mark:not([data-mark="none"]) {
+  transform-origin: center;
+  animation: cat-needs-you 5s ease-in-out infinite;
+}
+@keyframes cat-needs-you {
+  0%, 18%, 36%, 100% { transform: scale(1); }
+  9%, 27% { transform: scale(1.18); }
+}
