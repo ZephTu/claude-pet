@@ -3,7 +3,7 @@
 #
 # The distribution-facing one is dist/install.sh (produced by scripts/package.sh);
 # it adds precompiled binaries, arch probing and quarantine stripping. This one
-exists only for "I changed the code, install it now".
+# exists only for "I changed the code, install it now".
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
