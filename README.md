@@ -10,31 +10,31 @@ A cat that sits on your macOS desktop and shows, at a glance, what every Claude 
 
 You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
 
-## The lamp is the signal
+## The picture is the signal
 
-The other figure that ships is a robot, and its antenna lamp is the most
-readable summary of what the pet knows — so the table below is written against
-it. The cat shows the same states as drawings; **Right-click → Appearance**
-switches between them, and the section on it lists what each one can and cannot
-say.
+The cat has a drawing for nearly every state the pet knows, which is the whole
+point of it — you read a posture across the room without focusing on it. A
+robot ships too, and it keeps the one distinction the cat cannot draw;
+**Right-click → Appearance** switches between them, and the section on it says
+what each one can and cannot say.
 
-The bulb on the antenna is the part you can read without focusing on it:
+![Every state](docs/images/cat-states.png)
 
-![Every state](docs/images/states.png)
+Ordered by how much it wants from you, starting from asleep:
 
-Ordered by how much it wants from you, from nothing to a great deal, and back:
-
-| Lamp | Meaning | What it does |
-| --- | --- | --- |
-| 🟢 slow blink | a session is working | hands on the keys, code scrolling. The pose follows the tool: **editing** types, **reading** leans in at the screen, **running a command** slows down and watches |
-| 🟢 steady | compacting its context | hands sweeping side to side, the screen reshuffling rather than printing. Still work — just not work you asked for |
-| 🟢 slow pulse | waiting on a background agent | hands off the keys, watching the screen. Claude parked an agent and ended its turn; it will speak again by itself. **No finish notice for that turn** — nothing finished, and walking over to it would find a session that has not started |
-| 🟡 brief flash | a tool call was interrupted | the monitor turns amber and it carries on working. A failed call is usually not a failed task |
-| 🟡 pulse | a session needs your approval | raises a hand, monitor switches to a warning |
-| 🟡 pulse | a session needs an answer | tilts its head, a question mark floats up. No raised hand — this one wants typing, not a decision |
-| 🔴 fast blink | ignored for 60s+ | both arms up, jolting, bubble names the project **and the command it is blocked on** |
-| 🟢 brief flash | a turn just finished | two small nods. Deliberately small: a turn ending means Claude stopped talking, not that the work was right |
-| ⚫ off | everything is done | asleep at the desk with z's drifting up |
+| Meaning | What you see |
+| --- | --- |
+| everything is done | curled up asleep with z's drifting up |
+| a turn ended and nobody has looked | awake and on its feet, the count still by its ear. A separate drawing from asleep, which is a distinction the robot's one resting pose cannot make |
+| a session is working | hunched over the laptop, typing. **Editing and running a command are the same drawing** — separating those two is the robot's job |
+| reading | a book up in both paws, nose almost in it |
+| compacting its context | sorting a stack of paper. Still work — just not work you asked for |
+| waiting on a background agent | chin on a paw, laptop pushed aside. Claude parked an agent and ended its turn; it will speak again by itself. **No finish notice for that turn** — nothing finished, and walking over to it would find a session that has not started |
+| a tool call was interrupted | a warning triangle over a cat that carries on working. A failed call is usually not a failed task |
+| a session needs your approval | a raised paw and a warning triangle, pulsing twice every five seconds so a request does not sit there unnoticed |
+| a session needs an answer | the same raised paw, a question mark instead. This one wants typing, not a decision |
+| ignored for 60s+ | up on its hind legs, shouting, its own red alarm beside it; the bubble names the project **and the command it is blocked on** |
+| a turn just finished | both paws up, a short cheer. Deliberately short: a turn ending means Claude stopped talking, not that the work was right |
 
 ## What you can do with it
 
@@ -74,13 +74,13 @@ rights itself the moment that session does anything again.
 
 **Hover a row** for 0.45s and the bubble answers what the row has no space for: the full path and worktree, how full the context window is and on which model (with the statusline wired up), how long this turn has been going versus how long since anything happened at all, and the last tool call with its result. It used to show the session's name — which stopped being worth a hover once the first column started showing it.
 
-**Hover the pet itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp the antenna lamp uses.
+**Hover the pet itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp everything else here uses.
 
 **A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed there is no jump left to protect the record from, so clicking the row clears it and says why nothing opened. `clear` on the group heading marks them all.
 
 **Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
 
-**A turn that ended is not always a turn that finished.** Dispatch a background agent and Claude ends its turn immediately — the terminal says `Waiting for 1 background agent to finish`, and the pet used to put a red dot on it nine minutes before there was anything to see. `Stop` carries `background_tasks`, so a turn still holding an agent or a workflow is recorded as a pause: the session keeps its lamp on and its row says what it is waiting for. The turn the agent eventually wakes is the one that counts as finished. A backgrounded **shell** does not hold a turn open — Claude Code's own "waiting for" count excludes it, and a dev server parked for the afternoon would otherwise silence that session for the rest of the day.
+**A turn that ended is not always a turn that finished.** Dispatch a background agent and Claude ends its turn immediately — the terminal says `Waiting for 1 background agent to finish`, and the pet used to put a red dot on it nine minutes before there was anything to see. `Stop` carries `background_tasks`, so a turn still holding an agent or a workflow is recorded as a pause: the session still counts as running and its row says what it is waiting for. The turn the agent eventually wakes is the one that counts as finished. A backgrounded **shell** does not hold a turn open — Claude Code's own "waiting for" count excludes it, and a dev server parked for the afternoon would otherwise silence that session for the rest of the day.
 
 **⏱ on a blocked row** postpones it for 5, 15 or 30 minutes. The row stays visible and says how much longer — this is not muting. The delay belongs to that one approval: if the session resolves it and blocks on a different one, the new one is not postponed. Sleeping through a delay replays nothing.
 
@@ -106,7 +106,7 @@ A session stays listed for as long as its process is alive, however long it sits
 
 The **Cat** is the default: painted artwork warped by a WebGL mesh. It swishes its tail, blinks on an irregular beat, its eyes drift, and its ears flick every few seconds. It has nine drawings against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration rather than a bob of the idle one. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
 
-The **Robot** is an SVG whose every state is a CSS rule, and it keeps the one thing the cat cannot do: the lamp and the pose separate **every** busy state, including editing from waiting on a command. Pick it if that distinction is worth more to you than the artwork.
+The **Robot** is an SVG whose every state is a CSS rule, and it keeps the one thing the cat cannot do: the lamp on its antenna, together with the pose, separates **every** busy state, including editing from waiting on a command. Pick it if that distinction is worth more to you than the artwork.
 
 <img src="docs/images/pet.gif" width="360" alt="The robot cycling through every state it can show, speech bubbles included">
 
