@@ -803,6 +803,15 @@ html, body {
    reported and the status is what is happening to it, so they must not read as
    two headlines competing for the same row. */
 .what { color: #9a938c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Words out of TEXT hold their width; the project name is what gives.
+   Without this both columns shrank in proportion to their own content, so
+   "Response complete" came out as "Response comp…", "Response com…" and
+   "Response c…" on three consecutive rows — three different lengths of the
+   same word, none of them a state anybody can recognise. A finished row has
+   always worked this way (.row.done .what below); a live one now matches.
+   An activity summary is arbitrary text from the call in flight and keeps the
+   old behaviour, because there is no length it can be trusted to fit. */
+.what.fixed { flex: none; }
 /* The words a blocked row shows instead of a bare "needs you" — the one part of
    the status column that IS the news, so it keeps the warm colour. */
 .row.needs .what { color: #e0a63c; }
