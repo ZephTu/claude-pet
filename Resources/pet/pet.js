@@ -707,6 +707,10 @@ window.setSkin = function (name) {
       waiting: "skins/cat/assets/waiting.png",
       sleeping: "skins/cat/assets/sleeping.png",
       urgent: "skins/cat/assets/urgent.png",
+      reading: "skins/cat/assets/reading.png",
+      compacting: "skins/cat/assets/compacting.png",
+      finished: "skins/cat/assets/finished.png",
+      "awaiting-agent": "skins/cat/assets/awaiting-agent.png",
     });
     cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
     cat.ready.then(function () { if (cat) cat.setState(lastPose); })

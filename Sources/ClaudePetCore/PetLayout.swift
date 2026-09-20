@@ -56,7 +56,8 @@ public enum PetLayout {
     ///
     /// The cat has no antenna, so there is no second box — its lamp is drawn by
     /// the host inside this rectangle.
-    public static let catBodyBox = CGRect(x: 354, y: 148, width: 98, height: 104)
+    // Cat Life v3: include the book pose tail and the small side laptop.
+    public static let catBodyBox = CGRect(x: 348, y: 146, width: 106, height: 106)
 
     /// The rectangles that count as "the pet" for this skin.
     public static func hitBoxes(skin: PetSkin) -> [CGRect] {

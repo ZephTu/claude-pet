@@ -260,7 +260,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         loadInsights()
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
-        bridge?.push(state, motion: currentMotion(state, now: now))
+        let motion = currentMotion(state, now: now)
+        bridge?.push(state, motion: motion)
         // A phase belongs to a session, but the pet shows one figure, so any
         // session compacting puts the whole pet in that phase. It is a brief
         // state and showing it late is worse than showing it broadly.
@@ -287,7 +288,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count,
             unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count)
         bridge?.setBadge(badge)
-        // A painted skin has five pictures for eleven states, so what it shows
+        // The painted skin follows the same stabilized activity as the robot; what it shows
         // is decided here and pushed — see CatSkin. Sent whichever skin is up:
         // the page ignores it while the robot is showing, and the alternative is
         // a stale pose appearing the instant somebody switches.
@@ -295,7 +296,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         phase: StateAggregator.phase(state.sessions),
                                         flash: "",
                                         wanted: !badge.isEmpty,
-                                        blockedOn: state.waitingOn))
+                                        blockedOn: state.waitingOn, motion: motion))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
         // plainly seen the news or stopped caring about it.
@@ -848,7 +849,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // captions while the captions claimed otherwise.
         bridge?.setCatLook(CatSkin.look(mood: step.mood.rawValue, phase: step.phase,
                                         flash: "", wanted: !badge.isEmpty,
-                                        blockedOn: step.waitingOn))
+                                        blockedOn: step.waitingOn,
+                                        motion: step.tool.isEmpty ? nil : ActivitySummary.motion(forTool: step.tool)))
         if !step.flash.isEmpty { bridge?.flash(step.flash) }
         // The caption says both what is being shown AND that it is not real.
         // A demo that looks like live state is a demo that gets acted on.

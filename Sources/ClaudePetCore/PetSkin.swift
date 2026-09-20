@@ -24,34 +24,13 @@ public enum PetSkin: String, Sendable, Equatable, CaseIterable {
     }
 }
 
-/// What the cat skin draws for a given pet state.
-///
-/// The cat has five pictures against the pet's eleven states, so the pose is
-/// lossy by construction: three different busy poses, compaction and waiting on
-/// a background agent all become one picture of a cat at a laptop. Two of the
-/// eleven — a finished turn and an interrupted tool — have no picture at all.
-///
-/// The cat has no lamp. It had one — a host-drawn dot above the canvas, in the
-/// robot's own colours — and it was taken out on purpose: a coloured disc
-/// sitting on top of painted artwork reads as a sticker stuck to the cat, not
-/// as part of it.
-///
-/// What that costs, exactly: the three busy states (working, compacting,
-/// waiting on a background agent) are one picture now and nothing tells them
-/// apart. Everything else survives in the artwork itself — a raised paw plus a
-/// glyph for the two kinds of waiting, the kit's own painted alarm for being
-/// ignored, a bob of the idle picture for a finished turn, and a warning glyph
-/// over a working cat for an interrupted tool. The robot keeps its bulb, so a
-/// user who needs the busy states told apart has a skin that tells them.
+/// Pose and host-drawn glyph for the cat skin. Busy activity, compaction and
+/// background-agent waiting now have distinct artwork. The host still owns
+/// question/approval glyphs so their meaning is independent of the picture.
 public enum CatSkin {
-    /// The five pictures the kit ships, plus one the renderer makes from an
-    /// existing picture.
     public enum Pose: String, Sendable, Equatable, CaseIterable {
-        case idle, working, waiting, sleeping, urgent
-        /// The `idle` picture with a short bob, for the 1.6s after a turn ends.
-        /// Not a sixth texture — there is no artwork for a finished turn, and a
-        /// still picture cannot say "just now" anyway. See cat-pet.js.
-        case finished
+        case idle, working, waiting, sleeping, urgent, finished, reading, compacting
+        case awaitingAgent = "awaiting-agent"
     }
 
     /// A glyph the host draws beside the figure.
@@ -86,10 +65,8 @@ public enum CatSkin {
 
     /// - Parameters:
     ///   - mood: busy / waiting / urgent / idle, as `GlobalMood` spells them.
-    ///   - phase: "compacting", "awaiting-agent", or empty. Unused: it is the
-    ///     one thing the cat cannot draw, and the lamp that used to carry it is
-    ///     gone. Kept in the signature because the caller has it and a skin with
-    ///     more pictures would need it.
+    ///   - phase: "compacting", "awaiting-agent", or empty.
+    ///   - motion: the host's already-stabilized tool activity; reading gets a book.
     ///   - flash: "done", "trouble", or empty — a transient, not a state.
     ///   - wanted: something wants the user (the chest badge is non-empty).
     ///   - blockedOn: what a waiting session is blocked on, empty when it is
@@ -98,8 +75,9 @@ public enum CatSkin {
     ///     "answer me" — the alternative was reading English out of a
     ///     notification message.
     public static func look(mood: String, phase: String, flash: String,
-                            wanted: Bool, blockedOn: String = "") -> Look {
-        Look(pose: pose(mood: mood, wanted: wanted, flash: flash),
+                            wanted: Bool, blockedOn: String = "",
+                            motion: ActivitySummary.Motion? = nil) -> Look {
+        Look(pose: pose(mood: mood, wanted: wanted, flash: flash, phase: phase, motion: motion),
              mark: mark(mood: mood, flash: flash, blockedOn: blockedOn))
     }
 
@@ -121,13 +99,15 @@ public enum CatSkin {
         return blockedOn.isEmpty ? .question : .warn
     }
 
-    public static func pose(mood: String, wanted: Bool, flash: String = "") -> Pose {
-        // A turn ending is a moment, not a state, and the artwork has no
-        // picture for it. The renderer bobs the idle picture instead — which
-        // beats the alternative, which was nothing at all.
+    public static func pose(mood: String, wanted: Bool, flash: String = "",
+                            phase: String = "", motion: ActivitySummary.Motion? = nil) -> Pose {
+        // Transients win; phases only select a pose inside busy, never waiting.
         if flash == "done" { return .finished }
         switch mood {
-        case "busy": return .working
+        case "busy":
+            if phase == "compacting" { return .compacting }
+            if phase == "awaiting-agent" { return .awaitingAgent }
+            return motion == .reading ? .reading : .working
         case "waiting", "urgent": return mood == "urgent" ? .urgent : .waiting
         default:
             // The kit's two resting pictures earn their keep here: a session
