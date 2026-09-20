@@ -37,11 +37,13 @@ html, body {
    PetLayout.mirrored(_:) has to agree with all of them. */
 #stage.mirrored #pet    { right: auto; left: 20px; }
 #stage.mirrored #panel  { left: auto; right: 2px; }
-#stage.mirrored #bubble.chat,
-#stage.mirrored #bubble.quota { right: auto; left: 14px; text-align: left; }
-#stage.mirrored #bubble:not(.chat):not(.quota) {
-  left: 80px; right: auto; transform: translateX(-50%);   /* 20 + 120/2 */
-}
+/* Every variant except the alarm carries .chat as its base (see variant() in
+   pet.js), so this one rule moves all of them — which is what stops a NEW
+   variant from quietly staying on the wrong side of the window. */
+#stage.mirrored #bubble.chat { right: auto; left: 14px; text-align: left; }
+/* The alarm anchors to the same edge as everything else — it just does not wear
+   `.chat`, so it needs saying twice. */
+#stage.mirrored #bubble.alert { right: auto; left: 14px; }
 
 #pet {
   position: absolute;
@@ -404,7 +406,16 @@ html, body {
   transform: translateX(-50%);
   max-width: 150px;
   padding: 5px 9px;
-  border-radius: 9px;
+  /* So every max-width below is the width the bubble actually reaches. Without
+     it the padding and the border are added on top, and a variant capped at
+     250px renders at 272 — which is the difference between "fits in the 480pt
+     window" being checkable and being guessed at. */
+  box-sizing: border-box;
+  border-radius: 13px;
+  /* A hairline edge, not a shadow. On a pale desktop the dark fill alone has no
+     boundary at the corners, and a shadow big enough to give it one gets
+     clipped by the window. */
+  border: 1px solid rgba(255, 255, 255, 0.11);
   background: rgba(35, 32, 29, 0.93);
   color: #f6f4f1;
   font: 500 11px/1.35 -apple-system, system-ui, sans-serif;
@@ -427,7 +438,10 @@ html, body {
   left: auto;
   right: 14px;
   transform: none;
-  max-width: 300px;
+  /* A chatter line is a sentence, and a sentence set 300px wide in 11px type is
+     a long way for the eye to travel back. The readouts below widen it again —
+     their content is columns, not prose. */
+  max-width: 212px;
   text-align: left;
   line-height: 1.45;
   /* pre-line, not normal: the hover detail arrives as several lines joined by
@@ -452,9 +466,17 @@ html, body {
   left: auto;
   right: 14px;
   transform: none;
-  max-width: 230px;
+  max-width: 262px;
   text-align: left;
   padding: 7px 9px;
+}
+/* Says what the bars are MEASURING. A bare percentage next to a bar is read as
+   either "how much is gone" or "how much is left", and those are opposite
+   readings of the same picture. */
+.qhead {
+  color: #8a837d; font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.4px; text-transform: uppercase;
+  padding-bottom: 2px;
 }
 .qrow {
   display: flex;
@@ -491,7 +513,70 @@ html, body {
 #bubble.readout {
   display: block;
   white-space: normal;
+  max-width: 272px;
   padding: 7px 10px;
+}
+
+/* ---- Intervention, completion and quota warning ----------------------------
+   Three variants of one element rather than three components competing for the
+   corner — see variant() in pet.js, which is the only thing that sets these.
+   Each one is told apart by SHAPE and WORDS as well as by colour: a warning
+   that is only a hue disappears on a colour-blind screen and with motion off.
+
+   NAMING: the panel owns .row, .detail, .name, .what and .done. Bubble-only
+   classes are prefixed — `d` for the hover readout, `a` for the alarm card. */
+#bubble.alert {
+  /* Anchored to the window's right edge, NOT centred on the pet. Centred, a
+     card this wide runs off a 480pt window — which is exactly what a long
+     project name did: it was drawn from x=275 and the end of it was simply not
+     in the window. */
+  left: auto;
+  right: 14px;
+  transform: none;
+  display: block;
+  white-space: normal;
+  text-align: left;
+  max-width: 250px;
+  padding: 7px 10px;
+  border-color: rgba(224, 83, 60, 0.55);
+  background: rgba(38, 28, 25, 0.95);
+}
+.ahead { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+/* `!` for a decision, `?` for a reply — the same two glyphs the pet wears, so
+   the card and the figure cannot disagree about which kind of ask this is. */
+.aglyph {
+  flex: none; width: 13px; height: 13px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  font: 700 9.5px/1 -apple-system, system-ui, sans-serif;
+  color: #3a2f22; background: #e0a63c;
+}
+.aglyph[data-ask="permission"] { background: #e0533c; color: #fdf3ec; }
+/* min-width:0 is what actually makes the ellipsis happen: without it a flex
+   item refuses to shrink below its content, so the name pushed the card wider
+   than its own max-width instead of truncating. */
+.aname {
+  min-width: 0; font-weight: 600; color: #f6f4f1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.abody {
+  display: flex; gap: 5px; align-items: baseline;
+  margin-top: 2px; padding-left: 19px;         /* 13 glyph + 6 gap */
+  color: #d8d2cb; font-size: 10.5px;
+}
+.akey { flex: none; color: #8a837d; }
+.awhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A finished turn. Softer than the alarm and it takes itself away — the colour
+   is the panel's own "done" green so the two places agree. */
+#bubble.notice {
+  max-width: 240px;
+  border-color: rgba(103, 164, 152, 0.4);
+}
+/* Quota past a threshold. Amber, which is the same "it wants you, but nothing
+   is on fire" the pet's own mark uses. */
+#bubble.warn {
+  max-width: 240px;
+  border-color: rgba(224, 166, 60, 0.45);
 }
 #bubble.readout > * + * { margin-top: 3px; }
 .dpath { display: flex; gap: 6px; align-items: baseline; }
@@ -514,7 +599,10 @@ html, body {
 .ddot { flex: none; font-size: 7px; }
 .ddot.ok  { color: #67a498; }
 .ddot.bad { color: #e0a63c; }
-.qreset { flex: none; color: #8a837d; font-size: 10px; }
+.qreset {
+  flex: none; color: #8a837d; font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
 
 #pet { cursor: pointer; }
 
@@ -544,8 +632,40 @@ html, body {
    is near-opaque dark on its own and needs no help standing out. */
 #panel[hidden] { display: none; }
 
-.row { padding: 3px 2px; }
+/* The left inset is the same on EVERY row, whether or not it carries the
+   accent bar below. Paying for the gutter once means marking a row costs no
+   width, cannot move the column beside it, and keeps every dot on one line. */
+.row { padding: 3px 2px 3px 7px; }
+/* Rounded only where something is actually painted. A radius on a row with
+   no fill just curls the ends of the separator above it. */
+.row.hot, .row.needs { border-radius: 5px; }
 .row + .row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+
+/* ---- A row that wants something -------------------------------------------
+   A 6px dot was the entire signal, and at a glance across eight rows it is not
+   one. Three carriers now, so none of them is load-bearing on its own: the bar,
+   the wash, and the words ("Needs approval" / "Awaiting reply") in the status
+   column. Nothing here is colour ONLY.
+
+   Drawn with an inset shadow rather than a border-left because a border is
+   layout: it would shift the dot on marked rows and leave the column ragged. */
+.row.needs {
+  box-shadow: inset 2px 0 0 #e0a63c;
+  background: rgba(224, 166, 60, 0.05);
+}
+/* Waited past StateAggregator.urgentAfter — the same threshold that turns the
+   pet's own badge red, so the panel and the figure never disagree about which
+   session is the urgent one. A step up in weight, not a flash: a row that
+   blinks is unreadable exactly when it most needs reading. */
+.row.needs.urgent {
+  box-shadow: inset 2px 0 0 #e0533c;
+  background: rgba(224, 83, 60, 0.075);
+}
+.row.needs.urgent .dot { background: #e0533c; }
+/* Hover has to stay visible ON TOP of the wash, so it is a step of the same
+   colour rather than the white overlay that ordinary rows get. */
+.row.needs.hot { background: rgba(224, 166, 60, 0.13); }
+.row.needs.urgent.hot { background: rgba(224, 83, 60, 0.155); }
 
 /* A row whose session runs in a terminal we can address. The arrow is a
    permanent affordance, because the highlight below only appears once the
@@ -553,10 +673,7 @@ html, body {
 .row.jumpable { cursor: pointer; }
 /* Every row can be muted, so every row gets the hover treatment — not just the
    jumpable ones. */
-.row.hot {
-  background: rgba(255, 255, 255, 0.09);
-  border-radius: 5px;
-}
+.row.hot { background: rgba(255, 255, 255, 0.09); }
 .jump { flex: none; color: #6b6560; font-size: 10px; padding-left: 3px; }
 .row.jumpable.hot .jump { color: #d97757; }
 
@@ -600,6 +717,14 @@ html, body {
   text-transform: uppercase; color: #857c74;
 }
 .group:first-child { padding-top: 1px; }
+/* How many are in this group. This is the panel's summary — put where the
+   groups already are, rather than in a separate total pinned to the top, which
+   would have to say "1 session" above a list that is one row long. Tabular so
+   the heading cannot jog sideways as the number ticks. */
+.gcount {
+  color: #6b6560; font-weight: 500; letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
 .read-all {
   margin-left: auto; font-weight: 500; letter-spacing: 0;
   text-transform: none; color: #6b6560; cursor: pointer;
@@ -640,7 +765,9 @@ html, body {
 
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .dot.done    { background: #67a498; }
-.dot.waiting { background: #e8624a; }
+/* Amber, which is what the pet's own mark uses for "it wants you". The red is
+   kept for a row that has waited past the urgent threshold — see .row.urgent. */
+.dot.waiting { background: #e0a63c; }
 .dot.busy    { background: #d97757; }
 .dot.idle    { background: #6b6560; }
 /* Gone quiet: busy on paper, but nothing heard for a while. Hollow rather
@@ -672,8 +799,20 @@ html, body {
 .branch:not(:empty)::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
 .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.what { color: #b5aea8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.age  { margin-left: auto; color: #8a837d; flex: none; }
+/* Dimmer than the project name on purpose: the name is the thing being
+   reported and the status is what is happening to it, so they must not read as
+   two headlines competing for the same row. */
+.what { color: #9a938c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The words a blocked row shows instead of a bare "needs you" — the one part of
+   the status column that IS the news, so it keeps the warm colour. */
+.row.needs .what { color: #e0a63c; }
+.row.needs.urgent .what { color: #ef8a72; }
+/* Tabular, so a column of ages lines up digit under digit and a row does not
+   twitch sideways when 9s becomes 10s. */
+.age  {
+  margin-left: auto; color: #8a837d; flex: none;
+  font-variant-numeric: tabular-nums;
+}
 /* Notification message — design doc section 2 keeps it out of the bubble and
    shows it only here. */
 .detail {

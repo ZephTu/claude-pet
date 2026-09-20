@@ -182,9 +182,16 @@ final class WebBridge {
 
     /// Show a line for `hold` seconds. Fire-and-forget: the page owns the timer,
     /// because a dropped call must not leave a bubble stuck on screen.
-    func say(_ text: String, hold: TimeInterval, emphasis: String = "") {
+    ///
+    /// `variant` says which KIND of message window this is — see
+    /// `Chatter.Bubble`. The page needs it to decide what a line is allowed to
+    /// replace: a wellness nudge must not take the bubble away from a quota
+    /// warning just because it arrived second.
+    func say(_ text: String, hold: TimeInterval, emphasis: String = "",
+             variant: Chatter.Bubble = .chat) {
         guard isReady else { return }
-        evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)));")
+        evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)), "
+                 + "\(jsString(emphasis)), \(jsString(variant.rawValue)));")
     }
 
     /// Routes a right click: a session row gets its own menu, anything else
@@ -347,15 +354,34 @@ final class WebBridge {
                 "project": SessionLabels.displayName(for: s, prefs: prefs, title: title),
                 "state": s.state.rawValue,
                 "tool": s.tool,
-                // Notification message. Design doc section 2 puts it in the
-                // expanded panel and keeps it out of the bubble.
-                "detail": s.detail,
+                // The second line of the row. Design doc section 2 puts the
+                // notification in the expanded panel and keeps it out of the
+                // bubble; SessionCopy decides whether it says anything the
+                // first line has not already said — see SessionCopy.note.
+                "detail": SessionCopy.note(state: s.state, detail: s.detail,
+                                           waitingOn: s.waitingOn),
                 "waitedSeconds": Int(max(0, now.timeIntervalSince(s.since))),
             ]
             // Busy on paper, but nothing in flight and nothing heard for a
             // while: the row stops claiming to be thinking, without claiming to
             // be done — see StateAggregator.isQuiet.
             if StateAggregator.isQuiet(s, now: now) { item["quiet"] = true }
+            // Blocked on a permission rather than on an answer. The two are the
+            // same colour of "waiting" and not the same request: one wants a
+            // decision, the other wants typing, and the row says which.
+            if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
+            // "It answered and is waiting on the next instruction" is a fact
+            // about the session, not about whether its second line happens to
+            // carry text. It used to be read off `detail`, which meant dropping
+            // the boilerplate sentence ALSO downgraded the row to plain idle.
+            if s.state == .idle, !s.detail.isEmpty { item["replied"] = true }
+            // Ignored for long enough that the pet's own alarm has gone off.
+            // Same threshold, so the panel and the figure never disagree about
+            // which session is the urgent one.
+            if s.state == .waiting,
+               SessionCopy.isUrgent(waitedFor: now.timeIntervalSince(s.since)) {
+                item["urgent"] = true
+            }
             // A postponed row stays in the list and says how much longer, so
             // "remind me later" never turns into "forget about it".
             let left = Snooze.remaining(s, marks: snoozed, now: now)
