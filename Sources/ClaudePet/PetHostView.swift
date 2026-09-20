@@ -76,7 +76,7 @@ final class PetHostView: NSView {
 
     /// Which figure is on screen. The hit region is measured off the drawing,
     /// so swapping the drawing has to swap the rectangles with it.
-    var skin: PetSkin = .robot
+    var skin: PetSkin = .standard
 
     func opaqueRegionContains(_ p: NSPoint) -> Bool {
         PetLayout.isOpaque(at: cssPoint(from: p), panel: panelRect, bubble: bubbleRect,

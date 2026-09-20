@@ -37,6 +37,19 @@ struct AppMain {
             }
             app.run()
         }
+        // The same thing over time, for the README's animation. The page drives
+        // its own state; this only presses the shutter.
+        if let i = arguments.firstIndex(of: "--probe-film"), i + 4 < arguments.count {
+            app.setActivationPolicy(.prohibited)
+            let frames = Int(arguments[i + 3]) ?? 0
+            let fps = Double(arguments[i + 4]) ?? 9
+            let script = i + 5 < arguments.count ? arguments[i + 5] : ""
+            MainActor.assumeIsolated {
+                SkinProbe.film(path: arguments[i + 1], directory: arguments[i + 2],
+                               frames: frames, fps: fps, script: script) { exit($0) }
+            }
+            app.run()
+        }
         // .accessory keeps it out of the Dock and out of Cmd-Tab.
         app.setActivationPolicy(.accessory)
         let delegate = PetAppDelegate()
@@ -71,7 +84,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var titlesRefreshedIds: Set<String> = []
     private var lastTitleRefresh: Date?
     /// Which figure is drawn. Persisted, so it survives a restart.
-    private var skin: PetSkin = .robot
+    private var skin: PetSkin = .standard
     /// How long somebody has been at this machine without a break. Advanced
     /// from the raw session list on every render — see Wellness.
     private var deskClock = Wellness.DeskClock()
