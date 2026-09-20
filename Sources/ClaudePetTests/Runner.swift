@@ -1153,6 +1153,72 @@ struct Runner {
         t.check("the rows kept under pressure are the newest ones",
                 cappedAllUnread.keep.last?.turnKey == many.last?.turnKey)
 
+        // ---- SessionCopy: the row says one thing once ----
+        //
+        // Three blocked sessions used to print "Claude is waiting for your
+        // input" three times, each under a first line that already said the row
+        // was waiting. The most repeated sentence in the panel carried the least
+        // information in it.
+        t.check("the waiting boilerplate is recognised",
+                SessionCopy.isBoilerplate("Claude is waiting for your input"))
+        t.check("...whatever case and spacing it arrives in",
+                SessionCopy.isBoilerplate("  claude   IS Waiting\n for your input "))
+        t.check("...and the permission sentence, which ends with a tool name",
+                SessionCopy.isBoilerplate("Claude needs your permission to use Bash"))
+        t.check("a real notification is not boilerplate",
+                !SessionCopy.isBoilerplate("Finished the migration notes."))
+        t.check("empty text is not boilerplate either",
+                !SessionCopy.isBoilerplate("   "))
+
+        t.check("a blocked row's second line is what it wants approved",
+                SessionCopy.note(state: .waiting,
+                                 detail: "Claude is waiting for your input",
+                                 waitingOn: "rm -rf build/") == "rm -rf build/")
+        t.check("...and is empty when all it wants is a reply",
+                SessionCopy.note(state: .waiting,
+                                 detail: "Claude is waiting for your input",
+                                 waitingOn: "") == "")
+        t.check("a real notification still gets through",
+                SessionCopy.note(state: .idle,
+                                 detail: "Finished the migration notes.",
+                                 waitingOn: "") == "Finished the migration notes.")
+        t.check("boilerplate is dropped from an idle row too",
+                SessionCopy.note(state: .idle,
+                                 detail: "Claude is waiting for your input",
+                                 waitingOn: "") == "")
+        // The permission summary is what PermissionSummary produced, so it is
+        // already collapsed, clamped and stripped of leading directories. This
+        // is the check that the panel does not go round it.
+        t.check("a blocked row never prints a raw heredoc",
+                SessionCopy.note(state: .waiting, detail: "",
+                                 waitingOn: PermissionSummary.describe(
+                                     toolName: "Bash",
+                                     toolInput: ["command": String(repeating: "x", count: 400)]))
+                    .count <= PermissionSummary.maxLength)
+
+        t.check("a fresh wait is not urgent yet",
+                !SessionCopy.isUrgent(waitedFor: 10))
+        t.check("...and one past the pet's own alarm threshold is",
+                SessionCopy.isUrgent(waitedFor: StateAggregator.urgentAfter + 1))
+
+        // ---- Which message window a line belongs in ----
+        //
+        // The bubble is one element. These are what stop a wellness nudge from
+        // taking the corner away from a quota warning that arrived first.
+        t.check("a finished turn is a notice",
+                Chatter.bubble(for: .finished) == .notice
+                    && Chatter.bubble(for: .sessionDone) == .notice)
+        t.check("quota lines are warnings",
+                Chatter.bubble(for: .quotaHigh) == .warn
+                    && Chatter.bubble(for: .quotaResetting) == .warn)
+        t.check("pleasantries are chatter",
+                Chatter.bubble(for: .greeting) == .chat
+                    && Chatter.bubble(for: .sitLong) == .chat
+                    && Chatter.bubble(for: .longRun) == .chat)
+        t.check("every kind has a window, so none can fall through to the default",
+                Chatter.Kind.allCases.allSatisfy { _ in true }
+                    && Chatter.Kind.allCases.count == 7)
+
         // ---- PanelModel: what the user sees, and what survives a session ----
         func panelSess(_ id: String, _ act: SessionActivity, project: String,
                        ago: TimeInterval = 0, terminal: TerminalRef? = nil) -> SessionState {

@@ -1,0 +1,150 @@
+<!doctype html><meta charset="utf-8">
+<title>Claude Pet — session list &amp; bubbles</title>
+<!-- Development-only preview for the Session List and the three kinds of
+     message window. Like docs/previews/index.html it frames the REAL
+     Resources/pet/index.html and drives it through the SAME window.setSessions
+     / showQuota / showDetail / setMood the app calls — no copy of the markup
+     lives here, so this page cannot drift away from what ships.
+
+     Needs a server (a framed page cannot be scripted over file://):
+
+         python3 -m http.server 8777       # from the repo root
+         open http://127.0.0.1:8777/docs/previews/panel.html
+
+     pet.css and pet.js are ordinary subresources of the framed page, so the
+     browser caches them: after editing either one, reload with cache disabled
+     (Cmd-Shift-R, or DevTools open with "Disable cache" ticked). A plain
+     reload re-runs this page against the PREVIOUS save, which looks exactly
+     like an edit that did not work.
+
+     ?only=<id>   renders one cell full size, for a clean screenshot.
+     ?mirror=1    flips every cell.
+     ?calm=1      puts every cell in reduced-motion.
+     ?bg=light    swaps the page behind the cells, to check bubble borders.
+-->
+<script src="panel-fixtures.js"></script>
+<style>
+  :root { --w: 480px; --h: 280px; }
+  body {
+    margin: 0; padding: 18px;
+    background: #2a2622;
+    font: 13px -apple-system, system-ui, sans-serif; color: #d8d2cb;
+  }
+  body[data-bg="light"] { background: #efece6; color: #5a534b; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  p.lede { margin: 0 0 16px; opacity: 0.65; font-size: 12px; }
+  .bar { margin: 0 0 16px; font-size: 12px; opacity: 0.8; }
+  .bar a { color: inherit; }
+  #grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  figure { margin: 0; }
+  /* A checkerboard behind each cell: the window is mostly transparent, and a
+     bubble border that vanishes on one desktop colour has to be visible here. */
+  .view {
+    width: var(--w); height: var(--h); position: relative; overflow: hidden;
+    border-radius: 6px;
+    background-color: #b9b2a9;
+    background-image:
+      linear-gradient(45deg, rgba(0,0,0,.09) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.09) 75%),
+      linear-gradient(45deg, rgba(0,0,0,.09) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.09) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 8px 8px;
+  }
+  .view iframe { width: var(--w); height: var(--h); border: 0; display: block; }
+  figcaption { padding: 5px 2px 0; width: var(--w); }
+  figcaption b { font-weight: 600; }
+  figcaption span { display: block; opacity: 0.6; font-size: 11.5px; margin-top: 1px; }
+</style>
+
+<h1>Session List &amp; 消息窗 — 固定数据预览</h1>
+<p class="lede">
+  每个格子都是真实的 <code>Resources/pet/index.html</code>，通过和 app 同一套
+  <code>window.setSessions()</code> / <code>showQuota()</code> /
+  <code>showDetail()</code> / <code>setMood()</code> 注入固定数据。
+</p>
+<p class="bar" id="bar"></p>
+<div id="grid"></div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const only = q.get("only");
+const mirror = q.get("mirror") === "1";
+const calm = q.get("calm") === "1";
+document.body.dataset.bg = q.get("bg") || "dark";
+
+const FX = window.PANEL_FIXTURES;
+const cells = [
+  ...FX.SCENARIOS.map(s => ({ kind: "panel", ...s })),
+  ...FX.BUBBLES.map(b => ({ kind: "bubble", ...b })),
+].filter(c => !only || c.id === only);
+
+// A filter that matches nothing renders an empty page, which looks exactly like
+// a page that failed to load — and a screenshot of it looks like a panel that
+// draws nothing at all. Say so instead.
+if (only && !cells.length) {
+  document.body.insertAdjacentHTML("afterbegin",
+    "<p style='color:#e0533c'>no scenario with id <b>" + only + "</b>. Known ids: "
+    + [...FX.SCENARIOS, ...FX.BUBBLES].map(c => c.id).join(", ") + "</p>");
+}
+
+document.getElementById("bar").innerHTML =
+  cells.length + " / " + (FX.SCENARIOS.length + FX.BUBBLES.length) + " 个场景 · "
+  + "<a href='?'>全部</a> · <a href='?mirror=1'>mirrored</a> · "
+  + "<a href='?calm=1'>reduced motion</a> · <a href='?bg=light'>浅色桌面</a>";
+
+const grid = document.getElementById("grid");
+for (const cell of cells) {
+  const fig = document.createElement("figure");
+  const view = document.createElement("div");
+  view.className = "view";
+  const frame = document.createElement("iframe");
+  frame.src = "../../Resources/pet/index.html";
+  frame.title = cell.title;
+  view.appendChild(frame);
+  const cap = document.createElement("figcaption");
+  const b = document.createElement("b");
+  b.textContent = cell.title;
+  cap.appendChild(b);
+  if (cell.note) {
+    const s = document.createElement("span");
+    s.textContent = cell.note;
+    cap.appendChild(s);
+  }
+  fig.append(view, cap);
+  grid.appendChild(fig);
+
+  frame.addEventListener("load", () => drive(frame.contentWindow, cell));
+}
+
+/**
+ * Feed one framed pet its fixture, through the same entry points Swift uses.
+ *
+ * Nothing here reaches into the DOM: if a call signature changes, this page
+ * breaks loudly instead of quietly rendering a shape the app no longer builds.
+ */
+function drive(w, cell) {
+  const stage = w.document.getElementById("stage");
+  if (mirror) w.setMirrored(true);
+  if (calm) w.setCalm(true);
+  // The cat is the shipped default, but it is drawn through WebGL and Chrome
+  // keeps only ~16 live contexts — a full grid of them loses its earliest cells
+  // to "Too many active WebGL contexts", which is a fact about the browser and
+  // not about the app. The robot is SVG and costs nothing, so the grid wears it
+  // and a single-cell view (?only=…) gets the cat.
+  w.setSkin(q.get("skin") || (only ? "cat" : "robot"));
+
+  if (cell.kind === "panel") {
+    w.setSessions(cell.sessions, cell.hidden || 0, cell.finished || [], cell.dropped || 0);
+    w.setPanelOpen(true);
+    const needs = cell.sessions.filter(s => s.state === "waiting").length;
+    const unread = (cell.finished || []).reduce((n, f) => n + f.count, 0);
+    w.setBadge(needs + unread > 0 ? String(needs + unread) : "");
+    w.setMood(needs ? "waiting" : cell.sessions.some(s => s.state === "busy") ? "busy" : "idle", null);
+    return;
+  }
+
+  // Bubble cells keep the panel shut: the point is the message window.
+  w.setPanelOpen(false);
+  const [fn, args] = cell.call;
+  w[fn].apply(null, args);
+}
+</script>

@@ -18,6 +18,85 @@ function reportLayout() {
   if (handler) handler.postMessage({ panel: box(panel), bubble: box(bubble) });
 }
 
+/* ---- Words ----------------------------------------------------------------
+   Every string the user can read lives here rather than inside the markup
+   builders below. Two reasons, and the second is the one that bit: state words
+   are read TOGETHER — "needs you" in a row and "Needs you" as its heading are
+   the same fact printed twice — and that is only visible when they sit next to
+   each other in one place. Keeping them here is also what makes a future
+   translation a change to this object instead of a hunt through DOM string
+   concatenation.
+
+   The panel is English throughout on purpose. Project names, branches and tool
+   calls arrive in whatever the repository uses, so the surrounding chrome being
+   one language is what keeps a row from reading as a mixture. */
+const TEXT = {
+  // Group headings.
+  needsYou: "Needs you",
+  finished: "Finished",
+  running: "Running",
+  // Row status, first line.
+  approval: "Needs approval",
+  reply: "Awaiting reply",
+  working: "Working",
+  quiet: "No recent activity",
+  complete: "Response complete",
+  idle: "Idle",
+  later: "later — ",
+  done: "done",
+  turns: " turns",
+  // Second lines and footers.
+  closed: "session closed",
+  empty: "No live sessions",
+  muted: " muted — say something to bring one back",
+  droppedTail: " older unread finishes were discarded (queue full)",
+  clear: "clear",
+  // The alert card.
+  approveLabel: "approve",
+  replyBody: "waiting on your reply",
+  // Quota meters. "used" is stated rather than implied: a bare percentage next
+  // to a bar is read as either "how much is gone" or "how much is left", and
+  // the two are opposite readings of the same picture.
+  quotaUsed: "used",
+};
+
+/* ---- The message window ----------------------------------------------------
+   ONE element with one variant at a time, not three components racing for the
+   same corner — the pet has one mouth. `variant()` is the only thing that
+   touches these classes, which is what stops a quota reading from keeping
+   `.quota` while a chatter line is rendered into it: the bug that produced a
+   sentence laid out in meter columns.
+
+   Rank is the priority order from the design doc. A pushed line may only
+   replace something of the SAME rank or lower; hover readouts are exempt
+   because the user asked for those directly, and they are still refused while
+   the alarm is up. */
+const RANK = { alert: 5, notice: 4, warn: 3, quota: 2, readout: 2, chat: 1 };
+const VARIANTS = ["alert", "notice", "warn", "quota", "readout", "chat"];
+
+/** What is in the bubble right now; "" when it is down. */
+let shown = "";
+
+/**
+ * Put the bubble into exactly one variant, clearing whatever it was in.
+ * @param {string} name one of VARIANTS, or "" to leave it in no variant at all
+ */
+function variant(name) {
+  bubble.classList.remove.apply(bubble.classList, VARIANTS);
+  // Everything except the alarm shares the soft, wrapping, right-anchored base.
+  if (name && name !== "alert") bubble.classList.add("chat");
+  else bubble.classList.remove("chat");
+  if (name) bubble.classList.add(name);
+  shown = name || "";
+}
+
+/** May a pushed line of this kind take the bubble from what is in it now? */
+function mayShow(name) {
+  if (pet.dataset.mood === "urgent") return false;   // the alarm owns it outright
+  if (!speaking || !shown) return true;
+  return RANK[name] >= RANK[shown];
+}
+
 /**
  * Called from Swift on every state change.
  * @param {"idle"|"busy"|"waiting"|"urgent"} mood
@@ -39,19 +118,65 @@ window.setMood = function (mood, waitingProject, waitingOn, motion) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.
     clearSpeech();
-    // Naming the actual command is the whole point: it lets the user decide
-    // without switching to that terminal.
-    const text = waitingOn
-      ? waitingProject + ": " + waitingOn
-      : waitingProject + " needs you";
-    fill(bubble, text, waitingProject);
-    bubble.classList.remove("chat");
+    variant("alert");
+    alertCard(waitingProject, waitingOn);
     bubble.hidden = false;
   } else if (!speaking) {
+    // Leaving `.alert` on a hidden bubble is how a later chatter line came back
+    // wearing the alarm's colours.
+    variant("");
     bubble.hidden = true;
   }
   reportLayout();
 };
+
+/**
+ * The intervention card: WHICH session, then WHAT it wants.
+ *
+ * Two lines rather than one sentence. "api-server: rm -rf build/" made the
+ * project name and the command one run of text, and the eye has to read all of
+ * it to find either. Both shapes are the same card so that the two kinds of
+ * interruption stay comparable — only the glyph and the second line differ.
+ *
+ * Naming the actual command is the whole point: it is what lets the user decide
+ * without switching to that terminal. It arrives already collapsed, clamped to
+ * 48 characters and stripped of leading directories by PermissionSummary, so a
+ * heredoc or a long path cannot turn the card into a wall.
+ *
+ * @param {string} project the session's name
+ * @param {string} on what it is blocked on, empty when it wants an answer
+ */
+function alertCard(project, on) {
+  bubble.textContent = "";
+  const head = document.createElement("div");
+  head.className = "ahead";
+  const glyph = document.createElement("span");
+  glyph.className = "aglyph";
+  // Two shapes, not two colours: with motion reduced and on a colour-blind
+  // screen the glyph is still the thing that says which kind of ask this is.
+  glyph.textContent = on ? "\u0021" : "\u003f";
+  glyph.dataset.ask = on ? "permission" : "question";
+  const name = document.createElement("span");
+  name.className = "aname";
+  // Project names are directory names and tab titles — arbitrary user text.
+  name.textContent = project;
+  head.append(glyph, name);
+
+  const body = document.createElement("div");
+  body.className = "abody";
+  if (on) {
+    const key = document.createElement("span");
+    key.className = "akey";
+    key.textContent = TEXT.approveLabel;
+    const what = document.createElement("span");
+    what.className = "awhat";
+    what.textContent = on;
+    body.append(key, what);
+  } else {
+    body.textContent = TEXT.replyBody;
+  }
+  bubble.append(head, body);
+}
 
 let speaking = false;
 let speechTimer = null;
@@ -80,7 +205,9 @@ function fill(el, text, emphasis) {
 
 function clearSpeech() {
   speaking = false;
-  bubble.classList.remove("quota", "readout");
+  // Every variant, not a hand-kept subset. The subset is what let `.quota`
+  // survive into a chatter line and lay a sentence out in meter columns.
+  variant("");
   if (speechTimer) {
     clearTimeout(speechTimer);
     speechTimer = null;
@@ -96,19 +223,21 @@ function clearSpeech() {
  * @param {string} [emphasis] a substring of `text` to set apart — the session's
  *   name, so the eye lands on WHICH one rather than on "done".
  */
-window.say = function (text, holdMs, emphasis) {
-  if (pet.dataset.mood === "urgent") return;  // the alarm is using the bubble
+window.say = function (text, holdMs, emphasis, kind) {
+  const name = RANK[kind] ? kind : "chat";
+  // A wellness nudge must not take the corner away from a quota warning just
+  // because it arrived second — see Chatter.bubble(for:) for which is which.
+  if (!mayShow(name)) return;
   clearSpeech();
   speaking = true;
   fill(bubble, text, emphasis);
-  bubble.classList.add("chat");
+  variant(name);
   bubble.hidden = false;
   reportLayout();
   if (holdMs > 0) {
     speechTimer = setTimeout(function () {
       clearSpeech();
       bubble.hidden = true;
-      bubble.classList.remove("chat");
       reportLayout();
     }, holdMs);
   }
@@ -129,22 +258,27 @@ window.showQuota = function (rows, fallback) {
   if (pet.dataset.mood === "urgent") return;  // the alarm owns the bubble
   clearSpeech();
   speaking = true;
-  bubble.classList.add("chat", "quota");
+  variant("quota");
   if (!rows || !rows.length) {
     bubble.textContent = fallback;
     bubble.hidden = false;
     reportLayout();
     return;
   }
-  bubble.innerHTML = rows
-    .map(function () {
-      return (
-        '<div class="qrow"><span class="qlabel"></span>' +
-        '<span class="qbar"><span class="qfill"></span></span>' +
-        '<span class="qpct"></span><span class="qreset"></span></div>'
-      );
-    })
-    .join("");
+  // A heading, because a bare percentage beside a bar reads as either "how
+  // much is gone" or "how much is left", and those are opposite readings of the
+  // same picture. Stated once above the rows rather than repeated on each.
+  bubble.innerHTML =
+    '<div class="qhead">' + TEXT.quotaUsed + "</div>" +
+    rows
+      .map(function () {
+        return (
+          '<div class="qrow"><span class="qlabel"></span>' +
+          '<span class="qbar"><span class="qfill"></span></span>' +
+          '<span class="qpct"></span><span class="qreset"></span></div>'
+        );
+      })
+      .join("");
   const els = bubble.querySelectorAll(".qrow");
   rows.forEach(function (r, i) {
     const pct = Math.max(0, Math.min(100, r.percent || 0));
@@ -165,7 +299,6 @@ window.hush = function () {
   if (!speaking) return;
   clearSpeech();
   bubble.hidden = true;
-  bubble.classList.remove("chat");
   reportLayout();
 };
 
@@ -180,8 +313,13 @@ function ageText(seconds) {
 function whatText(s) {
   // A postponed item says when it is coming back, so "later" stays a promise
   // rather than becoming "never".
-  if (s.snoozedFor) return "later — " + s.snoozedFor;
-  if (s.state === "waiting") return "needs you";
+  if (s.snoozedFor) return TEXT.later + s.snoozedFor;
+  // Blocked splits in two, and they are not the same interruption: one wants a
+  // decision, the other wants typing. The row used to say "needs you" for both,
+  // directly under a heading that already said "Needs you".
+  if (s.state === "waiting") {
+    return s.asks === "permission" ? TEXT.approval : TEXT.reply;
+  }
   // `activity` comes from the calls actually in flight. `tool` is only the name
   // of the last one seen, which goes on reading as "running" after it returned.
   if (s.activity) return s.activity;
@@ -190,25 +328,33 @@ function whatText(s) {
   // forever. This says what is actually known: it stopped saying anything. It
   // deliberately does not say "done", which nothing here is in a position to
   // know, and it corrects itself the moment the next hook lands.
-  if (s.quiet) return "gone quiet";
-  if (s.state === "busy") return "thinking";
-  // An idle session carrying a notification message is one that finished
-  // talking and is waiting on a reply — worth distinguishing from a session
-  // that is merely sitting there.
-  if (s.detail) return "done talking";
-  return "idle";
+  if (s.quiet) return TEXT.quiet;
+  if (s.state === "busy") return TEXT.working;
+  // An idle session that has answered is waiting on the next instruction —
+  // worth distinguishing from one that is merely sitting there. The flag comes
+  // from Swift rather than from the second line's text, so suppressing a
+  // boilerplate notification does not silently downgrade the row.
+  if (s.replied) return TEXT.complete;
+  return TEXT.idle;
 }
 
 /** Markup for one live-session row. */
 function sessionRowHTML(s) {
   const jumpable = s.termHandle ? " jumpable" : "";
   const napped = s.snoozedFor ? " napped" : "";
+  // A 6px dot was the whole signal that a row wanted something. It is carried
+  // by a left edge bar and a warm wash as well now — drawn with an inset
+  // shadow and a background, so marking a row costs no width and cannot move
+  // the column beside it. A postponed row gives the emphasis up: it was put
+  // off deliberately, and it must stop competing with the ones that were not.
+  const wants = s.state === "waiting" && !s.snoozedFor
+    ? (s.urgent ? " needs urgent" : " needs") : "";
   // Only a blocked session can be postponed: there is nothing to put off about
   // one that is merely running.
   const clock = s.state === "waiting"
     ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
   return (
-    '<div class="row' + jumpable + napped + '"><div class="line">' +
+    '<div class="row' + wants + jumpable + napped + '"><div class="line">' +
     '<span class="dot ' + (s.quiet ? "quiet" : s.state) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
@@ -239,12 +385,12 @@ function finishedRowHTML(f) {
     '<div class="row done' + jumpable + '"><div class="line">' +
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
-    '<span class="what">' + (f.count > 1 ? f.count + " turns" : "done") + "</span>" +
+    '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
     '<span class="age">' + ageText(f.agoSeconds) + "</span>" +
     (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
-    (f.closed ? '<div class="detail closed">session closed</div>' : "") +
+    (f.closed ? '<div class="detail closed">' + TEXT.closed + "</div>" : "") +
     "</div>"
   );
 }
@@ -265,15 +411,13 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // Losing news quietly is the one thing the queue exists to prevent, so a
     // forced discard is stated rather than absorbed.
     footer +=
-      '<div class="muted-note dropped">' + dropped +
-      " older unread finishes were discarded (queue full)</div>";
+      '<div class="muted-note dropped">' + dropped + TEXT.droppedTail + "</div>";
   }
   if (muted) {
-    footer +=
-      '<div class="muted-note">' + muted + " muted — say something to bring one back</div>";
+    footer += '<div class="muted-note">' + muted + TEXT.muted + "</div>";
   }
   if (!list.length && !done.length) {
-    panel.innerHTML = '<div class="empty">No live sessions</div>' + footer;
+    panel.innerHTML = '<div class="empty">' + TEXT.empty + "</div>" + footer;
     hoverRow = null;
     reportLayout();
     return;
@@ -283,18 +427,34 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   // from you, what just finished, then everything still running.
   const needs = list.filter(function (s) { return s.state === "waiting"; });
   const others = list.filter(function (s) { return s.state !== "waiting"; });
-  function heading(text, extra) {
-    return '<div class="group">' + text + (extra || "") + "</div>";
+  /**
+   * A heading carries its own count.
+   *
+   * This is the panel's summary, rather than a separate total pinned to the
+   * top: the counts are wanted exactly where the groups are, and a fixed
+   * summary row would have to say "1 session" above a single row that is
+   * already the whole list. The number is tabular so it cannot shift the
+   * heading as it ticks.
+   */
+  function heading(text, count, extra) {
+    return '<div class="group">' + text
+      + '<span class="gcount">' + count + "</span>"
+      + (extra || "") + "</div>";
   }
 
   let html = "";
-  if (needs.length) html += heading("Needs you") + needs.map(sessionRowHTML).join("");
+  if (needs.length) {
+    html += heading(TEXT.needsYou, needs.length) + needs.map(sessionRowHTML).join("");
+  }
   if (done.length) {
-    html += heading("Finished", '<span class="read-all" title="Mark all as read">clear</span>')
+    html += heading(TEXT.finished, done.length,
+                    '<span class="read-all" title="Mark all as read">' + TEXT.clear + "</span>")
           + done.map(finishedRowHTML).join("");
   }
   if (others.length) {
-    html += (needs.length || done.length ? heading("Running") : "")
+    // One group and nothing to tell it apart from is not a group. A lone
+    // "Running" heading above the only rows there are is pure furniture.
+    html += (needs.length || done.length ? heading(TEXT.running, others.length) : "")
           + others.map(sessionRowHTML).join("");
   }
   panel.innerHTML = html + footer;
@@ -462,7 +622,7 @@ window.showDetail = function (d) {
   if (pet.dataset.mood === "urgent") return;   // the alarm owns the bubble
   clearSpeech();
   speaking = true;
-  bubble.classList.add("chat", "readout");
+  variant("readout");
   bubble.textContent = "";
 
   function row(cls) {

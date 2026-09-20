@@ -59,6 +59,35 @@ public enum Chatter {
     /// go back to work (see `justStarted`), at which point it is no longer news.
     public static func isSticky(_ kind: Kind) -> Bool { kind == .sessionDone }
 
+    /// Which kind of message window a line belongs in.
+    ///
+    /// The bubble is ONE element with one variant class at a time, rather than
+    /// three components competing for the same corner — the pet has one mouth.
+    /// Naming the variant here, next to the kinds themselves, is what stops the
+    /// page from having to re-derive "is this an alarm or a pleasantry" out of
+    /// the text it was handed.
+    ///
+    /// The order below is the priority order, and it is the same one the page
+    /// enforces: an alert is never replaced by a notice, a notice never by
+    /// chatter. `alert` is absent because nothing in `Kind` can produce one —
+    /// intervention comes from the mood, not from a spoken line.
+    public enum Bubble: String, Sendable, Equatable {
+        /// Quota past a threshold, or about to roll over.
+        case warn
+        /// A turn or a session came to rest.
+        case notice
+        /// Pleasantries and wellness nudges.
+        case chat
+    }
+
+    public static func bubble(for kind: Kind) -> Bubble {
+        switch kind {
+        case .quotaHigh, .quotaResetting: return .warn
+        case .finished, .sessionDone: return .notice
+        case .longRun, .greeting, .sitLong: return .chat
+        }
+    }
+
     public static func cooldown(for kind: Kind) -> TimeInterval {
         switch kind {
         case .quotaResetting: return 30 * 60

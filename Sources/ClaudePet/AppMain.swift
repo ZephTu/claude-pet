@@ -413,7 +413,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(today, forKey: Self.greetedDayKey)
         }
         let sticky = Chatter.isSticky(line.kind)
-        bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis)
+        bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis,
+                    variant: Chatter.bubble(for: line.kind))
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now

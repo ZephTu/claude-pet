@@ -4,3 +4,4 @@
 dist/*.tar.gz
 dist/claude-pet-*/
 pet-emit
+docs/previews/shots/

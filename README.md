@@ -44,10 +44,20 @@ Ordered by how much it wants from you, from nothing to a great deal, and back:
 - **Finished** — turns that ended while you were not looking, folded to one row per session
 - **Running** — everything else that is alive
 
+Each heading carries its own count, and a lone **Running** heading is left off: one
+group with nothing to tell it apart from is not a group.
+
+A row in **Needs you** says which kind of interruption it is — **Needs approval**
+against **Awaiting reply** — and carries a warm bar down its left edge, which goes
+red once it has waited past the point that turns the pet's own badge red. Its
+second line is what you would be approving (`rm -rf build/`), never the hook's own
+"Claude is waiting for your input": three blocked rows used to print that sentence
+three times, under three first lines that already said so.
+
 A number counts both kinds of attention — on the robot's chest, by the cat's ear. It is not shown at zero.
 
 A running row that has said nothing for 90 seconds, with no tool call in flight,
-reads **gone quiet** on a hollow dot, and stops counting as busy — the pet will go
+reads **No recent activity** on a hollow dot, and stops counting as busy — the pet will go
 to sleep over it and says nothing about it finishing. That is almost always a turn
 somebody cancelled with Esc: Claude Code emits no hook at all for an interrupt, so
 the last thing written stays "busy" and nothing ever comes to take it back. It is
