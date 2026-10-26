@@ -403,6 +403,13 @@ var manifest: [String: [String: Any]] = [:]
 var looped = Set<String>()
 
 func emit(_ name: String, kind: String, pose: String, from: String, slice: [Frame], seam: Float) throws {
+    // 接缝差到这个份上，播出来就是一张图硬切成另一张，比没有这段还难看：
+    // 不写进清单，那次切换退回淡入淡出。
+    guard seam <= 0.25 else {
+        print(String(format: "  %-28@ %-10@ skipped: seam %.3f — 终点姿势对不上，没有放进 App",
+                     name as NSString, kind as NSString, seam))
+        return
+    }
     var list: [Frame]
     switch kind {
     case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
@@ -437,8 +444,11 @@ where ["png", "jpg", "js"].contains(stale.pathExtension) {
 }
 
 for sheet in spec.sheets {
-    let url = ["mp4", "mov", "m4v"].map { videoDir.appendingPathComponent("\(sheet.name).\($0)") }
-        .first { FileManager.default.fileExists(atPath: $0.path) }
+    // to-working 存成 to_working 也认：下载下来的文件名横线下划线很容易混。
+    let names = [sheet.name, sheet.name.replacingOccurrences(of: "-", with: "_")]
+    let url = names.flatMap { name in
+        ["mp4", "mov", "m4v"].map { videoDir.appendingPathComponent("\(name).\($0)") }
+    }.first { FileManager.default.fileExists(atPath: $0.path) }
     guard let url else { print("\(sheet.name): no video yet"); continue }
     print("\(sheet.name):")
     let (rows, scale) = try await rows(of: url, expected: sheet.duration)

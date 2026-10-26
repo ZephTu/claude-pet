@@ -36,6 +36,12 @@ void main() {
 
 /** How long a cut between two clips is blended over, in seconds. */
 const BLEND = 0.15;
+/**
+ * A pose change with no transition clip to play. Longer than a cut: this is
+ * the whole cat changing, not a frame or two of drift, and 0.15s of it reads
+ * as a flash rather than a move.
+ */
+const BLEND_POSE = 0.35;
 /** GPU bytes clips may hold. A 5s loop is ~18MB, a transition ~6MB. */
 const BUDGET = 96 * 1024 * 1024;
 /** A fidget is considered only after this long in one pose, then at a loop's end. */
@@ -65,6 +71,8 @@ class CatFrames {
     this.layer = null;           // {name, frame, tex} on screen now
     this.fading = null;          // {tex, frame, cell} being blended out
     this.fadeLeft = 0;
+    this.fadeTotal = BLEND;
+    this.blendFor = BLEND;
     this.inPose = 0;             // seconds the current loop has been settled
     this.clock = 0;
     this.last = 0;
@@ -129,6 +137,9 @@ class CatFrames {
     const animated = this.layer && this.clips[this.layer.name];
     this.queue = this.reduced || !animated ? [] : this.route(from, pose);
     this.inPose = 0;
+    // Consumed by the next show(), which may be later than this call: when the
+    // loop is still loading, the change happens on its arrival.
+    this.blendFor = this.queue.length ? BLEND : BLEND_POSE;
     this.next(true);
     return this;
   }
@@ -201,8 +212,9 @@ class CatFrames {
     // meet on the same seed picture, so a blend there would only smear it.
     if (cut && !this.reduced && this.layer && this.layer.name !== name) {
       this.fading = { name: this.layer.name, frame: this.layer.frame };
-      this.fadeLeft = BLEND;
+      this.fadeLeft = this.fadeTotal = this.blendFor;
     }
+    this.blendFor = BLEND;
     this.layer = { name, frame: 0, time: 0 };
     this.touch(name);
     this.prefetch();
@@ -349,7 +361,7 @@ class CatFrames {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(this.program);
-    const k = this.fading ? Math.max(0, this.fadeLeft) / BLEND : 0;
+    const k = this.fading ? Math.max(0, this.fadeLeft) / this.fadeTotal : 0;
     if (this.fading) this.drawLayer(this.fading, k);
     this.drawLayer(this.layer, 1 - k);
   }
