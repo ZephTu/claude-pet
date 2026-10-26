@@ -268,7 +268,8 @@ func resample(_ frames: [Frame], to limit: Int) -> [Frame] {
 func closeLoop(_ frames: [Frame]) -> [Frame] {
     var out = frames
     if out.count > 2, out[out.count - 1].difference(out[0]) < 0.01 { out.removeLast() }
-    let tail = min(3, out.count / 4)
+    // 两帧就够：真视频首尾差的多是头的位置，混得越久，重影的帧越多。
+    let tail = min(2, out.count / 4)
     for k in 0..<tail {
         let i = out.count - tail + k
         out[i] = out[i].blended(toward: out[0], by: Float(k + 1) / Float(tail + 1))
