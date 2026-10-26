@@ -42,7 +42,7 @@ public enum StateAggregator {
             // No pid recorded: an older state file, so the clock is all we have.
             return now.timeIntervalSince(s.updatedAt) <= deadAfter
         }
-        return ProcessProbe.isRunning(pid: pid, named: ProcessProbe.claudeProcessName)
+        return ProcessProbe.isClaude(pid: pid)
     }
 
     /// Has this session gone quiet — busy on paper, but with nothing to show for

@@ -104,7 +104,7 @@ A session stays listed for as long as its process is alive, however long it sits
 
 **Right-click → Appearance** swaps who is drawing. Two figures ship.
 
-The **Cat** is the default: painted artwork warped by a WebGL mesh. It swishes its tail, blinks on an irregular beat, its eyes drift, and its ears flick every few seconds. It has nine drawings against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration rather than a bob of the idle one. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
+The **Cat** is the default, and it is animated frame by frame: every pose is a loop cut out of a generated video, and after a while in one pose it slips in a small move of its own — a yawn, a scratch of the head, a page turned, a hop. A pose change with no clip between the two is a short dissolve. `docs/seedance.md` says how the videos are made and cut; without them the cat falls back to the painted stills warped by a WebGL mesh. It has nine poses against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration rather than a bob of the idle one. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
 
 The **Robot** is an SVG whose every state is a CSS rule, and it keeps the one thing the cat cannot do: the lamp on its antenna, together with the pose, separates **every** busy state, including editing from waiting on a command. Pick it if that distinction is worth more to you than the artwork.
 
@@ -130,7 +130,7 @@ Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline
 
 Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
 
-**This edits `~/.claude/settings.json`**, appending nine hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
+**This edits `~/.claude/settings.json`**, appending ten hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `StopFailure`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
 
 Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
 
@@ -140,7 +140,7 @@ Three places, all reversible by `./scripts/uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
 2. `~/.claude/pet/` — the hook binary and the data below
-3. `~/.claude/settings.json` — nine appended hooks
+3. `~/.claude/settings.json` — ten appended hooks
 
 Inside `~/.claude/pet/`:
 

@@ -73,7 +73,7 @@ FRESH="$WORK/fresh.json"
 "$EMIT" --patch-settings "$FRESH" >/dev/null 2>&1
 check "the file is created" "$([ -f "$FRESH" ] && echo yes || echo no)" "yes"
 # Mirrors SettingsPatch.events — update both together.
-check "all 9 events get a hook" "$(count_pet_hooks "$FRESH")" "9"
+check "all 10 events get a hook" "$(count_pet_hooks "$FRESH")" "10"
 
 echo "== running it twice changes nothing =="
 BEFORE="$(cat "$FRESH")"

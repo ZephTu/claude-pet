@@ -1,0 +1,451 @@
+{
+  "_": "一个视频三只猫。cat-seeds.swift 按它出首尾帧和提示词，cat-frames.swift 按它切片段。每行的 segments 依次首尾相接，end 是这一段结束的秒数；中间的分界点抽帧时会在 ±1 秒内吸附到最像种子图的那一帧。kind: loop 循环 / fidget 小动作 / transition 过渡 / skip 丢弃。 循环表（每行首尾同一姿势）的切点不看 end，按动作本身自动找：豆包不照秒数走。",
+  "canvas": [
+    1080,
+    1920
+  ],
+  "common": "固定机位，静止镜头，无运镜，无缩放。纯绿色背景（#00FF00）始终保持纯色不变，无阴影、无渐变、无地面、无分隔线、无其他物体。三只猫各自待在自己那一行里原地动作，不越界、不互相遮挡、不交流，动作互不同步。保持原有 2D 日系卡通赛璐珞画风、线条和配色不变：橘色虎斑猫，黑色连帽卫衣，身体比例和大小不变，始终完整留在画面内。动作幅度小、柔和流畅，手臂和尾巴不要伸到身体两侧很远的地方，不出现文字和特效，除动作里提到的东西外不出现新道具。",
+  "sheets": [
+    {
+      "name": "calm",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "sleeping",
+          "to": "sleeping",
+          "action": "全程保持蜷着熟睡的姿势，身体随呼吸缓慢起伏，头顶的 z 字缓缓上飘。中途只做一次小动作：咂咂嘴、耳朵抖一下，然后继续睡，不要坐起来，不要伸懒腰。",
+          "segments": [
+            {
+              "name": "sleeping",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "sleeping@turn",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "idle",
+          "action": "全程双手插兜站着、眼睛睁开，轻松呼吸，眨眼，尾巴悠闲摆动。中途只做一次小动作：打个小哈欠（手不离开口袋），然后恢复原样、眼睛重新睁开。",
+          "segments": [
+            {
+              "name": "idle",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "idle@yawn",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "awaiting-agent",
+          "to": "awaiting-agent",
+          "action": "全程一只爪子托着腮、眼睛半睁着等待，手指在脸颊上轻敲，慢慢眨眼。中途只做一次小动作：打个哈欠差点睡着，又清醒过来，恢复开始时的表情。",
+          "segments": [
+            {
+              "name": "awaiting-agent",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "awaiting-agent@doze",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "busy",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "working",
+          "to": "working",
+          "action": "全程坐着在腿上的笔记本电脑上打字，两只前爪交替敲键盘。中途只做一次小动作：停下来用一只爪子挠挠头，然后继续打字。",
+          "segments": [
+            {
+              "name": "working",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "working@think",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "reading",
+          "to": "reading",
+          "action": "全程双手捧书认真阅读，眼睛左右扫读。中途只做一次小动作：翻一页书，然后继续读。",
+          "segments": [
+            {
+              "name": "reading",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "reading@page",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "compacting",
+          "to": "compacting",
+          "action": "全程用两只爪子把面前那摞纸磕齐、按平。中途只做一次小动作：擦一下额头的汗，然后继续整理。",
+          "segments": [
+            {
+              "name": "compacting",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "compacting@sigh",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "alert",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "waiting",
+          "to": "waiting",
+          "action": "全程举着一只爪子向前方招手，一阵一阵地挥。中途只做一次小动作：放下爪子左右张望一下，再举起来继续招手。",
+          "segments": [
+            {
+              "name": "waiting",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "waiting@tap",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "urgent",
+          "to": "urgent",
+          "action": "全程着急地挥舞两只爪子、张嘴大喊，旁边的红色警告标志闪动。中途只做一次小动作：原地小跳一下，落回原位继续喊。",
+          "segments": [
+            {
+              "name": "urgent",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "urgent@jump",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "finished",
+          "to": "finished",
+          "action": "全程双手高举欢呼、眯眼大笑，身体轻轻摇摆。中途只做一次小动作：原地蹦一下，落回原位继续欢呼。",
+          "segments": [
+            {
+              "name": "finished",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "finished@dance",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "to-working",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "sleeping",
+          "to": "working",
+          "action": "0-3秒：醒来揉揉眼睛，坐起来，把笔记本电脑拉到腿上打开；3-5秒：开始打字。",
+          "segments": [
+            {
+              "name": "sleeping_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "working",
+          "action": "0-3秒：坐下来，把笔记本电脑拉到腿上打开；3-5秒：开始打字。",
+          "segments": [
+            {
+              "name": "idle_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "waiting",
+          "to": "working",
+          "action": "0-3秒：放下招手的爪子，点点头，坐下把电脑拉回腿上；3-5秒：继续打字。",
+          "segments": [
+            {
+              "name": "waiting_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "from-working",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "working",
+          "to": "finished",
+          "action": "0-3秒：敲完最后一下键盘，合上电脑放到脚边，站起来双手高举欢呼；3-5秒：保持高举双手开心地笑。",
+          "segments": [
+            {
+              "name": "working_to_finished",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "waiting",
+          "action": "0-3秒：停下打字抬起头，放下电脑站起来，举起一只爪子向前方招手；3-5秒：继续轻轻招手。",
+          "segments": [
+            {
+              "name": "working_to_waiting",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "idle",
+          "action": "0-3秒：合上电脑放到一边，站起来伸展一下，双手插回口袋；3-5秒：轻松地站着。",
+          "segments": [
+            {
+              "name": "working_to_idle",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "finished",
+          "to": "idle",
+          "action": "0-3秒：放下高举的双手，满意地把手插回卫衣口袋站好；3-5秒：轻松地站着。",
+          "segments": [
+            {
+              "name": "finished_to_idle",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "sleeping",
+          "action": "0-3秒：打个大哈欠，伸个懒腰，慢慢趴下蜷成一团闭上眼；3-5秒：安静地睡着。",
+          "segments": [
+            {
+              "name": "idle_to_sleeping",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "waiting",
+          "to": "urgent",
+          "action": "0-3秒：招手越来越着急，两只爪子都挥起来，张嘴大喊，旁边弹出红色警告标志；3-5秒：继续着急地挥手。",
+          "segments": [
+            {
+              "name": "waiting_to_urgent",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "to-task",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "working",
+          "to": "reading",
+          "action": "0-3秒：把电脑放到一边，拿起一本书打开，凑近认真读；3-5秒：继续读书。",
+          "segments": [
+            {
+              "name": "working_to_reading",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "compacting",
+          "action": "0-3秒：把电脑推到一边，从旁边抱来一摞纸开始整理；3-5秒：继续整理纸张。",
+          "segments": [
+            {
+              "name": "working_to_compacting",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "awaiting-agent",
+          "action": "0-3秒：敲下回车，把电脑放到一边，用一只爪子托着腮；3-5秒：托腮等待。",
+          "segments": [
+            {
+              "name": "working_to_awaiting-agent",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "from-task",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "reading",
+          "to": "working",
+          "action": "0-3秒：合上书放到一边，把电脑拉回腿上；3-5秒：继续打字。",
+          "segments": [
+            {
+              "name": "reading_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "compacting",
+          "to": "working",
+          "action": "0-3秒：把整理好的纸推到一边，把电脑拉回腿上；3-5秒：继续打字。",
+          "segments": [
+            {
+              "name": "compacting_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "awaiting-agent",
+          "to": "working",
+          "action": "0-3秒：回过神来，放下托腮的爪子，把电脑拉回腿上；3-5秒：继续打字。",
+          "segments": [
+            {
+              "name": "awaiting-agent_to_working",
+              "kind": "transition",
+              "end": 3
+            },
+            {
+              "kind": "skip",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

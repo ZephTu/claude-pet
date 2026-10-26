@@ -22,6 +22,41 @@ public enum ProcessProbe {
     /// "still detected" instead of "every session silently looks dead".
     public static let claudeProcessName = "claude"
 
+    /// Is `pid` alive AND running Claude Code, however this install names it?
+    ///
+    /// The name alone stopped being enough: the native installer keeps one binary
+    /// per release under `~/.local/share/claude/versions/` and launches it from
+    /// there, so the kernel calls the process `2.1.310`, not `claude`. Every hook
+    /// then failed to find its session's pid, every session fell back to the
+    /// fifteen-minute clock, and idle sessions drained out of the panel one by one
+    /// while their terminals were still open. The executable's path is what still
+    /// says "claude" in that layout.
+    public static func isClaude(pid: Int32) -> Bool {
+        guard pid > 0, let name = processName(pid: pid), !name.isEmpty else { return false }
+        return looksLikeClaude(name: name, path: executablePath(pid: pid))
+    }
+
+    /// Pure half of `isClaude`, so both install layouts can be tested without a
+    /// real Claude Code process to point at.
+    public static func looksLikeClaude(name: String, path: String?) -> Bool {
+        if nameMatches(name, claudeProcessName) { return true }
+        guard let path, !path.isEmpty else { return false }
+        let parts = path.split(separator: "/").map(String.init)
+        if let last = parts.last, nameMatches(last, claudeProcessName) { return true }
+        // .../claude/versions/<version> — the native installer's layout.
+        return parts.count >= 3
+            && parts[parts.count - 2] == "versions"
+            && parts[parts.count - 3] == claudeProcessName
+    }
+
+    /// The full path of the executable `pid` is running, or nil if it is gone.
+    public static func executablePath(pid: Int32) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(cString: buffer)
+    }
+
     /// Is `pid` alive AND still running a process whose name starts with `name`?
     public static func isRunning(pid: Int32, named name: String) -> Bool {
         guard pid > 0, let actual = processName(pid: pid), !actual.isEmpty else { return false }
@@ -60,10 +95,23 @@ public enum ProcessProbe {
     /// the parent, and that shape is an implementation detail that could change.
     /// The depth cap keeps a malformed tree from looping forever.
     public static func findAncestor(named name: String, from pid: Int32, maxDepth: Int = 6) -> Int32? {
+        findAncestor(from: pid, maxDepth: maxDepth) { candidate in
+            processName(pid: candidate).map { nameMatches($0, name) } ?? false
+        }
+    }
+
+    /// The nearest ancestor of `pid` that is Claude Code, by `isClaude`'s rules.
+    public static func findClaudeAncestor(from pid: Int32, maxDepth: Int = 6) -> Int32? {
+        findAncestor(from: pid, maxDepth: maxDepth, where: isClaude)
+    }
+
+    private static func findAncestor(
+        from pid: Int32, maxDepth: Int, where matches: (Int32) -> Bool
+    ) -> Int32? {
         var current = pid
         for _ in 0..<maxDepth {
             guard let parent = parentPID(of: current), parent > 1 else { return nil }
-            if let parentName = processName(pid: parent), nameMatches(parentName, name) {
+            if matches(parent) {
                 return parent
             }
             current = parent

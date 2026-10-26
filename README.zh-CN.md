@@ -76,7 +76,7 @@ session 只要进程还活着就一直列在上面，不管多久没动静——
 
 **右键 → Appearance** 换一个形象，内置两个。
 
-**Cat** 是默认：手绘贴图挂在 WebGL 形变网格上，尾巴会摆、会眨眼、眼珠会动，耳朵每几秒抖一下。它有九张图对宠物的十一个状态——读代码、压缩上下文、等后台 agent 各有各的图，干完一轮是专门画的欢呼而不是把 idle 那张弹一下。还压在一起的是 busy 里剩下的部分：改文件和等命令跑完是同一只猫趴在同一台电脑前。举爪加 `?` 是「等你回答」，加警告三角是「等你授权」，这个符号每五秒放大两下，免得你一直没看见；被晾久了那张贴图自带红色警告；工具被打断是一只照常干活的猫顶个警告三角。未读数在耳朵边上。
+**Cat** 是默认，逐帧动画：每个姿势是从生成视频里切出来的一段循环，在一个姿势里待久了会自己插一段小动作——打哈欠、挠头、翻书、原地蹦。两个姿势之间没有过渡片段的，用一段短的淡入淡出。视频怎么做、怎么切见 `docs/seedance.md`；没有这些帧时退回手绘贴图加 WebGL 形变网格。它有九个姿势对宠物的十一个状态——读代码、压缩上下文、等后台 agent 各有各的图，干完一轮是专门画的欢呼而不是把 idle 那张弹一下。还压在一起的是 busy 里剩下的部分：改文件和等命令跑完是同一只猫趴在同一台电脑前。举爪加 `?` 是「等你回答」，加警告三角是「等你授权」，这个符号每五秒放大两下，免得你一直没看见；被晾久了那张贴图自带红色警告；工具被打断是一只照常干活的猫顶个警告三角。未读数在耳朵边上。
 
 **Robot** 是一张 SVG，每个状态就是一条 CSS 规则。它保留了猫做不到的一件事：天线上那颗灯加上姿势能分开**每一个** busy 状态，包括改文件和等命令跑完。你要是更看重这个区分而不是画风，就选它。
 
@@ -104,7 +104,7 @@ session 只要进程还活着就一直列在上面，不管多久没动静——
 
 额度播报依赖 [claude-hud](https://github.com/jarrodwatts/claude-hud) 这个 statusline 插件——宠物读的是它维护的 usage 缓存，而不是自己去调 Anthropic 的 usage API，所以不碰你的 OAuth token、也不占你的 rate limit。没装那个插件的话，除了额度以外一切照常。
 
-**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加九条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / PermissionRequest / PreCompact / Stop / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
+**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加十条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / PermissionRequest / PreCompact / Stop / StopFailure / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
 
 装完要开一个新的 Claude Code session 才会生效，已经开着的不受影响。
 

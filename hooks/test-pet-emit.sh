@@ -333,5 +333,30 @@ emit SessionEnd sL /Users/dev/Projects/api
 check "SessionEnd removes the log" \
   "$([ -f "$PET_HOME/activity/sL.jsonl" ] && echo yes || echo no)" "no"
 
+# notification_type decides when it is present; the English sentence is only
+# the fallback for builds that do not send it.
+emit UserPromptSubmit sN /tmp/n
+emit_json '{"hook_event_name":"Notification","session_id":"sN","cwd":"/tmp/n","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+check "permission_prompt is waiting" "$(field sN state)" "waiting"
+emit_json '{"hook_event_name":"Notification","session_id":"sN","cwd":"/tmp/n","notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+check "idle_prompt is idle" "$(field sN state)" "idle"
+emit_json '{"hook_event_name":"Notification","session_id":"sN","cwd":"/tmp/n","notification_type":"agent_needs_input","message":"x"}'
+check "agent_needs_input is waiting" "$(field sN state)" "waiting"
+emit UserPromptSubmit sN /tmp/n
+# Not about the user at all; the sentence test used to call these "waiting".
+emit_json '{"hook_event_name":"Notification","session_id":"sN","cwd":"/tmp/n","notification_type":"agent_completed","message":"Background agent finished"}'
+check "agent_completed leaves the session alone" "$(field sN state)" "busy"
+emit_json '{"hook_event_name":"Notification","session_id":"sN","cwd":"/tmp/n","notification_type":"quota_auto_resume_scheduled","message":"Resuming at 3pm"}'
+check "a quota notice leaves the session alone" "$(field sN state)" "busy"
+
+# A turn killed by an API error fires StopFailure, never Stop.
+emit UserPromptSubmit sF /tmp/f
+emit PreToolUse sF /tmp/f Bash
+emit_json '{"hook_event_name":"StopFailure","session_id":"sF","cwd":"/tmp/f","error":"rate_limit"}'
+check "StopFailure ends the turn" "$(field sF state)" "idle"
+check "StopFailure clears tools in flight" "$(field sF running)" "[]"
+check "StopFailure records no finish" \
+  "$(ls "$PET_HOME/events" 2>/dev/null | grep -c '^sF~' | tr -d ' ')" "0"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

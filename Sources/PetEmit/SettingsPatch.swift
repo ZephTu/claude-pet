@@ -29,6 +29,8 @@ enum SettingsPatch {
         // Context compaction takes a while and produces no other events, so
         // without this the session looks like it stopped doing anything.
         "PreCompact",
+        // A turn that dies on an API error fires this INSTEAD of Stop.
+        "StopFailure",
     ]
 
     /// Returns a process exit code: 0 on success, 1 on failure.
