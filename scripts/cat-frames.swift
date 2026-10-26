@@ -107,12 +107,20 @@ func rgba(_ image: CGImage, width: Int, height: Int, crop: CGRect? = nil) -> [Fl
 /// 阴影是暗绿，照样算背景，所以模型自己加的投影会被一起抠掉。
 /// 抠完再去溢色：边缘残留的绿压回 max(R, B)，否则猫会描一圈绿边。
 func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
-    let w = image.width, h = image.height
-    let box = CGRect(x: art.minX * Double(w), y: art.minY * Double(h),
-                     width: art.width * Double(w), height: art.height * Double(h)).integral
     // 先在两倍尺寸上抠，再缩到目标尺寸，边缘的半透明才是平滑的。
     let big = size * 2
-    var p = rgba(image, width: big, height: big, crop: box)
+    return Frame(pixels: downsample(keyed(image, channel: channel, art: art, side: big), from: big, to: size))
+}
+
+/// 视频像素里这只猫的框。
+func cropBox(_ image: CGImage, art: CGRect) -> CGRect {
+    let w = Double(image.width), h = Double(image.height)
+    return CGRect(x: art.minX * w, y: art.minY * h, width: art.width * w, height: art.height * h).integral
+}
+
+/// 抠好的 side×side 非预乘 RGBA。
+func keyed(_ image: CGImage, channel: Int, art: CGRect, side big: Int) -> [Float] {
+    var p = rgba(image, width: big, height: big, crop: cropBox(image, art: art))
     let other2 = channel == 1 ? 2 : 1  // 红永远是另一个
     for i in stride(from: 0, to: p.count, by: 4) {
         let k = p[i + channel], other = max(p[i], p[i + other2])
@@ -127,7 +135,7 @@ func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
         if alpha < 0.9 && lo > 0.55 && hi - lo < 0.12 { p[i + 3] = 0 }
     }
     dropWatermark(&p, side: big)
-    return Frame(pixels: downsample(p, from: big, to: size))
+    return p
 }
 
 /// 豆包会在画面上打一行半透明的「豆包AI生成」，位置还会变。落在绿幕上的那部分
@@ -413,7 +421,7 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
     }
     var list: [Frame]
     switch kind {
-    case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
+    case "transition": list = easeIntoEnd(resample(trimStill(slice), to: maxTransitionFrames))
     default: list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
     }
     guard !list.isEmpty else { print("  skip \(name): no frames"); return }
@@ -434,6 +442,49 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
     print(String(format: "  %-28@ %-10@ %2d frames  %.2fs  seam %.3f%@", name as NSString,
                  kind as NSString, list.count, Double(list.count) / fps,
                  seam, (seam > warn ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
+}
+
+// ---- 过渡的首尾帧：用循环自己的第一帧 -----------------------------------------
+
+/// 过渡接到哪个循环，就应该落在那个循环的第一帧上。拿原图当尾帧不行：循环是另一个
+/// 视频里切出来的，表情、大小都跟原图不一样——实测 idle_to_working 的最后一帧
+/// （原图，张嘴笑）到 working 循环第一帧（皱眉闭嘴）差 0.21，是循环里正常一帧
+/// 的七倍。所以每切出一段循环，就把它的第一帧按视频原分辨率抠出来存一张，
+/// cat-seeds.swift 拼过渡的首尾帧时优先用它。
+let anchors = sheetDir.deletingLastPathComponent().appendingPathComponent("anchors")
+
+func saveAnchor(_ pose: String, from url: URL, frame: Int, art: CGRect) async throws {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    generator.appliesPreferredTrackTransform = true
+    let (image, _) = try await generator.image(at: CMTime(seconds: Double(frame) / fps, preferredTimescale: 600))
+    let side = Int(cropBox(image, art: art).width)
+    let p = keyed(image, channel: keyChannel(of: image), art: art, side: side)
+    var bytes = [UInt8](repeating: 0, count: side * side * 4)
+    for i in stride(from: 0, to: p.count, by: 4) {
+        let a = min(max(p[i + 3], 0), 1)
+        for c in 0..<3 { bytes[i + c] = UInt8(min(max(p[i + c], 0), 1) * a * 255 + 0.5) }
+        bytes[i + 3] = UInt8(a * 255 + 0.5)
+    }
+    let ctx = CGContext(data: &bytes, width: side, height: side, bitsPerComponent: 8,
+                        bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    try FileManager.default.createDirectory(at: anchors, withIntermediateDirectories: true)
+    try write(ctx.makeImage(), to: anchors.appendingPathComponent("\(pose).png"), type: .png, options: [:])
+}
+
+/// 模型在最后一两帧里硬吸到尾帧上（实测最后一步 0.16，正常一帧 0.03）。把最后
+/// 几帧逐渐混向最后一帧，一下跳变成一小段变形。
+func easeIntoEnd(_ frames: [Frame]) -> [Frame] {
+    var out = frames
+    let tail = min(4, out.count / 4)
+    guard tail > 0, let last = out.last else { return out }
+    for k in 0..<tail {
+        let i = out.count - 1 - tail + k
+        out[i] = out[i].blended(toward: last, by: Float(k + 1) / Float(tail + 1))
+    }
+    return out
 }
 
 // ---- 全量重建 ---------------------------------------------------------------
@@ -464,6 +515,7 @@ for sheet in spec.sheets {
             else { print("  \(row.from): no calm stretch long enough for a loop — regenerate"); continue }
             try emit(loopName, kind: "loop", pose: row.from, from: "",
                      slice: Array(frames[cut.loop]), seam: cut.loopSeam)
+            try await saveAnchor(row.from, from: url, frame: cut.loop.lowerBound, art: boxes[r])
             // 动作比表里写的多，就把多出来的也留下：第二个叫 <名字>2，以此类推。
             let base = row.segments.first(where: { $0.kind == "fidget" })?.name ?? "\(row.from)@move"
             for (n, fidget) in cut.fidgets.enumerated() {

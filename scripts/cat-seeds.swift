@@ -44,11 +44,21 @@ let boxes = (0..<3).map { row in
     CGRect(x: (width - side) / 2, y: row * rowHeight + 40, width: side, height: side)
 }
 
-func sheet(_ poses: [String]) throws -> CGImage {
+/// 循环第一帧的抠图，cat-frames.swift 切循环时存的。过渡的首尾帧优先用它：
+/// 过渡要接上的是循环，不是原图。
+let anchors = out.deletingLastPathComponent().appendingPathComponent("anchors")
+
+func picture(_ pose: String, anchored: Bool) -> URL {
+    let anchor = anchors.appendingPathComponent("\(pose).png")
+    return anchored && FileManager.default.fileExists(atPath: anchor.path)
+        ? anchor : assets.appendingPathComponent("\(pose).png")
+}
+
+func sheet(_ poses: [String], anchored: Bool = false) throws -> CGImage {
     var image = CIImage(color: CIColor(cgColor: key))
         .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
     for (row, pose) in poses.enumerated() {
-        guard let source = CIImage(contentsOf: assets.appendingPathComponent("\(pose).png")) else {
+        guard let source = CIImage(contentsOf: picture(pose, anchored: anchored)) else {
             throw CocoaError(.fileReadNoSuchFile, userInfo: [NSFilePathErrorKey: "\(pose).png"])
         }
         // Lanczos 而不是双线性：原图只有 384²，放大后边缘糊了模型会照着糊。
@@ -74,8 +84,10 @@ func write(_ image: CGImage, _ name: String) throws {
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 let place = ["上方", "中间", "下方"]
 for item in spec.sheets {
-    try write(try sheet(item.rows.map(\.from)), "\(item.name)-first.png")
-    try write(try sheet(item.rows.map(\.to)), "\(item.name)-last.png")
+    // 循环表的首尾帧是原图：循环本身就是从这里切出来的。过渡表用循环的第一帧。
+    let transition = item.rows.contains { $0.from != $0.to }
+    try write(try sheet(item.rows.map(\.from), anchored: transition), "\(item.name)-first.png")
+    try write(try sheet(item.rows.map(\.to), anchored: transition), "\(item.name)-last.png")
     let lines = item.rows.enumerated().map { "\(place[$0.offset])的猫：\($0.element.action)" }
     // 只能给首帧的工具（豆包）不保证结尾回到原位，只能在提示词里把话说死；
     // 有尾帧的工具这句也无害。
