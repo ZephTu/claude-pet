@@ -1,15 +1,13 @@
 // 把 Seedance 生成的绿幕视频抽帧、抠像，拼成 App 用的帧图集和清单。
 //
-//     scripts/cat-frames.sh <videoDir> [seedDir] [outDir]
+//     scripts/cat-frames.sh <videoDir> [sheetDir] [outDir]
 //
 // 直接跑 `swift scripts/cat-frames.swift` 也行，但那是不优化的解释执行，抠几千帧
 // 要等很久；cat-frames.sh 先用 -O 编译一次。
 //
-// 视频按文件名分三类（姿势名就是 assets/ 下的文件名）：
-//
-//   working.mp4               循环。首帧尾帧都是 seeds/working.png
-//   idle@yawn.mp4             小动作。从 idle 开始、回到 idle，idle 待久了随机插一段
-//   idle_to_working.mp4       过渡。首帧 seeds/idle.png，尾帧 seeds/working.png
+// 一个视频是 scripts/cat-sheets.json 里的一张「表」：上中下三只猫，每只按秒数切成
+// 几段（循环、小动作、过渡）。视频文件名就是表名，比如 calm.mp4、to-working.mp4。
+// 缺哪个视频就少哪几段，App 里那几个姿势继续用静止图。
 //
 // 输出 outDir/<clip>.jpg + <clip>.a.png（每段一组 8 列的图集，颜色和透明度分开）
 // 和 outDir/frames.js。每次都按 videoDir 全量重建：目录里删掉的视频，它的图集和
@@ -21,12 +19,13 @@ import UniformTypeIdentifiers
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    print("usage: cat-frames <videoDir> [seedDir] [outDir]")
+    print("usage: cat-frames <videoDir> [sheetDir] [outDir]")
     exit(2)
 }
 let videoDir = URL(fileURLWithPath: args[1])
-let seedDir = URL(fileURLWithPath: args.count > 2 ? args[2] : "art/seedance/seeds")
+let sheetDir = URL(fileURLWithPath: args.count > 2 ? args[2] : "art/seedance/sheets")
 let outDir = URL(fileURLWithPath: args.count > 3 ? args[3] : "Resources/pet/skins/cat/frames")
+let assets = URL(fileURLWithPath: "Resources/pet/skins/cat/assets")
 
 /// 每帧的边长。画布在屏幕上是 120pt，Retina 下正好 240px，再大是白占内存。
 let size = 240
@@ -37,60 +36,28 @@ let columns = 8
 let maxFrames = 64
 /// 过渡最多 1.5 秒：状态已经变了，猫还在慢慢走过去，信号就晚了。
 let maxTransitionFrames = 18
+/// 段与段的分界在标称秒数前后这么多秒里找最像种子图的那一帧。模型不会准点
+/// 回到初始姿势，切在它真正回来的那一帧，循环才接得上。
+let snapWindow = 1.0
 
-// ---- 文件名 → 片段 ----------------------------------------------------------
+// ---- 表 ----------------------------------------------------------------------
 
-struct Clip {
-    enum Kind: String { case loop, fidget, transition }
-    let name: String
-    let kind: Kind
-    let pose: String   // 循环和小动作所属的姿势；过渡是它的终点
-    let from: String   // 只有过渡有
-    let url: URL
+struct Spec: Decodable {
+    struct Sheet: Decodable { let name: String; let duration: Double; let rows: [Row] }
+    struct Row: Decodable { let from: String; let to: String; let segments: [Segment] }
+    struct Segment: Decodable { let name: String?; let kind: String; let end: Double }
+    let sheets: [Sheet]
 }
+let spec = try JSONDecoder().decode(
+    Spec.self, from: Data(contentsOf: URL(fileURLWithPath: "scripts/cat-sheets.json")))
 
-let poses = Set(((try? FileManager.default.contentsOfDirectory(atPath: seedDir.path)) ?? [])
-    .filter { $0.hasSuffix(".png") }.map { String($0.dropLast(4)) })
-guard !poses.isEmpty else { print("no seeds in \(seedDir.path) — run scripts/cat-seeds.swift first"); exit(1) }
-
-func parse(_ url: URL) -> Clip? {
-    let name = url.deletingPathExtension().lastPathComponent
-    if let range = name.range(of: "_to_") {
-        let from = String(name[..<range.lowerBound]), to = String(name[range.upperBound...])
-        guard poses.contains(from), poses.contains(to) else { return nil }
-        return Clip(name: name, kind: .transition, pose: to, from: from, url: url)
-    }
-    if let at = name.firstIndex(of: "@") {
-        let pose = String(name[..<at])
-        guard poses.contains(pose), name.index(after: at) < name.endIndex else { return nil }
-        return Clip(name: name, kind: .fidget, pose: pose, from: "", url: url)
-    }
-    guard poses.contains(name) else { return nil }
-    return Clip(name: name, kind: .loop, pose: name, from: "", url: url)
-}
-
-let videos = ((try? FileManager.default.contentsOfDirectory(
-    at: videoDir, includingPropertiesForKeys: nil)) ?? [])
-    .filter { ["mp4", "mov", "m4v"].contains($0.pathExtension.lowercased()) }
-    .sorted { $0.lastPathComponent < $1.lastPathComponent }
-var clips: [Clip] = []
-for url in videos {
-    if let clip = parse(url) { clips.append(clip) } else {
-        // 名字对不上的不能悄悄跳过：拼错一个字母，那段动画就永远不会出现。
-        print("skip \(url.lastPathComponent): not <pose>, <pose>@<name> or <from>_to_<to>; poses are \(poses.sorted())")
-    }
-}
-guard !clips.isEmpty else { print("no usable videos in \(videoDir.path)"); exit(1) }
-
-// ---- 猫在画面里的位置 ------------------------------------------------------
-
-/// 归一化的猫框（左上角原点），来自 cat-seeds.swift 写的 layout.json。
-let art: CGRect = {
-    guard let data = try? Data(contentsOf: seedDir.appendingPathComponent("layout.json")),
+/// 三只猫的框（归一化，左上角原点），来自 cat-seeds.swift 写的 layout.json。
+let boxes: [CGRect] = {
+    guard let data = try? Data(contentsOf: sheetDir.appendingPathComponent("layout.json")),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let box = json["art"] as? [Double], box.count == 4
-    else { return CGRect(x: 0, y: 0, width: 1, height: 1) }
-    return CGRect(x: box[0], y: box[1], width: box[2], height: box[3])
+          let rows = json["rows"] as? [[Double]], rows.count == 3
+    else { print("no layout.json in \(sheetDir.path) — run scripts/cat-seeds.swift first"); exit(1) }
+    return rows.map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
 }()
 
 // ---- 一帧：裁、缩、抠 -------------------------------------------------------
@@ -138,7 +105,7 @@ func rgba(_ image: CGImage, width: Int, height: Int, crop: CGRect? = nil) -> [Fl
 /// 绿幕：「绿得比红和蓝都多多少」就是背景的程度。橘色、白色、黑色这个值都 ≤ 0，
 /// 阴影是暗绿，照样算背景，所以模型自己加的投影会被一起抠掉。
 /// 抠完再去溢色：边缘残留的绿压回 max(R, B)，否则猫会描一圈绿边。
-func key(_ image: CGImage, channel: Int) -> Frame {
+func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
     let w = image.width, h = image.height
     let box = CGRect(x: art.minX * Double(w), y: art.minY * Double(h),
                      width: art.width * Double(w), height: art.height * Double(h)).integral
@@ -182,29 +149,62 @@ func downsample(_ p: [Float], from big: Int, to small: Int) -> [Float] {
 
 // ---- 一段：抽帧、修剪、接缝 -------------------------------------------------
 
-func frames(of clip: Clip) async throws -> [Frame] {
-    let asset = AVURLAsset(url: clip.url)
+/// 整个视频抽成三行帧序列，每行一只猫。
+func rows(of url: URL, expected: Double) async throws -> (rows: [[Frame]], scale: Double) {
+    let asset = AVURLAsset(url: url)
     let duration = try await asset.load(.duration).seconds
     let generator = AVAssetImageGenerator(asset: asset)
     generator.requestedTimeToleranceBefore = .zero
     generator.requestedTimeToleranceAfter = .zero
     generator.appliesPreferredTrackTransform = true
 
-    var out: [Frame] = []
+    var out: [[Frame]] = [[], [], []]
     var channel = 1
     var t = 0.0
     while t < duration - 0.5 / fps {
         let (image, _) = try await generator.image(at: CMTime(seconds: t, preferredTimescale: 600))
-        if out.isEmpty { channel = keyChannel(of: image) }
-        out.append(key(image, channel: channel))
+        if t == 0 {
+            channel = keyChannel(of: image)
+            let aspect = Double(image.width) / Double(image.height)
+            if abs(aspect - 9.0 / 16.0) > 0.02 {
+                print("  warning: \(image.width)×\(image.height) is not 9:16 — the cats will be cut wrong")
+            }
+        }
+        for row in 0..<3 { out[row].append(key(image, channel: channel, art: boxes[row])) }
         t += 1 / fps
     }
-    return out
+    // 表里的秒数按视频实际时长等比换算：生成成了 10 秒的 5 秒表，切点跟着拉长。
+    if abs(duration - expected) > 0.3 {
+        print(String(format: "  warning: %.1fs long, the sheet says %.0fs — cut points scaled to match", duration, expected))
+    }
+    return (out, duration / expected)
+}
+
+/// 种子图本身作为一帧，用来找猫回到初始姿势的那一刻。
+func still(_ pose: String) -> Frame {
+    guard let image = NSImage(contentsOf: assets.appendingPathComponent("\(pose).png"))?
+        .cgImage(forProposedRect: nil, context: nil, hints: nil)
+    else { print("no still for \(pose)"); exit(1) }
+    var p = rgba(image, width: size, height: size)
+    // rgba() 画出来是预乘的，Frame 要的是非预乘。
+    for i in stride(from: 0, to: p.count, by: 4) where p[i + 3] > 0 {
+        for c in 0..<3 { p[i + c] /= p[i + 3] }
+    }
+    return Frame(pixels: p)
+}
+
+/// 窗口里最像 target 的那一帧。
+func nearest(_ frames: [Frame], to target: Frame, around index: Int, within radius: Int) -> Int {
+    let lo = max(1, index - radius), hi = min(frames.count - 2, index + radius)
+    guard lo <= hi else { return min(max(index, 0), frames.count - 1) }
+    return (lo...hi).min { frames[$0].difference(target) < frames[$1].difference(target) }!
 }
 
 /// 去掉开头和结尾一动不动的帧。模型常在首尾帧附近停半秒，过渡里那半秒就是延迟。
 func trimStill(_ frames: [Frame]) -> [Frame] {
-    let still: Float = 0.004
+    // 压缩噪点本身就有 ~0.007（合成视频实测：首帧是关键帧，跟后面每帧都差这么多），
+    // 真正开始动的时候这个数一两帧内就过 0.02。
+    let still: Float = 0.012
     var start = 0, end = frames.count - 1
     while start < end - 1, frames[start + 1].difference(frames[0]) < still { start += 1 }
     while end > start + 1, frames[end - 1].difference(frames[frames.count - 1]) < still { end -= 1 }
@@ -281,24 +281,55 @@ where ["png", "jpg", "js"].contains(stale.pathExtension) {
 }
 
 var manifest: [String: [String: Any]] = [:]
-for clip in clips {
-    var list = try await frames(of: clip)
-    switch clip.kind {
-    case .transition: list = resample(trimStill(list), to: maxTransitionFrames)
-    case .loop, .fidget: list = closeLoop(resample(list, to: maxFrames))
+var looped = Set<String>()
+for sheet in spec.sheets {
+    let url = ["mp4", "mov", "m4v"].map { videoDir.appendingPathComponent("\(sheet.name).\($0)") }
+        .first { FileManager.default.fileExists(atPath: $0.path) }
+    guard let url else { print("\(sheet.name): no video yet"); continue }
+    print("\(sheet.name):")
+    let (rows, scale) = try await rows(of: url, expected: sheet.duration)
+
+    for (r, row) in sheet.rows.enumerated() {
+        let frames = rows[r]
+        guard frames.count > 2 else { continue }
+        // 分界点：先按秒数换成帧号，再吸附到最像种子图的那一帧。过渡之后的分界
+        // 吸附到它的终点姿势，其余吸附到起点姿势。
+        var cuts = [0]
+        var passedTransition = false
+        for segment in row.segments.dropLast() {
+            if segment.kind == "transition" { passedTransition = true }
+            let index = Int((segment.end * scale * fps).rounded())
+            let target = still(passedTransition ? row.to : row.from)
+            cuts.append(max(cuts.last! + 1,
+                            nearest(frames, to: target, around: index, within: Int(snapWindow * fps))))
+        }
+        cuts.append(frames.count - 1)
+
+        for (i, segment) in row.segments.enumerated() {
+            guard segment.kind != "skip", let name = segment.name else { continue }
+            let slice = Array(frames[cuts[i]...min(cuts[i + 1], frames.count - 1)])
+            var list: [Frame]
+            switch segment.kind {
+            case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
+            case "loop", "fidget": list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
+            default: print("  skip \(name): unknown kind \(segment.kind)"); continue
+            }
+            guard !list.isEmpty else { print("  skip \(name): no frames"); continue }
+            let file = "\(name).jpg", mask = "\(name).a.png"
+            let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
+                                      alpha: outDir.appendingPathComponent(mask))
+            let pose = segment.kind == "transition" ? row.to : row.from
+            var entry: [String: Any] = [
+                "file": file, "alpha": mask, "kind": segment.kind, "pose": pose,
+                "frames": list.count, "columns": grid.columns,
+            ]
+            if segment.kind == "transition" { entry["from"] = row.from }
+            if segment.kind == "loop" { looped.insert(pose) }
+            manifest[name] = entry
+            print(String(format: "  %-28@ %-10@ %2d frames  %.2fs", name as NSString,
+                         segment.kind as NSString, list.count, Double(list.count) / fps))
+        }
     }
-    guard !list.isEmpty else { print("skip \(clip.name): no frames"); continue }
-    let file = "\(clip.name).jpg", mask = "\(clip.name).a.png"
-    let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
-                              alpha: outDir.appendingPathComponent(mask))
-    var entry: [String: Any] = [
-        "file": file, "alpha": mask, "kind": clip.kind.rawValue, "pose": clip.pose,
-        "frames": list.count, "columns": grid.columns,
-    ]
-    if clip.kind == .transition { entry["from"] = clip.from }
-    manifest[clip.name] = entry
-    print(String(format: "%-28@ %-10@ %2d frames  %.2fs", clip.name as NSString,
-                 clip.kind.rawValue as NSString, list.count, Double(list.count) / fps))
 }
 
 let body = try JSONSerialization.data(
@@ -308,7 +339,8 @@ let script = "// Generated by scripts/cat-frames.swift — do not edit.\nwindow.
     + String(decoding: body, as: UTF8.self) + ";\n"
 try script.write(to: outDir.appendingPathComponent("frames.js"), atomically: true, encoding: .utf8)
 
-let missing = poses.subtracting(clips.filter { $0.kind == .loop }.map(\.pose)).sorted()
+let poses = Set(spec.sheets.flatMap { $0.rows.flatMap { [$0.from, $0.to] } })
+let missing = poses.subtracting(looped).sorted()
 if !missing.isEmpty {
     print("no loop yet for: \(missing.joined(separator: ", ")) — those poses stay on the still picture")
 }
