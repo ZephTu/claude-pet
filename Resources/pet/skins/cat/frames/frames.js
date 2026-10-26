@@ -9,6 +9,15 @@ window.CAT_FRAMES = {
       "kind" : "loop",
       "pose" : "awaiting-agent"
     },
+    "awaiting-agent_to_working" : {
+      "alpha" : "awaiting-agent_to_working.a.png",
+      "columns" : 8,
+      "file" : "awaiting-agent_to_working.jpg",
+      "frames" : 24,
+      "from" : "awaiting-agent",
+      "kind" : "transition",
+      "pose" : "working"
+    },
     "awaiting-agent@doze" : {
       "alpha" : "awaiting-agent@doze.a.png",
       "columns" : 8,
@@ -24,6 +33,15 @@ window.CAT_FRAMES = {
       "frames" : 22,
       "kind" : "loop",
       "pose" : "compacting"
+    },
+    "compacting_to_working" : {
+      "alpha" : "compacting_to_working.a.png",
+      "columns" : 8,
+      "file" : "compacting_to_working.jpg",
+      "frames" : 24,
+      "from" : "compacting",
+      "kind" : "transition",
+      "pose" : "working"
     },
     "compacting@sigh" : {
       "alpha" : "compacting@sigh.a.png",
@@ -41,6 +59,15 @@ window.CAT_FRAMES = {
       "kind" : "loop",
       "pose" : "finished"
     },
+    "finished_to_idle" : {
+      "alpha" : "finished_to_idle.a.png",
+      "columns" : 8,
+      "file" : "finished_to_idle.jpg",
+      "frames" : 24,
+      "from" : "finished",
+      "kind" : "transition",
+      "pose" : "idle"
+    },
     "finished@dance" : {
       "alpha" : "finished@dance.a.png",
       "columns" : 8,
@@ -56,6 +83,15 @@ window.CAT_FRAMES = {
       "frames" : 32,
       "kind" : "loop",
       "pose" : "idle"
+    },
+    "idle_to_sleeping" : {
+      "alpha" : "idle_to_sleeping.a.png",
+      "columns" : 8,
+      "file" : "idle_to_sleeping.jpg",
+      "frames" : 24,
+      "from" : "idle",
+      "kind" : "transition",
+      "pose" : "sleeping"
     },
     "idle_to_working" : {
       "alpha" : "idle_to_working.a.png",
@@ -81,6 +117,15 @@ window.CAT_FRAMES = {
       "frames" : 64,
       "kind" : "loop",
       "pose" : "reading"
+    },
+    "reading_to_working" : {
+      "alpha" : "reading_to_working.a.png",
+      "columns" : 8,
+      "file" : "reading_to_working.jpg",
+      "frames" : 24,
+      "from" : "reading",
+      "kind" : "transition",
+      "pose" : "working"
     },
     "sleeping" : {
       "alpha" : "sleeping.a.png",
@@ -123,6 +168,15 @@ window.CAT_FRAMES = {
       "kind" : "loop",
       "pose" : "waiting"
     },
+    "waiting_to_urgent" : {
+      "alpha" : "waiting_to_urgent.a.png",
+      "columns" : 8,
+      "file" : "waiting_to_urgent.jpg",
+      "frames" : 24,
+      "from" : "waiting",
+      "kind" : "transition",
+      "pose" : "urgent"
+    },
     "waiting_to_working" : {
       "alpha" : "waiting_to_working.a.png",
       "columns" : 8,
@@ -147,6 +201,60 @@ window.CAT_FRAMES = {
       "frames" : 21,
       "kind" : "loop",
       "pose" : "working"
+    },
+    "working_to_awaiting-agent" : {
+      "alpha" : "working_to_awaiting-agent.a.png",
+      "columns" : 8,
+      "file" : "working_to_awaiting-agent.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "awaiting-agent"
+    },
+    "working_to_compacting" : {
+      "alpha" : "working_to_compacting.a.png",
+      "columns" : 8,
+      "file" : "working_to_compacting.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "compacting"
+    },
+    "working_to_finished" : {
+      "alpha" : "working_to_finished.a.png",
+      "columns" : 8,
+      "file" : "working_to_finished.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "finished"
+    },
+    "working_to_idle" : {
+      "alpha" : "working_to_idle.a.png",
+      "columns" : 8,
+      "file" : "working_to_idle.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "idle"
+    },
+    "working_to_reading" : {
+      "alpha" : "working_to_reading.a.png",
+      "columns" : 8,
+      "file" : "working_to_reading.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "reading"
+    },
+    "working_to_waiting" : {
+      "alpha" : "working_to_waiting.a.png",
+      "columns" : 8,
+      "file" : "working_to_waiting.jpg",
+      "frames" : 24,
+      "from" : "working",
+      "kind" : "transition",
+      "pose" : "waiting"
     },
     "working@think" : {
       "alpha" : "working@think.a.png",
