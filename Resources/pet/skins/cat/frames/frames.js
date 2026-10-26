@@ -57,6 +57,15 @@ window.CAT_FRAMES = {
       "kind" : "loop",
       "pose" : "idle"
     },
+    "idle_to_working" : {
+      "alpha" : "idle_to_working.a.png",
+      "columns" : 8,
+      "file" : "idle_to_working.jpg",
+      "frames" : 24,
+      "from" : "idle",
+      "kind" : "transition",
+      "pose" : "working"
+    },
     "idle@yawn" : {
       "alpha" : "idle@yawn.a.png",
       "columns" : 8,
@@ -81,6 +90,15 @@ window.CAT_FRAMES = {
       "kind" : "loop",
       "pose" : "sleeping"
     },
+    "sleeping_to_working" : {
+      "alpha" : "sleeping_to_working.a.png",
+      "columns" : 8,
+      "file" : "sleeping_to_working.jpg",
+      "frames" : 24,
+      "from" : "sleeping",
+      "kind" : "transition",
+      "pose" : "working"
+    },
     "urgent" : {
       "alpha" : "urgent.a.png",
       "columns" : 8,
@@ -104,6 +122,15 @@ window.CAT_FRAMES = {
       "frames" : 22,
       "kind" : "loop",
       "pose" : "waiting"
+    },
+    "waiting_to_working" : {
+      "alpha" : "waiting_to_working.a.png",
+      "columns" : 8,
+      "file" : "waiting_to_working.jpg",
+      "frames" : 24,
+      "from" : "waiting",
+      "kind" : "transition",
+      "pose" : "working"
     },
     "waiting@tap" : {
       "alpha" : "waiting@tap.a.png",

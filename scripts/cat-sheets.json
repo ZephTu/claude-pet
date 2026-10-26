@@ -1,5 +1,5 @@
 {
-  "_": "一个视频三只猫。cat-seeds.swift 按它出首尾帧和提示词，cat-frames.swift 按它切片段。每行的 segments 依次首尾相接，end 是这一段结束的秒数；中间的分界点抽帧时会在 ±1 秒内吸附到最像种子图的那一帧。kind: loop 循环 / fidget 小动作 / transition 过渡 / skip 丢弃。 循环表（每行首尾同一姿势）的切点不看 end，按动作本身自动找：豆包不照秒数走。",
+  "_": "一个视频三只猫。cat-seeds.swift 按它出首尾帧和提示词，cat-frames.swift 按它切片段。每行的 segments 依次首尾相接，end 是这一段结束的秒数；中间的分界点抽帧时会在 ±1 秒内吸附到最像种子图的那一帧。kind: loop 循环 / fidget 小动作 / transition 过渡 / skip 丢弃。 循环表（每行首尾同一姿势）的切点不看 end，按动作本身自动找：豆包不照秒数走。 过渡表整段都是过渡：用火山方舟 API（scripts/seedance.py）给首尾帧生成，尾帧把终点钉死，切在最后一帧接缝才最小（实测 0.03–0.05，切在第 3 秒是 0.10–0.16）。",
   "canvas": [
     1080,
     1920
@@ -184,15 +184,11 @@
         {
           "from": "sleeping",
           "to": "working",
-          "action": "0-3秒：醒来揉揉眼睛，坐起来，把笔记本电脑拉到腿上打开；3-5秒：开始打字。",
+          "action": "用整整5秒慢慢完成：醒来揉揉眼睛，坐起来，把笔记本电脑拉到腿上打开。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "sleeping_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -200,15 +196,11 @@
         {
           "from": "idle",
           "to": "working",
-          "action": "0-3秒：坐下来，把笔记本电脑拉到腿上打开；3-5秒：开始打字。",
+          "action": "用整整5秒慢慢完成：坐下来，把笔记本电脑拉到腿上打开。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "idle_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -216,15 +208,11 @@
         {
           "from": "waiting",
           "to": "working",
-          "action": "0-3秒：放下招手的爪子，点点头，坐下把电脑拉回腿上；3-5秒：继续打字。",
+          "action": "用整整5秒慢慢完成：放下招手的爪子，点点头，坐下把电脑拉回腿上。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "waiting_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -238,15 +226,11 @@
         {
           "from": "working",
           "to": "finished",
-          "action": "0-3秒：敲完最后一下键盘，合上电脑放到脚边，站起来双手高举欢呼；3-5秒：保持高举双手开心地笑。",
+          "action": "用整整5秒慢慢完成：敲完最后一下键盘，合上电脑放到脚边，站起来双手高举欢呼。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_finished",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -254,15 +238,11 @@
         {
           "from": "working",
           "to": "waiting",
-          "action": "0-3秒：停下打字抬起头，放下电脑站起来，举起一只爪子向前方招手；3-5秒：继续轻轻招手。",
+          "action": "用整整5秒慢慢完成：停下打字抬起头，放下电脑站起来，举起一只爪子向前方招手。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_waiting",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -270,15 +250,11 @@
         {
           "from": "working",
           "to": "idle",
-          "action": "0-3秒：合上电脑放到一边，站起来伸展一下，双手插回口袋；3-5秒：轻松地站着。",
+          "action": "用整整5秒慢慢完成：合上电脑放到一边，站起来伸展一下，双手插回口袋。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_idle",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -292,15 +268,11 @@
         {
           "from": "finished",
           "to": "idle",
-          "action": "0-3秒：放下高举的双手，满意地把手插回卫衣口袋站好；3-5秒：轻松地站着。",
+          "action": "用整整5秒慢慢完成：放下高举的双手，满意地把手插回卫衣口袋站好。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "finished_to_idle",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -308,15 +280,11 @@
         {
           "from": "idle",
           "to": "sleeping",
-          "action": "0-3秒：打个大哈欠，伸个懒腰，慢慢趴下蜷成一团闭上眼；3-5秒：安静地睡着。",
+          "action": "用整整5秒慢慢完成：打个大哈欠，伸个懒腰，慢慢趴下蜷成一团闭上眼。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "idle_to_sleeping",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -324,15 +292,11 @@
         {
           "from": "waiting",
           "to": "urgent",
-          "action": "0-3秒：招手越来越着急，两只爪子都挥起来，张嘴大喊，旁边弹出红色警告标志；3-5秒：继续着急地挥手。",
+          "action": "用整整5秒慢慢完成：招手越来越着急，两只爪子都挥起来，张嘴大喊，旁边弹出红色警告标志。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "waiting_to_urgent",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -346,15 +310,11 @@
         {
           "from": "working",
           "to": "reading",
-          "action": "0-3秒：把电脑放到一边，拿起一本书打开，凑近认真读；3-5秒：继续读书。",
+          "action": "用整整5秒慢慢完成：把电脑放到一边，拿起一本书打开，凑近认真读。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_reading",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -362,15 +322,11 @@
         {
           "from": "working",
           "to": "compacting",
-          "action": "0-3秒：把电脑推到一边，从旁边抱来一摞纸开始整理；3-5秒：继续整理纸张。",
+          "action": "用整整5秒慢慢完成：把电脑推到一边，从旁边抱来一摞纸开始整理。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_compacting",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -378,15 +334,11 @@
         {
           "from": "working",
           "to": "awaiting-agent",
-          "action": "0-3秒：敲下回车，把电脑放到一边，用一只爪子托着腮；3-5秒：托腮等待。",
+          "action": "用整整5秒慢慢完成：敲下回车，把电脑放到一边，用一只爪子托着腮。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "working_to_awaiting-agent",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -400,15 +352,11 @@
         {
           "from": "reading",
           "to": "working",
-          "action": "0-3秒：合上书放到一边，把电脑拉回腿上；3-5秒：继续打字。",
+          "action": "用整整5秒慢慢完成：合上书放到一边，把电脑拉回腿上。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "reading_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -416,15 +364,11 @@
         {
           "from": "compacting",
           "to": "working",
-          "action": "0-3秒：把整理好的纸推到一边，把电脑拉回腿上；3-5秒：继续打字。",
+          "action": "用整整5秒慢慢完成：把整理好的纸推到一边，把电脑拉回腿上。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "compacting_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
@@ -432,15 +376,11 @@
         {
           "from": "awaiting-agent",
           "to": "working",
-          "action": "0-3秒：回过神来，放下托腮的爪子，把电脑拉回腿上；3-5秒：继续打字。",
+          "action": "用整整5秒慢慢完成：回过神来，放下托腮的爪子，把电脑拉回腿上。最后一帧的姿势、位置和道具与尾帧图完全一致。",
           "segments": [
             {
               "name": "awaiting-agent_to_working",
               "kind": "transition",
-              "end": 3
-            },
-            {
-              "kind": "skip",
               "end": 5
             }
           ]
