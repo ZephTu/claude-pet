@@ -193,11 +193,11 @@ func still(_ pose: String) -> Frame {
     return Frame(pixels: p)
 }
 
-/// 窗口里最像 target 的那一帧。
-func nearest(_ frames: [Frame], to target: Frame, around index: Int, within radius: Int) -> Int {
-    let lo = max(1, index - radius), hi = min(frames.count - 2, index + radius)
-    guard lo <= hi else { return min(max(index, 0), frames.count - 1) }
-    return (lo...hi).min { frames[$0].difference(target) < frames[$1].difference(target) }!
+/// 窗口里 distance 最小的那一帧。
+func nearest(_ count: Int, around index: Int, within radius: Int, distance: (Int) -> Float) -> Int {
+    let lo = max(1, index - radius), hi = min(count - 2, index + radius)
+    guard lo <= hi else { return min(max(index, 0), count - 1) }
+    return (lo...hi).min { distance($0) < distance($1) }!
 }
 
 /// 去掉开头和结尾一动不动的帧。模型常在首尾帧附近停半秒，过渡里那半秒就是延迟。
@@ -292,6 +292,14 @@ for sheet in spec.sheets {
     for (r, row) in sheet.rows.enumerated() {
         let frames = rows[r]
         guard frames.count > 2 else { continue }
+        // 拿什么当「回到原位」的标准：起点姿势用这段视频自己的第一帧——它就是种子图
+        // 经过模型和压缩之后的样子，跟原图逐像素比会差出 0.05 左右的底噪，跟它比
+        // 才是 0。终点姿势视频里没有现成的，只能跟原图比，再扣掉同样的底噪。
+        let offset = frames[0].difference(still(row.from))
+        func distance(_ i: Int, _ pose: String) -> Float {
+            pose == row.from ? frames[i].difference(frames[0])
+                             : max(0, frames[i].difference(still(pose)) - offset)
+        }
         // 分界点：先按秒数换成帧号，再吸附到最像种子图的那一帧。过渡之后的分界
         // 吸附到它的终点姿势，其余吸附到起点姿势。
         var cuts = [0]
@@ -299,11 +307,17 @@ for sheet in spec.sheets {
         for segment in row.segments.dropLast() {
             if segment.kind == "transition" { passedTransition = true }
             let index = Int((segment.end * scale * fps).rounded())
-            let target = still(passedTransition ? row.to : row.from)
+            let pose = passedTransition ? row.to : row.from
             cuts.append(max(cuts.last! + 1,
-                            nearest(frames, to: target, around: index, within: Int(snapWindow * fps))))
+                            nearest(frames.count, around: index, within: Int(snapWindow * fps)) { distance($0, pose) }))
         }
-        cuts.append(frames.count - 1)
+        // 最后一刀也要找。有尾帧约束时最后一帧就是种子图，找到的就是它；豆包这类
+        // 只能给首帧的，模型多半回不到原位，就在最后 1.5 秒里挑最像的一帧收尾，
+        // 后面的扔掉。
+        let tail = Int(1.5 * fps)
+        let end = frames.indices.suffix(tail + 1).filter { $0 > cuts.last! }
+            .min { distance($0, row.to) < distance($1, row.to) }
+        cuts.append(end ?? frames.count - 1)
 
         for (i, segment) in row.segments.enumerated() {
             guard segment.kind != "skip", let name = segment.name else { continue }
@@ -326,8 +340,13 @@ for sheet in spec.sheets {
             if segment.kind == "transition" { entry["from"] = row.from }
             if segment.kind == "loop" { looped.insert(pose) }
             manifest[name] = entry
-            print(String(format: "  %-28@ %-10@ %2d frames  %.2fs", name as NSString,
-                         segment.kind as NSString, list.count, Double(list.count) / fps))
+            // 接缝分：片段首尾帧跟它该接上的种子图差多少。压缩噪点约 0.007，整只猫换了
+            // 姿势是 0.7 上下。超过 0.04 的接上去会看到一跳，值得重抽。
+            let start = segment.kind == "transition" ? row.from : pose
+            let seam = max(distance(cuts[i], start), distance(min(cuts[i + 1], frames.count - 1), pose))
+            print(String(format: "  %-28@ %-10@ %2d frames  %.2fs  seam %.3f%@", name as NSString,
+                         segment.kind as NSString, list.count, Double(list.count) / fps,
+                         seam, (seam > 0.04 ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
         }
     }
 }

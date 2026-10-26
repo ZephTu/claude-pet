@@ -77,8 +77,12 @@ for item in spec.sheets {
     try write(try sheet(item.rows.map(\.from)), "\(item.name)-first.png")
     try write(try sheet(item.rows.map(\.to)), "\(item.name)-last.png")
     let lines = item.rows.enumerated().map { "\(place[$0.offset])的猫：\($0.element.action)" }
+    // 只能给首帧的工具（豆包）不保证结尾回到原位，只能在提示词里把话说死；
+    // 有尾帧的工具这句也无害。
+    let back = item.rows.allSatisfy { $0.from == $0.to }
+        ? "视频最后一秒三只猫都回到和第一帧完全相同的姿势、位置和大小。\n" : ""
     let prompt = "画面上、中、下三行各有一只小猫，三只猫同时做各自不同的动作，共\(item.duration)秒。\n"
-        + lines.joined(separator: "\n") + "\n" + spec.common + "\n"
+        + lines.joined(separator: "\n") + "\n" + back + spec.common + "\n"
     try prompt.write(to: out.appendingPathComponent("\(item.name).txt"), atomically: true, encoding: .utf8)
     print("\(item.name): \(item.duration)s  \(item.rows.map { "\($0.from)→\($0.to)" }.joined(separator: " | "))")
 }
