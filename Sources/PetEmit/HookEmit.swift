@@ -85,7 +85,8 @@ enum HookEmit {
             return
         }
 
-        guard var state = state(for: event, message: message) else { return }
+        let kind = hook["notification_type"] as? String ?? ""
+        guard var state = state(for: event, message: message, notificationType: kind) else { return }
 
         // Work this session parked in the background. A Stop with an agent still
         // running is the session pausing, not finishing — see BackgroundWork.
@@ -270,7 +271,7 @@ enum HookEmit {
     /// killed) must not sit there claiming to still be running.
     private static func runningTools(event: String, hook: [String: Any],
                                      at path: URL, now: String) -> [[String: Any]] {
-        if event == "Stop" || event == "UserPromptSubmit" { return [] }
+        if event == "Stop" || event == "StopFailure" || event == "UserPromptSubmit" { return [] }
 
         var running = (readDocument(at: path)?["running"] as? [[String: Any]]) ?? []
         let id = (hook["tool_use_id"] as? String) ?? ""
@@ -326,7 +327,7 @@ enum HookEmit {
     private static func phaseValue(event: String, at path: URL) -> String {
         switch event {
         case "PreCompact": return "compacting"
-        case "UserPromptSubmit", "Stop", "PreToolUse", "PostToolUse", "SessionStart":
+        case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse", "SessionStart":
             return ""
         default:
             return (readDocument(at: path)?["phase"] as? String) ?? ""
@@ -362,8 +363,23 @@ enum HookEmit {
 
     /// Maps a hook event to one of the three session states, or nil for events
     /// the pet does not care about — those must not touch the file at all.
-    private static func state(for event: String, message: String) -> String? {
+    private static func state(for event: String, message: String,
+                              notificationType: String) -> String? {
+        if event == "Notification", !notificationType.isEmpty {
+            // Structured since Claude Code started sending it, and preferred over
+            // the English sentence below. It also names kinds the sentence test
+            // could only call "waiting": an agent finishing or a quota pause
+            // resuming made the pet raise its paw at a session that wanted
+            // nothing. Kinds not listed here are not about this session needing
+            // the user, so the file is left alone.
+            switch notificationType {
+            case "permission_prompt", "elicitation_dialog", "agent_needs_input": return "waiting"
+            case "idle_prompt": return "idle"
+            default: return nil
+            }
+        }
         if event == "Notification" {
+            // Older builds send no notification_type, only the sentence.
             // Notification covers two different situations and only one of them
             // is worth interrupting the user over:
             //   "Claude needs your permission to use X" - the session is stuck
@@ -386,6 +402,11 @@ enum HookEmit {
         case "PreCompact": return "busy"
         case "PostToolUse": return "busy"
         case "Stop": return "idle"
+        // A turn killed by an API error — rate limit, overload, auth. Stop does
+        // not fire for it, so without this the session sat on "busy" until the
+        // 90s quiet rule caught it. Idle, not finished: no completion is
+        // recorded, since nothing finished.
+        case "StopFailure": return "idle"
         default: return nil
         }
     }
