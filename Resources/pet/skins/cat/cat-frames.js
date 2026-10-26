@@ -172,11 +172,17 @@ class CatFrames {
     }
     const rest = this.resting(), still = `still:${this.target}`;
     if (this.loaded(rest)) return this.show(rest, cut);
-    // The loop is on its way: hold the still meanwhile, and let whichever of
-    // the two lands take over.
+    if (rest !== still) {
+      // The loop is on its way — a JPEG decode, tens of milliseconds. Keep the
+      // frame that is up rather than flash the still: the still is the
+      // original drawing, the clips are the model's, and the two styles
+      // differ enough that one frame of it reads as a flicker. A loop that
+      // fails to load is dropped from the list, and then the still it is.
+      this.load(rest).then(() => this.clips[rest] ? this.handover(rest) : this.next(true));
+      if (this.layer) return;
+    }
     if (this.loaded(still)) this.show(still, cut);
     else this.load(still).then(() => this.handover(still));
-    if (rest !== still) this.load(rest).then(() => this.handover(rest));
   }
 
   /** A picture landed late. It takes over only if it is still wanted and nothing is playing in front of it. */
@@ -248,14 +254,16 @@ class CatFrames {
     if (clip.kind === "loop") {
       this.inPose += layer.time;
       const fidget = this.inPose > FIDGET_AFTER && Math.random() < FIDGET_CHANCE && this.pickFidget();
-      if (fidget) return this.show(fidget, false);
+      // Blended both ways: a fidget is cut from a different stretch of the
+      // video than the loop, and the model rarely draws the same face twice.
+      if (fidget) return this.show(fidget, true);
       layer.time -= clip.frames / this.fps;
       layer.frame = 0;
       this.draw();
       return;
     }
     if (clip.kind === "fidget") this.inPose = 0;
-    this.next(false);
+    this.next(clip.kind === "fidget");
   }
 
   pickFidget() {

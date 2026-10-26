@@ -119,6 +119,11 @@ func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
         let alpha = 1 - smooth(0.10, 0.32, excess)
         if excess > 0 { p[i + channel] = other }
         p[i + 3] = alpha
+        // 半透明的白字（水印）压在绿幕上：抠完是浅灰、半透明。猫身上不会有这种
+        // 像素——白毛挨着背景的地方永远隔着一圈黑描边——所以按像素直接去掉，
+        // 碰到 z 或耳朵的水印也跑不掉。
+        let hi = max(p[i], p[i + 1], p[i + 2]), lo = min(p[i], p[i + 1], p[i + 2])
+        if alpha < 0.9 && lo > 0.55 && hi - lo < 0.12 { p[i + 3] = 0 }
     }
     dropWatermark(&p, side: big)
     return Frame(pixels: downsample(p, from: big, to: size))
@@ -127,9 +132,13 @@ func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
 /// 豆包会在画面上打一行半透明的「豆包AI生成」，位置还会变。落在绿幕上的那部分
 /// 抠完是一小块孤立的浅灰：不跟猫身相连、几乎没有颜色、偏亮。按这三条把它去掉。
 /// 头顶的 z 也是孤立的小块，但它是蓝的，不会被误伤；压在猫身上的水印去不掉。
+/// 顺带去掉另一种孤立小块：大半透明的（见下）。
 func dropWatermark(_ p: inout [Float], side: Int) {
+    // 水印淡入淡出时只剩一层几乎透明的灰；连通域要从这么淡的像素算起，不然它
+    // 被切成没人管的碎边，在屏幕上留一道影子。写图集时 0.03 以下才会归零。
+    let faint: Float = 0.03
     var seen = [Bool](repeating: false, count: side * side)
-    for start in 0..<(side * side) where !seen[start] && p[start * 4 + 3] > 0.1 {
+    for start in 0..<(side * side) where !seen[start] && p[start * 4 + 3] > faint {
         var stack = [start], blob: [Int] = []
         seen[start] = true
         while let i = stack.popLast() {
@@ -139,19 +148,22 @@ func dropWatermark(_ p: inout [Float], side: Int) {
                 let nx = x + dx, ny = y + dy
                 guard nx >= 0, ny >= 0, nx < side, ny < side else { continue }
                 let n = ny * side + nx
-                if !seen[n] && p[n * 4 + 3] > 0.1 { seen[n] = true; stack.append(n) }
+                if !seen[n] && p[n * 4 + 3] > faint { seen[n] = true; stack.append(n) }
             }
         }
         guard blob.count < side * side / 50 else { continue }
-        var saturation: Float = 0, light: Float = 0
+        var saturation: Float = 0, light: Float = 0, opacity: Float = 0
         for i in blob {
+            opacity += p[i * 4 + 3]
             let r = p[i * 4], g = p[i * 4 + 1], b = p[i * 4 + 2]
             let hi = max(r, g, b), lo = min(r, g, b)
             saturation += hi > 0 ? (hi - lo) / hi : 0
             light += hi
         }
         let n = Float(blob.count)
-        if saturation / n < 0.18 && light / n > 0.5 {
+        // 第二种：大半透明的孤立小块。模型让 z 淡出时会把它抹成一团半透明的
+        // 影子，看着像脏东西；实心的 z 不受影响，只是消失得干脆些。
+        if (saturation / n < 0.18 && light / n > 0.5) || opacity / n < 0.6 {
             for i in blob { p[i * 4 + 3] = 0 }
         }
     }
@@ -406,11 +418,13 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
     if kind == "transition" { entry["from"] = from }
     if kind == "loop" { looped.insert(pose) }
     manifest[name] = entry
-    // 接缝分：片段首尾帧跟它该接上的那一帧差多少。压缩噪点约 0.007，整只猫换了
-    // 姿势是 0.7 上下。超过 0.04 的接上去会看到一跳，值得重抽。
+    // 接缝分：片段首尾帧跟它该接上的那一帧差多少。整只猫换了姿势是 0.7 上下；
+    // 豆包真视频里呼吸、尾巴、飘着的 z 就有 0.05，肉眼看是同一帧。0.10 以上
+    // （眼睛一睁一闭这种）接上去才看得出一跳。
+    let warn: Float = 0.10
     print(String(format: "  %-28@ %-10@ %2d frames  %.2fs  seam %.3f%@", name as NSString,
                  kind as NSString, list.count, Double(list.count) / fps,
-                 seam, (seam > 0.04 ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
+                 seam, (seam > warn ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
 }
 
 // ---- 全量重建 ---------------------------------------------------------------
