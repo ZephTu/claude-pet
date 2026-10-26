@@ -120,7 +120,41 @@ func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
         if excess > 0 { p[i + channel] = other }
         p[i + 3] = alpha
     }
+    dropWatermark(&p, side: big)
     return Frame(pixels: downsample(p, from: big, to: size))
+}
+
+/// 豆包会在画面上打一行半透明的「豆包AI生成」，位置还会变。落在绿幕上的那部分
+/// 抠完是一小块孤立的浅灰：不跟猫身相连、几乎没有颜色、偏亮。按这三条把它去掉。
+/// 头顶的 z 也是孤立的小块，但它是蓝的，不会被误伤；压在猫身上的水印去不掉。
+func dropWatermark(_ p: inout [Float], side: Int) {
+    var seen = [Bool](repeating: false, count: side * side)
+    for start in 0..<(side * side) where !seen[start] && p[start * 4 + 3] > 0.1 {
+        var stack = [start], blob: [Int] = []
+        seen[start] = true
+        while let i = stack.popLast() {
+            blob.append(i)
+            let x = i % side, y = i / side
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let nx = x + dx, ny = y + dy
+                guard nx >= 0, ny >= 0, nx < side, ny < side else { continue }
+                let n = ny * side + nx
+                if !seen[n] && p[n * 4 + 3] > 0.1 { seen[n] = true; stack.append(n) }
+            }
+        }
+        guard blob.count < side * side / 50 else { continue }
+        var saturation: Float = 0, light: Float = 0
+        for i in blob {
+            let r = p[i * 4], g = p[i * 4 + 1], b = p[i * 4 + 2]
+            let hi = max(r, g, b), lo = min(r, g, b)
+            saturation += hi > 0 ? (hi - lo) / hi : 0
+            light += hi
+        }
+        let n = Float(blob.count)
+        if saturation / n < 0.18 && light / n > 0.5 {
+            for i in blob { p[i * 4 + 3] = 0 }
+        }
+    }
 }
 
 func smooth(_ a: Float, _ b: Float, _ x: Float) -> Float {
@@ -272,6 +306,113 @@ func write(_ image: CGImage?, to url: URL, type: UTType, options: [CFString: Any
     guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
 }
 
+// ---- 循环表：按动作本身切，不按秒数切 -----------------------------------------
+
+/// 豆包这类只给首帧的工具不照提示词里的秒数走：让它「0-5 秒睡觉，5-10 秒翻身」，
+/// 它可能第 3 秒就站起来伸懒腰了。所以循环表不信秒数，看猫自己：
+///
+/// 1. 找「休息姿势」：跟其他帧中位距离最小的那一帧。大部分时间猫都在原姿势上，
+///    所以它就是模型画出来的原姿势——比种子图本身准，种子图的画风跟模型不一样。
+/// 2. 离休息姿势很远的连续一段就是一个小动作，两头延伸到最接近休息姿势的那一帧。
+/// 3. 剩下最长的那段安静时间里，找首尾最像的一对帧当循环。
+///
+/// 开头 0.4 秒不要：那是种子图本身，下一帧画风就换成模型的了，会闪一下。
+struct Auto {
+    var loop: ClosedRange<Int>
+    var loopSeam: Float
+    var fidgets: [(range: ClosedRange<Int>, seam: Float)]
+}
+
+func autoSegment(_ frames: [Frame]) -> Auto? {
+    let skip = Int(0.4 * fps)
+    let all = Array(skip..<frames.count)
+    guard all.count > Int(2 * fps) else { return nil }
+    let probe = all.enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
+    let rest = probe.min { a, b in
+        func spread(_ i: Int) -> Float {
+            let d = probe.map { frames[i].difference(frames[$0]) }.sorted()
+            return d[d.count / 2]
+        }
+        return spread(a) < spread(b)
+    }!
+    let away = frames.map { $0.difference(frames[rest]) }
+
+    // 离休息姿势超过 moving 的帧算在动，前后相隔不到半秒的两段算同一个动作。
+    let moving: Float = 0.25
+    var runs: [ClosedRange<Int>] = []
+    for i in all where away[i] > moving {
+        if let last = runs.last, i - last.upperBound <= Int(0.5 * fps) {
+            runs[runs.count - 1] = last.lowerBound...i
+        } else {
+            runs.append(i...i)
+        }
+    }
+    // 两头各往外找 1.5 秒，停在最像休息姿势的那一帧上。
+    let reach = Int(1.5 * fps)
+    var moves = runs.map { run -> ClosedRange<Int> in
+        let left = (max(skip, run.lowerBound - reach)...run.lowerBound).min { away[$0] < away[$1] }!
+        let right = (run.upperBound...min(frames.count - 1, run.upperBound + reach)).min { away[$0] < away[$1] }!
+        return left...right
+    }
+    moves.removeAll { $0.count < Int(0.8 * fps) }
+
+    // 最长的安静段。
+    var quiet: [ClosedRange<Int>] = []
+    var cursor = skip
+    for move in moves {
+        if move.lowerBound - cursor > 1 { quiet.append(cursor...(move.lowerBound - 1)) }
+        cursor = move.upperBound + 1
+    }
+    if frames.count - 1 - cursor > 1 { quiet.append(cursor...(frames.count - 1)) }
+    guard let calm = quiet.max(by: { $0.count < $1.count }), calm.count >= Int(1.5 * fps) else { return nil }
+
+    // 循环：首尾最像的一对，长度 1.5 秒到一张图集装得下为止；差不多像的里挑最长的。
+    var pairs: [(a: Int, b: Int, d: Float)] = []
+    for a in calm { for b in calm where b - a >= Int(1.5 * fps) && b - a <= maxFrames {
+        pairs.append((a, b, frames[a].difference(frames[b])))
+    } }
+    let best = pairs.map(\.d).min()!
+    let pick = pairs.filter { $0.d <= best + 0.02 }.max { $0.b - $0.a < $1.b - $1.a }!
+
+    // 小动作接在循环的第一帧后面播，也回到它，所以两头都跟它比。
+    let anchor = frames[pick.a]
+    let fidgets = moves.map { move -> (ClosedRange<Int>, Float) in
+        let s = (max(skip, move.lowerBound - 6)...move.lowerBound).min {
+            frames[$0].difference(anchor) < frames[$1].difference(anchor) }!
+        let e = (move.upperBound...min(frames.count - 1, move.upperBound + 6)).min {
+            frames[$0].difference(anchor) < frames[$1].difference(anchor) }!
+        return (s...e, max(frames[s].difference(anchor), frames[e].difference(anchor)))
+    }
+    return Auto(loop: pick.a...pick.b, loopSeam: pick.d, fidgets: fidgets)
+}
+
+var manifest: [String: [String: Any]] = [:]
+var looped = Set<String>()
+
+func emit(_ name: String, kind: String, pose: String, from: String, slice: [Frame], seam: Float) throws {
+    var list: [Frame]
+    switch kind {
+    case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
+    default: list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
+    }
+    guard !list.isEmpty else { print("  skip \(name): no frames"); return }
+    let file = "\(name).jpg", mask = "\(name).a.png"
+    let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
+                              alpha: outDir.appendingPathComponent(mask))
+    var entry: [String: Any] = [
+        "file": file, "alpha": mask, "kind": kind, "pose": pose,
+        "frames": list.count, "columns": grid.columns,
+    ]
+    if kind == "transition" { entry["from"] = from }
+    if kind == "loop" { looped.insert(pose) }
+    manifest[name] = entry
+    // 接缝分：片段首尾帧跟它该接上的那一帧差多少。压缩噪点约 0.007，整只猫换了
+    // 姿势是 0.7 上下。超过 0.04 的接上去会看到一跳，值得重抽。
+    print(String(format: "  %-28@ %-10@ %2d frames  %.2fs  seam %.3f%@", name as NSString,
+                 kind as NSString, list.count, Double(list.count) / fps,
+                 seam, (seam > 0.04 ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
+}
+
 // ---- 全量重建 ---------------------------------------------------------------
 
 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
@@ -280,8 +421,6 @@ where ["png", "jpg", "js"].contains(stale.pathExtension) {
     try FileManager.default.removeItem(at: stale)
 }
 
-var manifest: [String: [String: Any]] = [:]
-var looped = Set<String>()
 for sheet in spec.sheets {
     let url = ["mp4", "mov", "m4v"].map { videoDir.appendingPathComponent("\(sheet.name).\($0)") }
         .first { FileManager.default.fileExists(atPath: $0.path) }
@@ -292,6 +431,21 @@ for sheet in spec.sheets {
     for (r, row) in sheet.rows.enumerated() {
         let frames = rows[r]
         guard frames.count > 2 else { continue }
+
+        if row.segments.allSatisfy({ $0.kind == "loop" || $0.kind == "fidget" }) {
+            guard let cut = autoSegment(frames),
+                  let loopName = row.segments.first(where: { $0.kind == "loop" })?.name
+            else { print("  \(row.from): no calm stretch long enough for a loop — regenerate"); continue }
+            try emit(loopName, kind: "loop", pose: row.from, from: "",
+                     slice: Array(frames[cut.loop]), seam: cut.loopSeam)
+            // 动作比表里写的多，就把多出来的也留下：第二个叫 <名字>2，以此类推。
+            let base = row.segments.first(where: { $0.kind == "fidget" })?.name ?? "\(row.from)@move"
+            for (n, fidget) in cut.fidgets.enumerated() {
+                try emit(n == 0 ? base : "\(base)\(n + 1)", kind: "fidget", pose: row.from, from: "",
+                         slice: Array(frames[fidget.range]), seam: fidget.seam)
+            }
+            continue
+        }
         // 拿什么当「回到原位」的标准：起点姿势用这段视频自己的第一帧——它就是种子图
         // 经过模型和压缩之后的样子，跟原图逐像素比会差出 0.05 左右的底噪，跟它比
         // 才是 0。终点姿势视频里没有现成的，只能跟原图比，再扣掉同样的底噪。
@@ -322,31 +476,10 @@ for sheet in spec.sheets {
         for (i, segment) in row.segments.enumerated() {
             guard segment.kind != "skip", let name = segment.name else { continue }
             let slice = Array(frames[cuts[i]...min(cuts[i + 1], frames.count - 1)])
-            var list: [Frame]
-            switch segment.kind {
-            case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
-            case "loop", "fidget": list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
-            default: print("  skip \(name): unknown kind \(segment.kind)"); continue
-            }
-            guard !list.isEmpty else { print("  skip \(name): no frames"); continue }
-            let file = "\(name).jpg", mask = "\(name).a.png"
-            let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
-                                      alpha: outDir.appendingPathComponent(mask))
             let pose = segment.kind == "transition" ? row.to : row.from
-            var entry: [String: Any] = [
-                "file": file, "alpha": mask, "kind": segment.kind, "pose": pose,
-                "frames": list.count, "columns": grid.columns,
-            ]
-            if segment.kind == "transition" { entry["from"] = row.from }
-            if segment.kind == "loop" { looped.insert(pose) }
-            manifest[name] = entry
-            // 接缝分：片段首尾帧跟它该接上的种子图差多少。压缩噪点约 0.007，整只猫换了
-            // 姿势是 0.7 上下。超过 0.04 的接上去会看到一跳，值得重抽。
             let start = segment.kind == "transition" ? row.from : pose
             let seam = max(distance(cuts[i], start), distance(min(cuts[i + 1], frames.count - 1), pose))
-            print(String(format: "  %-28@ %-10@ %2d frames  %.2fs  seam %.3f%@", name as NSString,
-                         segment.kind as NSString, list.count, Double(list.count) / fps,
-                         seam, (seam > 0.04 ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
+            try emit(name, kind: segment.kind, pose: pose, from: row.from, slice: slice, seam: seam)
         }
     }
 }
