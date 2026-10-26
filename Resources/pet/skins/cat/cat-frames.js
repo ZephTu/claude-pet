@@ -275,7 +275,11 @@ class CatFrames {
       return;
     }
     if (clip.kind === "fidget") this.inPose = 0;
-    this.next(clip.kind === "fidget");
+    // Blended out of everything that is not a loop. A fidget is cut from
+    // another stretch of video than the loop; a transition lands on the pinned
+    // end frame, which the model snaps to in its last frame or two, and the
+    // loop after it comes from a different video again.
+    this.next(true);
   }
 
   pickFidget() {

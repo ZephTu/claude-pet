@@ -34,8 +34,9 @@ let fps = 12.0
 let columns = 8
 /// 一张图集最多 64 帧（1920×1920）。超出的按时间均匀抽稀，等于整体加速。
 let maxFrames = 64
-/// 过渡最多 1.5 秒：状态已经变了，猫还在慢慢走过去，信号就晚了。
-let maxTransitionFrames = 18
+/// 过渡最多 2 秒：状态已经变了，猫还在慢慢走过去，信号就晚了。再短，5 秒的
+/// 视频要压三倍多，起身坐下像快进。
+let maxTransitionFrames = 24
 /// 段与段的分界在标称秒数前后这么多秒里找最像种子图的那一帧。模型不会准点
 /// 回到初始姿势，切在它真正回来的那一帧，循环才接得上。
 let snapWindow = 1.0
@@ -106,12 +107,20 @@ func rgba(_ image: CGImage, width: Int, height: Int, crop: CGRect? = nil) -> [Fl
 /// 阴影是暗绿，照样算背景，所以模型自己加的投影会被一起抠掉。
 /// 抠完再去溢色：边缘残留的绿压回 max(R, B)，否则猫会描一圈绿边。
 func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
-    let w = image.width, h = image.height
-    let box = CGRect(x: art.minX * Double(w), y: art.minY * Double(h),
-                     width: art.width * Double(w), height: art.height * Double(h)).integral
     // 先在两倍尺寸上抠，再缩到目标尺寸，边缘的半透明才是平滑的。
     let big = size * 2
-    var p = rgba(image, width: big, height: big, crop: box)
+    return Frame(pixels: downsample(keyed(image, channel: channel, art: art, side: big), from: big, to: size))
+}
+
+/// 视频像素里这只猫的框。
+func cropBox(_ image: CGImage, art: CGRect) -> CGRect {
+    let w = Double(image.width), h = Double(image.height)
+    return CGRect(x: art.minX * w, y: art.minY * h, width: art.width * w, height: art.height * h).integral
+}
+
+/// 抠好的 side×side 非预乘 RGBA。
+func keyed(_ image: CGImage, channel: Int, art: CGRect, side big: Int) -> [Float] {
+    var p = rgba(image, width: big, height: big, crop: cropBox(image, art: art))
     let other2 = channel == 1 ? 2 : 1  // 红永远是另一个
     for i in stride(from: 0, to: p.count, by: 4) {
         let k = p[i + channel], other = max(p[i], p[i + other2])
@@ -126,7 +135,7 @@ func key(_ image: CGImage, channel: Int, art: CGRect) -> Frame {
         if alpha < 0.9 && lo > 0.55 && hi - lo < 0.12 { p[i + 3] = 0 }
     }
     dropWatermark(&p, side: big)
-    return Frame(pixels: downsample(p, from: big, to: size))
+    return p
 }
 
 /// 豆包会在画面上打一行半透明的「豆包AI生成」，位置还会变。落在绿幕上的那部分
@@ -196,7 +205,7 @@ func downsample(_ p: [Float], from big: Int, to small: Int) -> [Float] {
 // ---- 一段：抽帧、修剪、接缝 -------------------------------------------------
 
 /// 整个视频抽成三行帧序列，每行一只猫。
-func rows(of url: URL, expected: Double) async throws -> (rows: [[Frame]], scale: Double) {
+func rows(of url: URL, expected: Double, lastFrame: Bool) async throws -> (rows: [[Frame]], scale: Double) {
     let asset = AVURLAsset(url: url)
     let duration = try await asset.load(.duration).seconds
     let generator = AVAssetImageGenerator(asset: asset)
@@ -218,6 +227,19 @@ func rows(of url: URL, expected: Double) async throws -> (rows: [[Frame]], scale
         }
         for row in 0..<3 { out[row].append(key(image, channel: channel, art: boxes[row])) }
         t += 1 / fps
+    }
+    // 过渡表的最后一帧就是钉死的尾帧——循环的第一帧。12fps 抽帧最后一刀落在
+    // 4.92 秒，还是模型自己画的那只（大小、位置差 5% 左右），真正落到尾帧上是
+    // 最后 1/24 秒的事，不补这一帧就永远接不上循环：实测接缝 0.11–0.25。
+    // 文件时长是音轨和视频轨里长的那个，视频轨往往短一点，正好卡在末尾要不到
+    // 帧；往回退着要，第一张要到的就是最后一帧。
+    if lastFrame {
+        for back in 1...24 {
+            let time = CMTime(seconds: duration - Double(back) / 240, preferredTimescale: 2400)
+            guard let (image, _) = try? await generator.image(at: time) else { continue }
+            for row in 0..<3 { out[row].append(key(image, channel: channel, art: boxes[row])) }
+            break
+        }
     }
     // 表里的秒数按视频实际时长等比换算：生成成了 10 秒的 5 秒表，切点跟着拉长。
     if abs(duration - expected) > 0.3 {
@@ -402,7 +424,23 @@ func autoSegment(_ frames: [Frame]) -> Auto? {
 var manifest: [String: [String: Any]] = [:]
 var looped = Set<String>()
 
-func emit(_ name: String, kind: String, pose: String, from: String, slice: [Frame], seam: Float) throws {
+/// 每个姿势循环播放时的第一帧。过渡的接缝要跟它比，不能跟原图比：过渡播完
+/// 接的是循环，原图从来不上屏。跟原图比曾经给 idle_to_working 打出 0.034，实际
+/// 接进循环是 0.206。循环表在 cat-sheets.json 里排在过渡表前面，所以轮到过渡时
+/// 这里已经有了。
+var loopStarts: [String: Frame] = [:]
+
+func emit(_ name: String, kind: String, pose: String, from: String, slice raw: [Frame], seam measured: Float) throws {
+    var seam = measured
+    var slice = raw
+    if kind == "transition" {
+        slice = register(raw, start: loopStarts[from], end: loopStarts[pose])
+        // 两头各跟要接的那个循环的第一帧比；哪头的循环还没有，就保留传进来的分。
+        var joins: [Float] = []
+        if let start = loopStarts[from] { joins.append(slice.first!.difference(start)) }
+        if let end = loopStarts[pose] { joins.append(slice.last!.difference(end)) }
+        if !joins.isEmpty { seam = joins.max()! }
+    }
     // 接缝差到这个份上，播出来就是一张图硬切成另一张，比没有这段还难看：
     // 不写进清单，那次切换退回淡入淡出。
     guard seam <= 0.25 else {
@@ -412,9 +450,10 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
     }
     var list: [Frame]
     switch kind {
-    case "transition": list = resample(trimStill(slice), to: maxTransitionFrames)
+    case "transition": list = easeIntoEnd(resample(trimStill(slice), to: maxTransitionFrames))
     default: list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
     }
+    if kind == "loop", let first = list.first { loopStarts[pose] = first }
     guard !list.isEmpty else { print("  skip \(name): no frames"); return }
     let file = "\(name).jpg", mask = "\(name).a.png"
     let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
@@ -435,6 +474,117 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
                  seam, (seam > warn ? "  ⚠ 接缝明显，考虑重抽" : "") as NSString))
 }
 
+// ---- 过渡的首尾帧：用循环自己的第一帧 -----------------------------------------
+
+/// 过渡接到哪个循环，就应该落在那个循环的第一帧上。拿原图当尾帧不行：循环是另一个
+/// 视频里切出来的，表情、大小都跟原图不一样——实测 idle_to_working 的最后一帧
+/// （原图，张嘴笑）到 working 循环第一帧（皱眉闭嘴）差 0.21，是循环里正常一帧
+/// 的七倍。所以每切出一段循环，就把它的第一帧按视频原分辨率抠出来存一张，
+/// cat-seeds.swift 拼过渡的首尾帧时优先用它。
+let anchors = sheetDir.deletingLastPathComponent().appendingPathComponent("anchors")
+
+func saveAnchor(_ pose: String, from url: URL, frame: Int, art: CGRect) async throws {
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    generator.appliesPreferredTrackTransform = true
+    let (image, _) = try await generator.image(at: CMTime(seconds: Double(frame) / fps, preferredTimescale: 600))
+    let side = Int(cropBox(image, art: art).width)
+    let p = keyed(image, channel: keyChannel(of: image), art: art, side: side)
+    var bytes = [UInt8](repeating: 0, count: side * side * 4)
+    for i in stride(from: 0, to: p.count, by: 4) {
+        let a = min(max(p[i + 3], 0), 1)
+        for c in 0..<3 { bytes[i + c] = UInt8(min(max(p[i + c], 0), 1) * a * 255 + 0.5) }
+        bytes[i + 3] = UInt8(a * 255 + 0.5)
+    }
+    let ctx = CGContext(data: &bytes, width: side, height: side, bitsPerComponent: 8,
+                        bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    try FileManager.default.createDirectory(at: anchors, withIntermediateDirectories: true)
+    try write(ctx.makeImage(), to: anchors.appendingPathComponent("\(pose).png"), type: .png, options: [:])
+}
+
+// ---- 过渡对齐 ------------------------------------------------------------------
+
+/// 一帧的缩放 + 平移，以画面中心为原点。
+struct Fit { var scale: Float = 1; var dx: Float = 0; var dy: Float = 0 }
+
+/// 按 fit 重采样。双线性，在预乘空间里插值，边缘不会带出黑边。
+func warp(_ f: Frame, _ fit: Fit) -> Frame {
+    if fit.scale == 1 && fit.dx == 0 && fit.dy == 0 { return f }
+    var out = [Float](repeating: 0, count: f.pixels.count)
+    let c = Float(size) / 2
+    for y in 0..<size { for x in 0..<size {
+        let sx = (Float(x) - c - fit.dx) / fit.scale + c, sy = (Float(y) - c - fit.dy) / fit.scale + c
+        let x0 = Int(sx.rounded(.down)), y0 = Int(sy.rounded(.down))
+        let fx = sx - Float(x0), fy = sy - Float(y0)
+        var acc: (Float, Float, Float, Float) = (0, 0, 0, 0)
+        for (ox, oy, w) in [(0, 0, (1 - fx) * (1 - fy)), (1, 0, fx * (1 - fy)), (0, 1, (1 - fx) * fy), (1, 1, fx * fy)] {
+            let px = x0 + ox, py = y0 + oy
+            guard px >= 0, py >= 0, px < size, py < size, w > 0 else { continue }
+            let i = (py * size + px) * 4, a = f.pixels[i + 3] * w
+            acc.0 += f.pixels[i] * a; acc.1 += f.pixels[i + 1] * a; acc.2 += f.pixels[i + 2] * a; acc.3 += a
+        }
+        let o = (y * size + x) * 4
+        if acc.3 > 0 { out[o] = acc.0 / acc.3; out[o + 1] = acc.1 / acc.3; out[o + 2] = acc.2 / acc.3 }
+        out[o + 3] = acc.3
+    } }
+    return Frame(pixels: out)
+}
+
+/// 找把 frame 对到 target 上最好的缩放 + 平移。先粗后细，比较时隔点取样。
+func bestFit(_ frame: Frame, onto target: Frame) -> Fit {
+    var best = Fit(), bestD = frame.difference(target)
+    func trial(_ fit: Fit) {
+        let d = warp(frame, fit).difference(target)
+        if d < bestD { bestD = d; best = fit }
+    }
+    for s in stride(from: Float(0.95), through: 1.05, by: 0.01) {
+        for dy in stride(from: Float(-10), through: 10, by: 2) { for dx in stride(from: Float(-10), through: 10, by: 2) {
+            trial(Fit(scale: s, dx: dx, dy: dy))
+        } }
+    }
+    let coarse = best
+    for s in stride(from: coarse.scale - 0.01, through: coarse.scale + 0.01, by: 0.0025) {
+        for dy in stride(from: coarse.dy - 2, through: coarse.dy + 2, by: 0.5) {
+            for dx in stride(from: coarse.dx - 2, through: coarse.dx + 2, by: 0.5) { trial(Fit(scale: s, dx: dx, dy: dy)) }
+        }
+    }
+    return best
+}
+
+/// 把过渡对齐到它要接的两个循环上。
+///
+/// 火山方舟出的视频跟输入图并不逐像素重合：整张画面会有约 2% 的缩放，落到上下两行
+/// 的猫身上就是 5～6 像素的上下错位（实测上行 +5、中行 −1、下行 −6），钉死的尾帧
+/// 也一样。首尾各求一个最贴合的缩放 + 平移，中间的帧按时间从前者渐变到后者。
+func register(_ frames: [Frame], start: Frame?, end: Frame?) -> [Frame] {
+    guard let first = frames.first, let last = frames.last, start != nil || end != nil else { return frames }
+    let a = start.map { bestFit(first, onto: $0) } ?? Fit()
+    let b = end.map { bestFit(last, onto: $0) } ?? Fit()
+    print(String(format: "    aligned: start ×%.3f %+.1f,%+.1f  end ×%.3f %+.1f,%+.1f",
+                 a.scale, a.dx, a.dy, b.scale, b.dx, b.dy))
+    let n = Float(max(frames.count - 1, 1))
+    return frames.enumerated().map { i, f in
+        let t = Float(i) / n
+        return warp(f, Fit(scale: a.scale + (b.scale - a.scale) * t,
+                           dx: a.dx + (b.dx - a.dx) * t, dy: a.dy + (b.dy - a.dy) * t))
+    }
+}
+
+/// 模型在最后一两帧里硬吸到尾帧上（实测最后一步 0.16，正常一帧 0.03）。把最后
+/// 几帧逐渐混向最后一帧，一下跳变成一小段变形。
+func easeIntoEnd(_ frames: [Frame]) -> [Frame] {
+    var out = frames
+    let tail = min(4, out.count / 4)
+    guard tail > 0, let last = out.last else { return out }
+    for k in 0..<tail {
+        let i = out.count - 1 - tail + k
+        out[i] = out[i].blended(toward: last, by: Float(k + 1) / Float(tail + 1))
+    }
+    return out
+}
+
 // ---- 全量重建 ---------------------------------------------------------------
 
 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
@@ -451,7 +601,8 @@ for sheet in spec.sheets {
     }.first { FileManager.default.fileExists(atPath: $0.path) }
     guard let url else { print("\(sheet.name): no video yet"); continue }
     print("\(sheet.name):")
-    let (rows, scale) = try await rows(of: url, expected: sheet.duration)
+    let (rows, scale) = try await rows(of: url, expected: sheet.duration,
+                                       lastFrame: sheet.rows.contains { $0.from != $0.to })
 
     for (r, row) in sheet.rows.enumerated() {
         let frames = rows[r]
@@ -463,6 +614,7 @@ for sheet in spec.sheets {
             else { print("  \(row.from): no calm stretch long enough for a loop — regenerate"); continue }
             try emit(loopName, kind: "loop", pose: row.from, from: "",
                      slice: Array(frames[cut.loop]), seam: cut.loopSeam)
+            try await saveAnchor(row.from, from: url, frame: cut.loop.lowerBound, art: boxes[r])
             // 动作比表里写的多，就把多出来的也留下：第二个叫 <名字>2，以此类推。
             let base = row.segments.first(where: { $0.kind == "fidget" })?.name ?? "\(row.from)@move"
             for (n, fidget) in cut.fidgets.enumerated() {
@@ -496,7 +648,9 @@ for sheet in spec.sheets {
         let tail = Int(1.5 * fps)
         let end = frames.indices.suffix(tail + 1).filter { $0 > cuts.last! }
             .min { distance($0, row.to) < distance($1, row.to) }
-        cuts.append(end ?? frames.count - 1)
+        // 以过渡收尾的行不找：尾帧就是钉死的循环第一帧，最后一帧就是终点。按
+        // 「最像原图」去找会挑中模型自己画的那只，又接不上循环。
+        cuts.append(row.segments.last?.kind == "transition" ? frames.count - 1 : (end ?? frames.count - 1))
 
         for (i, segment) in row.segments.enumerated() {
             guard segment.kind != "skip", let name = segment.name else { continue }

@@ -6,3 +6,4 @@ dist/claude-pet-*/
 pet-emit
 docs/previews/shots/
 art/
+.env
