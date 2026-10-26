@@ -110,8 +110,13 @@ enum HealthCollector {
     }
 
     private static func countClaudeProcesses() -> Int {
-        let out = shell("/usr/bin/pgrep", ["-x", ProcessProbe.claudeProcessName])
-        return out.split(separator: "\n").filter { !$0.isEmpty }.count
+        // Not `pgrep -x claude`: the native installer's processes are named after
+        // their version, so that counted zero with ten sessions open.
+        let out = shell("/bin/ps", ["-axo", "pid="])
+        return out.split(separator: "\n")
+            .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+            .filter(ProcessProbe.isClaude)
+            .count
     }
 
     private static func shell(_ launchPath: String, _ arguments: [String]) -> String {

@@ -357,10 +357,7 @@ enum HookEmit {
     /// instead of assuming a fixed depth. Returns nil if it is not found, which
     /// leaves that session on the old timeout behaviour rather than breaking it.
     private static func claudePID() -> Int32? {
-        ProcessProbe.findAncestor(
-            named: ProcessProbe.claudeProcessName,
-            from: ProcessInfo.processInfo.processIdentifier
-        )
+        ProcessProbe.findClaudeAncestor(from: ProcessInfo.processInfo.processIdentifier)
     }
 
     /// Maps a hook event to one of the three session states, or nil for events

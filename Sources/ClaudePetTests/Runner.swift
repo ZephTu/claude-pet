@@ -442,6 +442,25 @@ struct Runner {
                 !ProcessProbe.nameMatches("launchd", "claude"))
         t.check("an empty wanted name matches nothing",
                 !ProcessProbe.nameMatches("claude.exe", ""))
+        // Caught for real on 2.1.310: the native installer runs
+        // ~/.local/share/claude/versions/2.1.310, so p_comm is the version number.
+        // No hook found its pid and idle sessions timed out of the panel
+        t.check("a native-install process named after its version is claude",
+                ProcessProbe.looksLikeClaude(
+                    name: "2.1.310", path: "/Users/u/.local/share/claude/versions/2.1.310"))
+        t.check("an npm-style install is still claude by name",
+                ProcessProbe.looksLikeClaude(name: "claude", path: "/opt/homebrew/bin/node"))
+        t.check("a claude binary is recognised by path when the name is truncated oddly",
+                ProcessProbe.looksLikeClaude(name: "x", path: "/usr/local/bin/claude"))
+        t.check("some other versions/ directory is not claude",
+                !ProcessProbe.looksLikeClaude(
+                    name: "1.2.3", path: "/Users/u/.local/share/node/versions/1.2.3"))
+        t.check("a version-named process with no path is not claude",
+                !ProcessProbe.looksLikeClaude(name: "2.1.310", path: nil))
+        t.check("launchd is not claude", !ProcessProbe.isClaude(pid: 1))
+        t.check("this test runner can read its own executable path",
+                ProcessProbe.executablePath(pid: ProcessInfo.processInfo.processIdentifier)?
+                    .hasSuffix("ClaudePetTests") == true)
         t.check("every process has a parent except the root",
                 (ProcessProbe.parentPID(of: ProcessInfo.processInfo.processIdentifier) ?? 0) > 0)
 

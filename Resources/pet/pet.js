@@ -998,7 +998,7 @@ window.setSkin = function (name) {
   }
   if (cat) return;
   try {
-    cat = new CatPet(document.getElementById("cat"), {
+    const stills = {
       idle: "skins/cat/assets/idle.png",
       working: "skins/cat/assets/working.png",
       waiting: "skins/cat/assets/waiting.png",
@@ -1008,7 +1008,14 @@ window.setSkin = function (name) {
       compacting: "skins/cat/assets/compacting.png",
       finished: "skins/cat/assets/finished.png",
       "awaiting-agent": "skins/cat/assets/awaiting-agent.png",
-    });
+    };
+    // Frame-by-frame once there is any video to play (frames.js is written by
+    // scripts/cat-frames.swift and absent until then); the warped stills until.
+    const frames = window.CAT_FRAMES;
+    const canvas = document.getElementById("cat");
+    cat = frames && Object.keys(frames.clips || {}).length
+      ? new CatFrames(canvas, frames, "skins/cat/frames/", stills)
+      : new CatPet(canvas, stills);
     cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
     cat.ready.then(function () { if (cat) cat.setState(lastPose); })
              .catch(function (e) { skinFailed(e); });
