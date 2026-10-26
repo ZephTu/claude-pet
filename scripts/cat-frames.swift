@@ -411,7 +411,21 @@ func autoSegment(_ frames: [Frame]) -> Auto? {
 var manifest: [String: [String: Any]] = [:]
 var looped = Set<String>()
 
-func emit(_ name: String, kind: String, pose: String, from: String, slice: [Frame], seam: Float) throws {
+/// 每个姿势循环播放时的第一帧。过渡的接缝要跟它比，不能跟原图比：过渡播完
+/// 接的是循环，原图从来不上屏。跟原图比曾经给 idle_to_working 打出 0.034，实际
+/// 接进循环是 0.206。循环表在 cat-sheets.json 里排在过渡表前面，所以轮到过渡时
+/// 这里已经有了。
+var loopStarts: [String: Frame] = [:]
+
+func emit(_ name: String, kind: String, pose: String, from: String, slice: [Frame], seam measured: Float) throws {
+    var seam = measured
+    if kind == "transition" {
+        // 两头各跟要接的那个循环的第一帧比；哪头的循环还没有，就保留传进来的分。
+        var joins: [Float] = []
+        if let start = loopStarts[from] { joins.append(slice.first!.difference(start)) }
+        if let end = loopStarts[pose] { joins.append(slice.last!.difference(end)) }
+        if !joins.isEmpty { seam = joins.max()! }
+    }
     // 接缝差到这个份上，播出来就是一张图硬切成另一张，比没有这段还难看：
     // 不写进清单，那次切换退回淡入淡出。
     guard seam <= 0.25 else {
@@ -424,6 +438,7 @@ func emit(_ name: String, kind: String, pose: String, from: String, slice: [Fram
     case "transition": list = easeIntoEnd(resample(trimStill(slice), to: maxTransitionFrames))
     default: list = closeLoop(resample(Array(slice.dropLast()), to: maxFrames))
     }
+    if kind == "loop", let first = list.first { loopStarts[pose] = first }
     guard !list.isEmpty else { print("  skip \(name): no frames"); return }
     let file = "\(name).jpg", mask = "\(name).a.png"
     let grid = try writeAtlas(list, color: outDir.appendingPathComponent(file),
