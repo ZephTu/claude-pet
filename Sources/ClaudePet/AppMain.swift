@@ -259,7 +259,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge?.setPhase(StateAggregator.phase(state.sessions))
         refreshTitlesIfPinned(for: state.sessions, now: now)
         noticeTransients(state, previous: lastState)
+        backgroundShells = findBackgroundShells(state.sessions)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
+                             background: backgroundShells,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
                              snoozed: snoozeMarks, prefs: labelPrefs,
@@ -284,6 +286,22 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
+    }
+
+    /// sessionId → commands it left running after its turn ended. Refreshed
+    /// every render, so a command that exits drops off within one tick.
+    private var backgroundShells: [String: [BackgroundShells.Shell]] = [:]
+
+    /// Only idle sessions: while a turn runs, its own foreground Bash call is a
+    /// shell of exactly the same shape and would be counted as background.
+    private func findBackgroundShells(_ sessions: [SessionState]) -> [String: [BackgroundShells.Shell]] {
+        var out: [String: [BackgroundShells.Shell]] = [:]
+        for session in sessions where session.state == .idle {
+            guard let pid = session.pid else { continue }
+            let shells = BackgroundShells.running(under: pid)
+            if !shells.isEmpty { out[session.sessionId] = shells }
+        }
+        return out
     }
 
     // MARK: - Away and back
@@ -958,7 +976,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             ActivityLog.decode((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
             now: Date(), limit: 1).first
         return SessionDetail.detail(session: session, insight: insights[sessionID],
-                                    lastActivity: recent, now: Date())
+                                    lastActivity: recent,
+                                    background: backgroundShells[sessionID] ?? [], now: Date())
     }
 
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
