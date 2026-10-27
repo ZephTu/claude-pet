@@ -139,10 +139,10 @@ struct Runner {
         t.check("sessions come back waiting, then busy, then idle",
                 StateAggregator.aggregate(groupMix, now: t0).sessions.map(\.sessionId) == ["c", "b", "a"])
 
-        // Within a group, oldest since first; the input is deliberately newest-first
-        let sameGroup = [mk("x", .idle, sinceAgo: 10), mk("y", .idle, sinceAgo: 100)]
-        t.check("within a group, oldest since comes first",
-                StateAggregator.aggregate(sameGroup, now: t0).sessions.map(\.sessionId) == ["y", "x"])
+        // Within a group, newest since first; the input is deliberately oldest-first
+        let sameGroup = [mk("y", .idle, sinceAgo: 100), mk("x", .idle, sinceAgo: 10)]
+        t.check("within a group, the most recent since comes first",
+                StateAggregator.aggregate(sameGroup, now: t0).sessions.map(\.sessionId) == ["x", "y"])
 
         // Dead dropped and live kept in the SAME call — not the degenerate all-or-nothing case
         let deadAndLive = [mk("d", .busy, updatedAgo: 901), mk("l", .busy, updatedAgo: 0)]
