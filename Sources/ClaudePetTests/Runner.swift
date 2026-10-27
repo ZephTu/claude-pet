@@ -869,6 +869,13 @@ struct Runner {
         // ---- PermissionRequest: say WHAT is blocked, not just that something is ----
         // The old signal was Notification's English copy — contains("waiting for
         // your input") — which fails silently the day that wording changes.
+        t.check("AskUserQuestion is a question to answer, not a permission",
+                PermissionSummary.isQuestion(toolName: "AskUserQuestion")
+                && !PermissionSummary.isQuestion(toolName: "Bash"))
+        t.check("a question card counts its questions",
+                PermissionSummary.questionNote(toolInput: ["questions": [1, 2, 3]]) == "3 questions to answer"
+                && PermissionSummary.questionNote(toolInput: ["questions": [1]]) == "a question to answer"
+                && PermissionSummary.questionNote(toolInput: [:]) == "a question to answer")
         t.check("a bash command is quoted back verbatim",
                 PermissionSummary.describe(toolName: "Bash",
                                            toolInput: ["command": "rm -rf build/"])

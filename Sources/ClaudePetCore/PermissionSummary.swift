@@ -20,6 +20,22 @@ public enum PermissionSummary {
     /// - Parameters:
     ///   - toolName: the hook's `tool_name`.
     ///   - toolInput: the hook's `tool_input`, whose shape is tool-specific.
+    /// A tool whose permission prompt IS the question: the user answers by
+    /// picking options on the card, and Claude Code passes the picks on as the
+    /// tool's input. Allowing it from outside hands over no picks at all —
+    /// Claude Code itself marks these "one-tap Approve/Deny must not be
+    /// offered" — so the pet treats them as a question to go and answer.
+    public static func isQuestion(toolName: String) -> Bool {
+        toolName == "AskUserQuestion"
+    }
+
+    /// "2 questions to answer": what a question prompt says in its row, without
+    /// repeating any of the questions themselves.
+    public static func questionNote(toolInput: [String: Any]) -> String {
+        let n = (toolInput["questions"] as? [Any])?.count ?? 0
+        return n > 1 ? "\(n) questions to answer" : "a question to answer"
+    }
+
     public static func describe(toolName: String, toolInput: [String: Any]) -> String {
         switch toolName {
         case "Bash":
