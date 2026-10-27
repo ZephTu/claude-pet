@@ -3,121 +3,16 @@
 <link rel="stylesheet" href="pet.css">
 <div id="stage">
   <div id="bubble" hidden></div>
-  <!-- Every coordinate below was measured off docs/images/reference-sheet.png
-       and mapped with sx = (X - 626) * 0.09246, sy = (Y - 1030) * 0.09246 + 26,
-       which puts the desk's near edge at y=26 and its centre at x=0. -->
-  <!-- #pet is the 120x120 slot, not the drawing. One skin fills it at a time;
-       `data-mood` / `data-motion` / `data-phase` / `data-flash` stay on the slot
-       so every rule written against the robot keeps working unchanged. -->
-  <div id="pet" data-skin="robot">
-  <svg id="robot" viewBox="-60 -60 120 120" aria-hidden="true">
-    <g id="body">
-      <g class="monitor">
-        <rect class="mon-body"   x="14.3" y="-10.3" width="31"   height="22.6" rx="3.5"/>
-        <rect class="mon-screen" x="17.3" y="-7.3"  width="25.1" height="16.4" rx="2.5"/>
-        <g class="code">
-          <rect x="20" y="-3.5" width="12" height="2.2" rx="1.1"/>
-          <rect x="20" y="1"    width="17" height="2.2" rx="1.1"/>
-          <rect x="20" y="5.5"  width="9"  height="2.2" rx="1.1"/>
-        </g>
-        <!-- The screen answers the same question the lamp does, in the place
-             the user is already looking when they lean in. Exactly one of these
-             two shows per mood. -->
-        <g class="warn">
-          <path class="warn-tri" d="M29.85,-4.4 L35.5,5.3 L24.2,5.3 Z"/>
-          <rect class="warn-mark" x="29.1" y="-1.4" width="1.5" height="3.9" rx="0.75"/>
-          <circle class="warn-mark" cx="29.85" cy="3.7" r="0.85"/>
-        </g>
-        <rect class="mon-neck" x="27.6" y="12.3" width="4.3"  height="3.2"/>
-        <rect class="mon-foot" x="23"   y="15.4" width="13.2" height="2.3" rx="1.2"/>
-      </g>
-
-      <!-- Everything that moves as one unit. The typing hands are the sole
-           exception: they must draw in front of the desk, so they live outside
-           and carry their own animation. -->
-      <g class="person">
-        <!-- An arch, not a trapezoid: flat sides rising into a dome. The bottom
-             edge sits under the platform, so it is never seen. -->
-        <path class="torso" d="M-21.3,13.4 L-21.3,6 Q-21.3,-1.1 -9.05,-1.1 Q3.2,-1.1 3.2,6 L3.2,13.4 Z"/>
-        <path class="badge" d="M-8.8,1.1 Q-7.6,4.5 -4.3,5.7 Q-7.6,6.9 -8.8,10.3 Q-10,6.9 -13.3,5.7 Q-10,4.5 -8.8,1.1 Z"/>
-
-        <!-- Arms are nearly invisible at rest: the hands sit right against the
-             torso. They exist so the raised poses have something to raise. -->
-        <g class="limb arms-type">
-          <path class="arm" d="M-19,6 Q-20.5,9 -20.3,11.2"/>
-          <path class="arm" d="M1,6   Q2.5,9   2.6,11.2"/>
-        </g>
-        <g class="limb arms-wave">
-          <path class="arm" d="M-19,6 Q-20.5,9 -20.3,11.2"/>
-          <g class="wave-arm">
-            <path class="arm" d="M1,5 Q11,-4 17,-17"/>
-            <circle class="hand" cx="17" cy="-17" r="4.1"/>
-          </g>
-        </g>
-        <g class="limb arms-up">
-          <path class="arm" d="M-19,5 Q-30,-2 -36,-16"/>
-          <circle class="hand" cx="-36" cy="-16" r="4.1"/>
-          <path class="arm" d="M1,5 Q12,-2 18,-16"/>
-          <circle class="hand" cx="18"  cy="-16" r="4.1"/>
-        </g>
-
-        <g class="head">
-          <!-- antenna: the bulb is the status light, coloured per mood -->
-          <rect class="antenna" x="-10.1" y="-36" width="2.9" height="7.4" rx="1.4"/>
-          <circle class="bulb" cx="-8.7" cy="-40.5" r="4.6"/>
-          <rect class="ear" x="-30.8" y="-25.2" width="6.1" height="19.4" rx="3"/>
-          <rect class="ear" x="6.8"   y="-25.2" width="6.1" height="19.4" rx="3"/>
-          <rect class="skull" x="-25.6" y="-29.6" width="33.7" height="27.2" rx="9"/>
-          <rect class="plate" x="-22"   y="-24.9" width="26.5" height="19.1" rx="5.5"/>
-          <g class="face">
-            <!-- rx makes these read as ovals, but they stay <rect> because the
-                 moods animate their `y` and `height` attributes directly. -->
-            <rect class="eye" x="-17.64" y="-19.62" width="5.28" height="6.84" rx="2.64"/>
-            <rect class="eye" x="-5.04"  y="-19.62" width="5.28" height="6.84" rx="2.64"/>
-            <path class="mouth" d="M-11.8,-10.8 Q-8.8,-8.6 -5.8,-10.8"/>
-          </g>
-        </g>
-      </g>
-
-      <!-- Desk edge and platform draw in FRONT of the body: the robot sits
-           behind the desk, so its near edge cuts it off at the waist. -->
-      <rect class="desk" x="-46"   y="17.6" width="92"   height="8.4" rx="4.2"/>
-      <rect class="kbd"  x="-28.5" y="13.5" width="39.5" height="4.2" rx="2"/>
-
-      <g class="limb hands-type">
-        <circle class="hand handL" cx="-20.3" cy="11.2" r="4.1"/>
-        <circle class="hand handR" cx="2.6"   cy="11.2" r="4.1"/>
-      </g>
-
-      <!-- Shown when the session is waiting on an ANSWER rather than on
-           approval. Without it those two are the same picture, and they are not
-           the same interruption: one wants a decision, the other wants typing. -->
-      <text id="ask-mark" class="ask-mark" x="6" y="-30">?</text>
-
-      <!-- How many things want the user. Drawn last so nothing covers it, and
-           placed to the LEFT of the head because the right side is where the
-           z's rise and the two can be on screen at once. -->
-      <g id="badge-count" class="badge-count">
-        <rect class="badge-pill" x="-35.5" y="-39.5" width="11" height="11" rx="5.5"/>
-        <text class="badge-num" x="-30" y="-31.6">0</text>
-      </g>
-
-      <!-- All three z's are staggered by delay so they read as one stream
-           rising rather than three fixed letters. -->
-      <g class="zzz">
-        <text class="z1" x="14" y="-22">z</text>
-        <text class="z2" x="19" y="-30">z</text>
-        <text class="z3" x="25" y="-39">z</text>
-      </g>
-    </g>
-  </svg>
-
-  <!-- The cat skin: painted artwork warped by a WebGL mesh, so it has as many
-       poses as it has pictures — five, against the pet's eleven states. The
-       count and the waiting glyph are drawn HERE, by the host, because the
-       artwork has neither. The lamp used to be drawn here too and was taken
-       out: on top of a painted cat it read as a sticker. -->
+  <!-- #pet is the 120x120 slot. `data-mood` / `data-flash` / `data-phase` live
+       on it for the bubble and the calm switch; the cat itself is told its pose
+       from Swift (window.setCatLook). -->
+  <div id="pet">
+  <!-- The cat: video frames drawn with WebGL. The count and the waiting glyph
+       are drawn HERE, by the host, because the artwork has neither. -->
   <canvas id="cat" width="240" height="240" aria-hidden="true"></canvas>
+  <!-- What shows instead when WebGL is unavailable or a texture will not
+       decode: the pose's still picture, swapped by src. Nothing to fail. -->
+  <img id="still" alt="" hidden>
   <div id="signals" aria-hidden="true">
     <span id="count" hidden>0</span>
     <!-- The glyph that used to be painted into the waiting texture. Drawn here
@@ -128,8 +23,7 @@
   </div>
   <div id="panel" hidden></div>
 </div>
-<!-- The cat skin's renderer, vendored from the animation kit. Loaded for both
-     skins because it is 6KB and costs nothing until a CatPet is constructed. -->
+<!-- The warped-stills renderer, used while frames.js has no clips. -->
 <script src="skins/cat/cat-pet.js"></script>
 <!-- The frame-by-frame cat. frames.js is its clip list, generated from the
      videos by scripts/cat-frames.swift; while it says null the page stays on

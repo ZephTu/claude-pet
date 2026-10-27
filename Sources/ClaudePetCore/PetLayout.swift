@@ -22,50 +22,19 @@ public enum PetLayout {
     public static let windowSize = CGSize(width: 480, height: 280)
 
     /// The `#pet` element's own box: 120x120 at right:20 bottom:20 of the
-    /// 480x280 stage. Its centre is the SVG's viewBox origin, so a viewBox
-    /// coordinate (vx, vy) lands at (petCenter.x + vx, petCenter.y + vy).
+    /// 480x280 stage.
     public static let petBox = CGRect(x: 340, y: 140, width: 120, height: 120)
 
-    /// Centre of petBox, and the origin of the SVG viewBox.
+    /// Centre of petBox.
     public static let petCenter = CGPoint(x: 400, y: 200)
 
-    /// The robot-at-a-desk drawing is a wide, squat rectangle, so the hit region
-    /// is two rectangles rather than the disc the star used to need.
+    /// The cat's hit box, measured off the artwork rather than guessed.
     ///
-    /// `bodyBox` spans the desk's full width (viewBox x -46...46) and runs from
-    /// just above the antenna's stalk down to the desk's lower edge (viewBox y
-    /// -42...26). The upper margin deliberately covers the `urgent` jolt, which
-    /// lifts the figure 5pt and tilts it 3° — folding that into a fixed box is
-    /// what lets the hit region stop tracking the animation state at all.
-    public static let bodyBox = CGRect(x: 354, y: 158, width: 92, height: 68)
-
-    /// The bulb on top of the antenna clears the head entirely, so the body box
-    /// cannot reach it. Without its own box the brightest, most clickable-looking
-    /// part of the pet would pass clicks straight through to whatever is behind
-    /// it. Covers viewBox x -15...-3, y -51...-39: the bulb (centre -8.7,-40.5,
-    /// r 4.6) plus the same 5pt of urgent lift.
-    public static let antennaBox = CGRect(x: 385, y: 149, width: 12, height: 12)
-
-    /// The cat's single box, measured off the artwork rather than guessed.
-    ///
-    /// It is the union of the alpha bounding boxes of all five textures, mapped
-    /// through the renderer's own 6% margin (`p = 0.06 + p * 0.88`) into the
-    /// 120x120 pet box. One rectangle for all five poses, for the same reason
-    /// the robot has one: a hit region that tracked the animation would change
-    /// under the cursor.
-    ///
-    /// The cat has no antenna, so there is no second box — its lamp is drawn by
-    /// the host inside this rectangle.
+    /// It is the union of the alpha bounding boxes of every pose, mapped into
+    /// the 120x120 pet box. One rectangle for all poses: a hit region that
+    /// tracked the animation would change under the cursor.
     // Cat Life v3: include the book pose tail and the small side laptop.
-    public static let catBodyBox = CGRect(x: 348, y: 146, width: 106, height: 106)
-
-    /// The rectangles that count as "the pet" for this skin.
-    public static func hitBoxes(skin: PetSkin) -> [CGRect] {
-        switch skin {
-        case .robot: return [bodyBox, antennaBox]
-        case .cat: return [catBodyBox]
-        }
-    }
+    public static let bodyBox = CGRect(x: 348, y: 146, width: 106, height: 106)
 
     /// Where `#pet` sits once the layout flips: same size, other side.
     public static var mirroredPetBox: CGRect {
@@ -81,13 +50,9 @@ public enum PetLayout {
     /// left edge at all, since most of the window is transparent), the layout
     /// flips: pet on the left, panel on the right.
     ///
-    /// This is a TRANSLATION, not a reflection, and the difference is not
-    /// academic. Flipping moves the `#pet` element to the other side; it does
-    /// not mirror the drawing inside it, so the robot still faces the same way
-    /// and the antenna bulb stays left of centre. Reflecting the boxes instead
-    /// happens to give the right answer for `bodyBox`, which is symmetric inside
-    /// the pet, and the wrong one for `antennaBox`, which is not — the bulb
-    /// ended up outside its own hit region.
+    /// This is a TRANSLATION, not a reflection: flipping moves the `#pet`
+    /// element to the other side without mirroring the drawing inside it, so
+    /// the box has to move with the element rather than be reflected.
     public static func mirrored(_ box: CGRect) -> CGRect {
         box.offsetBy(dx: mirroredPetBox.minX - petBox.minX, dy: 0)
     }
@@ -188,40 +153,19 @@ public enum PetLayout {
         at point: CGPoint,
         panel: CGRect?,
         bubble: CGRect?,
-        mirrored isMirrored: Bool = false,
-        skin: PetSkin = .robot
+        mirrored isMirrored: Bool = false
     ) -> Bool {
         if let panel, panel.contains(point) { return true }
         if let bubble, bubble.contains(point) { return true }
-        return hitBoxes(skin: skin).contains {
-            (isMirrored ? mirrored($0) : $0).contains(point)
-        }
+        return isOnPet(point, mirrored: isMirrored)
     }
 
-    /// Is the pointer on the figure itself, in this skin and this layout?
+    /// Is the pointer on the figure itself, in this layout?
     ///
     /// The same rectangle a click uses, because "the pointer is on the pet" has
     /// to have ONE answer — resting on the cat's paws and clicking the cat's
-    /// paws cannot be two different questions. It was two: the hover readout
-    /// asked `bodyBox` directly, which is the ROBOT's desk, so a quarter of the
-    /// cat (its lower body) and all of it on a mirrored layout showed no quota
-    /// at all while still being clickable.
-    public static func isOnPet(_ point: CGPoint, skin: PetSkin = .robot,
-                               mirrored isMirrored: Bool = false) -> Bool {
-        let box = clickBox(skin: skin)
-        return (isMirrored ? mirrored(box) : box).contains(point)
-    }
-
-    /// The one box a click on the figure must land in, for this skin.
-    ///
-    /// The robot's antenna is deliberately not included: clicking the bulb
-    /// should not toggle the panel any more than clicking the desk should, and
-    /// the antenna box exists only so the brightest part of the drawing does not
-    /// pass clicks through to whatever is behind it.
-    public static func clickBox(skin: PetSkin) -> CGRect {
-        switch skin {
-        case .robot: return bodyBox
-        case .cat: return catBodyBox
-        }
+    /// paws cannot be two different questions.
+    public static func isOnPet(_ point: CGPoint, mirrored isMirrored: Bool = false) -> Bool {
+        (isMirrored ? mirrored(bodyBox) : bodyBox).contains(point)
     }
 }

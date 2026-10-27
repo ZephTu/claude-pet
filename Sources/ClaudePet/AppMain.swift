@@ -73,9 +73,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private let git = GitCache()
     private var labelPrefs: [String: SessionLabels.Prefs] = [:]
-    /// The user's own preference, independent of whether the window happens to
-    /// be visible right now.
-    private var reduceMotion = false
     /// The session list stays up instead of being opened per glance.
     private var keepListOpen = false
     /// Which sessions were live the last time terminal titles were actually
@@ -83,24 +80,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// still served by the fetch that runs when the user opens it.
     private var titlesRefreshedIds: Set<String> = []
     private var lastTitleRefresh: Date?
-    /// Which figure is drawn. Persisted, so it survives a restart.
-    private var skin: PetSkin = .standard
-    /// How long somebody has been at this machine without a break. Advanced
-    /// from the raw session list on every render — see Wellness.
-    private var deskClock = Wellness.DeskClock()
-    /// The day number already greeted, so the line comes once a day and not
-    /// once a launch. Nil until the pet has greeted anyone.
-    private var greetedDay: Int?
-    /// The daily line and the break nudge, together, as one thing to turn on.
-    /// Off until asked for: the pet's other lines all report on work the user
-    /// started, and having opinions about somebody's morning is not the same
-    /// kind of thing to help yourself to.
-    private var wellnessOn = false
-    /// Resolved once: the locale does not change while the app is running, and
-    /// these are the only lines that translate.
-    private let speechLanguage = Phrases.Language.resolve(Locale.preferredLanguages)
-    /// Read once at launch; see QuoteBook.
-    private lazy var quotes: [String] = QuoteBook.load(speechLanguage)
     private var windowVisible = true
 
     private var petHome: URL {
@@ -119,24 +98,29 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             // The page has just loaded at its defaults, so whichever side it
             // should be on has to be pushed again.
             bridge.setMirrored(panel?.isMirrored ?? false)
-            if let self {
-                panel?.setSkin(self.skin)
-                bridge.setSkin(self.skin)
-            }
             self?.applyMotionSetting()
             // The page reloaded at its defaults, which means shut. A pinned list
             // has to be put back up, and this is the first moment it can be.
             if self?.keepListOpen == true { bridge.setPanelOpen(true) }
             self?.render()
+            self?.mentionProblem()
+            // `--demo` cycles through every state, for looking at the artwork.
+            // A launch flag rather than a menu item: nobody needs it day to day.
+            if CommandLine.arguments.contains("--demo"), self?.demo == nil { self?.toggleDemo() }
         }
         panel.onMirrorChanged = { on in bridge.setMirrored(on) }
         // WebGL can be unavailable, and a texture can fail to decode. The page
-        // falls back to the robot on its own; this puts the setting and the hit
-        // rectangles back in step with what is actually on screen, so the user
-        // does not end up with a robot that is only clickable where a cat was.
-        panel.onSkinFailed = { [weak self] why in
-            NSLog("ClaudePet: skin failed, reverting to the robot: \(why)")
-            self?.revertToRobot()
+        // falls back to still pictures on its own; this only records why.
+        panel.onSkinFailed = { why in
+            NSLog("ClaudePet: the cat could not animate, showing stills: \(why)")
+        }
+        // Follows the system's own Reduce Motion setting rather than keeping a
+        // second switch for the same wish.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyMotionSetting() }
         }
         // A pet nobody can see has no reason to repaint. Covered by another
         // window, on another Space, or on a sleeping display all land here.
@@ -150,13 +134,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             ticker?.invalidate()
             startTicker(interval: visible ? Self.tickInterval : Self.hiddenTickInterval)
         }
-        reduceMotion = UserDefaults.standard.bool(forKey: Self.reduceMotionKey)
         keepListOpen = UserDefaults.standard.bool(forKey: Self.keepListOpenKey)
-        wellnessOn = UserDefaults.standard.bool(forKey: Self.wellnessKey)
-        let greeted = UserDefaults.standard.integer(forKey: Self.greetedDayKey)
-        greetedDay = greeted == 0 ? nil : greeted
         bridge.panelPinned = keepListOpen
-        skin = PetSkin.named(UserDefaults.standard.string(forKey: Self.skinKey))
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
@@ -199,11 +178,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onUnmuteAll: { [weak self] in self?.unmuteAll() },
             onShortcutToggle: { [weak self] in self?.toggleHotKey() },
             onShowHealth: { [weak self] in self?.showHealth() },
-            onDemoToggle: { [weak self] in self?.toggleDemo() },
-            onReduceMotionToggle: { [weak self] in self?.toggleReduceMotion() },
-            onWellnessToggle: { [weak self] in self?.toggleWellness() },
             onKeepListOpenToggle: { [weak self] in self?.toggleKeepListOpen() },
-            onSkinPick: { [weak self] in self?.setSkin($0) },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -217,11 +192,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           launchesAtLogin: self.launchesAtLogin,
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
-                          demoOn: self.demo != nil,
-                          reduceMotionOn: self.reduceMotion,
-                          wellnessOn: self.wellnessOn,
                           keepListOpenOn: self.keepListOpen,
-                          skin: self.skin)
+                          problem: HealthCollector.quickProblem(petHome: self.petHome))
             }
         }
         self.menu = menu
@@ -266,10 +238,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             snoozeMarks = survivingMarks
             saveSnoozed()
         }
-        // From `latest` rather than from `state`: a paused pet and a muted
-        // session both render as nothing running, and neither means the person
-        // got up and left.
-        deskClock = Wellness.advance(deskClock, sessions: latest, now: now)
         loadInsights()
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
@@ -301,10 +269,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count,
             unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count)
         bridge?.setBadge(badge)
-        // The painted skin follows the same stabilized activity as the robot; what it shows
-        // is decided here and pushed — see CatSkin. Sent whichever skin is up:
-        // the page ignores it while the robot is showing, and the alternative is
-        // a stale pose appearing the instant somebody switches.
+        // What the cat shows is decided here and pushed — see CatSkin.
         bridge?.setCatLook(CatSkin.look(mood: state.mood.rawValue,
                                         phase: StateAggregator.phase(state.sessions),
                                         flash: "",
@@ -384,7 +349,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func maybeSpeak(state: GlobalState, now: Date) {
-        // Paused means the pet is asleep, and a sleeping robot with a speech
+        // Paused means the pet is asleep, and a sleeping cat with a speech
         // bubble is just wrong. It also never sees real transitions while
         // paused, since render() substitutes a fixed idle state.
         guard !paused, !dwellShowing else { return }
@@ -393,7 +358,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
-            quotaAlarm: decision.speak, wellness: wellnessNudge(state, now: now)
+            quotaAlarm: decision.speak
         ) else { return }
         // The list is open and carrying this news itself: step aside rather than
         // draw a bubble across its top-right corner. Deliberately BEFORE every
@@ -413,34 +378,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
             saveQuotaSaid()
         }
-        // Recorded only when it was actually SAID, for the same reason the quota
-        // thresholds are: a greeting that lost the bubble to a finishing session
-        // has not happened yet, and must still be waiting on the next pass.
-        if line.kind == .greeting {
-            let today = Wellness.day(now)
-            greetedDay = today
-            UserDefaults.standard.set(today, forKey: Self.greetedDayKey)
-        }
         let sticky = Chatter.isSticky(line.kind)
         bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis,
                     variant: Chatter.bubble(for: line.kind))
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
-    }
-
-    /// The wellness line on offer this render, or nil when there is none or the
-    /// user has turned them off.
-    private func wellnessNudge(_ state: GlobalState, now: Date) -> Wellness.Nudge? {
-        guard wellnessOn else { return nil }
-        return Wellness.nudge(
-            clock: deskClock,
-            working: state.sessions.contains { $0.state == .busy },
-            greetedDay: greetedDay,
-            quotes: quotes,
-            language: speechLanguage,
-            now: now
-        )
     }
 
     // MARK: - Labels
@@ -485,25 +428,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         rename.representedObject = sessionID
         menu.addItem(rename)
 
-        if !current.alias.isEmpty {
-            let clear = NSMenuItem(title: "Clear Name", action: #selector(clearNamePicked(_:)),
-                                   keyEquivalent: "")
-            clear.target = self
-            clear.representedObject = sessionID
-            menu.addItem(clear)
-        }
-
         let pin = NSMenuItem(title: current.pinned ? "Unpin" : "Pin to Top",
                              action: #selector(pinPicked(_:)), keyEquivalent: "")
         pin.target = self
         pin.representedObject = sessionID
         menu.addItem(pin)
-
-        let recent = NSMenuItem(title: "Recent Activity…", action: #selector(activityPicked(_:)),
-                                keyEquivalent: "")
-        recent.target = self
-        recent.representedObject = sessionID
-        menu.addItem(recent)
 
         menu.addItem(.separator())
         let mute = NSMenuItem(title: "Mute Until I Speak To It",
@@ -534,7 +463,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
               let session = latest.first(where: { $0.sessionId == id }) else { return }
         let alert = NSAlert()
         alert.messageText = "Name this session"
-        alert.informativeText = "Shown instead of the folder name and the tab title."
+        alert.informativeText = "Shown instead of the folder name and the tab title. "
+            + "Leave it empty to go back to those."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = labelPrefs[id]?.alias ?? ""
         field.placeholderString = session.project
@@ -551,38 +481,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         setPrefs(id) { $0.alias = SessionLabels.sanitiseAlias(field.stringValue) }
     }
 
-    @objc private func clearNamePicked(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        setPrefs(id) { $0.alias = "" }
-    }
-
     @objc private func pinPicked(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         setPrefs(id) { $0.pinned.toggle() }
-    }
-
-    /// What this session's tools have been doing.
-    ///
-    /// Read from the log pet-emit appends to, never from the transcript: the
-    /// pet does not read conversations, and this has to keep being true.
-    @objc private func activityPicked(_ sender: NSMenuItem) {
-        guard
-            let id = sender.representedObject as? String,
-            let session = latest.first(where: { $0.sessionId == id })
-        else { return }
-        let file = petHome.appending(path: "activity")
-            .appending(path: SessionLabels.sanitiseAlias(id).isEmpty ? id : id)
-            .appendingPathExtension("jsonl")
-        let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
-        let entries = ActivityLog.recent(ActivityLog.decode(text), now: Date())
-
-        healthWindow?.close()
-        let window = HealthWindow(
-            title: SessionLabels.displayName(for: session, prefs: labelPrefs,
-                                             title: titleFor(session)),
-            lines: entries.map { "· " + $0.line() })
-        healthWindow = window
-        window.show(near: panel?.frame ?? .zero)
     }
 
     @objc private func mutePicked(_ sender: NSMenuItem) {
@@ -677,11 +578,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// current the moment it comes back, and a stopped clock would show the
     /// state from whenever it was covered up.
     private static let hiddenTickInterval: TimeInterval = 30
-    private static let reduceMotionKey = "reduceMotion"
-    private static let wellnessKey = "wellnessLines"
-    private static let greetedDayKey = "wellnessGreetedDay"
     private static let keepListOpenKey = "keepListOpen.v1"
-    private static let skinKey = "petSkin"
 
     private func startTicker(interval: TimeInterval) {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
@@ -690,46 +587,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Animation runs only when someone could be watching it AND has not asked
-    /// for it to stop.
+    /// the system for less motion.
     private func applyMotionSetting() {
-        bridge?.setCalm(reduceMotion || !windowVisible)
-    }
-
-    /// Both halves have to move together: the page swaps the drawing, the host
-    /// view swaps the rectangles it hit-tests against. A skin change that only
-    /// did the first would leave the cat clickable in the robot's shape.
-    private func setSkin(_ next: PetSkin) {
-        guard next != skin else { return }
-        skin = next
-        UserDefaults.standard.set(next.rawValue, forKey: Self.skinKey)
-        panel?.setSkin(next)
-        bridge?.setSkin(next)
-        render()
-    }
-
-    /// Not `setSkin(.robot)`: that would be a no-op when the stored skin is
-    /// already the robot, and the point here is to correct a mismatch.
-    private func revertToRobot() {
-        skin = .robot
-        UserDefaults.standard.set(PetSkin.robot.rawValue, forKey: Self.skinKey)
-        panel?.setSkin(.robot)
-        render()
-    }
-
-    private func toggleReduceMotion() {
-        reduceMotion.toggle()
-        UserDefaults.standard.set(reduceMotion, forKey: Self.reduceMotionKey)
-        applyMotionSetting()
-    }
-
-    /// The day's line and the break nudge, on or off together.
-    ///
-    /// They share one switch because they share one objection: somebody who
-    /// does not want a desktop toy with opinions about their morning does not
-    /// want half of one either. And they share a default, which is off.
-    private func toggleWellness() {
-        wellnessOn.toggle()
-        UserDefaults.standard.set(wellnessOn, forKey: Self.wellnessKey)
+        bridge?.setCalm(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !windowVisible)
     }
 
     /// Keep the session list up instead of opening it per glance.
@@ -758,6 +618,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// diagnostic that also repairs is a diagnostic that can turn a question
     /// into an outage.
     private func showHealth() {
+        defer { mentionedProblem = nil }
         let checks = HealthCollector.run(petHome: petHome, sessions: latest,
                                          usage: currentUsage(),
                                          lastJumpFailure: lastJumpFailure)
@@ -769,6 +630,21 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         healthWindow = window
         window.show(near: panel?.frame ?? .zero)
+    }
+
+    /// The problem last mentioned at launch, so it is said once, not per launch
+    /// of the menu.
+    private var mentionedProblem: String?
+
+    /// One line when the install is broken, because the menu item that reports
+    /// it only appears on right-click and a pet that silently sees nothing
+    /// looks exactly like a pet with nothing to show.
+    private func mentionProblem() {
+        guard let problem = HealthCollector.quickProblem(petHome: petHome),
+              mentionedProblem != problem.name else { return }
+        mentionedProblem = problem.name
+        bridge?.say("\(problem.name): \(problem.detail) — right-click me for details",
+                    hold: 12, emphasis: problem.name, variant: .warn)
     }
 
     private var demo: Timer?
@@ -867,8 +743,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge?.pushSessions([fake], now: now)
         let badge = step.mood == .idle ? "" : "1"
         bridge?.setBadge(badge)
-        // The demo is how anyone actually looks at a skin, so it has to drive
-        // the skin too. Without this the cat sat in one pose through all twelve
+        // The demo is how anyone actually looks at the artwork, so it has to
+        // drive the cat too. Without this the cat sat in one pose through all twelve
         // captions while the captions claimed otherwise.
         bridge?.setCatLook(CatSkin.look(mood: step.mood.rawValue, phase: step.phase,
                                         flash: "", wanted: !badge.isEmpty,
@@ -1017,7 +893,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // No panel rect needed: with the list open, anything that is not the pet
         // is a candidate row, and the page answers "" for points that are not on
         // one.
-        let onPet = PetLayout.isOnPet(point, skin: skin,
+        let onPet = PetLayout.isOnPet(point,
                                       mirrored: panel?.isMirrored ?? false)
         let target: DwellTarget? = {
             if panelOpen, !onPet { return .row(point) }

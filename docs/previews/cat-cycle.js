@@ -2,10 +2,9 @@
 // state the cat can draw, cropped to the box the figure and its speech bubble
 // occupy.
 //
-// cycle.html cannot do this one. It freezes CSS animations by setting
-// currentTime, which is what makes the robot's GIF step evenly — and the cat
-// is a WebGL mesh with no currentTime to set. So the page runs at its own
-// speed and `--probe-film` presses the shutter on an absolute tick instead.
+// The cat is drawn with WebGL, which has no currentTime to freeze, so the
+// page runs at its own speed and `--probe-film` presses the shutter on an
+// absolute tick instead.
 //
 // Capture, from the repo root:
 //
@@ -21,7 +20,6 @@
 //
 // README 动图的脚本：页面自己按表走状态，探针只管按快门。
 // 顺序和停留时间照着 app 自己的 Demo the States 来，说的话也用真实文案。
-window.setSkin("cat");
 var SLOT = 1600;
 var steps = [
   function () { window.setBadge(""); window.hush();

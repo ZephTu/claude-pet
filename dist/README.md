@@ -2,7 +2,7 @@
 
 **English** · [中文](README.zh-CN.md)
 
-A small robot that lives on your macOS desktop and mirrors the state of **every** Claude Code session on this machine.
+A small cat that lives on your macOS desktop and mirrors the state of **every** Claude Code session on this machine.
 
 No more tabbing through terminal windows to find out which session finished and which one is stuck. A glance at the corner of the screen tells you whether anything needs you.
 
@@ -23,7 +23,7 @@ The lamp on its antenna is the part you can read without focusing on it:
 **Left-click** to expand the list — what each session is running, and for how long.
 **Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2).
 **Hover a row** and the bubble shows where that session is, how full its context window is, how long the turn has run versus how long since anything happened, and its last tool call.
-**Hover the robot** for a second to see your remaining quota.
+**Hover the cat** for a second to see your remaining quota.
 **Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
 **Click the × at the end of a row** to mute that session — it comes back on its own the next time you type into it.
 **Right-click** for the menu: nap / launch at login / quit.
@@ -69,7 +69,7 @@ Removes the hooks, deletes the app, cleans up the directory. `settings.json` goe
 ## Known rough edges
 
 - The expanded panel always opens to the left, so it can run off-screen if you drag the pet to the far-left edge of the display (the pet itself stays put).
-- Click-through is computed from two rectangles rather than the figure's outline, so a few apparently-transparent pixels near the robot still swallow clicks.
+- Click-through is computed from a rectangle rather than the figure's outline, so a few apparently-transparent pixels near the cat still swallow clicks.
 - Roughly 4% CPU while idle — that is the breathing animation. Leaving it running all day costs a little battery.
 - No Apple Developer signature. The installer clears macOS's download quarantine flag automatically; if Gatekeeper still blocks it, allow it once under System Settings → Privacy & Security.
 - Jumping to an **iTerm2** tab raises a macOS Automation prompt the first time. Deny it and jumps fail silently from then on; you can re-allow it under System Settings → Privacy & Security → Automation. **Orca needs no permission at all.**

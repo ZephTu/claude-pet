@@ -13,10 +13,7 @@ You stop tabbing through terminal windows to find out which session finished and
 ## The picture is the signal
 
 The cat has a drawing for nearly every state the pet knows, which is the whole
-point of it — you read a posture across the room without focusing on it. A
-robot ships too, and it keeps the one distinction the cat cannot draw;
-**Right-click → Appearance** switches between them, and the section on it says
-what each one can and cannot say.
+point of it — you read a posture across the room without focusing on it.
 
 ![Every state](docs/images/cat-states.png)
 
@@ -25,8 +22,8 @@ Ordered by how much it wants from you, starting from asleep:
 | Meaning | What you see |
 | --- | --- |
 | everything is done | curled up asleep with z's drifting up |
-| a turn ended and nobody has looked | awake and on its feet, the count still by its ear. A separate drawing from asleep, which is a distinction the robot's one resting pose cannot make |
-| a session is working | hunched over the laptop, typing. **Editing and running a command are the same drawing** — separating those two is the robot's job |
+| a turn ended and nobody has looked | awake and on its feet, the count still by its ear |
+| a session is working | hunched over the laptop, typing. **Editing and running a command are the same drawing** |
 | reading | a book up in both paws, nose almost in it |
 | compacting its context | sorting a stack of paper. Still work — just not work you asked for |
 | waiting on a background agent | chin on a paw, laptop pushed aside. Claude parked an agent and ended its turn; it will speak again by itself. **No finish notice for that turn** — nothing finished, and walking over to it would find a session that has not started |
@@ -54,7 +51,7 @@ second line is what you would be approving (`rm -rf build/`), never the hook's o
 "Claude is waiting for your input": three blocked rows used to print that sentence
 three times, under three first lines that already said so.
 
-A number counts both kinds of attention — on the robot's chest, by the cat's ear. It is not shown at zero.
+A number counts both kinds of attention, by the cat's ear. It is not shown at zero.
 
 A running row that has said nothing for 90 seconds, with no tool call in flight,
 reads **No recent activity** on a hollow dot, and stops counting as busy — the pet will go
@@ -64,7 +61,7 @@ the last thing written stays "busy" and nothing ever comes to take it back. It i
 deliberately not called "done", which nothing here is in a position to know, and it
 rights itself the moment that session does anything again.
 
-**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for keep-list-open / pause / reduce motion / encouragement & breaks / connection status / demo / launch-at-login / quit. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
+**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / keep list open / unmute all / quit; launch at login, the global shortcut and the connection report sit under **Settings**. If the install is broken — hooks missing from `settings.json`, `pet-emit` gone — the menu opens with a ⚠ line naming the problem, and the cat says so once at launch. The pet follows the system's **Reduce motion** setting rather than keeping a switch of its own. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session (an empty name goes back to the folder and tab title), pin it, or mute it.
 
 **Click a row marked ↗** to jump straight to the terminal tab that session is running in.
 
@@ -88,31 +85,23 @@ rights itself the moment that session does anything again.
 
 When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
 
-**Two lines are about you rather than about the work.** The first session you start each day gets one line from `Resources/pet/quotes.json`, picked by day number so it is the same all day and different tomorrow. After two hours at the desk with no break it asks you to stand up, refill your water, or look out of the window, and it asks again every forty-five minutes until you do. Both are off until you ask for them — **right-click → Encouragement & Breaks** turns them on together. Every other line the pet says reports on work you started; having opinions about your morning is not the same kind of thing to help itself to.
-
-Two things keep these from becoming the wallpaper that every wellness reminder eventually becomes. They are **last in the order** — anything the pet could say about your actual work outranks them, and a session coming to rest always wins the bubble. And the two hours are **observed rather than counted down**: the clock runs off the sessions' own activity, so half an hour with nothing stirring ends the stretch, and a machine you did not touch this morning has nothing to say about your morning. It undercounts on purpose — reading code with Claude untouched looks exactly like lunch, and a reminder that arrives late beats one that tells an empty chair to stretch.
-
-**The pet makes no network requests.** The quotes were written and reviewed by hand, and `scripts/fetch-quotes.py` is a development-machine tool for topping them up — measured against the free quote APIs in September 2026, none of them could be trusted to hand you something short and kind at nine in the morning.
+**The pet makes no network requests.**
 
 A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
 
 **A row says what is running right now**, from the tool calls that have started and not reported back — `Bash npm test`, `Read PetLayout.swift`, or `3 tools running`. The age beside it is how long *that call* has been going, which is the number that answers "is this stuck?". Inside `busy` the figure's pose follows: reading leans at the screen, editing types, anything else sits back and waits.
 
-**Optional: a global shortcut.** Off by default. Turn on ⌃⌥⌘J in the right-click menu to jump to whatever has been waiting longest. Claiming a system-wide chord uninvited is taking something that was not offered, so you have to ask for it — and if another app already owns it, the menu says so instead of quietly failing.
+**Optional: a global shortcut.** Off by default. Turn on ⌃⌥⌘J under right-click → Settings to jump to whatever has been waiting longest. Claiming a system-wide chord uninvited is taking something that was not offered, so you have to ask for it — and if another app already owns it, the menu says so instead of quietly failing.
 
-**Right-click → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
+**Right-click → Settings → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
 
-**Right-click → Appearance** swaps who is drawing. Two figures ship.
+## The cat
 
-The **Cat** is the default, and it is animated frame by frame: every pose is a loop cut out of a generated video, and after a while in one pose it slips in a small move of its own — a yawn, a scratch of the head, a page turned, a hop. A pose change with no clip between the two is a short dissolve. `docs/seedance.md` says how the videos are made and cut; without them the cat falls back to the painted stills warped by a WebGL mesh. It has nine poses against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration rather than a bob of the idle one. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
+The cat is animated frame by frame: every pose is a loop cut out of a generated video, and after a while in one pose it slips in a small move of its own — a yawn, a scratch of the head, a page turned, a hop. Common state changes have their own transition clips; the rest are a short dissolve. `docs/seedance.md` says how the videos are made and cut. It has nine poses against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
 
-The **Robot** is an SVG whose every state is a CSS rule, and it keeps the one thing the cat cannot do: the lamp on its antenna, together with the pose, separates **every** busy state, including editing from waiting on a command. Pick it if that distinction is worth more to you than the artwork.
+If WebGL is unavailable or a texture will not decode, the page shows each pose's still picture instead and tells the app why.
 
-<img src="docs/images/pet.gif" width="360" alt="The robot cycling through every state it can show, speech bubbles included">
-
-The choice is remembered. If WebGL is unavailable or a texture will not decode, the page falls back to the robot on its own and tells the app, so the hit region never ends up belonging to a figure that is not on screen — which is also why the robot, not the cat, is the one the fallback goes to.
-
-**Right-click → Demo the States** cycles the pet through everything it can show, writing nothing to disk.
+`ClaudePet --demo` cycles the pet through everything it can show, writing nothing to disk.
 
 ## Requirements
 
@@ -211,8 +200,8 @@ nothing while the README called it unverified.
 Tests run through a small hand-written harness as an executable target rather than XCTest: with only the Command Line Tools installed (no full Xcode), **neither XCTest nor swift-testing is available**, so `swift test` cannot run at all.
 
 To watch every state animate, serve the repo (`python3 -m http.server 8777`) and open
-`http://127.0.0.1:8777/docs/previews/`. Its neighbour `cycle.html` is the one the README's
-animation is captured from. Both frame the real `Resources/pet/index.html` rather than keeping
+`http://127.0.0.1:8777/docs/previews/`; `docs/previews/cat-cycle.js` is what the README's
+animation is captured from. Both drive the real `Resources/pet/index.html` rather than keeping
 a copy, and both are also what the two pictures above are generated from — one artifact per
 job is what stops the documentation drifting a state behind the app, which is exactly how the
 last contact sheet ended up short.
@@ -221,9 +210,9 @@ The design document in `docs/superpowers/specs/` explains the architecture and, 
 
 ### Three things worth knowing before you change anything
 
-**The hit region is two rectangles in `Sources/ClaudePetCore/PetLayout.swift`, and they must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
+**The hit region is a rectangle in `Sources/ClaudePetCore/PetLayout.swift`, and it must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
 
-This is not hypothetical. The mirrored layout was first written as a reflection (`x → width - maxX`), every test passed, and the body box still looked right in a screenshot — because it happens to be symmetric inside the pet. The antenna's box is not, and the bulb ended up outside its own hit region. What caught it was drawing both rectangles over the rendered page and looking. Do that after any change here.
+This is not hypothetical. The mirrored layout was first written as a reflection (`x → width - maxX`), every test passed, and the body box still looked right in a screenshot — because it happens to be symmetric inside the pet. A figure that is not symmetric ended up partly outside its own hit region. What caught it was drawing the rectangles over the rendered page and looking. Do that after any change here.
 
 **The `settings.json` patch is tested against real files, not in process.** It is the only thing here that can break someone else's machine, and the parts that make it safe — the backup, the atomic write, the parse-back, the rollback — exist only on disk; testing them in memory tests nothing. The assertion that matters is the round trip: install then uninstall, and not one field of the user's own hooks may differ.
 
@@ -232,8 +221,8 @@ This is not hypothetical. The mirrored layout was first written as a reflection 
 ## Known limitations
 
 - No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
-- Click-through is computed from two rectangles, not the figure's outline, so a few transparent pixels near the figure still swallow clicks.
-- Roughly **0.9% CPU and 63MB** while idle, measured on an M-series Mac by CPU-time delta over 20s. That figure did not move when the session count went from 4 to 14, and **Reduce Motion did not lower it either** (0.8% vs 0.9%, inside the measurement noise) — the CSS animation is composited and costs almost nothing. Reduce Motion is there for people who do not want movement on their desktop, not as a way to save power.
+- Click-through is computed from a rectangle, not the figure's outline, so a few transparent pixels near the figure still swallow clicks.
+- Roughly **0.9% CPU and 63MB** while idle, measured on an M-series Mac by CPU-time delta over 20s. That figure did not move when the session count went from 4 to 14, and reducing motion did not lower it either (0.8% vs 0.9%, inside the measurement noise). The system's Reduce motion setting is honoured for people who do not want movement on their desktop, not as a way to save power.
 
 ## License
 

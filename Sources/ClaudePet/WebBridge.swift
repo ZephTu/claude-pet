@@ -45,7 +45,6 @@ final class WebBridge {
         isReady = true
         last = nil
         lastSessionsPayload = nil
-        lastSkin = nil
         lastLook = nil
     }
 
@@ -185,7 +184,7 @@ final class WebBridge {
     ///
     /// `variant` says which KIND of message window this is — see
     /// `Chatter.Bubble`. The page needs it to decide what a line is allowed to
-    /// replace: a wellness nudge must not take the bubble away from a quota
+    /// replace: a remark must not take the bubble away from a quota
     /// warning just because it arrived second.
     func say(_ text: String, hold: TimeInterval, emphasis: String = "",
              variant: Chatter.Bubble = .chat) {
@@ -238,10 +237,9 @@ final class WebBridge {
 
     /// A brief reaction that is not a state — see window.flash.
     ///
-    /// The pose and the glyph travel with it because the robot's flash is a
-    /// CSS rule and a painted skin has no rule to run: a finished turn is a bob
-    /// of the idle picture, an interrupted tool is a warning glyph over
-    /// whatever the cat is already doing.
+    /// The pose and the glyph travel with it: a finished turn is the cheering
+    /// pose, an interrupted tool is a warning glyph over whatever the cat is
+    /// already doing.
     func flash(_ kind: String) {
         guard isReady else { return }
         let mark = CatSkin.mark(mood: "", flash: kind, blockedOn: "").rawValue
@@ -253,15 +251,7 @@ final class WebBridge {
             + "\(jsString(pose)), \(jsString(mark)));")
     }
 
-    private var lastSkin: PetSkin?
-    func setSkin(_ skin: PetSkin) {
-        guard isReady, skin != lastSkin else { return }
-        lastSkin = skin
-        evaluate("window.setSkin(\(jsString(skin.rawValue)));")
-    }
-
-    /// The pose and glyph a painted skin should show. Pushed on every render;
-    /// the page ignores it while the robot is up.
+    /// The pose and glyph the cat should show. Pushed on every render.
     private var lastLook: CatSkin.Look?
     func setCatLook(_ look: CatSkin.Look) {
         guard isReady, look != lastLook else { return }

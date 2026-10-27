@@ -5,29 +5,22 @@
      drifted a whole redesign behind the app.
 
      It is also the source of docs/images/cat-states.png, the README's contact
-     sheet: load `?skin=cat` and capture #grid at 2x. Keeping one artifact for
+     sheet: capture #grid at 2x. Keeping one artifact for
      "watch them animate" and "the picture in the README" is what stops the two
      disagreeing, which is how the last strip ended up a state short.
-
-     One page, two lists, because the two figures do not have the same states:
-     the cat merges every busy state the lamp keeps apart and splits resting
-     into awake and asleep. The robot's list is here to be watched — the README
-     shows the robot as an animation instead, so nothing captures it.
 
      Needs a server (iframes cannot script each other over file://):
 
          python3 -m http.server 8777       # from the repo root
-         open http://127.0.0.1:8777/docs/previews/?skin=cat
+         open http://127.0.0.1:8777/docs/previews/
 -->
 <style>
  /* The window is 480x280 and mostly transparent; the pet, its badge, its
     speech and the z's live in the box below. Cropping to it is what makes a
     cell 160pt wide instead of 480. */
- :root { --cw: 152px; --ch: 134px; --cx: -320px; --cy: -120px; }
- /* The cat fills its 120x120 slot corner to corner and the robot does not, so
-    the robot's crop clips the cat's paws off the bottom. Its own box is the
-    slot (stage 340..460 x, 140..260 y) plus six points of air. */
- body[data-skin="cat"] { --cw: 136px; --ch: 132px; --cx: -332px; --cy: -134px; }
+ /* The cat fills its 120x120 slot corner to corner; its box is the slot
+    (stage 340..460 x, 140..260 y) plus six points of air. */
+ :root { --cw: 136px; --ch: 132px; --cx: -332px; --cy: -134px; }
  body{margin:0;background:#efece6;font:13px -apple-system,system-ui,sans-serif;color:#5a534b}
  h1{font-size:15px;font-weight:600;margin:18px 0 6px;text-align:center}
  p.note{margin:0 0 14px;text-align:center;color:#8a8076;font-size:12px}
@@ -44,30 +37,13 @@
 <script>
 // Ordered by how much it wants from you, from nothing to a great deal, and
 // back — the same order the README's table is in.
-const ROBOT = [
-  { caption: "editing",             mood: "busy", motion: "writing" },
-  { caption: "reading",             mood: "busy", motion: "reading" },
-  { caption: "running a tool",      mood: "busy", motion: "awaiting" },
-  { caption: "compacting",          mood: "busy", phase: "compacting" },
-  { caption: "waiting on an agent", mood: "busy", phase: "awaiting-agent" },
-  { caption: "tool interrupted",    mood: "busy", motion: "awaiting", flash: "trouble" },
-  { caption: "wants approval",      mood: "waiting", on: "rm -rf build/", badge: "1" },
-  { caption: "wants an answer",     mood: "waiting", badge: "1" },
-  { caption: "ignored 60s+",        mood: "urgent", on: "rm -rf build/", badge: "2" },
-  { caption: "turn finished",       mood: "idle", badge: "1", flash: "done" },
-  { caption: "idle",                mood: "idle" },
-];
-
 // The cat's poses are decided in Swift (CatSkin.look) and pushed in, so they
 // are named here rather than derived: this list IS the set of drawings, and a
 // cell whose pose had to be computed would be a cell that could compute a
-// different answer than the app does. Two differences from the robot are the
-// whole reason the lists are separate — "editing" and "running a tool" are one
-// drawing, and resting is two.
+// different answer than the app does.
 // Starts asleep rather than at work, which is the one ordering that puts the
 // row break in the right place: six that want nothing, five that want
-// something. The robot's list cannot start there — it has one resting picture,
-// so "asleep" and "awake with something unread" would be the same cell twice.
+// something.
 const CAT = [
   { caption: "everything done",     mood: "idle", pose: "sleeping" },
   { caption: "one thing unread",    mood: "idle", badge: "1", pose: "idle" },
@@ -86,12 +62,9 @@ const CAT = [
   { caption: "turn finished",       mood: "idle", badge: "1", flash: "done", pose: "finished" },
 ];
 
-const skin = new URLSearchParams(location.search).get("skin") === "cat" ? "cat" : "robot";
-const STATES = skin === "cat" ? CAT : ROBOT;
-document.body.dataset.skin = skin;
-document.getElementById("note").textContent = skin === "cat"
-  ? "Top row: wanting nothing from you. Bottom row: wanting something, then done."
-  : "Top row: working, and wanting nothing from you. Bottom row: wanting something, then done.";
+const STATES = CAT;
+document.getElementById("note").textContent =
+  "Top row: wanting nothing from you. Bottom row: wanting something, then done.";
 
 const grid = document.getElementById("grid");
 for (const s of STATES) {
@@ -109,7 +82,6 @@ for (const s of STATES) {
 }
 
 function apply(w, s) {
-  if (skin === "cat") w.setSkin("cat");
   // No project name for the urgent cell, which is what keeps its alarm bubble
   // shut. The bubble is 200pt wide beside a 150pt cell — it belongs in the
   // animation, where there is room for it, not in a contact sheet.

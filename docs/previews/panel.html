@@ -126,12 +126,9 @@ function drive(w, cell) {
   const stage = w.document.getElementById("stage");
   if (mirror) w.setMirrored(true);
   if (calm) w.setCalm(true);
-  // The cat is the shipped default, but it is drawn through WebGL and Chrome
-  // keeps only ~16 live contexts — a full grid of them loses its earliest cells
-  // to "Too many active WebGL contexts", which is a fact about the browser and
-  // not about the app. The robot is SVG and costs nothing, so the grid wears it
-  // and a single-cell view (?only=…) gets the cat.
-  w.setSkin(q.get("skin") || (only ? "cat" : "robot"));
+  // The cat is drawn through WebGL and Chrome keeps only ~16 live contexts, so
+  // in a full grid the earliest cells lose theirs and fall back to the still
+  // pictures — a fact about the browser, not about the app.
 
   // A cell may carry BOTH a list and a message — that combination is the whole
   // point of the overlap scenarios, and a harness that could only draw one at a

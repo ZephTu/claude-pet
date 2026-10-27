@@ -162,15 +162,6 @@ function yieldBubble() {
  */
 window.setMood = function (mood, waitingProject, waitingOn, motion) {
   pet.dataset.mood = mood;
-  // Empty means "no opinion", which leaves the default (typing) in place.
-  if (motion) { pet.dataset.motion = motion; } else { delete pet.dataset.motion; }
-  // Waiting splits in two. `waitingOn` is only ever set by PermissionRequest,
-  // so its presence is what distinguishes "may I run this" from "answer me".
-  if (mood === "waiting" || mood === "urgent") {
-    pet.dataset.ask = waitingOn ? "permission" : "question";
-  } else {
-    delete pet.dataset.ask;
-  }
   if (mood === "urgent" && waitingProject) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.
@@ -889,21 +880,10 @@ window.setCalm = function (on) {
 };
 
 window.setBadge = function (text) {
-  // The host-drawn count, for skins whose artwork has no chest to put one on.
-  // Kept in step with the robot's rather than replacing it: the robot's sits
-  // inside its own drawing and moves with it.
+  // Drawn by the host: the artwork has nowhere to put a number.
   const host = document.getElementById("count");
   host.textContent = text || "";
   host.hidden = !text;
-
-  const g = document.getElementById("badge-count");
-  if (!text) { g.classList.remove("on"); return; }
-  const w = text.length <= 2 ? 11 : 16;
-  const pill = g.querySelector(".badge-pill");
-  pill.setAttribute("width", w);
-  pill.setAttribute("x", -30 - w / 2);
-  g.querySelector(".badge-num").textContent = text;
-  g.classList.add("on");
 };
 
 /** The event ids a finished row stands for. */
@@ -958,19 +938,33 @@ window.setHoverAt = function (x, y) {
 };
 
 
-/* ---- Skins ---------------------------------------------------------------
- * The robot is CSS: every state it has is a rule, and swapping states costs
- * an attribute write. A painted skin cannot work that way — it has as many
- * poses as it has pictures — so the pose and the glyph are decided in Swift
- * (ClaudePetCore/PetSkin.swift, where they are unit-tested against all eleven
- * pet states) and pushed here. This file only applies them.
+/* ---- The cat ---------------------------------------------------------------
+ * The cat has as many poses as it has pictures, so the pose and the glyph are
+ * decided in Swift (ClaudePetCore/CatSkin.swift, where they are unit-tested
+ * against every pet state) and pushed here. This file only applies them.
  */
 
-/** The live CatPet renderer, or null while the robot is showing. */
+const STILLS = {
+  idle: "skins/cat/assets/idle.png",
+  working: "skins/cat/assets/working.png",
+  waiting: "skins/cat/assets/waiting.png",
+  sleeping: "skins/cat/assets/sleeping.png",
+  urgent: "skins/cat/assets/urgent.png",
+  reading: "skins/cat/assets/reading.png",
+  compacting: "skins/cat/assets/compacting.png",
+  finished: "skins/cat/assets/finished.png",
+  "awaiting-agent": "skins/cat/assets/awaiting-agent.png",
+};
+
+/** The live renderer, or null once it has failed and the stills are showing. */
 let cat = null;
+/** True when WebGL could not draw and #still carries the pose instead. */
+let stillsOnly = false;
 /** What the current STATE calls for, as opposed to a transient flash. */
 let steadyMark = "none";
 let steadyPose = "idle";
+/** Whatever pose Swift last asked for, replayed once the textures arrive. */
+let lastPose = "idle";
 
 function setMark(token) {
   document.getElementById("mark").dataset.mark = token || "none";
@@ -979,63 +973,37 @@ function setMark(token) {
 function setPose(pose) {
   lastPose = pose || "idle";
   if (cat) cat.setState(lastPose);
+  if (stillsOnly) document.getElementById("still").src = STILLS[lastPose] || STILLS.idle;
 }
 
 /**
- * Switch the figure. Safe to call with the skin that is already showing.
- * @param {"robot"|"cat"} name
+ * Frame-by-frame once there is any video to play (frames.js is written by
+ * scripts/cat-frames.swift); the warped stills until then.
  */
-window.setSkin = function (name) {
-  const skin = name === "cat" ? "cat" : "robot";
-  if (pet.dataset.skin === skin) return;
-  pet.dataset.skin = skin;
-
-  if (skin !== "cat") {
-    // Disposed rather than hidden: a hidden canvas still holds its textures
-    // and its animation frame, and this thing sits on the desktop all day.
-    if (cat) { cat.dispose(); cat = null; }
-    return;
-  }
-  if (cat) return;
+function startCat() {
   try {
-    const stills = {
-      idle: "skins/cat/assets/idle.png",
-      working: "skins/cat/assets/working.png",
-      waiting: "skins/cat/assets/waiting.png",
-      sleeping: "skins/cat/assets/sleeping.png",
-      urgent: "skins/cat/assets/urgent.png",
-      reading: "skins/cat/assets/reading.png",
-      compacting: "skins/cat/assets/compacting.png",
-      finished: "skins/cat/assets/finished.png",
-      "awaiting-agent": "skins/cat/assets/awaiting-agent.png",
-    };
-    // Frame-by-frame once there is any video to play (frames.js is written by
-    // scripts/cat-frames.swift and absent until then); the warped stills until.
     const frames = window.CAT_FRAMES;
     const canvas = document.getElementById("cat");
     cat = frames && Object.keys(frames.clips || {}).length
-      ? new CatFrames(canvas, frames, "skins/cat/frames/", stills)
-      : new CatPet(canvas, stills);
+      ? new CatFrames(canvas, frames, "skins/cat/frames/", STILLS)
+      : new CatPet(canvas, STILLS);
     cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
     cat.ready.then(function () { if (cat) cat.setState(lastPose); })
-             .catch(function (e) { skinFailed(e); });
+             .catch(function (e) { catFailed(e); });
   } catch (e) {
-    skinFailed(e);
+    catFailed(e);
   }
-};
-
-/** Whatever pose Swift last asked for, replayed once the textures arrive. */
-let lastPose = "idle";
+}
 
 /**
- * Called from Swift on every render. The pose is one of six; the glyph says
- * which KIND of waiting, which the one raised-paw picture cannot.
+ * Called from Swift on every render. The glyph says which KIND of waiting,
+ * which the one raised-paw picture cannot.
  */
 window.setCatLook = function (pose, mark) {
   steadyPose = pose || "idle";
   steadyMark = mark || "none";
   // A flash in progress owns both; it restores these when it ends. Without this
-  // guard a state push arriving mid-flash would cut the "done" bob short — and
+  // guard a state push arriving mid-flash would cut the "done" pose short — and
   // one of those arrives on every tick.
   if (flashTimer) return;
   setMark(steadyMark);
@@ -1043,15 +1011,20 @@ window.setCatLook = function (pose, mark) {
 };
 
 /**
- * A skin that cannot draw itself falls back to the one that always can.
- * Silently showing nothing is the failure this whole app is against.
+ * A cat that cannot animate shows its still pictures instead. Silently
+ * showing nothing is the failure this whole app is against.
  */
-function skinFailed(error) {
+function catFailed(error) {
   // eslint-disable-next-line no-console
-  console.error("skin failed, falling back to the robot:", error);
+  console.error("the cat could not animate, showing stills:", error);
   if (cat) { cat.dispose(); cat = null; }
-  pet.dataset.skin = "robot";
+  stillsOnly = true;
+  document.getElementById("cat").hidden = true;
+  document.getElementById("still").hidden = false;
+  setPose(lastPose);
   const handler =
     window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.layout;
   if (handler) handler.postMessage({ skinFailed: String(error) });
 }
+
+startCat();
