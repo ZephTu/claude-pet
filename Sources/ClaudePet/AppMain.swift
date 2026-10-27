@@ -358,6 +358,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
+            summaries: latestSummaries(now: now),
             quotaAlarm: decision.speak
         ) else { return }
         // The list is open and carrying this news itself: step aside rather than
@@ -384,6 +385,23 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    /// sessionId → the first line of what Claude said at the end of its most
+    /// recent finished turn. Read or not: the bubble announces the finish that
+    /// just happened, which is the newest one whatever the user has seen.
+    ///
+    /// Only the last minute's: if this turn's record has not been read yet, the
+    /// session's previous line would otherwise be announced as this turn's,
+    /// and a bare "done" is better than a confident wrong one.
+    private func latestSummaries(now: Date) -> [String: String] {
+        var out: [String: (Date, String)] = [:]
+        for event in completions?.events ?? []
+        where !event.summary.isEmpty && now.timeIntervalSince(event.finishedAt) < 60 {
+            if let seen = out[event.sessionId], seen.0 >= event.finishedAt { continue }
+            out[event.sessionId] = (event.finishedAt, event.summary)
+        }
+        return out.mapValues(\.1)
     }
 
     // MARK: - Labels

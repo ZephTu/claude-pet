@@ -38,7 +38,7 @@ Ordered by how much it wants from you, starting from asleep:
 **Click it** to expand the panel. It has three groups, in the order they want your attention:
 
 - **Needs you** — sessions blocked on an approval or a question, longest wait first
-- **Finished** — turns that ended while you were not looking, folded to one row per session
+- **Finished** — turns that ended while you were not looking, folded to one row per session, each with the first line of what Claude said last — "all 12 tests pass" and "which of these do you want?" are the difference between needing to look and not. The "done" bubble says the same line
 - **Running** — everything else that is alive
 
 Each heading carries its own count, and a lone **Running** heading is left off: one
@@ -143,7 +143,7 @@ Inside `~/.claude/pet/`:
 
 Aliases, pins, mutes, snoozes and settings live in `UserDefaults`, not here.
 
-**It does not read your conversations, and it makes no network requests of any kind.** The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
+**It keeps one line of each conversation and nothing else, and it makes no network requests of any kind.** That line is the first line of Claude's last message in a finished turn, handed over by the `Stop` hook, stripped of formatting and cut to 140 characters; it is what a finished row and the "done" bubble show, and it ages out with the row after seven days. Your prompts are never stored. The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
 
 ## Optional: reading quota from your statusline
 

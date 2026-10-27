@@ -589,6 +589,8 @@ html, body {
 /* :empty cannot do this any more — the line always holds its two spans even
    when both are blank, so the page marks it instead. */
 .detail.blank { display: none; }
+/* Claude's own last line on a finished row: one line, cut with an ellipsis. */
+.detail.summary { display: block; white-space: nowrap; text-overflow: ellipsis; color: #a99f96; }
 /* A session name is identity, not chatter, so it reads a shade louder than the
    notification text it replaces. */
 .note.name { color: #a99f96; }

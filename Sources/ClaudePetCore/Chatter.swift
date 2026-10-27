@@ -136,6 +136,7 @@ public enum Chatter {
         lastSpoken: [Kind: Date],
         lastAnything: Date?,
         names: [String: String] = [:],
+        summaries: [String: String] = [:],
         quotaAlarm: QuotaAlarm.Alarm? = nil
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
@@ -160,7 +161,7 @@ public enum Chatter {
             let labels = finishedNow.map { names[$0.sessionId] ?? $0.project }
             return Utterance(
                 kind: .sessionDone,
-                text: doneLine(finishedNow, names: names),
+                text: doneLine(finishedNow, names: names, summaries: summaries),
                 // Only a single name can be picked out of the sentence; with two
                 // the styled run would be discontiguous.
                 emphasis: labels.count == 1 ? labels[0] : ""
@@ -319,10 +320,25 @@ public enum Chatter {
     /// - Parameter names: sessionId → the terminal tab title, when known. The
     ///   project is only a directory name, so several sessions share it; the tab
     ///   title is what identifies the one that just finished.
-    public static func doneLine(_ finished: [SessionState], names: [String: String]) -> String {
+    /// How much of Claude's last line the bubble repeats. The bubble is a
+    /// corner of the screen, not a row; the full line is in the list.
+    public static let summaryInBubble = 60
+
+    /// - Parameter summaries: sessionId → the first line of what Claude said
+    ///   last. A single finished session says it instead of a bare "done",
+    ///   because "tests pass" and "I am stuck" are the difference between
+    ///   needing to look and not.
+    public static func doneLine(_ finished: [SessionState], names: [String: String],
+                                summaries: [String: String] = [:]) -> String {
         let labels = finished.map { names[$0.sessionId] ?? $0.project }
         switch labels.count {
-        case 1: return labels[0] + " done"
+        case 1:
+            let said = summaries[finished[0].sessionId] ?? ""
+            guard !said.isEmpty else { return labels[0] + " done" }
+            let short = said.count > summaryInBubble
+                ? String(said.prefix(summaryInBubble - 1)).trimmingCharacters(in: .whitespaces) + "…"
+                : said
+            return labels[0] + ": " + short
         case 2: return labels.joined(separator: ", ") + " done"
         default: return "\(labels.count) sessions done"
         }

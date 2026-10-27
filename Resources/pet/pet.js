@@ -471,6 +471,9 @@ function finishedRowHTML(f) {
     (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
+    // What Claude said last, so the row can answer "do I need to look?" on its
+    // own. Filled by textContent below: it is Claude's words, not ours.
+    (f.summary ? '<div class="detail summary"></div>' : "") +
     (f.closed ? '<div class="detail closed">' + TEXT.closed + "</div>" : "") +
     "</div>"
   );
@@ -568,6 +571,8 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     const row = doneRows[i];
     if (!row) return;
     row.querySelector(".proj").textContent = f.label;
+    const summary = row.querySelector(".detail.summary");
+    if (summary) summary.textContent = f.summary;
     row.dataset.sessionId = f.sessionId || "";
     row.dataset.eventIds = (f.eventIds || []).join(" ");
     if (f.termHandle) {

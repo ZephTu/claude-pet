@@ -431,6 +431,7 @@ final class WebBridge {
                 "count": row.count,
                 "closed": row.sessionClosed,
                 "agoSeconds": Int(max(0, now.timeIntervalSince(row.latestAt))),
+                "summary": row.summary,
             ]
             if row.canJump, let t = row.terminal {
                 item["termKind"] = t.kind

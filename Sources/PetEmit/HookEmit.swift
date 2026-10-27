@@ -204,7 +204,9 @@ enum HookEmit {
         // on a session nine minutes before it had anything to show.
         if event == "Stop", waitingForWork.isEmpty {
             recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
-                             turnKey: promptId.isEmpty ? String(turn) : promptId, at: now)
+                             turnKey: promptId.isEmpty ? String(turn) : promptId, at: now,
+                             summary: TurnSummary.headline(
+                                hook["last_assistant_message"] as? String ?? ""))
         }
     }
 
@@ -252,8 +254,9 @@ enum HookEmit {
     /// would silently unmute the session you had deliberately put away.
     ///
     /// This is the only place that looks at prompt text at all, it reads the
-    /// first tag and nothing else, and it stores none of it. The pet does not
-    /// read conversations.
+    /// first tag and nothing else, and it stores none of it. The only words of
+    /// a conversation the pet keeps are one line of Claude's last message per
+    /// finished turn — see `TurnSummary`.
     private static func isHuman(_ hook: [String: Any]) -> Bool {
         let prompt = (hook["prompt"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -458,11 +461,11 @@ enum HookEmit {
     /// two rows. Failure here is silent by design: the pet may never break the
     /// hook chain, and a missing record is better than a broken session.
     private static func recordCompletion(sessionID: String, project: String,
-                                         turnKey: String, at now: String) {
+                                         turnKey: String, at now: String, summary: String) {
         guard let finishedAt = CompletionQueue.parseDate(now) else { return }
         let event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
                                     project: project, displayName: project,
-                                    finishedAt: finishedAt)
+                                    finishedAt: finishedAt, summary: summary)
         let directory = eventsDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writeAtomically(CompletionQueue.encode(event),

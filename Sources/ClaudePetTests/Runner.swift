@@ -1887,6 +1887,51 @@ struct Runner {
                                           y: PetLayout.petCenter.y), mirrored: true)
                     && !PetLayout.isOnPet(PetLayout.petCenter, mirrored: true))
 
+        // ---- TurnSummary: one line of what Claude said last ----
+        t.check("the first line is the summary",
+                TurnSummary.headline("All 12 tests pass.\nDetails below.") == "All 12 tests pass.")
+        t.check("markdown is stripped down to the words",
+                TurnSummary.headline("## **Done**: see [the PR](https://x/1) and `make test`")
+                    == "Done: see the PR and make test")
+        t.check("blank lines and rules are skipped",
+                TurnSummary.headline("\n\n---\n- Fixed the hook") == "Fixed the hook")
+        t.check("a code block is not the summary",
+                TurnSummary.headline("```bash\nnpm test\n```\nTests pass") == "Tests pass")
+        t.check("numbered lists lose their number",
+                TurnSummary.headline("1. Which option do you want?") == "Which option do you want?")
+        let longReply = String(repeating: "word ", count: 60)
+        t.check("a long line is clamped with an ellipsis",
+                TurnSummary.headline(longReply).count == TurnSummary.limit
+                    && TurnSummary.headline(longReply).hasSuffix("…"))
+        t.check("an empty message has no summary", TurnSummary.headline("").isEmpty)
+        t.check("Chinese passes through untouched",
+                TurnSummary.headline("测试全部通过，PR 已开") == "测试全部通过，PR 已开")
+
+        let said = CompletionEvent(sessionId: "s", turnKey: "1", project: "api",
+                                   displayName: "api", finishedAt: t0, summary: "Tests pass")
+        t.check("a summary survives the record's round trip",
+                CompletionQueue.decode([CompletionQueue.encode(said)]).first?.summary == "Tests pass")
+        let silent = CompletionEvent(sessionId: "s", turnKey: "2", project: "api",
+                                     displayName: "api", finishedAt: t0)
+        t.check("a record from before summaries reads as having none",
+                CompletionQueue.decode([CompletionQueue.encode(silent)]).first?.summary == "")
+        let earlierTurn = CompletionEvent(sessionId: "s", turnKey: "0", project: "api",
+                                    displayName: "api", finishedAt: t0.addingTimeInterval(-60),
+                                    summary: "old news")
+        t.check("a folded row shows its newest turn's summary",
+                PanelModel.completionRows([earlierTurn, said], live: []).first?.summary == "Tests pass")
+
+        let finishedOne = [mk("s", .idle, project: "api")]
+        t.check("one finished session says what Claude said",
+                Chatter.doneLine(finishedOne, names: [:], summaries: ["s": "Tests pass"])
+                    == "api: Tests pass")
+        t.check("without a summary it is a plain done",
+                Chatter.doneLine(finishedOne, names: [:]) == "api done")
+        t.check("the bubble repeats only the start of a long line",
+                Chatter.doneLine(finishedOne, names: [:],
+                                 summaries: ["s": String(repeating: "x", count: 100)]).count
+                    == "api: ".count + Chatter.summaryInBubble)
+
         t.finish()
     }
 }

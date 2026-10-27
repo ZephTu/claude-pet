@@ -358,5 +358,15 @@ check "StopFailure clears tools in flight" "$(field sF running)" "[]"
 check "StopFailure records no finish" \
   "$(ls "$PET_HOME/events" 2>/dev/null | grep -c '^sF~' | tr -d ' ')" "0"
 
+# Stop carries Claude's last message; the record keeps its first line only.
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sL /tmp/l
+emit_json '{"hook_event_name":"Stop","session_id":"sL","cwd":"/tmp/l","last_assistant_message":"## All 12 tests pass\n\nPR opened at https://example.com/pr/1 with token abc"}'
+check "a finish keeps the first line of what Claude said" "$(event_field 1 summary)" "All 12 tests pass"
+emit UserPromptSubmit sM /tmp/m
+emit Stop sM /tmp/m
+check "a Stop with no message records no summary" \
+  "$(/usr/bin/python3 -c "import json,glob,sys;print('summary' in json.load(open(glob.glob(sys.argv[1])[0])))" "$PET_HOME/events/sM~*.json")" "False"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
