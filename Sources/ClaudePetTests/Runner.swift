@@ -301,11 +301,51 @@ struct Runner {
         t.check("the bubble's area is transparent when hidden", !opaque(320, 130))
 
         // ---- TerminalTarget: jumping back to a session's terminal ----
-        t.check("orca and iterm2 are jumpable",
-                TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2"))
+        t.check("orca, iterm2 and vscode are jumpable",
+                TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2")
+                && TerminalTarget.canJump(kind: "vscode"))
         // An unrecognised terminal degrades to "not clickable" rather than a dead click
         t.check("an unknown or empty kind is not jumpable",
-                !TerminalTarget.canJump(kind: "vscode") && !TerminalTarget.canJump(kind: ""))
+                !TerminalTarget.canJump(kind: "warp") && !TerminalTarget.canJump(kind: ""))
+
+        // ---- An editor's integrated terminal (VS Code, Cursor) ----
+        let cursorEnv = ["TERM_PROGRAM": "vscode", "__CFBundleIdentifier": "com.todesktop.230313mzl4w4u92"]
+        t.check("Cursor's terminal is named by its bundle id and the session directory",
+                TerminalTarget.identify(environment: cursorEnv, cwd: "/Users/a/repo/sub")
+                == TerminalRef(kind: "vscode", handle: "com.todesktop.230313mzl4w4u92|/Users/a/repo/sub"))
+        t.check("an editor terminal without a directory is not addressable",
+                TerminalTarget.identify(environment: cursorEnv) == nil)
+        t.check("without a bundle id the app comes from the askpass helper's path",
+                TerminalTarget.identify(environment: [
+                    "TERM_PROGRAM": "vscode",
+                    "VSCODE_GIT_ASKPASS_NODE": "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)",
+                ], cwd: "/r") == TerminalRef(kind: "vscode", handle: "/Applications/Cursor.app|/r"))
+        t.check("a bundle id with anything odd in it is not trusted",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "vscode",
+                                                      "__CFBundleIdentifier": "a|b"], cwd: "/r") == nil)
+        t.check("the handle splits at the first bar, so a directory may contain one",
+                TerminalTarget.editorTarget(handle: "com.x|/a|b").map { [$0.app, $0.cwd] } == ["com.x", "/a|b"])
+        t.check("a handle without a directory does not parse",
+                TerminalTarget.editorTarget(handle: "com.x|") == nil
+                && TerminalTarget.editorTarget(handle: "com.x") == nil)
+        // Asking for a subfolder of an open workspace would open a second window
+        let noRepo: (String) -> Bool = { _ in false }
+        t.check("the deepest workspace containing the directory wins",
+                TerminalTarget.editorFolder(cwd: "/w/app/src", workspaces: ["/w", "/w/app/", "/other"],
+                                            isRepoRoot: noRepo) == "/w/app")
+        t.check("a workspace that only shares a name prefix does not match",
+                TerminalTarget.editorFolder(cwd: "/w/app2", workspaces: ["/w/app"],
+                                            isRepoRoot: noRepo) == "/w/app2")
+        t.check("with no workspace known, the enclosing repository is used",
+                TerminalTarget.editorFolder(cwd: "/w/app/src/x", workspaces: [],
+                                            isRepoRoot: { $0 == "/w/app" }) == "/w/app")
+        t.check("with neither, the directory itself",
+                TerminalTarget.editorFolder(cwd: "/w/app/", workspaces: [], isRepoRoot: noRepo) == "/w/app")
+        t.check("lock files give their workspace folders",
+                TerminalTarget.lockWorkspaces(Data(#"{"pid":1,"workspaceFolders":["/w","rel"],"ideName":"Cursor"}"#.utf8))
+                == ["/w"])
+        t.check("a broken lock file gives none",
+                TerminalTarget.lockWorkspaces(Data("nope".utf8)).isEmpty)
 
         // The w/t/p prefix is the tab's position when the shell started and goes stale
         // as soon as tabs are reordered; the uuid does not

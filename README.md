@@ -89,6 +89,7 @@ rights itself the moment that session does anything again.
 
 - **Orca** goes through its own CLI (`orca terminal switch`) and needs no system permission at all
 - **iTerm2** goes through AppleScript, so the **first jump raises a macOS Automation prompt**; deny it and jumps fail silently afterwards
+- **VS Code, Cursor and other VS Code forks** have no way to address one terminal from outside, so the jump asks the editor to open the session's project folder — which raises the window that already has it open. You land in the right window, not necessarily on the right terminal tab. No permission needed. The folder is the workspace Claude Code's IDE integration reports (`~/.claude/ide/*.lock`), else the enclosing git repository, else the session's directory
 - Other terminals cannot be addressed — those rows have no ↗ and clicking them just closes the list
 
 **Hover a row** for 0.45s and the bubble answers what the row has no space for: the full path and worktree, how full the context window is and on which model (with the statusline wired up), how long this turn has been going versus how long since anything happened at all, and the last tool call with its result. It used to show the session's name — which stopped being worth a hover once the first column started showing it.

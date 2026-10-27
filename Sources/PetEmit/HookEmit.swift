@@ -132,7 +132,7 @@ enum HookEmit {
             "waitingOn": waitingOn,
             "updatedAt": now,
         ]
-        if let terminal = terminalRef() {
+        if let terminal = terminalRef(cwd: cwd) {
             document["terminal"] = terminal
         }
         // The pet decides liveness from this, so an idle session stays listed.
@@ -257,8 +257,9 @@ enum HookEmit {
     ///
     /// Returns nil for every terminal we cannot address, which is not a failure:
     /// that session's row simply will not be clickable.
-    private static func terminalRef() -> [String: String]? {
-        guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment)
+    private static func terminalRef(cwd: String) -> [String: String]? {
+        guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
+                                                cwd: cwd)
         else { return nil }
         return ["kind": ref.kind, "handle": ref.handle]
     }

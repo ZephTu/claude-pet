@@ -14,12 +14,13 @@ public enum SessionActivity: String, Sendable, Decodable {
 /// plain Optional is also what lets state files written before this existed
 /// still decode — a missing key decodes to nil rather than throwing.
 public struct TerminalRef: Sendable, Equatable, Decodable {
-    /// "orca" or "iterm2". Free-form rather than an enum so an unknown value
+    /// "orca", "iterm2" or "vscode". Free-form rather than an enum so an unknown value
     /// written by a newer pet-emit degrades to "no jump" instead of failing the
     /// whole decode and dropping the session from the panel.
     public let kind: String
     /// Whatever that terminal uses to address a tab. Orca issues its own handle;
-    /// iTerm2's is the raw ITERM_SESSION_ID, parsed at jump time.
+    /// iTerm2's is the raw ITERM_SESSION_ID, parsed at jump time. An editor has
+    /// none, so its handle is "<app>|<session directory>".
     public let handle: String
 
     public init(kind: String, handle: String) {

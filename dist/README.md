@@ -21,7 +21,7 @@ The lamp on its antenna is the part you can read without focusing on it:
 | Off | asleep at the desk with z's drifting up | everything is done |
 
 **Left-click** to expand the list — what each session is running, and for how long.
-**Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2).
+**Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2; for VS Code and Cursor, to the window that has its project open).
 **Hover a row** and the bubble shows where that session is, how full its context window is, how long the turn has run versus how long since anything happened, and its last tool call.
 **Hover the cat** for a second to see your remaining quota.
 **Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
@@ -83,7 +83,7 @@ Hooks only apply to **newly started** sessions. Open a new window. If that does 
 It should not be: liveness is a process check, so closing the terminal removes it immediately. If you do see one, its state file probably predates the upgrade (no process id recorded) — say anything in that session and it will correct itself.
 
 **A row has no ↗ and clicking does nothing**
-Only Orca and iTerm2 sessions can be jumped to. Sessions that were already open before installing also lack it until they next run a hook.
+Only Orca, iTerm2, VS Code and Cursor sessions can be jumped to. Sessions that were already open before installing also lack it until they next run a hook.
 
 **I want it to shut up for a while**
 Right-click → Take a Nap. To silence one session only, hover its row and click the ×.

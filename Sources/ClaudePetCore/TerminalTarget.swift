@@ -18,7 +18,10 @@ public enum TerminalTarget {
     /// inherited ORCA_TERMINAL_HANDLE would otherwise offer a jump that raises
     /// some unrelated Orca tab. Bare presence is consulted only when TERM_PROGRAM
     /// is absent entirely, which is the one case where we have nothing better.
-    public static func identify(environment env: [String: String]) -> TerminalRef? {
+    /// - Parameter cwd: the session's directory. Only an editor's terminal
+    ///   needs it: the editor has no handle for a terminal, so the jump goes to
+    ///   the window that has this directory open instead.
+    public static func identify(environment env: [String: String], cwd: String = "") -> TerminalRef? {
         let program = env["TERM_PROGRAM"] ?? ""
         let orca = env["ORCA_TERMINAL_HANDLE"] ?? ""
         let iterm = env["ITERM_SESSION_ID"] ?? ""
@@ -28,6 +31,11 @@ public enum TerminalTarget {
             return iterm.isEmpty ? nil : TerminalRef(kind: "iterm2", handle: iterm)
         case "Orca":
             return orca.isEmpty ? nil : TerminalRef(kind: "orca", handle: orca)
+        case "vscode":
+            // VS Code and everything forked from it — Cursor, Windsurf — say
+            // "vscode" here. Which one it actually is comes from the app.
+            guard let app = editorApp(environment: env), !cwd.isEmpty else { return nil }
+            return TerminalRef(kind: "vscode", handle: app + "|" + cwd)
         case "":
             break  // nothing told us; fall through to bare presence
         default:
@@ -43,7 +51,82 @@ public enum TerminalTarget {
     /// written by a future pet-emit this binary predates — makes the row
     /// non-clickable rather than giving the user a dead click.
     public static func canJump(kind: String) -> Bool {
-        kind == "orca" || kind == "iterm2"
+        kind == "orca" || kind == "iterm2" || kind == "vscode"
+    }
+
+    // MARK: - VS Code and its forks
+
+    /// Which editor owns this terminal: its bundle id, or failing that the path
+    /// of its .app.
+    ///
+    /// macOS sets __CFBundleIdentifier for every app it launches and the
+    /// integrated terminal inherits it, so it names Cursor and VS Code apart
+    /// even though both report TERM_PROGRAM=vscode. The git askpass helper the
+    /// editor injects lives inside its own .app, which is the fallback for an
+    /// editor started some other way.
+    static func editorApp(environment env: [String: String]) -> String? {
+        if let id = env["__CFBundleIdentifier"], isSafeBundleID(id) { return id }
+        for key in ["VSCODE_GIT_ASKPASS_NODE", "VSCODE_GIT_ASKPASS_MAIN"] {
+            guard let path = env[key], let end = path.range(of: ".app/") else { continue }
+            let app = String(path[..<end.lowerBound]) + ".app"
+            if app.hasPrefix("/"), !app.contains("|") { return app }
+        }
+        return nil
+    }
+
+    static func isSafeBundleID(_ id: String) -> Bool {
+        !id.isEmpty && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }
+    }
+
+    /// The two halves of a "vscode" handle: the app, then the session's
+    /// directory. Split at the first bar, since a directory may contain one
+    /// and neither a bundle id nor an accepted app path can.
+    public static func editorTarget(handle: String) -> (app: String, cwd: String)? {
+        guard let bar = handle.firstIndex(of: "|") else { return nil }
+        let app = String(handle[..<bar])
+        let cwd = String(handle[handle.index(after: bar)...])
+        guard !app.isEmpty, cwd.hasPrefix("/") else { return nil }
+        return (app, cwd)
+    }
+
+    /// The folder to ask the editor for, so it raises the window that already
+    /// has it open rather than opening a second one.
+    ///
+    /// The session's own directory is often a subfolder of what the window
+    /// has open, and asking for a subfolder opens a NEW window. So: the
+    /// deepest workspace folder Claude Code's IDE lock files list that
+    /// contains the directory, else the enclosing git repository, else the
+    /// directory itself.
+    ///
+    /// - Parameters:
+    ///   - workspaces: every `workspaceFolders` entry from ~/.claude/ide/*.lock.
+    ///   - isRepoRoot: whether a directory holds a `.git`, file or folder.
+    public static func editorFolder(cwd: String, workspaces: [String],
+                                    isRepoRoot: (String) -> Bool) -> String {
+        let dir = trimmed(cwd)
+        let best = workspaces.map(trimmed)
+            .filter { dir == $0 || dir.hasPrefix($0 == "/" ? $0 : $0 + "/") }
+            .max { $0.count < $1.count }
+        if let best { return best }
+        var probe = dir
+        while probe.count > 1 {
+            if isRepoRoot(probe) { return probe }
+            probe = (probe as NSString).deletingLastPathComponent
+        }
+        return dir
+    }
+
+    private static func trimmed(_ path: String) -> String {
+        path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+
+    /// The `workspaceFolders` a lock file lists, or none if it is not one.
+    public static func lockWorkspaces(_ data: Data) -> [String] {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let folders = root["workspaceFolders"] as? [String]
+        else { return [] }
+        return folders.filter { $0.hasPrefix("/") }
     }
 
     /// ITERM_SESSION_ID looks like `w0t1p0:0F0C1A5B-…`. The `w`/`t`/`p` prefix is

@@ -17,6 +17,12 @@ import Foundation
 ///    carries NSAppleEventsUsageDescription, without which macOS refuses the
 ///    request outright instead of asking.
 ///
+///  - **vscode** covers VS Code and its forks (Cursor, Windsurf). They expose
+///    no way to address one terminal from outside, so the jump asks the editor
+///    to open the session's project folder; an editor that already has it
+///    open raises that window instead of opening another. Right window, not
+///    necessarily the right terminal tab. No permission needed.
+///
 /// Every failure path is silent-but-logged on purpose. A jump that does not work
 /// must never take the pet down or block the UI, and there is no good way to
 /// surface an error from a borderless accessory panel.
@@ -25,6 +31,7 @@ enum TerminalJump {
         switch kind {
         case "orca": jumpOrca(handle: handle)
         case "iterm2": jumpITerm(sessionID: handle)
+        case "vscode": jumpEditor(handle: handle)
         default: NSLog("ClaudePet: unknown terminal kind \(kind)")
         }
     }
@@ -93,6 +100,52 @@ enum TerminalJump {
             }
             activate(bundleID: iTermBundleID)
         }
+    }
+
+    // MARK: - VS Code, Cursor and the like
+
+    private static func jumpEditor(handle: String) {
+        guard let target = TerminalTarget.editorTarget(handle: handle) else {
+            NSLog("ClaudePet: unreadable editor handle")
+            return
+        }
+        let appURL: URL?
+        if target.app.hasPrefix("/") {
+            appURL = URL(fileURLWithPath: target.app)
+        } else {
+            appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.app)
+        }
+        guard let appURL, FileManager.default.fileExists(atPath: appURL.path) else {
+            NSLog("ClaudePet: editor \(target.app) is not installed")
+            return
+        }
+        let fm = FileManager.default
+        let folder = TerminalTarget.editorFolder(
+            cwd: target.cwd, workspaces: ideWorkspaces(),
+            isRepoRoot: { fm.fileExists(atPath: $0 + "/.git") })
+        guard fm.fileExists(atPath: folder) else {
+            NSLog("ClaudePet: \(folder) no longer exists")
+            return
+        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.open([URL(fileURLWithPath: folder)], withApplicationAt: appURL,
+                                configuration: config) { _, error in
+            if let error { NSLog("ClaudePet: editor jump failed: \(error.localizedDescription)") }
+        }
+    }
+
+    /// Every folder an editor window has open, as Claude Code's IDE
+    /// integration records them in ~/.claude/ide/*.lock. Empty when the
+    /// integration is not in use, which only costs the jump some precision.
+    private static func ideWorkspaces() -> [String] {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/ide")
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "lock" }
+            .flatMap { url in
+                (try? Data(contentsOf: url)).map(TerminalTarget.lockWorkspaces) ?? []
+            }
     }
 
     // MARK: - Titles
