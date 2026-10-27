@@ -13,6 +13,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onShowHealth: () -> Void
     private let onKeepListOpenToggle: () -> Void
     private let onLoginToggle: () -> Void
+    private let onNoticeHold: (TimeInterval) -> Void
+    private let onNoticeCount: (Int) -> Void
     private let onUnmuteAll: () -> Void
     private let onQuit: () -> Void
 
@@ -23,8 +25,12 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onShortcutToggle: @escaping () -> Void,
         onShowHealth: @escaping () -> Void,
         onKeepListOpenToggle: @escaping () -> Void,
+        onNoticeHold: @escaping (TimeInterval) -> Void,
+        onNoticeCount: @escaping (Int) -> Void,
         onQuit: @escaping () -> Void
     ) {
+        self.onNoticeHold = onNoticeHold
+        self.onNoticeCount = onNoticeCount
         self.onPauseToggle = onPauseToggle
         self.onShortcutToggle = onShortcutToggle
         self.onShowHealth = onShowHealth
@@ -37,11 +43,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        keepListOpenOn: Bool = false, problem: HealthCheck? = nil
+        keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
+        noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem
+            shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
+            noticeHold: noticeHold, noticeCount: noticeCount
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -52,7 +60,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
     ///   when nothing is — which is when the connection report is left out.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, keepListOpenOn: Bool = false,
-                  problem: HealthCheck? = nil) -> NSMenu {
+                  problem: HealthCheck? = nil,
+                  noticeHold: TimeInterval = Chatter.noticeHold,
+                  noticeCount: Int = Chatter.noticeCount) -> NSMenu {
         let menu = NSMenu()
 
         if let problem {
@@ -102,6 +112,32 @@ final class PetMenu: NSObject, NSMenuDelegate {
         shortcut.target = self
         options.addItem(shortcut)
         options.addItem(.separator())
+
+        // The "this session finished" bubbles above the pet.
+        let hold = NSMenuItem(title: "Bubble Duration", action: nil, keyEquivalent: "")
+        let holds = NSMenu()
+        for seconds in Chatter.noticeHoldChoices {
+            let item = NSMenuItem(title: "\(Int(seconds)) seconds", action: #selector(pickHold(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = seconds
+            item.state = seconds == noticeHold ? .on : .off
+            holds.addItem(item)
+        }
+        hold.submenu = holds
+        options.addItem(hold)
+        let count = NSMenuItem(title: "Bubbles at Once", action: nil, keyEquivalent: "")
+        let counts = NSMenu()
+        for n in Chatter.noticeCountChoices {
+            let item = NSMenuItem(title: "\(n)", action: #selector(pickCount(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = n
+            item.state = n == noticeCount ? .on : .off
+            counts.addItem(item)
+        }
+        count.submenu = counts
+        options.addItem(count)
+        options.addItem(.separator())
         let health = NSMenuItem(title: "Connection Status…", action: #selector(showHealth),
                                 keyEquivalent: "")
         health.target = self
@@ -123,5 +159,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func toggleShortcut() { onShortcutToggle() }
     @objc private func showHealth() { onShowHealth() }
     @objc private func toggleKeepListOpen() { onKeepListOpenToggle() }
+    @objc private func pickHold(_ sender: NSMenuItem) {
+        if let seconds = sender.representedObject as? TimeInterval { onNoticeHold(seconds) }
+    }
+    @objc private func pickCount(_ sender: NSMenuItem) {
+        if let n = sender.representedObject as? Int { onNoticeCount(n) }
+    }
     @objc private func quit() { onQuit() }
 }

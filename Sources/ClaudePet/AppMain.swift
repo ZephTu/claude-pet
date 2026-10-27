@@ -98,6 +98,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             // The page has just loaded at its defaults, so whichever side it
             // should be on has to be pushed again.
             bridge.setMirrored(panel?.isMirrored ?? false)
+            bridge.setMaxNotices(self?.noticeCount ?? Chatter.noticeCount)
             self?.applyMotionSetting()
             // The page reloaded at its defaults, which means shut. A pinned list
             // has to be put back up, and this is the first moment it can be.
@@ -135,6 +136,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             startTicker(interval: visible ? Self.tickInterval : Self.hiddenTickInterval)
         }
         keepListOpen = UserDefaults.standard.bool(forKey: Self.keepListOpenKey)
+        noticeHold = Chatter.noticeHold(stored: UserDefaults.standard.double(forKey: Self.noticeHoldKey))
+        noticeCount = Chatter.noticeCount(stored: UserDefaults.standard.integer(forKey: Self.noticeCountKey))
         bridge.panelPinned = keepListOpen
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onHover = { [weak self] point, panelOpen in
@@ -183,6 +186,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShortcutToggle: { [weak self] in self?.toggleHotKey() },
             onShowHealth: { [weak self] in self?.showHealth() },
             onKeepListOpenToggle: { [weak self] in self?.toggleKeepListOpen() },
+            onNoticeHold: { [weak self] seconds in
+                self?.noticeHold = seconds
+                UserDefaults.standard.set(seconds, forKey: Self.noticeHoldKey)
+            },
+            onNoticeCount: { [weak self] n in
+                self?.noticeCount = n
+                UserDefaults.standard.set(n, forKey: Self.noticeCountKey)
+                self?.bridge?.setMaxNotices(n)
+            },
             onQuit: { NSApp.terminate(nil) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
@@ -197,7 +209,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           keepListOpenOn: self.keepListOpen,
-                          problem: HealthCollector.quickProblem(petHome: self.petHome))
+                          problem: HealthCollector.quickProblem(petHome: self.petHome),
+                          noticeHold: self.noticeHold, noticeCount: self.noticeCount)
             }
         }
         self.menu = menu
@@ -346,7 +359,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private static let speechHold: TimeInterval = 6
 
     /// One notice per session that just finished, each up for its own
-    /// `Chatter.noticeHold` — see window.notify for the stack they sit in.
+    /// `noticeHold` — see window.notify for the stack they sit in.
     ///
     /// Not while paused (the pet is asleep), and not while the list is open:
     /// the Finished group is showing exactly these, and a notice would only
@@ -358,7 +371,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                           summaries: latestSummaries(now: now))
         for notice in notices {
             let terminal = state.sessions.first { $0.sessionId == notice.sessionId }?.terminal
-            bridge?.notify(notice.text, hold: Chatter.noticeHold, emphasis: notice.emphasis,
+            bridge?.notify(notice.text, hold: noticeHold, emphasis: notice.emphasis,
                            sessionId: notice.sessionId,
                            jumpable: terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false)
         }
@@ -699,6 +712,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// state from whenever it was covered up.
     private static let hiddenTickInterval: TimeInterval = 30
     private static let keepListOpenKey = "keepListOpen.v1"
+    private static let noticeHoldKey = "noticeHoldSeconds"
+    private static let noticeCountKey = "noticeCount"
+    /// Settings → Bubble Duration / Bubbles at Once.
+    private var noticeHold = Chatter.noticeHold
+    private var noticeCount = Chatter.noticeCount
 
     private func startTicker(interval: TimeInterval) {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in

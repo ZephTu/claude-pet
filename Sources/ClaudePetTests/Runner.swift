@@ -909,7 +909,13 @@ struct Runner {
         t.check("no generic Done on top of the notices",
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
-        t.check("a notice stays up for ten seconds", Chatter.noticeHold == 10)
+        t.check("a notice stays up for thirty seconds by default", Chatter.noticeHold == 30)
+        t.check("a stored choice is kept, anything else falls back",
+                Chatter.noticeHold(stored: 60) == 60 && Chatter.noticeHold(stored: 0) == 30
+                    && Chatter.noticeHold(stored: 3600) == 30)
+        t.check("one to three notices at once, three by default",
+                Chatter.noticeCount(stored: 1) == 1 && Chatter.noticeCount(stored: 0) == 3
+                    && Chatter.noticeCount(stored: 7) == 3)
         t.check("each notice knows its session, so a click can go there",
                 notices.map(\.sessionId) == ["a", "b"])
 

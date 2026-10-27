@@ -398,7 +398,8 @@ window.showQuota = function (rows, fallback) {
    pet, older ones pushed up. The stack is capped, and when it is full the
    oldest gives way early — it is still in the Finished list. A click on one
    goes to its session, exactly like its row in Finished. */
-const MAX_NOTICES = 3;
+/* How many can be up at once; Settings → Bubbles at Once, pushed from Swift. */
+let maxNotices = 3;
 const NOTICE_GAP = 6;
 /* Same anchor as #bubble's `bottom`. */
 const NOTICE_FLOOR = 138;
@@ -450,8 +451,15 @@ window.notify = function (text, holdMs, emphasis, sessionId, jumpable) {
     el.appendChild(go);
   }
   notices.appendChild(el);
-  while (notices.children.length > MAX_NOTICES) dropNotice(notices.firstChild);
+  while (notices.children.length > maxNotices) dropNotice(notices.firstChild);
   el._timer = setTimeout(function () { noticeGone(el); }, holdMs);
+  reportLayout();
+};
+
+/** Settings changed: trim what is up now to the new limit. */
+window.setMaxNotices = function (n) {
+  maxNotices = Math.max(1, Math.min(3, n | 0));
+  while (notices.children.length > maxNotices) dropNotice(notices.firstChild);
   reportLayout();
 };
 

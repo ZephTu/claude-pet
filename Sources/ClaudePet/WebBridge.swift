@@ -219,6 +219,11 @@ final class WebBridge {
                  + "\(jsString(sessionId)), \(jumpable));")
     }
 
+    func setMaxNotices(_ n: Int) {
+        guard isReady else { return }
+        evaluate("window.setMaxNotices(\(n));")
+    }
+
     /// Takes down the notices for one session — it has just been opened.
     func dismissNotice(_ sessionId: String) {
         guard isReady else { return }
