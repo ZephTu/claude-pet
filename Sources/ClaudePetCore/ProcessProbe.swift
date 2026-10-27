@@ -119,6 +119,73 @@ public enum ProcessProbe {
         return nil
     }
 
+    /// Has Claude Code `pid` started a Bash tool's shell at or after `since`?
+    ///
+    /// This is how the pet notices a permission prompt being ANSWERED. Claude
+    /// Code sends PermissionRequest before the prompt and PostToolUse after the
+    /// command finishes, and nothing in between: approving a ten-minute
+    /// `terraform apply` left the cat waving for ten minutes at a prompt that was
+    /// already gone. What approval does do is make Claude spawn the shell that
+    /// runs the command, and that process can be seen.
+    ///
+    /// Only a tool shell counts. Claude starts other children while a prompt is
+    /// up — the Notification hook it fires a few seconds in, `caffeinate` — and
+    /// none of those mean the prompt was answered.
+    public static func startedToolShell(under pid: Int32, since: Date) -> Bool {
+        childPIDs(of: pid).contains { child in
+            guard let started = startTime(pid: child), started >= since,
+                  let arguments = arguments(pid: child)
+            else { return false }
+            return isToolShell(arguments: arguments)
+        }
+    }
+
+    /// Pure half of `startedToolShell`: Claude Code runs every Bash tool call as
+    /// `<shell> -c source <config>/shell-snapshots/snapshot-… && <command>`.
+    public static func isToolShell(arguments: String) -> Bool {
+        arguments.contains("/shell-snapshots/snapshot-")
+    }
+
+    public static func childPIDs(of pid: Int32) -> [Int32] {
+        guard pid > 0 else { return [] }
+        var buffer = [pid_t](repeating: 0, count: 256)
+        let bytes = proc_listchildpids(
+            pid, &buffer, Int32(buffer.count * MemoryLayout<pid_t>.stride))
+        guard bytes > 0 else { return [] }
+        // Returns a count of pids on current macOS, bytes on older releases;
+        // either way the unused tail is zero.
+        return buffer.prefix(Int(bytes)).filter { $0 > 0 }
+    }
+
+    public static func startTime(pid: Int32) -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let result = mib.withUnsafeMutableBufferPointer { mibBuffer -> Int32 in
+            sysctl(mibBuffer.baseAddress, u_int(mibBuffer.count), &info, &size, nil, 0)
+        }
+        guard result == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec)
+                    + TimeInterval(start.tv_usec) / 1_000_000)
+    }
+
+    /// The process's argv joined by spaces, or nil when it is gone or not ours.
+    public static func arguments(pid: Int32) -> String? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size
+        else { return nil }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+        // Layout: argc, the executable path, padding NULs, then argc strings.
+        let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
+        let fields = buffer[MemoryLayout<Int32>.size..<size]
+            .split(separator: 0, omittingEmptySubsequences: true)
+            .map { String(decoding: $0, as: UTF8.self) }
+        return fields.dropFirst().prefix(Int(argc)).joined(separator: " ")
+    }
+
     public static func parentPID(of pid: Int32) -> Int32? {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride

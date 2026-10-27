@@ -464,6 +464,51 @@ struct Runner {
         t.check("every process has a parent except the root",
                 (ProcessProbe.parentPID(of: ProcessInfo.processInfo.processIdentifier) ?? 0) > 0)
 
+        // Approving a permission prompt fires no hook; the tool shell it starts is the signal
+        t.check("a Bash tool shell is recognised by its snapshot",
+                ProcessProbe.isToolShell(arguments:
+                    "/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1-x.sh 2>/dev/null || true && eval 'tf apply'"))
+        t.check("a hook shell is not a tool shell",
+                !ProcessProbe.isToolShell(arguments: "/bin/sh -c /Users/u/.claude/pet/bin/pet-emit"))
+        t.check("caffeinate is not a tool shell",
+                !ProcessProbe.isToolShell(arguments: "caffeinate -i -t 300"))
+        let me = ProcessInfo.processInfo.processIdentifier
+        t.check("this test runner can read its own arguments",
+                ProcessProbe.arguments(pid: me)?.contains("ClaudePetTests") == true)
+        t.check("this test runner started in the past",
+                (ProcessProbe.startTime(pid: me) ?? .distantFuture) <= Date())
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["5"]
+        let beforeChild = Date().addingTimeInterval(-1)
+        if (try? child.run()) != nil {
+            t.check("a spawned child is listed under its parent",
+                    ProcessProbe.childPIDs(of: me).contains(child.processIdentifier))
+            t.check("a child that is not a tool shell does not count as approval",
+                    !ProcessProbe.startedToolShell(under: me, since: beforeChild))
+            child.terminate()
+        } else {
+            t.check("could spawn /bin/sleep", false)
+        }
+
+        let asking = SessionState(
+            sessionId: "ask", project: "p", cwd: "/tmp", state: .waiting, tool: "Bash",
+            detail: "", since: t0.addingTimeInterval(-120), updatedAt: t0.addingTimeInterval(-120),
+            pid: 4242, waitingOn: "tf apply",
+            running: [RunningTool(id: "toolu_1", tool: "Bash", target: "tf …")])
+        let approvedLater = StateAggregator.aggregate([asking], now: t0, isLive: { _, _ in true },
+                                                      approved: { _ in true })
+        t.check("an approved prompt stops the pet waving",
+                approvedLater.mood == .busy && approvedLater.waitingProject == nil)
+        t.check("an approved prompt shows the row as busy",
+                approvedLater.sessions.first?.state == .busy
+                && approvedLater.sessions.first?.waitingOn == "")
+        t.check("an unanswered prompt still escalates",
+                StateAggregator.aggregate([asking], now: t0, isLive: { _, _ in true },
+                                          approved: { _ in false }).mood == .urgent)
+        t.check("waiting without a permission request is never treated as approved",
+                !StateAggregator.wasApproved(mk("q", .waiting)))
+
         // With a pid recorded, a live process keeps the session listed however long it idles
         let ancient = Date(timeIntervalSince1970: 1_700_000_000)
         let idleButOpen = SessionState(
