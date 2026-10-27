@@ -153,8 +153,8 @@ public enum StateAggregator {
         return repeated
     }
 
-    /// Waiting first, then busy, then idle; oldest `since` first inside each group,
-    /// so the expanded panel lists the most neglected session at the top.
+    /// Waiting first, then busy, then idle; newest `since` first inside each group,
+    /// so the sessions just touched are at the top and old idle ones sink.
     private static func ordered(_ sessions: [SessionState]) -> [SessionState] {
         func rank(_ s: SessionActivity) -> Int {
             switch s {
@@ -164,7 +164,7 @@ public enum StateAggregator {
             }
         }
         return sessions.sorted {
-            rank($0.state) != rank($1.state) ? rank($0.state) < rank($1.state) : $0.since < $1.since
+            rank($0.state) != rank($1.state) ? rank($0.state) < rank($1.state) : $0.since > $1.since
         }
     }
 }
