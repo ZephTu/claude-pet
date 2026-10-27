@@ -1932,6 +1932,53 @@ struct Runner {
                                  summaries: ["s": String(repeating: "x", count: 100)]).count
                     == "api: ".count + Chatter.summaryInBubble)
 
+        // ---- PermissionDecision: answering a prompt from the pet ----
+        let allowAnswer = PermissionDecision.Answer(askId: "a1", behavior: .allow)
+        t.check("an answer survives its file",
+                PermissionDecision.decode(PermissionDecision.encode(allowAnswer)) == allowAnswer)
+        t.check("an answer with no ask is not an answer",
+                PermissionDecision.decode(Data(#"{"behavior":"allow"}"#.utf8)) == nil)
+        t.check("an answer that is neither allow nor deny is not an answer",
+                PermissionDecision.decode(Data(#"{"askId":"a1","behavior":"maybe"}"#.utf8)) == nil)
+        let allowOut = (try? JSONSerialization.jsonObject(
+            with: PermissionDecision.hookOutput(.allow))) as? [String: Any]
+        let allowSpecific = allowOut?["hookSpecificOutput"] as? [String: Any]
+        t.check("allow is the shape Claude Code reads",
+                allowSpecific?["hookEventName"] as? String == "PermissionRequest"
+                    && (allowSpecific?["decision"] as? [String: Any])?["behavior"] as? String == "allow")
+        let denyOut = (try? JSONSerialization.jsonObject(
+            with: PermissionDecision.hookOutput(.deny))) as? [String: Any]
+        let denyDecision = (denyOut?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
+        t.check("a denial tells Claude a person said no",
+                denyDecision?["behavior"] as? String == "deny"
+                    && denyDecision?["message"] as? String == PermissionDecision.denyMessage)
+        t.check("a hook stops waiting once the prompt has moved on",
+                PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "busy", "askId": "a1"])
+                    && PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a2"])
+                    && PermissionDecision.isStale(askId: "a1", sessionDocument: nil))
+        t.check("...and keeps waiting while it is still up",
+                !PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a1"]))
+        t.check("the wait ends before the hook's own timeout would kill it",
+                PermissionDecision.wait < 600)
+
+        let askingFile = Data("""
+        {"sessionId":"s","project":"p","cwd":"/tmp","state":"waiting","tool":"Bash","detail":"",
+         "since":"2026-09-15T10:18:00Z","updatedAt":"2026-09-15T10:18:00Z","pid":4242,
+         "waitingOn":"rm -rf build/","askId":"a1"}
+        """.utf8)
+        let askingSession = SessionState.decode(from: askingFile)
+        t.check("a session file carries the prompt's ask", askingSession?.askId == "a1")
+        if let askingSession {
+            let shown = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
+                                                  approved: { _ in false })
+            t.check("the alarm knows which prompt it can answer",
+                    shown.waitingSessionId == "s" && shown.waitingAskId == "a1")
+            let settled = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
+                                                    approved: { _ in true })
+            t.check("an answered prompt leaves nothing to answer",
+                    settled.sessions.first?.askId == "" && settled.waitingAskId == "")
+        }
+
         t.finish()
     }
 }

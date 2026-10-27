@@ -166,6 +166,31 @@ cp "$ONLY_USER" "$WORK/only-user.orig.json"
 check "the user's lone hook is still there" \
   "$(json_eq "$ONLY_USER" "$WORK/only-user.orig.json")" "yes"
 
+# ---- PermissionRequest waits for a click, so it gets a long timeout ---------
+FRESH="$WORK/fresh.json"
+echo '{}' > "$FRESH"
+"$EMIT" --patch-settings "$FRESH" >/dev/null 2>&1
+check "PermissionRequest is given time to wait for an answer" \
+  "$(jq_path "$FRESH" hooks.PermissionRequest.0.hooks.0.timeout)" "600"
+check "every other event keeps the short timeout" \
+  "$(jq_path "$FRESH" hooks.Stop.0.hooks.0.timeout)" "5"
+
+# An install from before this change has 5s there; reinstalling must fix it
+# without touching anything else.
+OLD="$WORK/old-timeout.json"
+python3 - "$FRESH" "$OLD" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+d["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]=5
+d["hooks"]["PermissionRequest"].append({"hooks":[{"type":"command","command":"mine.sh","timeout":5}]})
+json.dump(d,open(sys.argv[2],"w"))
+PY
+"$EMIT" --patch-settings "$OLD" >/dev/null 2>&1
+check "an old 5s PermissionRequest hook is upgraded" \
+  "$(jq_path "$OLD" hooks.PermissionRequest.0.hooks.0.timeout)" "600"
+check "...and the user's own PermissionRequest hook is left alone" \
+  "$(jq_path "$OLD" hooks.PermissionRequest.1.hooks.0.timeout)" "5"
+
 if [ "$fails" = "0" ]; then
   echo ""
   echo "ALL PASS"

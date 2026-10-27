@@ -89,6 +89,8 @@ const TEXT = {
   clear: "clear",
   // The alert card.
   approveLabel: "approve",
+  allow: "Allow",
+  deny: "Deny",
   replyBody: "waiting on your reply",
   // Quota meters. "used" is stated rather than implied: a bare percentage next
   // to a bar is read as either "how much is gone" or "how much is left", and
@@ -160,14 +162,14 @@ function yieldBubble() {
  * @param {string|null} waitingProject project name for the urgent bubble
  * @param {string} waitingOn what that session is blocked on, e.g. "rm -rf build/"
  */
-window.setMood = function (mood, waitingProject, waitingOn, motion) {
+window.setMood = function (mood, waitingProject, waitingOn, motion, ask) {
   pet.dataset.mood = mood;
   if (mood === "urgent" && waitingProject) {
     // The alarm owns the bubble outright: it outranks anything being said, and
     // it must not be dismissed by a chatter timer that was already running.
     clearSpeech();
     variant("alert");
-    alertCard(waitingProject, waitingOn);
+    alertCard(waitingProject, waitingOn, ask);
     bubble.hidden = false;
   } else if (!speaking) {
     // Leaving `.alert` on a hidden bubble is how a later chatter line came back
@@ -194,7 +196,26 @@ window.setMood = function (mood, waitingProject, waitingOn, motion) {
  * @param {string} project the session's name
  * @param {string} on what it is blocked on, empty when it wants an answer
  */
-function alertCard(project, on) {
+/**
+ * Allow / Deny for one permission prompt. The session and the ask travel on
+ * the element, so a click answers exactly the prompt that was on screen.
+ */
+function decideButtons(sessionId, askId) {
+  const box = document.createElement("span");
+  box.className = "decide-box";
+  box.dataset.sessionId = sessionId;
+  box.dataset.askId = askId;
+  [["allow", TEXT.allow], ["deny", TEXT.deny]].forEach(function (pair) {
+    const b = document.createElement("span");
+    b.className = "decide " + pair[0];
+    b.dataset.behavior = pair[0];
+    b.textContent = pair[1];
+    box.appendChild(b);
+  });
+  return box;
+}
+
+function alertCard(project, on, ask) {
   bubble.textContent = "";
   const head = document.createElement("div");
   head.className = "ahead";
@@ -224,6 +245,12 @@ function alertCard(project, on) {
     body.textContent = TEXT.replyBody;
   }
   bubble.append(head, body);
+  if (on && ask && ask.askId) {
+    const row = document.createElement("div");
+    row.className = "abuttons";
+    row.appendChild(decideButtons(ask.sessionId, ask.askId));
+    bubble.appendChild(row);
+  }
 }
 
 let speaking = false;
@@ -449,6 +476,8 @@ function sessionRowHTML(s) {
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
     '<div class="detail"><span class="branch"></span><span class="note"></span></div>'
+    // A permission the pet can answer itself gets its own line of buttons.
+    + (s.askId ? '<div class="detail asks"></div>' : "")
     + "</div>"
   );
 }
@@ -592,6 +621,8 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // squeezed down to "E 47s" — the branch is a disambiguator, and it must
     // never cost the row the thing it is actually reporting.
     rows[i].querySelector(".branch").textContent = s.branch || "";
+    const asks = rows[i].querySelector(".detail.asks");
+    if (asks) asks.appendChild(decideButtons(s.sessionId, s.askId));
     const what = whatText(s);
     const whatEl = rows[i].querySelector(".what");
     whatEl.textContent = what.text;
@@ -684,6 +715,19 @@ window.setPanelOpen = function (open) {
 window.hitRow = function (x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el || !el.closest) return null;
+  // Allow / Deny, in a row or in the alarm. Checked before anything else: they
+  // sit inside a jumpable row, and a click meant to approve must never instead
+  // switch terminals.
+  const decide = el.closest(".decide");
+  if (decide) {
+    const box = decide.closest(".decide-box");
+    return {
+      action: "decide",
+      sessionId: (box && box.dataset.sessionId) || "",
+      askId: (box && box.dataset.askId) || "",
+      behavior: decide.dataset.behavior || "",
+    };
+  }
   // The × is checked first: it sits inside a row that may also be jumpable, and
   // the smaller target has to win or it would be impossible to press.
   const mute = el.closest(".mute");

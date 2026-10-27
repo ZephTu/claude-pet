@@ -310,6 +310,18 @@ html, body {
   color: #d8d2cb; font-size: 10.5px;
 }
 .akey { flex: none; color: #8a837d; }
+.abuttons { margin-top: 5px; }
+/* Allow / Deny: two plain pills. Allow takes the accent, Deny stays quiet, so
+   the safe-looking one is never the one that runs something by accident of
+   colour — and neither has a keyboard shortcut. */
+.decide-box { display: inline-flex; gap: 6px; }
+.decide {
+  padding: 1px 8px; border-radius: 9px; font-size: 10px; font-weight: 600;
+  border: 1px solid #6b6560; color: #d8d0c8;
+}
+.decide.allow { background: #6fae9b; border-color: #6fae9b; color: #1f2a29; }
+.row.hot .decide.deny, .decide.deny:hover { border-color: #a99f96; }
+.detail.asks { padding-top: 3px; }
 .awhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A finished turn. Softer than the alarm and it takes itself away — the colour

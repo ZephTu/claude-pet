@@ -146,6 +146,28 @@ public enum ProcessProbe {
         arguments.contains("/shell-snapshots/snapshot-")
     }
 
+    /// Is any process with this exact kernel name running?
+    ///
+    /// pet-emit asks this about the pet app before holding a permission prompt
+    /// open for it: with nobody there to click, waiting is pointless.
+    public static func isAnyRunning(named name: String) -> Bool {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return false }
+        let count = size / MemoryLayout<kinfo_proc>.stride + 16
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        size = count * MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return false }
+        let found = size / MemoryLayout<kinfo_proc>.stride
+        return procs.prefix(found).contains { proc in
+            withUnsafePointer(to: proc.kp_proc.p_comm) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) {
+                    String(cString: $0) == name
+                }
+            }
+        }
+    }
+
     public static func childPIDs(of pid: Int32) -> [Int32] {
         guard pid > 0 else { return [] }
         var buffer = [pid_t](repeating: 0, count: 256)

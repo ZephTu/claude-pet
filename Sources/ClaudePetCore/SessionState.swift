@@ -103,6 +103,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// structural names. Non-empty only on a turn that ended while one was still
     /// running — which is the turn the pet must NOT call finished.
     public let backgroundAgents: [String]
+    /// Which permission prompt is up, minted by pet-emit per PermissionRequest.
+    /// Non-empty only while one is, and only then can the pet answer it — see
+    /// PermissionDecision.
+    public let askId: String
 
     public init(
         sessionId: String,
@@ -121,7 +125,8 @@ public struct SessionState: Sendable, Equatable, Decodable {
         promptId: String = "",
         phase: String = "",
         troubleAt: Date? = nil,
-        backgroundAgents: [String] = []
+        backgroundAgents: [String] = [],
+        askId: String = ""
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -140,12 +145,13 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.phase = phase
         self.troubleAt = troubleAt
         self.backgroundAgents = backgroundAgents
+        self.askId = askId
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
-        case backgroundAgents
+        case backgroundAgents, askId
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -176,6 +182,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         troubleAt = try? c.decodeIfPresent(Date.self, forKey: .troubleAt)
         backgroundAgents =
             (try? c.decodeIfPresent([String].self, forKey: .backgroundAgents)) as? [String] ?? []
+        askId = (try? c.decodeIfPresent(String.self, forKey: .askId)) as? String ?? ""
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

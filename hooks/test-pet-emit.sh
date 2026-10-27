@@ -11,6 +11,9 @@ if [ ! -x "$EMIT" ]; then
   exit 1
 fi
 export PET_HOME="$(mktemp -d)/pet"
+# A PermissionRequest holds its hook open for an answer from the pet; only the
+# tests about that want it to.
+export PET_PERMISSION_WAIT=0
 trap 'rm -rf "$(dirname "$PET_HOME")"' EXIT
 
 fails=0
@@ -367,6 +370,40 @@ emit UserPromptSubmit sM /tmp/m
 emit Stop sM /tmp/m
 check "a Stop with no message records no summary" \
   "$(/usr/bin/python3 -c "import json,glob,sys;print('summary' in json.load(open(glob.glob(sys.argv[1])[0])))" "$PET_HOME/events/sM~*.json")" "False"
+
+# ---- answering a permission prompt from the pet ------------------------------
+ask() {  # ask <session> — a PermissionRequest that waits up to 10s, stdout to a file
+  printf '{"hook_event_name":"PermissionRequest","session_id":"%s","cwd":"/tmp/p","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' "$1" \
+    | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/$1.out" &
+}
+await_ask() {  # waits for the session file to carry an askId
+  for _ in $(seq 1 40); do
+    id="$(field "$1" askId 2>/dev/null)"; [ -n "$id" ] && { echo "$id"; return; }; sleep 0.05
+  done
+}
+answer() {  # answer <session> <askId> <allow|deny>
+  mkdir -p "$PET_HOME/decisions"
+  printf '{"askId":"%s","behavior":"%s"}' "$2" "$3" > "$PET_HOME/decisions/$1.json"
+}
+decision() {
+  /usr/bin/python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['hookSpecificOutput']['decision']['behavior'])" "$PET_HOME/$1.out" 2>/dev/null
+}
+
+ask sP; pid=$!; id="$(await_ask sP)"
+check "a permission request names its ask" "$([ -n "$id" ] && echo yes)" "yes"
+answer sP "$id" allow; wait $pid
+check "a click on Allow becomes the hook's answer" "$(decision sP)" "allow"
+check "...and the answer file is used up" "$([ -e "$PET_HOME/decisions/sP.json" ] && echo left || echo gone)" "gone"
+
+ask sQ; pid=$!; id="$(await_ask sQ)"
+answer sQ "$id" deny; wait $pid
+check "a click on Deny denies" "$(decision sQ)" "deny"
+
+ask sR; pid=$!; id="$(await_ask sR)"
+answer sR "not-this-ask" allow
+emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
+wait $pid
+check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

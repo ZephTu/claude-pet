@@ -142,6 +142,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             self?.updateDwell(at: point, panelOpen: panelOpen)
         }
         bridge.onMute = { [weak self] id in self?.mute(sessionID: id) }
+        bridge.onDecide = { [weak self] id, ask, behavior in
+            self?.answer(sessionID: id, askId: ask, behavior: behavior)
+        }
         // Titles cost a subprocess, so they are fetched when the user opens the
         // list — never on a timer for a panel nobody has looked at.
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
@@ -228,7 +231,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let state = paused
             ? GlobalState(mood: .idle, sessions: [], waitingProject: nil)
             : StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
-                                        snoozed: snoozeMarks)
+                                        snoozed: snoozeMarks, approved: isSettled)
         // The hit region is a pair of fixed rectangles now (PetLayout.bodyBox /
         // antennaBox), so the window no longer needs telling about mood.
         // Expiry is judged against `now` rather than by a timer, so sleeping
@@ -402,6 +405,38 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             out[event.sessionId] = (event.finishedAt, event.summary)
         }
         return out.mapValues(\.1)
+    }
+
+    // MARK: - Answering permission prompts
+
+    /// askId → when the user answered it from the pet. Remembered so the row
+    /// and the figure stop asking at once, instead of waiting for the next
+    /// hook — which, for an approved ten-minute command, is ten minutes away.
+    private var answered: [String: Date] = [:]
+
+    /// A waiting session the pet should no longer show as waiting: answered
+    /// from here, or approved in the terminal — see StateAggregator.wasApproved.
+    private func isSettled(_ session: SessionState) -> Bool {
+        (!session.askId.isEmpty && answered[session.askId] != nil)
+            || StateAggregator.wasApproved(session)
+    }
+
+    /// Hands the answer to the pet-emit holding that prompt's hook open. It
+    /// checks the askId, so an answer to a prompt that has since gone away
+    /// approves nothing.
+    private func answer(sessionID: String, askId: String, behavior: PermissionDecision.Behavior) {
+        let now = Date()
+        let file = PermissionDecision.fileURL(petHome: petHome, sessionId: sessionID)
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        guard (try? PermissionDecision.encode(PermissionDecision.Answer(askId: askId, behavior: behavior))
+            .write(to: file, options: .atomic)) != nil else {
+            bridge?.say("could not answer — use the terminal", hold: 5, variant: .warn)
+            return
+        }
+        answered = answered.filter { now.timeIntervalSince($0.value) < 15 * 60 }
+        answered[askId] = now
+        render()
     }
 
     // MARK: - Labels
@@ -800,7 +835,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private func jumpToNextWaiting() {
         let now = Date()
         let state = StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
-                                              snoozed: snoozeMarks)
+                                              snoozed: snoozeMarks, approved: isSettled)
         guard let target = PanelModel.jumpTarget(state.sessions, snoozed: snoozeMarks, now: now)
         else {
             bridge?.say("nothing is waiting on you", hold: 3)

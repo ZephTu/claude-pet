@@ -129,9 +129,22 @@ enum HookEmit {
             document["terminal"] = terminal
         }
         // The pet decides liveness from this, so an idle session stays listed.
-        if let pid = claudePID() {
+        let pid = claudePID()
+        if let pid {
             document["pid"] = pid
         }
+        // Which prompt this is, so a click in the pet answers THIS one — see
+        // PermissionDecision. Minted per request, and carried forward by the
+        // other events that arrive while the same prompt is still up.
+        let askId: String
+        if event == "PermissionRequest" {
+            askId = UUID().uuidString
+        } else if state == "waiting" {
+            askId = previousField("askId", at: path)
+        } else {
+            askId = ""
+        }
+        if !askId.isEmpty { document["askId"] = askId }
         // Only a real user prompt updates this. It is what un-hides a session the
         // user muted: the session talking to itself — running tools, finishing a
         // turn — must not count as "we are back in conversation".
@@ -190,6 +203,15 @@ enum HookEmit {
         if !trouble.isEmpty { document["troubleAt"] = trouble }
 
         write(document, to: path)
+
+        // Only while the app is there to be clicked. A test that sets the wait
+        // itself is asking for it regardless.
+        if event == "PermissionRequest", !askId.isEmpty,
+           ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"] != nil
+            || ProcessProbe.isAnyRunning(named: "ClaudePet") {
+            awaitDecision(sessionID: sessionID, askId: askId, sessionFile: path,
+                          claudePID: pid, askedAt: Date())
+        }
 
         // A finished tool call, with the duration Claude Code measured itself.
         if event == "PostToolUse" {
@@ -417,12 +439,49 @@ enum HookEmit {
     /// The phrase from the last PermissionRequest, so that the events which
     /// follow it (a repeated Notification, say) do not blank the bubble.
     private static func previousWaitingOn(at path: URL) -> String {
-        guard
-            let data = try? Data(contentsOf: path),
-            let raw = try? JSONSerialization.jsonObject(with: data),
-            let old = raw as? [String: Any]
-        else { return "" }
-        return old["waitingOn"] as? String ?? ""
+        previousField("waitingOn", at: path)
+    }
+
+    private static func previousField(_ key: String, at path: URL) -> String {
+        readDocument(at: path)?[key] as? String ?? ""
+    }
+
+    /// Holds the PermissionRequest hook open until the user answers from the
+    /// pet, then prints that answer as the hook's output.
+    ///
+    /// Claude Code shows its own dialog at the same time and takes whichever
+    /// answer comes first, so waiting here never delays the terminal prompt.
+    /// Every way out other than a click prints nothing, which leaves the
+    /// decision to the terminal exactly as if the pet did not exist:
+    /// - the session file moved on (the prompt was answered and something else
+    ///   happened, or another prompt replaced it);
+    /// - Claude started the approved command's shell — answered in the
+    ///   terminal, with nothing written since because the command is running;
+    /// - the Claude process is gone;
+    /// - `PermissionDecision.wait` ran out.
+    private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
+                                      claudePID: Int32?, askedAt: Date) {
+        let answerFile = PermissionDecision.fileURL(petHome: baseDirectory, sessionId: sessionID)
+        // `PET_PERMISSION_WAIT` overrides the wait for tests; 0 turns it off.
+        let wait = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
+            .flatMap(TimeInterval.init) ?? PermissionDecision.wait
+        let deadline = askedAt.addingTimeInterval(min(wait, PermissionDecision.wait))
+        while Date() < deadline {
+            if let data = try? Data(contentsOf: answerFile),
+               let answer = PermissionDecision.decode(data), answer.askId == askId {
+                try? FileManager.default.removeItem(at: answerFile)
+                FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer.behavior))
+                return
+            }
+            if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {
+                return
+            }
+            if let claudePID {
+                if !ProcessProbe.isClaude(pid: claudePID) { return }
+                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt) { return }
+            }
+            usleep(250_000)
+        }
     }
 
     /// Keep `since` across writes that do not change state, otherwise the 60s

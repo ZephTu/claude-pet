@@ -18,6 +18,8 @@ final class WebBridge {
     var onMute: ((String) -> Void)?
     /// The session list just became visible.
     var onPanelOpened: (() -> Void)?
+    /// The user answered a permission prompt from the pet: session, ask, answer.
+    var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
     /// The user acknowledged these finished turns.
     var onMarkRead: (([String]) -> Void)?
     /// The user cleared the whole finished list.
@@ -57,7 +59,8 @@ final class WebBridge {
         let project = state.waitingProject.map { "\"\(escape($0))\"" } ?? "null"
         let on = "\"\(escape(state.waitingOn))\""
         let move = motion.map { "\"\($0.rawValue)\"" } ?? "\"\""
-        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on), \(move));")
+        let ask = "{sessionId: \"\(escape(state.waitingSessionId))\", askId: \"\(escape(state.waitingAskId))\"}"
+        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on), \(move), \(ask));")
     }
 
     private var lastMotion: ActivitySummary.Motion?
@@ -125,6 +128,14 @@ final class WebBridge {
                     return
                 }
                 switch row["action"] as? String {
+                case "decide":
+                    guard
+                        let id = row["sessionId"] as? String, !id.isEmpty,
+                        let ask = row["askId"] as? String, !ask.isEmpty,
+                        let behavior = (row["behavior"] as? String)
+                            .flatMap(PermissionDecision.Behavior.init(rawValue:))
+                    else { return }
+                    self.onDecide?(id, ask, behavior)
                 case "mute":
                     if let id = row["sessionId"] as? String, !id.isEmpty {
                         // The list stays open: muting several in a row is the
@@ -361,6 +372,8 @@ final class WebBridge {
             // same colour of "waiting" and not the same request: one wants a
             // decision, the other wants typing, and the row says which.
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
+            // Present only when the pet can answer this prompt itself.
+            if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
             // "It answered and is waiting on the next instruction" is a fact
             // about the session, not about whether its second line happens to
             // carry text. It used to be read off `detail`, which meant dropping

@@ -147,9 +147,18 @@ enum SettingsPatch {
 
         for event in events {
             var groups = hooks[event] as? [[String: Any]] ?? []
+            let seconds = timeout(for: event)
 
             if groups.contains(where: { groupContains($0, command: hookCommand) }) {
-                continue  // already current
+                // Present, but an install from before the pet could answer
+                // prompts gave PermissionRequest the same 5s as everything else,
+                // which would kill the hook while it waits for a click.
+                let retimed = groups.map { withTimeout($0, seconds) }
+                if !NSArray(array: retimed).isEqual(to: groups) {
+                    hooks[event] = retimed
+                    touched.append(event)
+                }
+                continue
             }
 
             if groups.contains(where: { groupContains($0, command: legacyHookCommand) }) {
@@ -159,7 +168,7 @@ enum SettingsPatch {
                 continue
             }
 
-            groups.append(["hooks": [["type": "command", "command": hookCommand, "timeout": 5]]])
+            groups.append(["hooks": [["type": "command", "command": hookCommand, "timeout": seconds]]])
             hooks[event] = groups
             touched.append(event)
         }
@@ -177,6 +186,29 @@ enum SettingsPatch {
             guard (entry["command"] as? String) == legacyHookCommand else { return entry }
             var updated = entry
             updated["command"] = hookCommand
+            return updated
+        }
+        return rebuilt
+    }
+
+    /// PermissionRequest stays open while the user decides from the pet — see
+    /// PermissionDecision — so it gets longer than the wait itself. Every other
+    /// event finishes in milliseconds and keeps the short leash.
+    static let permissionTimeout = 600
+
+    static func timeout(for event: String) -> Int {
+        event == "PermissionRequest" ? permissionTimeout : 5
+    }
+
+    /// The pet's own entry in this group with its timeout set; the user's
+    /// entries are left exactly as they were.
+    private static func withTimeout(_ group: [String: Any], _ seconds: Int) -> [String: Any] {
+        guard let entries = group["hooks"] as? [[String: Any]] else { return group }
+        var rebuilt = group
+        rebuilt["hooks"] = entries.map { entry -> [String: Any] in
+            guard entry["command"] as? String == hookCommand else { return entry }
+            var updated = entry
+            updated["timeout"] = seconds
             return updated
         }
         return rebuilt
