@@ -41,7 +41,8 @@ public enum Chatter {
     /// a burst of events would produce a burst of speech.
     public static let globalCooldown: TimeInterval = 5 * 60
 
-    /// How long each "this one finished" notice stays up.
+    /// How long each "this one finished" notice stays up, unless the user
+    /// picked another of `noticeHoldChoices` under Settings.
     ///
     /// These used to be ONE sticky bubble, and that is how they got lost: two
     /// sessions finishing a few seconds apart shared the bubble, the second
@@ -49,7 +50,22 @@ public enum Chatter {
     /// at all. Each finish now gets its own notice in a small stack above the
     /// pet (see window.notify), and each keeps it for this long whatever
     /// arrives after it. The Finished list still holds every one of them.
-    public static let noticeHold: TimeInterval = 10
+    public static let noticeHold: TimeInterval = 30
+    public static let noticeHoldChoices: [TimeInterval] = [10, 30, 60]
+
+    /// How many notices can be up at once, unless the user picked fewer.
+    public static let noticeCount = 3
+    public static let noticeCountChoices = [1, 2, 3]
+
+    /// A stored hold, or the default when it is missing or not one on offer —
+    /// a hand-edited preference must not leave a notice up for an hour.
+    public static func noticeHold(stored: Double) -> TimeInterval {
+        noticeHoldChoices.contains(stored) ? stored : noticeHold
+    }
+
+    public static func noticeCount(stored: Int) -> Int {
+        noticeCountChoices.contains(stored) ? stored : noticeCount
+    }
 
     /// Which kind of message window a line belongs in.
     ///
