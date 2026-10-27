@@ -279,14 +279,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         wanted: !badge.isEmpty,
                                         blockedOn: state.waitingOn, motion: motion,
                                         struggling: state.sessions.contains(where: Struggle.isStruggling)))
-        // A "done" line has no timer, so something has to retire it. Going back
-        // to work is that something: once a session is busy again, the user has
-        // plainly seen the news or stopped caring about it.
-        if stickyBubble, let previous = lastState,
-           !Chatter.justStarted(previous: previous, current: state).isEmpty {
-            bridge?.hush()
-            stickyBubble = false
-        }
+        announceFinishes(state, now: now)
         noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
@@ -330,11 +323,28 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Talking
 
-    /// How long a line stays up before it takes itself away. Sticky lines
-    /// (see `Chatter.isSticky`) ignore this and wait to be replaced instead.
+    /// How long a line stays up before it takes itself away.
     private static let speechHold: TimeInterval = 6
-    /// True while the bubble holds a line with no timer of its own.
-    private var stickyBubble = false
+
+    /// One notice per session that just finished, each up for its own
+    /// `Chatter.noticeHold` — see window.notify for the stack they sit in.
+    ///
+    /// Not while paused (the pet is asleep), and not while the list is open:
+    /// the Finished group is showing exactly these, and a notice would only
+    /// sit across the list's corner.
+    private func announceFinishes(_ state: GlobalState, now: Date) {
+        guard !paused, panel?.isListOpen != true else { return }
+        let notices = Chatter.doneNotices(previous: lastState, current: state,
+                                          names: sessionNames(state),
+                                          summaries: latestSummaries(now: now))
+        for notice in notices {
+            bridge?.notify(notice.text, hold: Chatter.noticeHold, emphasis: notice.emphasis)
+        }
+        if !notices.isEmpty {
+            lastSpoken[.sessionDone] = now
+            lastAnything = now
+        }
+    }
     /// How long the pointer must rest on the pet before it volunteers the quota.
     private static let dwellDelay: TimeInterval = 1
 
@@ -399,7 +409,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
             lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
-            summaries: latestSummaries(now: now),
             quotaAlarm: decision.speak
         ) else { return }
         // The list is open and carrying this news itself: step aside rather than
@@ -420,10 +429,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
             saveQuotaSaid()
         }
-        let sticky = Chatter.isSticky(line.kind)
-        bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis,
+        bridge?.say(line.text, hold: Self.speechHold, emphasis: line.emphasis,
                     variant: Chatter.bubble(for: line.kind))
-        stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
     }
@@ -997,7 +1004,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
-                stickyBubble = false
                 bridge?.hush()
             }
             return
@@ -1011,7 +1017,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
-                stickyBubble = false
                 bridge?.hush()
             }
         }

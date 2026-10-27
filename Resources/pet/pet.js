@@ -2,6 +2,7 @@ const pet = document.getElementById("pet");
 const bubble = document.getElementById("bubble");
 const panel = document.getElementById("panel");
 const stage = document.getElementById("stage");
+const notices = document.getElementById("notices");
 
 /* The bubble's bottom edge in stage coordinates: 280 (stage height) - 138
    (#bubble's `bottom`). The list grows upward from the bottom too, so this is
@@ -34,6 +35,7 @@ function reportLayout() {
   // Before measuring, not after: crowding changes how wide the bubble is, and
   // Swift is told the rect it ends up with rather than the one it started from.
   syncCrowding();
+  placeNotices();
   const box = (el) => {
     if (el.hidden) return null;
     const r = el.getBoundingClientRect();
@@ -370,6 +372,65 @@ window.showQuota = function (rows, fallback) {
 };
 
 /** Take the bubble down now — used when the pointer leaves the pet. */
+/* ---- Finish notices --------------------------------------------------------
+   Several sessions finishing close together used to share the one bubble: the
+   second replaced the first, and a third inside the cooldown was never said.
+   Each finish now gets its own notice with its own timer, newest nearest the
+   pet, older ones pushed up. The stack is capped, and when it is full the
+   oldest gives way early — it is still in the Finished list. The notices take
+   no clicks, so they are not part of the hit region Swift is told about. */
+const MAX_NOTICES = 3;
+const NOTICE_GAP = 6;
+/* Same anchor as #bubble's `bottom`. */
+const NOTICE_FLOOR = 138;
+
+function dropNotice(el) {
+  if (!el.parentNode) return;
+  clearTimeout(el._timer);
+  el.remove();
+  placeNotices();
+}
+
+/**
+ * Sit on top of #bubble when it is up, and give up the oldest notices that
+ * would then run off the top of the window.
+ */
+function placeNotices() {
+  const lift = bubble.hidden ? 0 : bubble.getBoundingClientRect().height + NOTICE_GAP;
+  notices.style.bottom = (NOTICE_FLOOR + lift) + "px";
+  while (notices.firstChild && notices.getBoundingClientRect().top < 2) {
+    const oldest = notices.firstChild;
+    clearTimeout(oldest._timer);
+    oldest.remove();
+  }
+}
+
+/**
+ * Add one "this session finished" notice for `holdMs`.
+ * @param {string} text e.g. "api-server: All 12 tests pass"
+ * @param {number} holdMs
+ * @param {string} [emphasis] the session's name inside `text`
+ */
+window.notify = function (text, holdMs, emphasis) {
+  // The open list already shows these as rows in Finished.
+  if (!panel.hidden) return;
+  const el = document.createElement("div");
+  el.className = "notice-item";
+  fill(el, text, emphasis);
+  notices.appendChild(el);
+  while (notices.children.length > MAX_NOTICES) dropNotice(notices.firstChild);
+  el._timer = setTimeout(function () { dropNotice(el); }, holdMs);
+  placeNotices();
+};
+
+/** Opening the list takes the notices down: it is carrying the same news. */
+function clearNotices() {
+  while (notices.firstChild) {
+    clearTimeout(notices.firstChild._timer);
+    notices.firstChild.remove();
+  }
+}
+
 window.hush = function () {
   if (!speaking) return;
   clearSpeech();
@@ -681,7 +742,7 @@ window.scrollPanel = function (dy) {
  */
 window.togglePanel = function () {
   panel.hidden = !panel.hidden;
-  if (!panel.hidden) yieldBubble();
+  if (!panel.hidden) { yieldBubble(); clearNotices(); }
   reportLayout();
   return !panel.hidden;
 };
@@ -698,7 +759,7 @@ window.setPanelOpen = function (open) {
   const want = !open;
   if (panel.hidden !== want) {
     panel.hidden = want;
-    if (open) yieldBubble();
+    if (open) { yieldBubble(); clearNotices(); }
     reportLayout();
   }
   return !panel.hidden;

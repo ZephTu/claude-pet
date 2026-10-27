@@ -41,15 +41,15 @@ public enum Chatter {
     /// a burst of events would produce a burst of speech.
     public static let globalCooldown: TimeInterval = 5 * 60
 
-    /// Lines that do not take themselves away.
+    /// How long each "this one finished" notice stays up.
     ///
-    /// "Which session just came to rest" is the one line here the user is
-    /// actively waiting for, and they wait for it in a terminal window, not in
-    /// the corner of the screen. Giving it a timer makes noticing it depend on
-    /// already looking at the pet — which is the exact thing the pet exists to
-    /// save them from. So it stays until something replaces it, or until they
-    /// go back to work (see `justStarted`), at which point it is no longer news.
-    public static func isSticky(_ kind: Kind) -> Bool { kind == .sessionDone }
+    /// These used to be ONE sticky bubble, and that is how they got lost: two
+    /// sessions finishing a few seconds apart shared the bubble, the second
+    /// replaced the first, and a third inside the 20s cooldown was never said
+    /// at all. Each finish now gets its own notice in a small stack above the
+    /// pet (see window.notify), and each keeps it for this long whatever
+    /// arrives after it. The Finished list still holds every one of them.
+    public static let noticeHold: TimeInterval = 10
 
     /// Which kind of message window a line belongs in.
     ///
@@ -140,41 +140,26 @@ public enum Chatter {
         lastSpoken: [Kind: Date],
         lastAnything: Date?,
         names: [String: String] = [:],
-        summaries: [String: String] = [:],
         quotaAlarm: QuotaAlarm.Alarm? = nil
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
         // and a session waiting on the user is not a moment for small talk.
         guard state.mood != .urgent, state.mood != .waiting else { return nil }
 
-        // A finishing session is news with a short shelf life, so it is exempt
-        // from the global gap — otherwise a quota line said four minutes ago
-        // would swallow it. Its own 20s cooldown is what keeps it in check.
+        // Finishing sessions are announced separately, one notice each — see
+        // `doneNotices`. Here they only stop the generic "Done" from saying the
+        // same thing again in the main bubble.
         let finishedNow = previous.map { justFinished(previous: $0, current: state) } ?? []
-        let hasNews = !finishedNow.isEmpty && Self.ready(.sessionDone, lastSpoken: lastSpoken, now: now)
         // A session that has just failed four times running is the other thing
         // worth breaking the global gap for: it is the moment to step in.
         let stuck = previous.map { Struggle.justStarted(previous: $0, current: state) } ?? []
         let hasTrouble = !stuck.isEmpty && Self.ready(.struggling, lastSpoken: lastSpoken, now: now)
-        if !hasNews, !hasTrouble, let lastAnything,
+        if !hasTrouble, let lastAnything,
            now.timeIntervalSince(lastAnything) < globalCooldown {
             return nil
         }
 
         func ready(_ kind: Kind) -> Bool { Self.ready(kind, lastSpoken: lastSpoken, now: now) }
-
-        // Which session just came to rest outranks everything else: it is the
-        // one thing here the user is actively waiting to hear.
-        if hasNews {
-            let labels = finishedNow.map { names[$0.sessionId] ?? $0.project }
-            return Utterance(
-                kind: .sessionDone,
-                text: doneLine(finishedNow, names: names, summaries: summaries),
-                // Only a single name can be picked out of the sentence; with two
-                // the styled run would be discontiguous.
-                emphasis: labels.count == 1 ? labels[0] : ""
-            )
-        }
 
         if hasTrouble, let first = stuck.first {
             let name = names[first.sessionId] ?? first.project
@@ -204,7 +189,7 @@ public enum Chatter {
 
         // Everything below is a transition, so it needs a previous state to
         // compare against.
-        if ready(.finished), previous.mood == .busy, state.mood == .idle,
+        if ready(.finished), finishedNow.isEmpty, previous.mood == .busy, state.mood == .idle,
            !onlyWentQuiet(previous: previous, current: state, now: now) {
             return Utterance(kind: .finished, text: finishedLine(count: previous.sessions.count))
         }
@@ -338,24 +323,33 @@ public enum Chatter {
     /// corner of the screen, not a row; the full line is in the list.
     public static let summaryInBubble = 60
 
-    /// - Parameter summaries: sessionId → the first line of what Claude said
-    ///   last. A single finished session says it instead of a bare "done",
-    ///   because "tests pass" and "I am stuck" are the difference between
-    ///   needing to look and not.
-    public static func doneLine(_ finished: [SessionState], names: [String: String],
-                                summaries: [String: String] = [:]) -> String {
-        let labels = finished.map { names[$0.sessionId] ?? $0.project }
-        switch labels.count {
-        case 1:
-            let said = summaries[finished[0].sessionId] ?? ""
-            guard !said.isEmpty else { return labels[0] + " done" }
-            let short = said.count > summaryInBubble
-                ? String(said.prefix(summaryInBubble - 1)).trimmingCharacters(in: .whitespaces) + "…"
-                : said
-            return labels[0] + ": " + short
-        case 2: return labels.joined(separator: ", ") + " done"
-        default: return "\(labels.count) sessions done"
+    /// One notice per session that just came to rest, oldest first.
+    ///
+    /// Not rate-limited: each is a real transition and cannot run away on its
+    /// own, and a cooldown here is exactly what used to swallow the second of
+    /// two sessions finishing close together.
+    public static func doneNotices(previous: GlobalState?, current: GlobalState,
+                                   names: [String: String] = [:],
+                                   summaries: [String: String] = [:]) -> [Utterance] {
+        guard let previous else { return [] }
+        return justFinished(previous: previous, current: current).map { session in
+            let name = names[session.sessionId] ?? session.project
+            return Utterance(kind: .sessionDone,
+                             text: doneText(session, name: name,
+                                            summary: summaries[session.sessionId] ?? ""),
+                             emphasis: name)
         }
+    }
+
+    /// - Parameter summary: the first line of what Claude said last. Said
+    ///   instead of a bare "done", because "tests pass" and "I am stuck" are
+    ///   the difference between needing to look and not.
+    public static func doneText(_ session: SessionState, name: String, summary: String) -> String {
+        guard !summary.isEmpty else { return name + " done" }
+        let short = summary.count > summaryInBubble
+            ? String(summary.prefix(summaryInBubble - 1)).trimmingCharacters(in: .whitespaces) + "…"
+            : summary
+        return name + ": " + short
     }
 
     // MARK: - Wording

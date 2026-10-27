@@ -204,6 +204,13 @@ final class WebBridge {
                  + "\(jsString(emphasis)), \(jsString(variant.rawValue)));")
     }
 
+    /// One "this session finished" notice in the stack above the pet. Unlike
+    /// `say`, it never replaces anything: each keeps its own `hold`.
+    func notify(_ text: String, hold: TimeInterval, emphasis: String = "") {
+        guard isReady else { return }
+        evaluate("window.notify(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)));")
+    }
+
     /// Routes a right click: a session row gets its own menu, anything else
     /// falls through to the pet's global menu.
     func handleRightClick(at point: CGPoint, fallback: @escaping @MainActor () -> Void) {

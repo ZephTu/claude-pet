@@ -198,7 +198,7 @@ html, body {
 
 /* The session's own name, set apart from the words around it: the name is the
    part being reported, the rest is grammar. */
-#bubble .name {
+#bubble .name, .notice-item .name {
   color: #e8a184;
   font-weight: 600;
 }
@@ -330,6 +330,25 @@ html, body {
   max-width: 240px;
   border-color: rgba(103, 164, 152, 0.4);
 }
+/* The finish notices: a column of small bubbles above the pet, newest at the
+   bottom. Each looks like #bubble.notice and, like it, takes no clicks.
+   `bottom` is set by placeNotices() so the column sits on top of #bubble. */
+#notices {
+  position: absolute; right: 14px; bottom: 138px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  pointer-events: none;
+}
+#stage.mirrored #notices { right: auto; left: 14px; align-items: flex-start; }
+.notice-item {
+  max-width: 240px; padding: 5px 9px; box-sizing: border-box;
+  border-radius: 13px; border: 1px solid rgba(103, 164, 152, 0.4);
+  background: rgba(35, 32, 29, 0.88); color: #f6f4f1;
+  font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
+  animation: notice-in 0.18s ease-out;
+}
+@keyframes notice-in { from { opacity: 0; transform: translateY(4px); } }
+#stage.calm .notice-item { animation: none; }
+
 /* Quota past a threshold. Amber, which is the same "it wants you, but nothing
    is on fire" the pet's own mark uses. */
 #bubble.warn {

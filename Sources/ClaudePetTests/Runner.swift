@@ -710,8 +710,8 @@ struct Runner {
         // own `busy`, which a quiet session still carries — so it names y and
         // leaves x alone.
         t.check("a real finish is still announced while another session sits quiet",
-                Chatter.next(state: oneFinished, previous: twoBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil)?.kind == .sessionDone)
+                Chatter.doneNotices(previous: twoBusy, current: oneFinished)
+                    .map(\.text) == ["y done"])
 
         // Long-running is worth a line; just-started is not
         let longBusy = GlobalState(
@@ -888,52 +888,28 @@ struct Runner {
         // The project is a directory name shared by several sessions; the tab
         // title is what tells the user which one just came to rest
         t.check("the tab title is used when there is one",
-                Chatter.doneLine([sess("a", .idle, project: "daily_work")],
-                                 names: ["a": "email reply"]) == "email reply done")
-        t.check("the project name is the fallback",
-                Chatter.doneLine([sess("a", .idle, project: "daily_work")], names: [:])
-                == "daily_work done")
-        t.check("two at once are named, more than two are counted",
-                Chatter.doneLine([sess("a", .idle), sess("b", .idle)], names: ["a": "x", "b": "y"])
-                == "x, y done"
-                && Chatter.doneLine([sess("a", .idle), sess("b", .idle), sess("c", .idle)],
-                                    names: [:]).hasSuffix("3 sessions done"))
-
-        // This is the point of the feature: it must get through even when a quota
-        // line was said a minute ago, or the user would not hear about it
-        let justSpoke = t0.addingTimeInterval(-60)
-        t.check("a finished session is announced despite the global cooldown",
-                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: justSpoke)?.kind == .sessionDone)
-        // The name is what the eye should land on, not the word "done"
-        t.check("the single finished session's name is marked for emphasis",
-                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             names: ["a": "email reply"])?.emphasis == "email reply")
-        // Two names cannot be one contiguous styled run, so nothing is marked
+                Chatter.doneNotices(previous: wasBusy, current: oneDone,
+                                    names: ["a": "email reply"]).map(\.text) == ["email reply done"])
+        // The bug this replaced: finishes close together shared one bubble, the
+        // later replaced the earlier, and one inside the cooldown was not said.
         let twoDone = GlobalState(mood: .idle, sessions: [sess("a", .idle), sess("b", .idle)],
                                   waitingProject: nil)
-        t.check("two at once mark nothing, since the run would be discontiguous",
-                Chatter.next(state: twoDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             names: ["a": "x", "b": "y"])?.emphasis == "")
-        // Whatever is emphasised has to actually occur in the text, or the page
-        // silently falls back to plain rendering
-        let done1 = Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                                 lastSpoken: [:], lastAnything: nil, names: ["a": "email reply"])
-        t.check("the emphasised run is a substring of the line",
-                done1.map { $0.text.contains($0.emphasis) } == true)
-        // But it still respects its own cooldown, so a flapping session cannot spam
-        t.check("it stays quiet inside its own cooldown",
+        let notices = Chatter.doneNotices(previous: wasBusy, current: twoDone,
+                                          names: ["a": "x", "b": "y"],
+                                          summaries: ["b": "Tests pass"])
+        t.check("two at once are two notices, each with its own words",
+                notices.map(\.text) == ["x done", "y: Tests pass"])
+        // The name is what the eye should land on, and it has to actually occur
+        // in the text, or the page silently falls back to plain rendering.
+        t.check("each notice marks its own session's name",
+                notices.allSatisfy { $0.text.contains($0.emphasis) && !$0.emphasis.isEmpty })
+        t.check("the first render after launch announces nothing",
+                Chatter.doneNotices(previous: nil, current: twoDone).isEmpty)
+        // The main bubble must not repeat what the notices are already saying.
+        t.check("no generic Done on top of the notices",
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [.sessionDone: t0.addingTimeInterval(-5)],
-                             lastAnything: nil) == nil)
-
-        // A "done" line is the one the user is actually waiting for, and they
-        // are looking at a terminal, not at the corner of the screen. It has no
-        // expiry of its own; everything else takes itself away.
-        t.check("only the done line is sticky",
-                Chatter.Kind.allCases.filter(Chatter.isSticky) == [.sessionDone])
+                             lastSpoken: [:], lastAnything: nil) == nil)
+        t.check("a notice stays up for ten seconds", Chatter.noticeHold == 10)
 
         // ---- CompletionQueue: finishes must survive not being shown ----
         // The bug this exists for: a finish that happens while another session is
@@ -1921,15 +1897,14 @@ struct Runner {
         t.check("a folded row shows its newest turn's summary",
                 PanelModel.completionRows([earlierTurn, said], live: []).first?.summary == "Tests pass")
 
-        let finishedOne = [mk("s", .idle, project: "api")]
+        let finishedOne = mk("s", .idle, project: "api")
         t.check("one finished session says what Claude said",
-                Chatter.doneLine(finishedOne, names: [:], summaries: ["s": "Tests pass"])
-                    == "api: Tests pass")
+                Chatter.doneText(finishedOne, name: "api", summary: "Tests pass") == "api: Tests pass")
         t.check("without a summary it is a plain done",
-                Chatter.doneLine(finishedOne, names: [:]) == "api done")
+                Chatter.doneText(finishedOne, name: "api", summary: "") == "api done")
         t.check("the bubble repeats only the start of a long line",
-                Chatter.doneLine(finishedOne, names: [:],
-                                 summaries: ["s": String(repeating: "x", count: 100)]).count
+                Chatter.doneText(finishedOne, name: "api",
+                                 summary: String(repeating: "x", count: 100)).count
                     == "api: ".count + Chatter.summaryInBubble)
 
         // ---- PermissionDecision: answering a prompt from the pet ----

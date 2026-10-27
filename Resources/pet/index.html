@@ -3,6 +3,10 @@
 <link rel="stylesheet" href="pet.css">
 <div id="stage">
   <div id="bubble" hidden></div>
+  <!-- "This session finished" notices, one per session, stacked above the pet
+       and above #bubble. Separate from #bubble because these must not replace
+       each other — see window.notify. -->
+  <div id="notices"></div>
   <!-- #pet is the 120x120 slot. `data-mood` / `data-flash` / `data-phase` live
        on it for the bubble and the calm switch; the cat itself is told its pose
        from Swift (window.setCatLook). -->

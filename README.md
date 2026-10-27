@@ -89,7 +89,7 @@ rights itself the moment that session does anything again.
 
 **Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the pet's mood — it can sit blocked on a permission prompt without making the pet wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
 
-When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it.
+When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it. Each finish gets **its own small bubble for 10 seconds**, stacked above the pet with the newest nearest it, so several sessions finishing together no longer replace one another. At most three are up at once; when a fourth arrives the oldest leaves early, and it is still in the Finished list. The stack sits above any other bubble that is showing, takes no clicks, and stays out of the way while the list is open.
 
 **The pet makes no network requests.**
 
