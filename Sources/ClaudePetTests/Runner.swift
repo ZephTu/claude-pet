@@ -2018,6 +2018,11 @@ struct Runner {
                 BackgroundShells.command(fromShellArguments:
                     #"zsh -c source x/shell-snapshots/snapshot-a && eval 'echo '\''hi'\''' < /dev/null && pwd -P"#)
                     == "echo 'hi'")
+        // Seen for real: a plain script path is not quoted at all.
+        t.check("an unquoted command comes out too",
+                BackgroundShells.command(fromShellArguments:
+                    "/bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-1-y.sh 2>/dev/null || true && eval /tmp/scratchpad/watch2.sh < /dev/null && pwd -P >| /tmp/claude-71d5-cwd")
+                    == "/tmp/scratchpad/watch2.sh")
         t.check("a shell that is not Claude's wrapper yields nothing",
                 BackgroundShells.command(fromShellArguments: "/bin/sh -c make") == nil)
         let bgShell = BackgroundShells.Shell(command: "npm run dev", since: t0.addingTimeInterval(-720))

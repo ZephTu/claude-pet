@@ -45,15 +45,24 @@ public enum BackgroundShells {
     }
 
     /// The user's command out of the wrapper Claude Code runs it in:
-    /// `zsh -c source <snapshot> … && eval '<command>' < /dev/null && pwd -P >| …`.
-    /// The command is single-quoted there, with each inner quote written `'\''`.
+    /// `zsh -c source <snapshot> … && eval <command> < /dev/null && pwd -P >| …`.
+    ///
+    /// Quoted only when it has to be: `eval 'npm run dev -- --port 3000'`, with
+    /// each inner quote written `'\''`, but a plain `eval ./watch.sh` bare. Both
+    /// shapes were seen on the same machine; reading only the quoted one hid
+    /// every simple background script.
     public static func command(fromShellArguments arguments: String) -> String? {
-        guard let open = arguments.range(of: "&& eval '"),
-              let close = arguments.range(of: "' < /dev/null", options: .backwards,
+        guard let open = arguments.range(of: "&& eval "),
+              let close = arguments.range(of: " < /dev/null", options: .backwards,
                                           range: open.upperBound..<arguments.endIndex)
         else { return nil }
-        let quoted = arguments[open.upperBound..<close.lowerBound]
-        let command = quoted.replacingOccurrences(of: #"'\''"#, with: "'")
+        var body = arguments[open.upperBound..<close.lowerBound]
+        if body.hasPrefix("'"), body.hasSuffix("'"), body.count >= 2 {
+            body = body.dropFirst().dropLast()
+            let command = body.replacingOccurrences(of: #"'\''"#, with: "'")
+            return command.isEmpty ? nil : command
+        }
+        let command = String(body)
         return command.isEmpty ? nil : command
     }
 
