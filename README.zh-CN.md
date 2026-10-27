@@ -29,12 +29,18 @@
 点它展开面板。面板按「谁更需要你」分三组：
 
 - **需要你** — 卡在授权或提问上的 session，等最久的排最前
-- **刚结束** — 你没看着的时候结束的那些轮，同一个 session 折叠成一行
+- **刚结束** — 你没看着的时候结束的那些轮，同一个 session 折叠成一行，每行第二行是 Claude 最后说的那句话的第一行——「12 个测试全过」和「这几个方案你要哪个？」决定了你需不需要过去看。完成气泡里也说这一句
 - **在跑** — 其余还活着的
 
 每个组标题后面跟着自己那组有几条；只有一个Running组的时候标题就不画了，反正下面的行就是全部。
 
 需要你那组的行会写清楚是哪种打断——**Needs approval**还是**Awaiting reply**——左边还有一条暖色竖条，等太久（超过宠物自己那个红徽章的阈值）就转红。第二行放的是你要批的那条命令（`rm -rf build/`），不再是hook自己那句Claude is waiting for your input：以前三行卡住就把同一句话印三遍，而每行的第一行本来就已经说了它在等你。
+
+**不用回终端就能批准或拒绝。** 等你授权的那一行上有 **Allow** 和 **Deny** 两个按钮，等超过 60 秒弹出的警报气泡上也有。Claude Code 会同时在终端弹出自己的提示，谁先回答算谁的，所以终端的提示一点都不会被耽误；你在终端回答了，宠物上的按钮就自己消失。宠物等你点的时候会让 `PermissionRequest` 这条 hook 一直挂着（所以只有这一条装的超时是 600 秒，其他都是 5 秒），只在 App 开着的时候这样做，也只回答它显示的那一个提示：每个提示有自己的 id，提示换了之后再点旧按钮什么都不会批准。两个按钮都没有键盘快捷键。
+
+**原地打转。** 一个 session 最近连着四次工具调用都失败——同一个测试、同一个构建，一遍又一遍——远远看过去和正常干活一模一样。宠物按 Claude Code 自己发的 `PostToolUseFailure` 数连续失败的次数（按 Esc 打断不算失败，中间成功一次就从头数），到四次时猫还在敲键盘但头上多一个警告符号，气泡说出是哪个 session、哪条命令一直失败，那一行第二行写「4 failed in a row · Bash npm test」。只记命令的简短形式，错误信息一个字都不存。
+
+**你不在的时候。** 键盘鼠标十分钟没动，宠物记下这个时刻和当时的额度；你一回来动一下，它说一句：`While you were away (42m): 3 finished · tg-server waiting 12m · quota +18%`。什么都没发生就什么都不说。
 
 这两类加起来是一个数字，画在猫的耳朵边上，为零时不显示。
 
@@ -50,7 +56,7 @@
 - **iTerm2** 走 AppleScript，**第一次跳转会弹一次 macOS 自动化授权**，拒绝之后就静默失效
 - 其他终端认不出来，那些行不带 ↗、点了只会展开/收起面板
 
-某个 session 干完一轮活，宠物会立刻说出是哪一个——你不用盯着也知道它停下来了。
+某个 session 干完一轮活，宠物会立刻说出是哪一个——你不用盯着也知道它停下来了。**每个 session 结束都有自己的一个小气泡，各显示 10 秒**，叠在猫头上方，最新的离猫最近，所以几个 session 前后脚结束不会互相顶掉。同时最多三个，第四个来时最早的那个提前撤下，它在「刚结束」列表里还在。这一摞气泡会叠在其他气泡上面，列表打开时不弹。**点气泡就跳到那个 session**，和点「刚结束」里那一行一样：跳到它的终端标签（能跳的气泡末尾有 ↗），同时把这次完成标成已读；终端跳不过去的，点了就打开列表。
 
 **宠物不发任何网络请求。**
 
@@ -96,7 +102,7 @@ WebGL 跑不起来、或者贴图解不开，页面改成显示每个姿势的�
 
 额度播报依赖 [claude-hud](https://github.com/jarrodwatts/claude-hud) 这个 statusline 插件——宠物读的是它维护的 usage 缓存，而不是自己去调 Anthropic 的 usage API，所以不碰你的 OAuth token、也不占你的 rate limit。没装那个插件的话，除了额度以外一切照常。
 
-**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加十条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / PermissionRequest / PreCompact / Stop / StopFailure / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
+**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加十一条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure / Notification / PermissionRequest / PreCompact / Stop / StopFailure / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
 
 装完要开一个新的 Claude Code session 才会生效，已经开着的不受影响。
 
@@ -114,7 +120,7 @@ WebGL 跑不起来、或者贴图解不开，页面改成显示每个姿势的�
 
 别名、置顶、静音、延后和各项设置在 `UserDefaults` 里，不在这儿。
 
-**它不读你的对话，也不发任何网络请求。** 活动记录里的命令是**故意不完整**的摘要：程序名，后面的词只放行到第一个可能带值的东西为止。`npm test` 原样保留，`curl -H Authorization:Bearer …` 变成 `curl …`。这是按结构放行，不是按「token」「password」这种词去黑名单——没人想到要命名的 secret 一样拦得住。
+**对话内容它只留一行，也不发任何网络请求。** 这一行是每轮结束时 Claude 最后那条回复的第一行，由 `Stop` hook 给出，去掉格式、截到 140 个字，用在「干完了」那一行和完成气泡里，七天后随那一行一起清掉。你的提问一个字都不存。 活动记录里的命令是**故意不完整**的摘要：程序名，后面的词只放行到第一个可能带值的东西为止。`npm test` 原样保留，`curl -H Authorization:Bearer …` 变成 `curl …`。这是按结构放行，不是按「token」「password」这种词去黑名单——没人想到要命名的 secret 一样拦得住。
 
 ## 可选：从你的 statusline 读额度
 

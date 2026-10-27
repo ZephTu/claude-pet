@@ -129,9 +129,22 @@ enum HookEmit {
             document["terminal"] = terminal
         }
         // The pet decides liveness from this, so an idle session stays listed.
-        if let pid = claudePID() {
+        let pid = claudePID()
+        if let pid {
             document["pid"] = pid
         }
+        // Which prompt this is, so a click in the pet answers THIS one — see
+        // PermissionDecision. Minted per request, and carried forward by the
+        // other events that arrive while the same prompt is still up.
+        let askId: String
+        if event == "PermissionRequest" {
+            askId = UUID().uuidString
+        } else if state == "waiting" {
+            askId = previousField("askId", at: path)
+        } else {
+            askId = ""
+        }
+        if !askId.isEmpty { document["askId"] = askId }
         // Only a real user prompt updates this. It is what un-hides a session the
         // user muted: the session talking to itself — running tools, finishing a
         // turn — must not count as "we are back in conversation".
@@ -189,10 +202,29 @@ enum HookEmit {
         let trouble = troubleAt(event: event, hook: hook, at: path, now: now)
         if !trouble.isEmpty { document["troubleAt"] = trouble }
 
+        // How many tool calls in a row have failed, and on what. A session that
+        // keeps failing the same command is working on paper and going nowhere;
+        // this is what lets the pet say so. Only the call's short target is
+        // kept, never Claude Code's error text.
+        let streak = failStreak(event: event, hook: hook, at: path)
+        if streak.count > 0 {
+            document["failStreak"] = streak.count
+            document["failTarget"] = streak.target
+        }
+
         write(document, to: path)
 
+        // Only while the app is there to be clicked. A test that sets the wait
+        // itself is asking for it regardless.
+        if event == "PermissionRequest", !askId.isEmpty,
+           ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"] != nil
+            || ProcessProbe.isAnyRunning(named: "ClaudePet") {
+            awaitDecision(sessionID: sessionID, askId: askId, sessionFile: path,
+                          claudePID: pid, askedAt: Date())
+        }
+
         // A finished tool call, with the duration Claude Code measured itself.
-        if event == "PostToolUse" {
+        if event == "PostToolUse" || event == "PostToolUseFailure" {
             recordActivity(sessionID: sessionID, hook: hook, now: now)
         }
 
@@ -204,7 +236,9 @@ enum HookEmit {
         // on a session nine minutes before it had anything to show.
         if event == "Stop", waitingForWork.isEmpty {
             recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
-                             turnKey: promptId.isEmpty ? String(turn) : promptId, at: now)
+                             turnKey: promptId.isEmpty ? String(turn) : promptId, at: now,
+                             summary: TurnSummary.headline(
+                                hook["last_assistant_message"] as? String ?? ""))
         }
     }
 
@@ -252,8 +286,9 @@ enum HookEmit {
     /// would silently unmute the session you had deliberately put away.
     ///
     /// This is the only place that looks at prompt text at all, it reads the
-    /// first tag and nothing else, and it stores none of it. The pet does not
-    /// read conversations.
+    /// first tag and nothing else, and it stores none of it. The only words of
+    /// a conversation the pet keeps are one line of Claude's last message per
+    /// finished turn — see `TurnSummary`.
     private static func isHuman(_ hook: [String: Any]) -> Bool {
         let prompt = (hook["prompt"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -290,7 +325,7 @@ enum HookEmit {
                                                  toolInput: hook["tool_input"] as? [String: Any] ?? [:]),
                 "since": now,
             ])
-        case "PostToolUse":
+        case "PostToolUse", "PostToolUseFailure":
             let key = id.isEmpty ? tool : id
             running.removeAll { ($0["id"] as? String) == key }
         default:
@@ -309,6 +344,9 @@ enum HookEmit {
     private static func troubleAt(event: String, hook: [String: Any],
                                   at path: URL, now: String) -> String {
         let previous = (readDocument(at: path)?["troubleAt"] as? String) ?? ""
+        if event == "PostToolUseFailure" {
+            return hook["is_interrupt"] as? Bool == true ? now : previous
+        }
         guard event == "PostToolUse" else {
             // Cleared when a new turn starts: last turn's trouble is not this
             // turn's.
@@ -316,6 +354,30 @@ enum HookEmit {
         }
         let response = hook["tool_response"] as? [String: Any]
         return (response?["interrupted"] as? Bool == true) ? now : previous
+    }
+
+    /// Counts failed tool calls in a row. A success or a new prompt starts the
+    /// count again; an interrupt is the user stopping it, not it failing, so it
+    /// leaves the count alone.
+    private static func failStreak(event: String, hook: [String: Any],
+                                   at path: URL) -> (count: Int, target: String) {
+        let old = readDocument(at: path)
+        let count = old?["failStreak"] as? Int ?? 0
+        let target = old?["failTarget"] as? String ?? ""
+        switch event {
+        case "PostToolUseFailure":
+            guard hook["is_interrupt"] as? Bool != true else { return (count, target) }
+            let tool = hook["tool_name"] as? String ?? ""
+            let what = ActivitySummary.phrase(
+                toolName: tool,
+                target: ActivitySummary.target(toolName: tool,
+                                               toolInput: hook["tool_input"] as? [String: Any] ?? [:]))
+            return (count + 1, what)
+        case "PostToolUse", "UserPromptSubmit", "SessionStart":
+            return (0, "")
+        default:
+            return (count, target)
+        }
     }
 
     /// Which multi-event phase the session is in, if any.
@@ -327,7 +389,8 @@ enum HookEmit {
     private static func phaseValue(event: String, at path: URL) -> String {
         switch event {
         case "PreCompact": return "compacting"
-        case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse", "SessionStart":
+        case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse",
+             "PostToolUseFailure", "SessionStart":
             return ""
         default:
             return (readDocument(at: path)?["phase"] as? String) ?? ""
@@ -401,6 +464,9 @@ enum HookEmit {
         // here the whole write is skipped and the phase never reaches the file.
         case "PreCompact": return "busy"
         case "PostToolUse": return "busy"
+        // A failed call is still the session working: Claude reads the error
+        // and carries on.
+        case "PostToolUseFailure": return "busy"
         case "Stop": return "idle"
         // A turn killed by an API error — rate limit, overload, auth. Stop does
         // not fire for it, so without this the session sat on "busy" until the
@@ -414,12 +480,49 @@ enum HookEmit {
     /// The phrase from the last PermissionRequest, so that the events which
     /// follow it (a repeated Notification, say) do not blank the bubble.
     private static func previousWaitingOn(at path: URL) -> String {
-        guard
-            let data = try? Data(contentsOf: path),
-            let raw = try? JSONSerialization.jsonObject(with: data),
-            let old = raw as? [String: Any]
-        else { return "" }
-        return old["waitingOn"] as? String ?? ""
+        previousField("waitingOn", at: path)
+    }
+
+    private static func previousField(_ key: String, at path: URL) -> String {
+        readDocument(at: path)?[key] as? String ?? ""
+    }
+
+    /// Holds the PermissionRequest hook open until the user answers from the
+    /// pet, then prints that answer as the hook's output.
+    ///
+    /// Claude Code shows its own dialog at the same time and takes whichever
+    /// answer comes first, so waiting here never delays the terminal prompt.
+    /// Every way out other than a click prints nothing, which leaves the
+    /// decision to the terminal exactly as if the pet did not exist:
+    /// - the session file moved on (the prompt was answered and something else
+    ///   happened, or another prompt replaced it);
+    /// - Claude started the approved command's shell — answered in the
+    ///   terminal, with nothing written since because the command is running;
+    /// - the Claude process is gone;
+    /// - `PermissionDecision.wait` ran out.
+    private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
+                                      claudePID: Int32?, askedAt: Date) {
+        let answerFile = PermissionDecision.fileURL(petHome: baseDirectory, sessionId: sessionID)
+        // `PET_PERMISSION_WAIT` overrides the wait for tests; 0 turns it off.
+        let wait = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
+            .flatMap(TimeInterval.init) ?? PermissionDecision.wait
+        let deadline = askedAt.addingTimeInterval(min(wait, PermissionDecision.wait))
+        while Date() < deadline {
+            if let data = try? Data(contentsOf: answerFile),
+               let answer = PermissionDecision.decode(data), answer.askId == askId {
+                try? FileManager.default.removeItem(at: answerFile)
+                FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer.behavior))
+                return
+            }
+            if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {
+                return
+            }
+            if let claudePID {
+                if !ProcessProbe.isClaude(pid: claudePID) { return }
+                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt) { return }
+            }
+            usleep(250_000)
+        }
     }
 
     /// Keep `since` across writes that do not change state, otherwise the 60s
@@ -458,11 +561,11 @@ enum HookEmit {
     /// two rows. Failure here is silent by design: the pet may never break the
     /// hook chain, and a missing record is better than a broken session.
     private static func recordCompletion(sessionID: String, project: String,
-                                         turnKey: String, at now: String) {
+                                         turnKey: String, at now: String, summary: String) {
         guard let finishedAt = CompletionQueue.parseDate(now) else { return }
         let event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
                                     project: project, displayName: project,
-                                    finishedAt: finishedAt)
+                                    finishedAt: finishedAt, summary: summary)
         let directory = eventsDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writeAtomically(CompletionQueue.encode(event),
@@ -485,7 +588,9 @@ enum HookEmit {
         // of a normal build as broken.
         let response = hook["tool_response"] as? [String: Any]
         let result: ActivityEntry.Result
-        if let response {
+        if hook["hook_event_name"] as? String == "PostToolUseFailure" {
+            result = hook["is_interrupt"] as? Bool == true ? .interrupted : .failed
+        } else if let response {
             result = (response["interrupted"] as? Bool == true) ? .interrupted : .ok
         } else {
             result = .unknown

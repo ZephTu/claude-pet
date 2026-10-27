@@ -18,6 +18,10 @@ final class WebBridge {
     var onMute: ((String) -> Void)?
     /// The session list just became visible.
     var onPanelOpened: (() -> Void)?
+    /// A finish notice above the pet was clicked: the session it is about.
+    var onOpenNotice: ((String) -> Void)?
+    /// The user answered a permission prompt from the pet: session, ask, answer.
+    var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
     /// The user acknowledged these finished turns.
     var onMarkRead: (([String]) -> Void)?
     /// The user cleared the whole finished list.
@@ -57,7 +61,8 @@ final class WebBridge {
         let project = state.waitingProject.map { "\"\(escape($0))\"" } ?? "null"
         let on = "\"\(escape(state.waitingOn))\""
         let move = motion.map { "\"\($0.rawValue)\"" } ?? "\"\""
-        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on), \(move));")
+        let ask = "{sessionId: \"\(escape(state.waitingSessionId))\", askId: \"\(escape(state.waitingAskId))\"}"
+        evaluate("window.setMood(\"\(state.mood.rawValue)\", \(project), \(on), \(move), \(ask));")
     }
 
     private var lastMotion: ActivitySummary.Motion?
@@ -125,6 +130,16 @@ final class WebBridge {
                     return
                 }
                 switch row["action"] as? String {
+                case "openNotice":
+                    if let id = row["sessionId"] as? String, !id.isEmpty { self.onOpenNotice?(id) }
+                case "decide":
+                    guard
+                        let id = row["sessionId"] as? String, !id.isEmpty,
+                        let ask = row["askId"] as? String, !ask.isEmpty,
+                        let behavior = (row["behavior"] as? String)
+                            .flatMap(PermissionDecision.Behavior.init(rawValue:))
+                    else { return }
+                    self.onDecide?(id, ask, behavior)
                 case "mute":
                     if let id = row["sessionId"] as? String, !id.isEmpty {
                         // The list stays open: muting several in a row is the
@@ -191,6 +206,23 @@ final class WebBridge {
         guard isReady else { return }
         evaluate("window.say(\(jsString(text)), \(Int(hold * 1000)), "
                  + "\(jsString(emphasis)), \(jsString(variant.rawValue)));")
+    }
+
+    /// One "this session finished" notice in the stack above the pet. Unlike
+    /// `say`, it never replaces anything: each keeps its own `hold`.
+    /// - Parameter jumpable: whether a click can go to the session's terminal,
+    ///   which the notice says with a ↗ like a jumpable row does.
+    func notify(_ text: String, hold: TimeInterval, emphasis: String = "",
+                sessionId: String = "", jumpable: Bool = false) {
+        guard isReady else { return }
+        evaluate("window.notify(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)), "
+                 + "\(jsString(sessionId)), \(jumpable));")
+    }
+
+    /// Takes down the notices for one session — it has just been opened.
+    func dismissNotice(_ sessionId: String) {
+        guard isReady else { return }
+        evaluate("window.dismissNotice(\(jsString(sessionId)));")
     }
 
     /// Routes a right click: a session row gets its own menu, anything else
@@ -361,6 +393,14 @@ final class WebBridge {
             // same colour of "waiting" and not the same request: one wants a
             // decision, the other wants typing, and the row says which.
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
+            // Present only when the pet can answer this prompt itself.
+            if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // Going round in circles: said on the row's second line, where the
+            // notification text would otherwise go — see Struggle.
+            if Struggle.isStruggling(s) {
+                item["struggle"] = "\(s.failStreak) failed in a row"
+                    + (s.failTarget.isEmpty ? "" : " · " + s.failTarget)
+            }
             // "It answered and is waiting on the next instruction" is a fact
             // about the session, not about whether its second line happens to
             // carry text. It used to be read off `detail`, which meant dropping
@@ -431,6 +471,7 @@ final class WebBridge {
                 "count": row.count,
                 "closed": row.sessionClosed,
                 "agoSeconds": Int(max(0, now.timeIntervalSince(row.latestAt))),
+                "summary": row.summary,
             ]
             if row.canJump, let t = row.terminal {
                 item["termKind"] = t.kind

@@ -110,7 +110,9 @@ public enum StateAggregator {
                 sessions: ordered(alive),
                 waitingProject: longest.project,
                 hiddenCount: hiddenCount,
-                waitingOn: longest.waitingOn
+                waitingOn: longest.waitingOn,
+                waitingSessionId: longest.sessionId,
+                waitingAskId: longest.askId
             )
         }
 
@@ -177,6 +179,7 @@ private extension SessionState {
             detail: detail, since: since, updatedAt: updatedAt, terminal: terminal,
             pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
             promptId: promptId, phase: phase, troubleAt: troubleAt,
-            backgroundAgents: backgroundAgents)
+            backgroundAgents: backgroundAgents, askId: "",
+            failStreak: failStreak, failTarget: failTarget)
     }
 }

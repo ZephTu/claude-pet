@@ -22,18 +22,27 @@ public struct GlobalState: Sendable, Equatable {
     /// How many live sessions the user has muted. Shown as a footer line in the
     /// panel so muting something is never a thing the user silently forgets.
     public let hiddenCount: Int
+    /// The waiting session and the prompt it has up, so the alarm can offer
+    /// Allow / Deny for exactly that prompt. Empty when it cannot be answered
+    /// from here (a question rather than a permission, or an older pet-emit).
+    public let waitingSessionId: String
+    public let waitingAskId: String
 
     public init(
         mood: GlobalMood,
         sessions: [SessionState],
         waitingProject: String?,
         hiddenCount: Int = 0,
-        waitingOn: String = ""
+        waitingOn: String = "",
+        waitingSessionId: String = "",
+        waitingAskId: String = ""
     ) {
         self.mood = mood
         self.sessions = sessions
         self.waitingProject = waitingProject
         self.hiddenCount = hiddenCount
         self.waitingOn = waitingOn
+        self.waitingSessionId = waitingSessionId
+        self.waitingAskId = waitingAskId
     }
 }

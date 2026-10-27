@@ -198,7 +198,7 @@ html, body {
 
 /* The session's own name, set apart from the words around it: the name is the
    part being reported, the rest is grammar. */
-#bubble .name {
+#bubble .name, .notice-item .name {
   color: #e8a184;
   font-weight: 600;
 }
@@ -310,6 +310,22 @@ html, body {
   color: #d8d2cb; font-size: 10.5px;
 }
 .akey { flex: none; color: #8a837d; }
+.abuttons { margin-top: 5px; }
+/* Allow / Deny: two plain pills. Allow takes the accent, Deny stays quiet, so
+   the safe-looking one is never the one that runs something by accident of
+   colour — and neither has a keyboard shortcut. */
+.decide-box { display: inline-flex; gap: 6px; }
+.decide {
+  padding: 1px 8px; border-radius: 9px; font-size: 10px; font-weight: 600;
+  border: 1px solid #6b6560; color: #d8d0c8;
+}
+.decide.allow { background: #6fae9b; border-color: #6fae9b; color: #1f2a29; }
+.row.hot .decide.deny, .decide.deny:hover { border-color: #a99f96; }
+.detail.asks { padding-top: 3px; }
+/* The alarm bubble ignores the pointer so it never blocks the page, but these
+   are buttons: elementFromPoint skips anything with pointer-events:none, so
+   without this a click on Allow in the alarm found nothing. */
+#bubble .decide-box { pointer-events: auto; }
 .awhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A finished turn. Softer than the alarm and it takes itself away — the colour
@@ -318,6 +334,29 @@ html, body {
   max-width: 240px;
   border-color: rgba(103, 164, 152, 0.4);
 }
+/* The finish notices: a column of small bubbles above the pet, newest at the
+   bottom. Each looks like #bubble.notice and, like it, takes no clicks.
+   `bottom` is set by placeNotices() so the column sits on top of #bubble. */
+#notices {
+  position: absolute; right: 14px; bottom: 138px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  pointer-events: none;
+}
+#stage.mirrored #notices { right: auto; left: 14px; align-items: flex-start; }
+.notice-item {
+  max-width: 240px; padding: 5px 9px; box-sizing: border-box;
+  border-radius: 13px; border: 1px solid rgba(103, 164, 152, 0.4);
+  background: rgba(35, 32, 29, 0.88); color: #f6f4f1;
+  font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
+  animation: notice-in 0.18s ease-out;
+}
+.notice-item .jump { margin-left: 5px; color: #a99f96; }
+/* The column ignores the pointer, but each notice is clickable (it opens its
+   session), and elementFromPoint skips anything with pointer-events:none. */
+.notice-item { pointer-events: auto; }
+@keyframes notice-in { from { opacity: 0; transform: translateY(4px); } }
+#stage.calm .notice-item { animation: none; }
+
 /* Quota past a threshold. Amber, which is the same "it wants you, but nothing
    is on fire" the pet's own mark uses. */
 #bubble.warn {
@@ -589,9 +628,13 @@ html, body {
 /* :empty cannot do this any more — the line always holds its two spans even
    when both are blank, so the page marks it instead. */
 .detail.blank { display: none; }
+/* Claude's own last line on a finished row: one line, cut with an ellipsis. */
+.detail.summary { display: block; white-space: nowrap; text-overflow: ellipsis; color: #a99f96; }
 /* A session name is identity, not chatter, so it reads a shade louder than the
    notification text it replaces. */
 .note.name { color: #a99f96; }
+/* Failing again and again: the same amber the rest of the pet uses for "look here". */
+.note.bad { color: #e0a63c; }
 .empty { color: #8a837d; padding: 4px 2px; }
 
 /* Cat Life v3: persistent symbol, two gentle scale pulses then a quiet gap.

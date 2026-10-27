@@ -710,8 +710,8 @@ struct Runner {
         // own `busy`, which a quiet session still carries — so it names y and
         // leaves x alone.
         t.check("a real finish is still announced while another session sits quiet",
-                Chatter.next(state: oneFinished, previous: twoBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil)?.kind == .sessionDone)
+                Chatter.doneNotices(previous: twoBusy, current: oneFinished)
+                    .map(\.text) == ["y done"])
 
         // Long-running is worth a line; just-started is not
         let longBusy = GlobalState(
@@ -888,52 +888,30 @@ struct Runner {
         // The project is a directory name shared by several sessions; the tab
         // title is what tells the user which one just came to rest
         t.check("the tab title is used when there is one",
-                Chatter.doneLine([sess("a", .idle, project: "daily_work")],
-                                 names: ["a": "email reply"]) == "email reply done")
-        t.check("the project name is the fallback",
-                Chatter.doneLine([sess("a", .idle, project: "daily_work")], names: [:])
-                == "daily_work done")
-        t.check("two at once are named, more than two are counted",
-                Chatter.doneLine([sess("a", .idle), sess("b", .idle)], names: ["a": "x", "b": "y"])
-                == "x, y done"
-                && Chatter.doneLine([sess("a", .idle), sess("b", .idle), sess("c", .idle)],
-                                    names: [:]).hasSuffix("3 sessions done"))
-
-        // This is the point of the feature: it must get through even when a quota
-        // line was said a minute ago, or the user would not hear about it
-        let justSpoke = t0.addingTimeInterval(-60)
-        t.check("a finished session is announced despite the global cooldown",
-                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: justSpoke)?.kind == .sessionDone)
-        // The name is what the eye should land on, not the word "done"
-        t.check("the single finished session's name is marked for emphasis",
-                Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             names: ["a": "email reply"])?.emphasis == "email reply")
-        // Two names cannot be one contiguous styled run, so nothing is marked
+                Chatter.doneNotices(previous: wasBusy, current: oneDone,
+                                    names: ["a": "email reply"]).map(\.text) == ["email reply done"])
+        // The bug this replaced: finishes close together shared one bubble, the
+        // later replaced the earlier, and one inside the cooldown was not said.
         let twoDone = GlobalState(mood: .idle, sessions: [sess("a", .idle), sess("b", .idle)],
                                   waitingProject: nil)
-        t.check("two at once mark nothing, since the run would be discontiguous",
-                Chatter.next(state: twoDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             names: ["a": "x", "b": "y"])?.emphasis == "")
-        // Whatever is emphasised has to actually occur in the text, or the page
-        // silently falls back to plain rendering
-        let done1 = Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                                 lastSpoken: [:], lastAnything: nil, names: ["a": "email reply"])
-        t.check("the emphasised run is a substring of the line",
-                done1.map { $0.text.contains($0.emphasis) } == true)
-        // But it still respects its own cooldown, so a flapping session cannot spam
-        t.check("it stays quiet inside its own cooldown",
+        let notices = Chatter.doneNotices(previous: wasBusy, current: twoDone,
+                                          names: ["a": "x", "b": "y"],
+                                          summaries: ["b": "Tests pass"])
+        t.check("two at once are two notices, each with its own words",
+                notices.map(\.text) == ["x done", "y: Tests pass"])
+        // The name is what the eye should land on, and it has to actually occur
+        // in the text, or the page silently falls back to plain rendering.
+        t.check("each notice marks its own session's name",
+                notices.allSatisfy { $0.text.contains($0.emphasis) && !$0.emphasis.isEmpty })
+        t.check("the first render after launch announces nothing",
+                Chatter.doneNotices(previous: nil, current: twoDone).isEmpty)
+        // The main bubble must not repeat what the notices are already saying.
+        t.check("no generic Done on top of the notices",
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
-                             lastSpoken: [.sessionDone: t0.addingTimeInterval(-5)],
-                             lastAnything: nil) == nil)
-
-        // A "done" line is the one the user is actually waiting for, and they
-        // are looking at a terminal, not at the corner of the screen. It has no
-        // expiry of its own; everything else takes itself away.
-        t.check("only the done line is sticky",
-                Chatter.Kind.allCases.filter(Chatter.isSticky) == [.sessionDone])
+                             lastSpoken: [:], lastAnything: nil) == nil)
+        t.check("a notice stays up for ten seconds", Chatter.noticeHold == 10)
+        t.check("each notice knows its session, so a click can go there",
+                notices.map(\.sessionId) == ["a", "b"])
 
         // ---- CompletionQueue: finishes must survive not being shown ----
         // The bug this exists for: a finish that happens while another session is
@@ -1080,7 +1058,7 @@ struct Runner {
 
         t.check("every kind has a window, so none can fall through to the default",
                 Chatter.Kind.allCases.allSatisfy { _ in true }
-                    && Chatter.Kind.allCases.count == 5)
+                    && Chatter.Kind.allCases.count == 6)
 
         // ---- PanelModel: what the user sees, and what survives a session ----
         func panelSess(_ id: String, _ act: SessionActivity, project: String,
@@ -1886,6 +1864,145 @@ struct Runner {
                 PetLayout.isOnPet(CGPoint(x: PetLayout.petCenter.x - 320,
                                           y: PetLayout.petCenter.y), mirrored: true)
                     && !PetLayout.isOnPet(PetLayout.petCenter, mirrored: true))
+
+        // ---- TurnSummary: one line of what Claude said last ----
+        t.check("the first line is the summary",
+                TurnSummary.headline("All 12 tests pass.\nDetails below.") == "All 12 tests pass.")
+        t.check("markdown is stripped down to the words",
+                TurnSummary.headline("## **Done**: see [the PR](https://x/1) and `make test`")
+                    == "Done: see the PR and make test")
+        t.check("blank lines and rules are skipped",
+                TurnSummary.headline("\n\n---\n- Fixed the hook") == "Fixed the hook")
+        t.check("a code block is not the summary",
+                TurnSummary.headline("```bash\nnpm test\n```\nTests pass") == "Tests pass")
+        t.check("numbered lists lose their number",
+                TurnSummary.headline("1. Which option do you want?") == "Which option do you want?")
+        let longReply = String(repeating: "word ", count: 60)
+        t.check("a long line is clamped with an ellipsis",
+                TurnSummary.headline(longReply).count == TurnSummary.limit
+                    && TurnSummary.headline(longReply).hasSuffix("…"))
+        t.check("an empty message has no summary", TurnSummary.headline("").isEmpty)
+        t.check("Chinese passes through untouched",
+                TurnSummary.headline("测试全部通过，PR 已开") == "测试全部通过，PR 已开")
+
+        let said = CompletionEvent(sessionId: "s", turnKey: "1", project: "api",
+                                   displayName: "api", finishedAt: t0, summary: "Tests pass")
+        t.check("a summary survives the record's round trip",
+                CompletionQueue.decode([CompletionQueue.encode(said)]).first?.summary == "Tests pass")
+        let silent = CompletionEvent(sessionId: "s", turnKey: "2", project: "api",
+                                     displayName: "api", finishedAt: t0)
+        t.check("a record from before summaries reads as having none",
+                CompletionQueue.decode([CompletionQueue.encode(silent)]).first?.summary == "")
+        let earlierTurn = CompletionEvent(sessionId: "s", turnKey: "0", project: "api",
+                                    displayName: "api", finishedAt: t0.addingTimeInterval(-60),
+                                    summary: "old news")
+        t.check("a folded row shows its newest turn's summary",
+                PanelModel.completionRows([earlierTurn, said], live: []).first?.summary == "Tests pass")
+
+        let finishedOne = mk("s", .idle, project: "api")
+        t.check("one finished session says what Claude said",
+                Chatter.doneText(finishedOne, name: "api", summary: "Tests pass") == "api: Tests pass")
+        t.check("without a summary it is a plain done",
+                Chatter.doneText(finishedOne, name: "api", summary: "") == "api done")
+        t.check("the bubble repeats only the start of a long line",
+                Chatter.doneText(finishedOne, name: "api",
+                                 summary: String(repeating: "x", count: 100)).count
+                    == "api: ".count + Chatter.summaryInBubble)
+
+        // ---- PermissionDecision: answering a prompt from the pet ----
+        let allowAnswer = PermissionDecision.Answer(askId: "a1", behavior: .allow)
+        t.check("an answer survives its file",
+                PermissionDecision.decode(PermissionDecision.encode(allowAnswer)) == allowAnswer)
+        t.check("an answer with no ask is not an answer",
+                PermissionDecision.decode(Data(#"{"behavior":"allow"}"#.utf8)) == nil)
+        t.check("an answer that is neither allow nor deny is not an answer",
+                PermissionDecision.decode(Data(#"{"askId":"a1","behavior":"maybe"}"#.utf8)) == nil)
+        let allowOut = (try? JSONSerialization.jsonObject(
+            with: PermissionDecision.hookOutput(.allow))) as? [String: Any]
+        let allowSpecific = allowOut?["hookSpecificOutput"] as? [String: Any]
+        t.check("allow is the shape Claude Code reads",
+                allowSpecific?["hookEventName"] as? String == "PermissionRequest"
+                    && (allowSpecific?["decision"] as? [String: Any])?["behavior"] as? String == "allow")
+        let denyOut = (try? JSONSerialization.jsonObject(
+            with: PermissionDecision.hookOutput(.deny))) as? [String: Any]
+        let denyDecision = (denyOut?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any]
+        t.check("a denial tells Claude a person said no",
+                denyDecision?["behavior"] as? String == "deny"
+                    && denyDecision?["message"] as? String == PermissionDecision.denyMessage)
+        t.check("a hook stops waiting once the prompt has moved on",
+                PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "busy", "askId": "a1"])
+                    && PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a2"])
+                    && PermissionDecision.isStale(askId: "a1", sessionDocument: nil))
+        t.check("...and keeps waiting while it is still up",
+                !PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a1"]))
+        t.check("the wait ends before the hook's own timeout would kill it",
+                PermissionDecision.wait < 600)
+
+        let askingFile = Data("""
+        {"sessionId":"s","project":"p","cwd":"/tmp","state":"waiting","tool":"Bash","detail":"",
+         "since":"2026-09-15T10:18:00Z","updatedAt":"2026-09-15T10:18:00Z","pid":4242,
+         "waitingOn":"rm -rf build/","askId":"a1"}
+        """.utf8)
+        let askingSession = SessionState.decode(from: askingFile)
+        t.check("a session file carries the prompt's ask", askingSession?.askId == "a1")
+        if let askingSession {
+            let shown = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
+                                                  approved: { _ in false })
+            t.check("the alarm knows which prompt it can answer",
+                    shown.waitingSessionId == "s" && shown.waitingAskId == "a1")
+            let settled = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
+                                                    approved: { _ in true })
+            t.check("an answered prompt leaves nothing to answer",
+                    settled.sessions.first?.askId == "" && settled.waitingAskId == "")
+        }
+
+        // ---- Struggle: failing over and over looks like work ----
+        func failing(_ id: String, _ n: Int, state st: SessionActivity = .busy) -> SessionState {
+            SessionState(sessionId: id, project: "api", cwd: "/tmp", state: st, tool: "",
+                         detail: "", since: t0, updatedAt: t0,
+                         running: [RunningTool(id: "x", tool: "Bash", target: "npm test")],
+                         failStreak: n, failTarget: "Bash npm test")
+        }
+        t.check("three failures is an ordinary red-green loop",
+                !Struggle.isStruggling(failing("a", 3)))
+        t.check("four in a row is a rut", Struggle.isStruggling(failing("a", 4)))
+        t.check("a waiting session is not struggling, it is waiting",
+                !Struggle.isStruggling(failing("a", 9, state: .waiting)))
+        let calm = GlobalState(mood: .busy, sessions: [failing("a", 3)], waitingProject: nil)
+        let rut = GlobalState(mood: .busy, sessions: [failing("a", 4)], waitingProject: nil)
+        let deeper = GlobalState(mood: .busy, sessions: [failing("a", 5)], waitingProject: nil)
+        t.check("crossing the line is news",
+                Struggle.justStarted(previous: calm, current: rut).map(\.sessionId) == ["a"])
+        t.check("staying over it is not news again",
+                Struggle.justStarted(previous: rut, current: deeper).isEmpty)
+        t.check("the line names the session, the count and the command",
+                Struggle.line(failing("a", 4), name: "api") == "api: 4 failed in a row — Bash npm test")
+        let rutLine = Chatter.next(state: rut, previous: calm, usage: nil, now: t0,
+                                lastSpoken: [:], lastAnything: t0.addingTimeInterval(-10))
+        t.check("falling into a rut breaks the global quiet, as a warning",
+                rutLine?.kind == .struggling && Chatter.bubble(for: .struggling) == .warn)
+        t.check("the cat keeps working under a warning while it lasts",
+                CatSkin.look(mood: "busy", phase: "", flash: "", wanted: false,
+                             struggling: true) == CatSkin.Look(pose: .working, mark: .warn))
+        t.check("...and a waiting cat keeps its own glyph",
+                CatSkin.look(mood: "waiting", phase: "", flash: "", wanted: true,
+                             struggling: true).mark == .question)
+        t.check("a failed call says so in the log",
+                ActivityEntry(tool: "Bash", target: "npm test", finishedAt: t0, durationMs: 0,
+                              result: .failed).line().hasSuffix("· failed"))
+
+        // ---- AwayReport: what happened while nobody was looking ----
+        t.check("the report says what finished, what waits and what it cost",
+                AwayReport.line(away: 42 * 60, finished: 3,
+                                waiting: [AwayReport.Waiting(name: "tg-server", waited: 720),
+                                          AwayReport.Waiting(name: "api", waited: 60)],
+                                quotaUsed: 18)
+                    == "While you were away (42m): 3 finished · tg-server waiting 12m (+1) · quota +18%")
+        t.check("nothing happened, nothing said",
+                AwayReport.line(away: 3600, finished: 0, waiting: [], quotaUsed: 0) == nil)
+        t.check("a quota window that rolled over is not negative spending",
+                AwayReport.line(away: 3600, finished: 1, waiting: [], quotaUsed: -40)
+                    == "While you were away (1h 0m): 1 finished")
 
         t.finish()
     }

@@ -19,14 +19,18 @@ public struct CompletionEvent: Sendable, Equatable {
     /// up later: a terminal tab that has since closed still has a name here.
     public let displayName: String
     public let finishedAt: Date
+    /// The first line of what Claude said last — see `TurnSummary`. Empty for
+    /// records written before it existed, and for a turn that ended in silence.
+    public let summary: String
 
     public init(sessionId: String, turnKey: String, project: String,
-                displayName: String, finishedAt: Date) {
+                displayName: String, finishedAt: Date, summary: String = "") {
         self.sessionId = sessionId
         self.turnKey = turnKey
         self.project = project
         self.displayName = displayName
         self.finishedAt = finishedAt
+        self.summary = summary
     }
 
     /// Stable across redeliveries of the same turn, and distinct between turns.
@@ -79,17 +83,19 @@ public enum CompletionQueue {
         let project = d["project"] as? String ?? ""
         let name = d["displayName"] as? String ?? project
         return CompletionEvent(sessionId: sessionId, turnKey: turnKey, project: project,
-                               displayName: name, finishedAt: finishedAt)
+                               displayName: name, finishedAt: finishedAt,
+                               summary: d["summary"] as? String ?? "")
     }
 
     public static func encode(_ e: CompletionEvent) -> Data {
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "sessionId": e.sessionId,
             "turnKey": e.turnKey,
             "project": e.project,
             "displayName": e.displayName,
             "finishedAt": format(e.finishedAt),
         ]
+        if !e.summary.isEmpty { doc["summary"] = e.summary }
         return (try? JSONSerialization.data(withJSONObject: doc)) ?? Data()
     }
 

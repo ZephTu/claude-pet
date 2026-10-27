@@ -142,6 +142,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             self?.updateDwell(at: point, panelOpen: panelOpen)
         }
         bridge.onMute = { [weak self] id in self?.mute(sessionID: id) }
+        bridge.onOpenNotice = { [weak self] id in self?.openNotice(sessionID: id) }
+        bridge.onDecide = { [weak self] id, ask, behavior in
+            self?.answer(sessionID: id, askId: ask, behavior: behavior)
+        }
         // Titles cost a subprocess, so they are fetched when the user opens the
         // list — never on a timer for a panel nobody has looked at.
         bridge.onPanelOpened = { [weak self] in self?.refreshTitles() }
@@ -228,7 +232,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let state = paused
             ? GlobalState(mood: .idle, sessions: [], waitingProject: nil)
             : StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
-                                        snoozed: snoozeMarks)
+                                        snoozed: snoozeMarks, approved: isSettled)
         // The hit region is a pair of fixed rectangles now (PetLayout.bodyBox /
         // antennaBox), so the window no longer needs telling about mood.
         // Expiry is judged against `now` rather than by a timer, so sleeping
@@ -274,26 +278,77 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         phase: StateAggregator.phase(state.sessions),
                                         flash: "",
                                         wanted: !badge.isEmpty,
-                                        blockedOn: state.waitingOn, motion: motion))
-        // A "done" line has no timer, so something has to retire it. Going back
-        // to work is that something: once a session is busy again, the user has
-        // plainly seen the news or stopped caring about it.
-        if stickyBubble, let previous = lastState,
-           !Chatter.justStarted(previous: previous, current: state).isEmpty {
-            bridge?.hush()
-            stickyBubble = false
-        }
+                                        blockedOn: state.waitingOn, motion: motion,
+                                        struggling: state.sessions.contains(where: Struggle.isStruggling)))
+        announceFinishes(state, now: now)
+        noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
     }
 
+    // MARK: - Away and back
+
+    /// When nobody has touched the machine since, or nil while somebody is
+    /// at it. Set once input has been idle for `AwayReport.awayAfter`.
+    private var awayStart: Date?
+    /// The five-hour quota reading at that moment, to say how much went.
+    private var quotaAtLeave: Int?
+
+    /// Says what happened while the person was away, once, as they come back.
+    private func noticeReturn(_ state: GlobalState, now: Date) {
+        guard !paused else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if awayStart == nil {
+            if idle >= AwayReport.awayAfter {
+                awayStart = now.addingTimeInterval(-idle)
+                quotaAtLeave = currentUsage()?.fiveHourPercent
+            }
+            return
+        }
+        guard let start = awayStart, idle < AwayReport.backWithin else { return }
+        awayStart = nil
+        let names = sessionNames(state)
+        let waiting = state.sessions
+            .filter { $0.state == .waiting }
+            .sorted { $0.since < $1.since }
+            .map { AwayReport.Waiting(name: names[$0.sessionId] ?? $0.project,
+                                      waited: now.timeIntervalSince($0.since)) }
+        let finished = (completions?.events ?? []).filter { $0.finishedAt >= start }.count
+        let used = currentUsage().flatMap { now in quotaAtLeave.map { now.fiveHourPercent - $0 } }
+        guard let line = AwayReport.line(away: now.timeIntervalSince(start), finished: finished,
+                                         waiting: waiting, quotaUsed: used) else { return }
+        bridge?.say(line, hold: 15, variant: .notice)
+        lastAnything = now
+    }
+
     // MARK: - Talking
 
-    /// How long a line stays up before it takes itself away. Sticky lines
-    /// (see `Chatter.isSticky`) ignore this and wait to be replaced instead.
+    /// How long a line stays up before it takes itself away.
     private static let speechHold: TimeInterval = 6
-    /// True while the bubble holds a line with no timer of its own.
-    private var stickyBubble = false
+
+    /// One notice per session that just finished, each up for its own
+    /// `Chatter.noticeHold` — see window.notify for the stack they sit in.
+    ///
+    /// Not while paused (the pet is asleep), and not while the list is open:
+    /// the Finished group is showing exactly these, and a notice would only
+    /// sit across the list's corner.
+    private func announceFinishes(_ state: GlobalState, now: Date) {
+        guard !paused, panel?.isListOpen != true else { return }
+        let notices = Chatter.doneNotices(previous: lastState, current: state,
+                                          names: sessionNames(state),
+                                          summaries: latestSummaries(now: now))
+        for notice in notices {
+            let terminal = state.sessions.first { $0.sessionId == notice.sessionId }?.terminal
+            bridge?.notify(notice.text, hold: Chatter.noticeHold, emphasis: notice.emphasis,
+                           sessionId: notice.sessionId,
+                           jumpable: terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false)
+        }
+        if !notices.isEmpty {
+            lastSpoken[.sessionDone] = now
+            lastAnything = now
+        }
+    }
     /// How long the pointer must rest on the pet before it volunteers the quota.
     private static let dwellDelay: TimeInterval = 1
 
@@ -378,12 +433,59 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
             saveQuotaSaid()
         }
-        let sticky = Chatter.isSticky(line.kind)
-        bridge?.say(line.text, hold: sticky ? 0 : Self.speechHold, emphasis: line.emphasis,
+        bridge?.say(line.text, hold: Self.speechHold, emphasis: line.emphasis,
                     variant: Chatter.bubble(for: line.kind))
-        stickyBubble = sticky
         lastSpoken[line.kind] = now
         lastAnything = now
+    }
+
+    /// sessionId → the first line of what Claude said at the end of its most
+    /// recent finished turn. Read or not: the bubble announces the finish that
+    /// just happened, which is the newest one whatever the user has seen.
+    ///
+    /// Only the last minute's: if this turn's record has not been read yet, the
+    /// session's previous line would otherwise be announced as this turn's,
+    /// and a bare "done" is better than a confident wrong one.
+    private func latestSummaries(now: Date) -> [String: String] {
+        var out: [String: (Date, String)] = [:]
+        for event in completions?.events ?? []
+        where !event.summary.isEmpty && now.timeIntervalSince(event.finishedAt) < 60 {
+            if let seen = out[event.sessionId], seen.0 >= event.finishedAt { continue }
+            out[event.sessionId] = (event.finishedAt, event.summary)
+        }
+        return out.mapValues(\.1)
+    }
+
+    // MARK: - Answering permission prompts
+
+    /// askId → when the user answered it from the pet. Remembered so the row
+    /// and the figure stop asking at once, instead of waiting for the next
+    /// hook — which, for an approved ten-minute command, is ten minutes away.
+    private var answered: [String: Date] = [:]
+
+    /// A waiting session the pet should no longer show as waiting: answered
+    /// from here, or approved in the terminal — see StateAggregator.wasApproved.
+    private func isSettled(_ session: SessionState) -> Bool {
+        (!session.askId.isEmpty && answered[session.askId] != nil)
+            || StateAggregator.wasApproved(session)
+    }
+
+    /// Hands the answer to the pet-emit holding that prompt's hook open. It
+    /// checks the askId, so an answer to a prompt that has since gone away
+    /// approves nothing.
+    private func answer(sessionID: String, askId: String, behavior: PermissionDecision.Behavior) {
+        let now = Date()
+        let file = PermissionDecision.fileURL(petHome: petHome, sessionId: sessionID)
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        guard (try? PermissionDecision.encode(PermissionDecision.Answer(askId: askId, behavior: behavior))
+            .write(to: file, options: .atomic)) != nil else {
+            bridge?.say("could not answer — use the terminal", hold: 5, variant: .warn)
+            return
+        }
+        answered = answered.filter { now.timeIntervalSince($0.value) < 15 * 60 }
+        answered[askId] = now
+        render()
     }
 
     // MARK: - Labels
@@ -782,7 +884,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private func jumpToNextWaiting() {
         let now = Date()
         let state = StateAggregator.aggregate(latest, now: now, hidden: hiddenMarks,
-                                              snoozed: snoozeMarks)
+                                              snoozed: snoozeMarks, approved: isSettled)
         guard let target = PanelModel.jumpTarget(state.sessions, snoozed: snoozeMarks, now: now)
         else {
             bridge?.say("nothing is waiting on you", hold: 3)
@@ -861,6 +963,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
     /// and the list agree without waiting for the next tick.
+    /// A click on a finish notice: the same as clicking that session's row in
+    /// Finished. Go there and call its finishes read; with nowhere to go, open
+    /// the list, which is where the row is.
+    private func openNotice(sessionID: String) {
+        bridge?.dismissNotice(sessionID)
+        guard let terminal = latest.first(where: { $0.sessionId == sessionID })?.terminal,
+              TerminalTarget.canJump(kind: terminal.kind) else {
+            bridge?.setPanelOpen(true)
+            return
+        }
+        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
+        markRead((completions?.unread ?? []).filter { $0.sessionId == sessionID }.map(\.eventId))
+    }
+
     private func markRead(_ ids: [String]) {
         completions?.markRead(ids)
         render()
@@ -906,7 +1022,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
-                stickyBubble = false
                 bridge?.hush()
             }
             return
@@ -920,7 +1035,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             dwellTimer = nil
             if dwellShowing {
                 dwellShowing = false
-                stickyBubble = false
                 bridge?.hush()
             }
         }

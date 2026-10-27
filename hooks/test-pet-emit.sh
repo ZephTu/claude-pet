@@ -11,6 +11,9 @@ if [ ! -x "$EMIT" ]; then
   exit 1
 fi
 export PET_HOME="$(mktemp -d)/pet"
+# A PermissionRequest holds its hook open for an answer from the pet; only the
+# tests about that want it to.
+export PET_PERMISSION_WAIT=0
 trap 'rm -rf "$(dirname "$PET_HOME")"' EXIT
 
 fails=0
@@ -357,6 +360,76 @@ check "StopFailure ends the turn" "$(field sF state)" "idle"
 check "StopFailure clears tools in flight" "$(field sF running)" "[]"
 check "StopFailure records no finish" \
   "$(ls "$PET_HOME/events" 2>/dev/null | grep -c '^sF~' | tr -d ' ')" "0"
+
+# Stop carries Claude's last message; the record keeps its first line only.
+rm -rf "$PET_HOME/events"
+emit UserPromptSubmit sL /tmp/l
+emit_json '{"hook_event_name":"Stop","session_id":"sL","cwd":"/tmp/l","last_assistant_message":"## All 12 tests pass\n\nPR opened at https://example.com/pr/1 with token abc"}'
+check "a finish keeps the first line of what Claude said" "$(event_field 1 summary)" "All 12 tests pass"
+emit UserPromptSubmit sM /tmp/m
+emit Stop sM /tmp/m
+check "a Stop with no message records no summary" \
+  "$(/usr/bin/python3 -c "import json,glob,sys;print('summary' in json.load(open(glob.glob(sys.argv[1])[0])))" "$PET_HOME/events/sM~*.json")" "False"
+
+# ---- a tool call that fails ---------------------------------------------------
+# Claude Code sends PostToolUseFailure INSTEAD of PostToolUse for a failed call.
+fail_call() {  # fail_call <session> <tool_use_id> [is_interrupt]
+  printf '{"hook_event_name":"PostToolUseFailure","session_id":"%s","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"%s","tool_input":{"command":"npm test"},"error":"exit 1 secret=abc","is_interrupt":%s}' \
+    "$1" "$2" "${3:-false}" | "$EMIT"
+}
+pre_call() {  # pre_call <session> <tool_use_id>
+  printf '{"hook_event_name":"PreToolUse","session_id":"%s","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"%s","tool_input":{"command":"npm test"}}' \
+    "$1" "$2" | "$EMIT"
+}
+emit UserPromptSubmit sX /tmp/x
+pre_call sX t1; fail_call sX t1
+check "a failed call is no longer running" "$(field sX running)" "[]"
+check "...and the session is still working" "$(field sX state)" "busy"
+check "one failure starts the count" "$(field sX failStreak)" "1"
+check "the count names what failed" "$(field sX failTarget)" "Bash npm test"
+check "the error text is not kept" "$(grep -c secret "$PET_HOME/sessions/sX.json" | tr -d ' ')" "0"
+pre_call sX t2; fail_call sX t2
+pre_call sX t3; fail_call sX t3 true
+check "an interrupt is not a failure" "$(field sX failStreak)" "2"
+pre_call sX t4
+printf '{"hook_event_name":"PostToolUse","session_id":"sX","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"t4","tool_response":{}}' | "$EMIT"
+check "a success starts the count again" "$(field sX failStreak)" ""
+check "a failed call reaches the activity log as failed" \
+  "$(grep -c '"result":"failed"' "$PET_HOME/activity/sX.jsonl" | tr -d ' ')" "2"
+
+# ---- answering a permission prompt from the pet ------------------------------
+ask() {  # ask <session> — a PermissionRequest that waits up to 10s, stdout to a file
+  printf '{"hook_event_name":"PermissionRequest","session_id":"%s","cwd":"/tmp/p","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' "$1" \
+    | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/$1.out" &
+}
+await_ask() {  # waits for the session file to carry an askId
+  for _ in $(seq 1 40); do
+    id="$(field "$1" askId 2>/dev/null)"; [ -n "$id" ] && { echo "$id"; return; }; sleep 0.05
+  done
+}
+answer() {  # answer <session> <askId> <allow|deny>
+  mkdir -p "$PET_HOME/decisions"
+  printf '{"askId":"%s","behavior":"%s"}' "$2" "$3" > "$PET_HOME/decisions/$1.json"
+}
+decision() {
+  /usr/bin/python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['hookSpecificOutput']['decision']['behavior'])" "$PET_HOME/$1.out" 2>/dev/null
+}
+
+ask sP; pid=$!; id="$(await_ask sP)"
+check "a permission request names its ask" "$([ -n "$id" ] && echo yes)" "yes"
+answer sP "$id" allow; wait $pid
+check "a click on Allow becomes the hook's answer" "$(decision sP)" "allow"
+check "...and the answer file is used up" "$([ -e "$PET_HOME/decisions/sP.json" ] && echo left || echo gone)" "gone"
+
+ask sQ; pid=$!; id="$(await_ask sQ)"
+answer sQ "$id" deny; wait $pid
+check "a click on Deny denies" "$(decision sQ)" "deny"
+
+ask sR; pid=$!; id="$(await_ask sR)"
+answer sR "not-this-ask" allow
+emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
+wait $pid
+check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

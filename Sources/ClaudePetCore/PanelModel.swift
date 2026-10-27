@@ -19,15 +19,18 @@ public struct CompletionRow: Sendable, Equatable {
     /// cannot be jumped to and says so rather than failing on click.
     public let sessionClosed: Bool
     public let terminal: TerminalRef?
+    /// What Claude said last in the newest of these turns, one line.
+    public let summary: String
 
     public init(sessionId: String, eventIds: [String], label: String, latestAt: Date,
-                sessionClosed: Bool, terminal: TerminalRef?) {
+                sessionClosed: Bool, terminal: TerminalRef?, summary: String = "") {
         self.sessionId = sessionId
         self.eventIds = eventIds
         self.label = label
         self.latestAt = latestAt
         self.sessionClosed = sessionClosed
         self.terminal = terminal
+        self.summary = summary
     }
 
     public var canJump: Bool {
@@ -81,7 +84,8 @@ public enum PanelModel {
                 label: label(for: newest, session: session, titles: titles),
                 latestAt: newest.finishedAt,
                 sessionClosed: session == nil,
-                terminal: session?.terminal
+                terminal: session?.terminal,
+                summary: newest.summary
             ))
         }
         return rows.sorted { $0.latestAt > $1.latestAt }

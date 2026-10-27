@@ -103,6 +103,14 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// structural names. Non-empty only on a turn that ended while one was still
     /// running — which is the turn the pet must NOT call finished.
     public let backgroundAgents: [String]
+    /// Which permission prompt is up, minted by pet-emit per PermissionRequest.
+    /// Non-empty only while one is, and only then can the pet answer it — see
+    /// PermissionDecision.
+    public let askId: String
+    /// Tool calls failed in a row, and the last one that did ("Bash npm test").
+    /// Zero after any success — see `Struggle`.
+    public let failStreak: Int
+    public let failTarget: String
 
     public init(
         sessionId: String,
@@ -121,7 +129,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
         promptId: String = "",
         phase: String = "",
         troubleAt: Date? = nil,
-        backgroundAgents: [String] = []
+        backgroundAgents: [String] = [],
+        askId: String = "",
+        failStreak: Int = 0,
+        failTarget: String = ""
     ) {
         self.sessionId = sessionId
         self.project = project
@@ -140,12 +151,15 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.phase = phase
         self.troubleAt = troubleAt
         self.backgroundAgents = backgroundAgents
+        self.askId = askId
+        self.failStreak = failStreak
+        self.failTarget = failTarget
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
-        case backgroundAgents
+        case backgroundAgents, askId, failStreak, failTarget
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -176,6 +190,9 @@ public struct SessionState: Sendable, Equatable, Decodable {
         troubleAt = try? c.decodeIfPresent(Date.self, forKey: .troubleAt)
         backgroundAgents =
             (try? c.decodeIfPresent([String].self, forKey: .backgroundAgents)) as? [String] ?? []
+        askId = (try? c.decodeIfPresent(String.self, forKey: .askId)) as? String ?? ""
+        failStreak = (try? c.decodeIfPresent(Int.self, forKey: .failStreak)) as? Int ?? 0
+        failTarget = (try? c.decodeIfPresent(String.self, forKey: .failTarget)) as? String ?? ""
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

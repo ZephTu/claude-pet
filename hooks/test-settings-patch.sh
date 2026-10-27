@@ -73,7 +73,7 @@ FRESH="$WORK/fresh.json"
 "$EMIT" --patch-settings "$FRESH" >/dev/null 2>&1
 check "the file is created" "$([ -f "$FRESH" ] && echo yes || echo no)" "yes"
 # Mirrors SettingsPatch.events — update both together.
-check "all 10 events get a hook" "$(count_pet_hooks "$FRESH")" "10"
+check "all 11 events get a hook" "$(count_pet_hooks "$FRESH")" "11"
 
 echo "== running it twice changes nothing =="
 BEFORE="$(cat "$FRESH")"
@@ -165,6 +165,31 @@ cp "$ONLY_USER" "$WORK/only-user.orig.json"
 "$EMIT" --unpatch-settings "$ONLY_USER" >/dev/null 2>&1
 check "the user's lone hook is still there" \
   "$(json_eq "$ONLY_USER" "$WORK/only-user.orig.json")" "yes"
+
+# ---- PermissionRequest waits for a click, so it gets a long timeout ---------
+FRESH="$WORK/fresh.json"
+echo '{}' > "$FRESH"
+"$EMIT" --patch-settings "$FRESH" >/dev/null 2>&1
+check "PermissionRequest is given time to wait for an answer" \
+  "$(jq_path "$FRESH" hooks.PermissionRequest.0.hooks.0.timeout)" "600"
+check "every other event keeps the short timeout" \
+  "$(jq_path "$FRESH" hooks.Stop.0.hooks.0.timeout)" "5"
+
+# An install from before this change has 5s there; reinstalling must fix it
+# without touching anything else.
+OLD="$WORK/old-timeout.json"
+python3 - "$FRESH" "$OLD" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+d["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]=5
+d["hooks"]["PermissionRequest"].append({"hooks":[{"type":"command","command":"mine.sh","timeout":5}]})
+json.dump(d,open(sys.argv[2],"w"))
+PY
+"$EMIT" --patch-settings "$OLD" >/dev/null 2>&1
+check "an old 5s PermissionRequest hook is upgraded" \
+  "$(jq_path "$OLD" hooks.PermissionRequest.0.hooks.0.timeout)" "600"
+check "...and the user's own PermissionRequest hook is left alone" \
+  "$(jq_path "$OLD" hooks.PermissionRequest.1.hooks.0.timeout)" "5"
 
 if [ "$fails" = "0" ]; then
   echo ""

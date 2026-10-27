@@ -9,6 +9,10 @@ public struct ActivityEntry: Sendable, Equatable {
         /// outright — a non-empty stderr is not a failure, and guessing from it
         /// would label half a normal build as broken.
         case interrupted
+        /// Claude Code reported the call as failed (PostToolUseFailure) — a
+        /// non-zero exit, a tool error. Stated by the event itself, like
+        /// `interrupted`, never guessed from output.
+        case failed
         /// The payload did not say. Better than inventing a verdict.
         case unknown
     }
@@ -35,6 +39,7 @@ public struct ActivityEntry: Sendable, Equatable {
         var text = phrase
         if durationMs > 0 { text += " · " + duration }
         if result == .interrupted { text += " · interrupted" }
+        if result == .failed { text += " · failed" }
         return text
     }
 
