@@ -431,5 +431,16 @@ emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
 wait $pid
 check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
+# A multiple-choice question is answered on its card; Allow from outside would
+# hand Claude no answers, so the pet must not offer it or hold the hook.
+start=$(date +%s)
+printf '{"hook_event_name":"PermissionRequest","session_id":"sA","cwd":"/tmp/p","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"a?"},{"question":"b?"}]}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sA.out"
+check "a question card does not hold the hook" "$(( $(date +%s) - start < 3 ))" "1"
+check "...and answers nothing" "$(cat "$PET_HOME/sA.out")" ""
+check "...but the session is waiting" "$(field sA state)" "waiting"
+check "...on a reply, not an approval" "$(field sA waitingOn)|$(field sA askId)" "|"
+check "...and says how many questions" "$(field sA detail)" "2 questions to answer"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

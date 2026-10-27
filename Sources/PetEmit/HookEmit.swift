@@ -72,7 +72,15 @@ enum HookEmit {
         let directory = sessionsDirectory
         let path = directory.appending(path: sessionID + ".json")
         let event = hook["hook_event_name"] as? String ?? ""
-        let message = hook["message"] as? String ?? ""
+        let toolName = hook["tool_name"] as? String ?? ""
+        let toolInput = hook["tool_input"] as? [String: Any] ?? [:]
+        // A question card is answered on the card — see
+        // PermissionSummary.isQuestion — so it is waiting for a reply, not for
+        // a permission the pet could grant.
+        let question = event == "PermissionRequest" && PermissionSummary.isQuestion(toolName: toolName)
+        let message = question
+            ? PermissionSummary.questionNote(toolInput: toolInput)
+            : hook["message"] as? String ?? ""
 
         // The session is over: drop its file now instead of leaving the watcher
         // to time it out fifteen minutes from now.
@@ -98,11 +106,10 @@ enum HookEmit {
         // WHAT is blocked rather than just that something is. Carried forward on
         // other events so the phrase survives until the session stops waiting.
         let waitingOn: String
-        if event == "PermissionRequest" {
-            waitingOn = PermissionSummary.describe(
-                toolName: hook["tool_name"] as? String ?? "",
-                toolInput: hook["tool_input"] as? [String: Any] ?? [:]
-            )
+        if question {
+            waitingOn = ""
+        } else if event == "PermissionRequest" {
+            waitingOn = PermissionSummary.describe(toolName: toolName, toolInput: toolInput)
         } else if state == "waiting" {
             waitingOn = previousWaitingOn(at: path)
         } else {
@@ -137,7 +144,9 @@ enum HookEmit {
         // PermissionDecision. Minted per request, and carried forward by the
         // other events that arrive while the same prompt is still up.
         let askId: String
-        if event == "PermissionRequest" {
+        if question {
+            askId = ""
+        } else if event == "PermissionRequest" {
             askId = UUID().uuidString
         } else if state == "waiting" {
             askId = previousField("askId", at: path)
