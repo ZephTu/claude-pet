@@ -6,7 +6,7 @@
 
 A cat that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
 
-<img src="docs/images/cat.gif" width="360" alt="The cat cycling through every state it can show, speech bubbles included">
+<img src="docs/images/cat.gif" width="300" alt="One turn as the cat lives it: asleep, starting work, raising a paw for approval, shouting when ignored, back to work, cheering the finished turn, and dozing off again">
 
 You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
 
@@ -52,6 +52,8 @@ second line is what you would be approving (`rm -rf build/`), never the hook's o
 three times, under three first lines that already said so.
 
 **Approve or deny without leaving your desk.** A row that is waiting on a permission carries **Allow** and **Deny**, and so does the alarm once it goes up. Claude Code shows its own prompt at the same moment and takes whichever answer comes first, so the terminal prompt is never delayed — answer there and the pet's buttons simply go away. The pet holds the `PermissionRequest` hook open while it waits (which is why that one hook is installed with a 600s timeout instead of 5s), only while the app is running, and only for the prompt it is showing: each prompt carries its own id, and a click on one that has since been replaced approves nothing. Neither button has a keyboard shortcut.
+
+**Multiple-choice questions get no buttons.** When Claude asks with options to pick and a Submit (`AskUserQuestion`), Claude Code routes it through the same permission hook — but the picks are the answer, and an Allow from outside would hand Claude none of them. So that session shows as waiting for a reply ("2 questions to answer"), and clicking it takes you to the terminal to choose.
 
 **Going round in circles.** A session whose last four tool calls all failed — the same test, the same build, again — looks exactly like steady work from across the room. The pet counts consecutive failures from Claude Code's own `PostToolUseFailure` events (an interrupt is not a failure, and any success resets the count), and at four the cat keeps typing under a warning glyph, the bubble names the session and what keeps failing, and the row's second line says "4 failed in a row · Bash npm test". Only the call's short target is kept, never the error text.
 
@@ -119,6 +121,8 @@ A session stays listed for as long as its process is alive, however long it sits
 **Right-click → Settings → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
 
 ## The cat
+
+<img src="docs/images/cat-moves.gif" width="480" alt="Eight poses side by side, each playing its own small move: a yawn, thinking at the laptop, a sigh over paperwork, dozing while an agent runs, tapping for attention, jumping when ignored, a dance after a finished turn, and reading">
 
 The cat is animated frame by frame: every pose is a loop cut out of a generated video, and after a while in one pose it slips in a small move of its own — a yawn, a scratch of the head, a page turned, a hop. Common state changes have their own transition clips; the rest are a short dissolve. `docs/seedance.md` says how the videos are made and cut. It has nine poses against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
 
@@ -245,7 +249,7 @@ This is not hypothetical. The mirrored layout was first written as a reflection 
 
 - No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
 - Click-through is computed from a rectangle, not the figure's outline, so a few transparent pixels near the figure still swallow clicks.
-- Roughly **0.9% CPU and 63MB** while idle, measured on an M-series Mac by CPU-time delta over 20s. That figure did not move when the session count went from 4 to 14, and reducing motion did not lower it either (0.8% vs 0.9%, inside the measurement noise). The system's Reduce motion setting is honoured for people who do not want movement on their desktop, not as a way to save power.
+- Roughly **7% of one core and 310MB** while the cat animates, counting the app together with the WebKit content and GPU processes that draw it — measured on an M-series Mac by CPU-time delta over 30s. That is the price of 12fps video frames. The system's Reduce motion setting stops the animation.
 
 ## License
 
