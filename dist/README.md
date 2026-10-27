@@ -2,31 +2,35 @@
 
 **English** · [中文](README.zh-CN.md)
 
-A small cat that lives on your macOS desktop and mirrors the state of **every** Claude Code session on this machine.
+A cat that lives on your macOS desktop and mirrors the state of **every** Claude Code session on this machine.
 
 No more tabbing through terminal windows to find out which session finished and which one is stuck. A glance at the corner of the screen tells you whether anything needs you.
 
-The lamp on its antenna is the part you can read without focusing on it:
+Its pose is the part you can read without focusing on it:
 
-| Lamp | What it is doing | What it means |
-|---|---|---|
-| Red, fast blink | arms over its head, jolting, speech bubble | a session has been waiting on you for over a minute. The bubble names the project and the command |
-| Amber, pulsing | raises a hand, monitor warns | a session wants your approval |
-| Amber, pulsing | tilts its head, question mark floats up | a session wants an answer — typing, not a decision |
-| Amber, brief flash | monitor turns amber, keeps working | a tool call was interrupted. Usually not a failed task |
-| Green, slow blink | hands on the keys. Types when editing, leans at the screen when reading, slows down while a command runs | a session is working |
-| Green, steady | hands sweeping, screen reshuffling | compacting its context |
-| Green, slow pulse | hands off the keys, watching the screen | it parked a background agent and ended the turn. It will speak again by itself, so this turn gets no finish notice |
-| Green, brief flash | two small nods | a turn just finished. Not a claim that the work was right |
-| Off | asleep at the desk with z's drifting up | everything is done |
+| What you see | What it means |
+|---|---|
+| curled up asleep, z's drifting up | everything is done |
+| hunched over the laptop, typing | a session is working |
+| a book up in both paws | reading |
+| sorting a stack of paper | compacting its context |
+| chin on a paw, laptop pushed aside | it parked a background agent and ended the turn; it will speak again by itself, so this turn gets no finish notice |
+| a warning triangle over a cat that keeps working | a tool call failed or was interrupted. Usually not a failed task |
+| a raised paw and a warning triangle | a session wants your approval |
+| the same raised paw with a question mark | a session wants an answer — typing, not a decision |
+| up on its hind legs, shouting, a red alarm beside it | a session has waited on you for over a minute. The bubble names the project and the command |
+| both paws up, cheering | a turn just finished. Not a claim that the work was right |
+
+It is animated frame by frame — loops for each pose, transitions between them, and the odd yawn or dance when it has been in one pose a while. With the system's Reduce motion on it holds still.
 
 **Left-click** to expand the list — what each session is running, and for how long.
 **Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2; for VS Code and Cursor, to the window that has its project open).
+**Allow / Deny** a permission prompt from the pet itself; answering in the terminal works as always. Multiple-choice questions are left to the terminal.
+**Finish bubbles** stack above the cat, one per session that just finished, with the first line of what Claude said. Click one to jump to that session.
 **Hover a row** and the bubble shows where that session is, how full its context window is, how long the turn has run versus how long since anything happened, and its last tool call.
 **Hover the cat** for a second to see your remaining quota.
-**Right-click the pet** for pause / reduce motion / connection status / demo / launch-at-login / quit. **Right-click a row** to name that session, pin it, see its recent activity, or mute it.
+**Right-click the pet** for take a nap / keep list open / unmute all / quit; launch at login, the jump shortcut, bubble duration and count, and connection status are under Settings. **Right-click a row** to name that session, pin it, or mute it.
 **Click the × at the end of a row** to mute that session — it comes back on its own the next time you type into it.
-**Right-click** for the menu: nap / launch at login / quit.
 **Drag** to move it; it remembers where you put it.
 
 It never makes a sound and never posts a system notification.
@@ -52,7 +56,7 @@ Three places, all reversible with `./uninstall.sh`:
 
 1. `~/Applications/ClaudePet.app` — the pet itself
 2. `~/.claude/pet/` — the hook binary, the session state files, the finished-turn records and the activity logs
-3. **`~/.claude/settings.json` — 9 appended hooks**
+3. **`~/.claude/settings.json` — 11 appended hooks**
 
 The third is the one to pay attention to: that file governs the behaviour of every Claude Code session you run. The installer **only appends** — not one of your existing hooks is touched. It backs the file up to `~/.claude/settings.json.bak-claudepet-<timestamp>` first, parses the result immediately after writing, and restores the backup on any doubt. Running the installer twice is idempotent; the hooks are not added again.
 
@@ -68,9 +72,8 @@ Removes the hooks, deletes the app, cleans up the directory. `settings.json` goe
 
 ## Known rough edges
 
-- The expanded panel always opens to the left, so it can run off-screen if you drag the pet to the far-left edge of the display (the pet itself stays put).
 - Click-through is computed from a rectangle rather than the figure's outline, so a few apparently-transparent pixels near the cat still swallow clicks.
-- Roughly 4% CPU while idle — that is the breathing animation. Leaving it running all day costs a little battery.
+- Roughly 7% of one core while the cat animates (the app plus the WebKit processes that draw it). Leaving it running all day costs a little battery; Reduce motion stops the animation.
 - No Apple Developer signature. The installer clears macOS's download quarantine flag automatically; if Gatekeeper still blocks it, allow it once under System Settings → Privacy & Security.
 - Jumping to an **iTerm2** tab raises a macOS Automation prompt the first time. Deny it and jumps fail silently from then on; you can re-allow it under System Settings → Privacy & Security → Automation. **Orca needs no permission at all.**
 
