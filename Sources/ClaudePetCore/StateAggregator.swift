@@ -65,8 +65,21 @@ public enum StateAggregator {
         return now.timeIntervalSince(s.updatedAt) > quietAfter
     }
 
-    /// `isLive` is injectable so tests can decide liveness without spawning
-    /// processes; the default asks the kernel.
+    /// Has the permission prompt this session is waiting on been approved?
+    ///
+    /// No hook says so — see `ProcessProbe.startedToolShell` — so this asks
+    /// the kernel whether Claude has since started the shell that runs the
+    /// approved command. `waitingOn` is only ever set by PermissionRequest, so a
+    /// question to the user (or any other kind of waiting) is never cleared here.
+    public static func wasApproved(_ s: SessionState) -> Bool {
+        guard s.state == .waiting, !s.waitingOn.isEmpty, let pid = s.pid else { return false }
+        return ProcessProbe.startedToolShell(under: pid, since: s.since)
+    }
+
+    /// `isLive` and `approved` are injectable so tests can decide them without
+    /// spawning processes; the defaults ask the kernel.
+    /// - Parameter approved: a waiting session this returns true for is shown
+    ///   as busy, until its PostToolUse makes that true on disk as well.
     /// - Parameter hidden: sessionId → mute mark. Muted sessions are removed
     ///   before anything else happens, so they affect neither the list nor the
     ///   pet's mood: a muted session stuck on a permission prompt must not leave
@@ -79,9 +92,10 @@ public enum StateAggregator {
         now: Date,
         hidden: [String: Date] = [:],
         snoozed: [String: Snooze.Mark] = [:],
-        isLive: (SessionState, Date) -> Bool = Self.isLive
+        isLive: (SessionState, Date) -> Bool = Self.isLive,
+        approved: (SessionState) -> Bool = Self.wasApproved
     ) -> GlobalState {
-        let live = all.filter { isLive($0, now) }
+        let live = all.filter { isLive($0, now) }.map { approved($0) ? $0.approvedNow() : $0 }
         let alive = live.filter { !HiddenSessions.isHidden($0, marks: hidden) }
         let hiddenCount = live.count - alive.count
 
@@ -152,5 +166,17 @@ public enum StateAggregator {
         return sessions.sorted {
             rank($0.state) != rank($1.state) ? rank($0.state) < rank($1.state) : $0.since < $1.since
         }
+    }
+}
+
+private extension SessionState {
+    /// The same session, working on the command it was given permission for.
+    func approvedNow() -> SessionState {
+        SessionState(
+            sessionId: sessionId, project: project, cwd: cwd, state: .busy, tool: tool,
+            detail: detail, since: since, updatedAt: updatedAt, terminal: terminal,
+            pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
+            promptId: promptId, phase: phase, troubleAt: troubleAt,
+            backgroundAgents: backgroundAgents)
     }
 }
