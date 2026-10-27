@@ -1994,8 +1994,8 @@ struct Runner {
         // ---- AwayReport: what happened while nobody was looking ----
         t.check("the report says what finished, what waits and what it cost",
                 AwayReport.line(away: 42 * 60, finished: 3,
-                                waiting: [.init(name: "tg-server", waited: 12 * 60),
-                                          .init(name: "api", waited: 60)],
+                                waiting: [AwayReport.Waiting(name: "tg-server", waited: 720),
+                                          AwayReport.Waiting(name: "api", waited: 60)],
                                 quotaUsed: 18)
                     == "While you were away (42m): 3 finished · tg-server waiting 12m (+1) · quota +18%")
         t.check("nothing happened, nothing said",
