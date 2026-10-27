@@ -1080,7 +1080,7 @@ struct Runner {
 
         t.check("every kind has a window, so none can fall through to the default",
                 Chatter.Kind.allCases.allSatisfy { _ in true }
-                    && Chatter.Kind.allCases.count == 5)
+                    && Chatter.Kind.allCases.count == 6)
 
         // ---- PanelModel: what the user sees, and what survives a session ----
         func panelSess(_ id: String, _ act: SessionActivity, project: String,
@@ -1978,6 +1978,54 @@ struct Runner {
             t.check("an answered prompt leaves nothing to answer",
                     settled.sessions.first?.askId == "" && settled.waitingAskId == "")
         }
+
+        // ---- Struggle: failing over and over looks like work ----
+        func failing(_ id: String, _ n: Int, state st: SessionActivity = .busy) -> SessionState {
+            SessionState(sessionId: id, project: "api", cwd: "/tmp", state: st, tool: "",
+                         detail: "", since: t0, updatedAt: t0,
+                         running: [RunningTool(id: "x", tool: "Bash", target: "npm test")],
+                         failStreak: n, failTarget: "Bash npm test")
+        }
+        t.check("three failures is an ordinary red-green loop",
+                !Struggle.isStruggling(failing("a", 3)))
+        t.check("four in a row is a rut", Struggle.isStruggling(failing("a", 4)))
+        t.check("a waiting session is not struggling, it is waiting",
+                !Struggle.isStruggling(failing("a", 9, state: .waiting)))
+        let calm = GlobalState(mood: .busy, sessions: [failing("a", 3)], waitingProject: nil)
+        let rut = GlobalState(mood: .busy, sessions: [failing("a", 4)], waitingProject: nil)
+        let deeper = GlobalState(mood: .busy, sessions: [failing("a", 5)], waitingProject: nil)
+        t.check("crossing the line is news",
+                Struggle.justStarted(previous: calm, current: rut).map(\.sessionId) == ["a"])
+        t.check("staying over it is not news again",
+                Struggle.justStarted(previous: rut, current: deeper).isEmpty)
+        t.check("the line names the session, the count and the command",
+                Struggle.line(failing("a", 4), name: "api") == "api: 4 failed in a row — Bash npm test")
+        let rutLine = Chatter.next(state: rut, previous: calm, usage: nil, now: t0,
+                                lastSpoken: [:], lastAnything: t0.addingTimeInterval(-10))
+        t.check("falling into a rut breaks the global quiet, as a warning",
+                rutLine?.kind == .struggling && Chatter.bubble(for: .struggling) == .warn)
+        t.check("the cat keeps working under a warning while it lasts",
+                CatSkin.look(mood: "busy", phase: "", flash: "", wanted: false,
+                             struggling: true) == CatSkin.Look(pose: .working, mark: .warn))
+        t.check("...and a waiting cat keeps its own glyph",
+                CatSkin.look(mood: "waiting", phase: "", flash: "", wanted: true,
+                             struggling: true).mark == .question)
+        t.check("a failed call says so in the log",
+                ActivityEntry(tool: "Bash", target: "npm test", finishedAt: t0, durationMs: 0,
+                              result: .failed).line().hasSuffix("· failed"))
+
+        // ---- AwayReport: what happened while nobody was looking ----
+        t.check("the report says what finished, what waits and what it cost",
+                AwayReport.line(away: 42 * 60, finished: 3,
+                                waiting: [.init(name: "tg-server", waited: 12 * 60),
+                                          .init(name: "api", waited: 60)],
+                                quotaUsed: 18)
+                    == "While you were away (42m): 3 finished · tg-server waiting 12m (+1) · quota +18%")
+        t.check("nothing happened, nothing said",
+                AwayReport.line(away: 3600, finished: 0, waiting: [], quotaUsed: 0) == nil)
+        t.check("a quota window that rolled over is not negative spending",
+                AwayReport.line(away: 3600, finished: 1, waiting: [], quotaUsed: -40)
+                    == "While you were away (1h 0m): 1 finished")
 
         t.finish()
     }

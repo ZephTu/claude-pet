@@ -53,6 +53,10 @@ three times, under three first lines that already said so.
 
 **Approve or deny without leaving your desk.** A row that is waiting on a permission carries **Allow** and **Deny**, and so does the alarm once it goes up. Claude Code shows its own prompt at the same moment and takes whichever answer comes first, so the terminal prompt is never delayed — answer there and the pet's buttons simply go away. The pet holds the `PermissionRequest` hook open while it waits (which is why that one hook is installed with a 600s timeout instead of 5s), only while the app is running, and only for the prompt it is showing: each prompt carries its own id, and a click on one that has since been replaced approves nothing. Neither button has a keyboard shortcut.
 
+**Going round in circles.** A session whose last four tool calls all failed — the same test, the same build, again — looks exactly like steady work from across the room. The pet counts consecutive failures from Claude Code's own `PostToolUseFailure` events (an interrupt is not a failure, and any success resets the count), and at four the cat keeps typing under a warning glyph, the bubble names the session and what keeps failing, and the row's second line says "4 failed in a row · Bash npm test". Only the call's short target is kept, never the error text.
+
+**While you were away.** After ten minutes with no keyboard or mouse input, the pet notes the time and your quota; the first input after that gets one line — `While you were away (42m): 3 finished · tg-server waiting 12m · quota +18%` — and nothing at all if nothing happened.
+
 A number counts both kinds of attention, by the cat's ear. It is not shown at zero.
 
 A running row that has said nothing for 90 seconds, with no tool call in flight,
@@ -121,7 +125,7 @@ Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline
 
 Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
 
-**This edits `~/.claude/settings.json`**, appending ten hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `StopFailure`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
+**This edits `~/.claude/settings.json`**, appending eleven hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `StopFailure`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
 
 Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
 

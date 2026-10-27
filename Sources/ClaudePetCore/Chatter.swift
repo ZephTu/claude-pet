@@ -19,6 +19,7 @@ public enum Chatter {
         case finished
         case sessionDone
         case longRun
+        case struggling
     }
 
     public struct Utterance: Sendable, Equatable {
@@ -96,7 +97,7 @@ public enum Chatter {
 
     public static func bubble(for kind: Kind) -> Bubble {
         switch kind {
-        case .quotaHigh, .quotaResetting: return .warn
+        case .quotaHigh, .quotaResetting, .struggling: return .warn
         case .finished, .sessionDone: return .notice
         case .longRun: return .chat
         }
@@ -112,6 +113,9 @@ public enum Chatter {
         // so it cannot run away on its own.
         case .sessionDone: return 20
         case .longRun: return 20 * 60
+        // Per kind, not per session: a second session falling into a rut ten
+        // minutes later is worth hearing about, the same one every render is not.
+        case .struggling: return 10 * 60
         }
     }
 
@@ -148,7 +152,11 @@ public enum Chatter {
         // would swallow it. Its own 20s cooldown is what keeps it in check.
         let finishedNow = previous.map { justFinished(previous: $0, current: state) } ?? []
         let hasNews = !finishedNow.isEmpty && Self.ready(.sessionDone, lastSpoken: lastSpoken, now: now)
-        if !hasNews, let lastAnything,
+        // A session that has just failed four times running is the other thing
+        // worth breaking the global gap for: it is the moment to step in.
+        let stuck = previous.map { Struggle.justStarted(previous: $0, current: state) } ?? []
+        let hasTrouble = !stuck.isEmpty && Self.ready(.struggling, lastSpoken: lastSpoken, now: now)
+        if !hasNews, !hasTrouble, let lastAnything,
            now.timeIntervalSince(lastAnything) < globalCooldown {
             return nil
         }
@@ -166,6 +174,12 @@ public enum Chatter {
                 // the styled run would be discontiguous.
                 emphasis: labels.count == 1 ? labels[0] : ""
             )
+        }
+
+        if hasTrouble, let first = stuck.first {
+            let name = names[first.sessionId] ?? first.project
+            return Utterance(kind: .struggling, text: Struggle.line(first, name: name),
+                             emphasis: name)
         }
 
         // Quota lines first: they are time-critical in a way the others are not.

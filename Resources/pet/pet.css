@@ -606,6 +606,8 @@ html, body {
 /* A session name is identity, not chatter, so it reads a shade louder than the
    notification text it replaces. */
 .note.name { color: #a99f96; }
+/* Failing again and again: the same amber the rest of the pet uses for "look here". */
+.note.bad { color: #e0a63c; }
 .empty { color: #8a837d; padding: 4px 2px; }
 
 /* Cat Life v3: persistent symbol, two gentle scale pulses then a quiet gap.

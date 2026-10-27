@@ -49,11 +49,16 @@ public enum CatSkin {
     ///     which is what makes it the honest way to tell "decide this" from
     ///     "answer me" — the alternative was reading English out of a
     ///     notification message.
+    ///   - struggling: a busy session has failed `Struggle.threshold` calls in
+    ///     a row. The cat keeps working — it IS still working — under the same
+    ///     warning glyph an interrupted call gets, for as long as it lasts.
     public static func look(mood: String, phase: String, flash: String,
                             wanted: Bool, blockedOn: String = "",
-                            motion: ActivitySummary.Motion? = nil) -> Look {
-        Look(pose: pose(mood: mood, wanted: wanted, flash: flash, phase: phase, motion: motion),
-             mark: mark(mood: mood, flash: flash, blockedOn: blockedOn))
+                            motion: ActivitySummary.Motion? = nil,
+                            struggling: Bool = false) -> Look {
+        let glyph = mark(mood: mood, flash: flash, blockedOn: blockedOn)
+        return Look(pose: pose(mood: mood, wanted: wanted, flash: flash, phase: phase, motion: motion),
+                    mark: glyph == .none && struggling && mood == "busy" ? .warn : glyph)
     }
 
     /// The pose a transient imposes, or nil to keep whatever is showing.

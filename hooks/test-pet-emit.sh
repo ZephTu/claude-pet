@@ -371,6 +371,32 @@ emit Stop sM /tmp/m
 check "a Stop with no message records no summary" \
   "$(/usr/bin/python3 -c "import json,glob,sys;print('summary' in json.load(open(glob.glob(sys.argv[1])[0])))" "$PET_HOME/events/sM~*.json")" "False"
 
+# ---- a tool call that fails ---------------------------------------------------
+# Claude Code sends PostToolUseFailure INSTEAD of PostToolUse for a failed call.
+fail_call() {  # fail_call <session> <tool_use_id> [is_interrupt]
+  printf '{"hook_event_name":"PostToolUseFailure","session_id":"%s","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"%s","tool_input":{"command":"npm test"},"error":"exit 1 secret=abc","is_interrupt":%s}' \
+    "$1" "$2" "${3:-false}" | "$EMIT"
+}
+pre_call() {  # pre_call <session> <tool_use_id>
+  printf '{"hook_event_name":"PreToolUse","session_id":"%s","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"%s","tool_input":{"command":"npm test"}}' \
+    "$1" "$2" | "$EMIT"
+}
+emit UserPromptSubmit sX /tmp/x
+pre_call sX t1; fail_call sX t1
+check "a failed call is no longer running" "$(field sX running)" "[]"
+check "...and the session is still working" "$(field sX state)" "busy"
+check "one failure starts the count" "$(field sX failStreak)" "1"
+check "the count names what failed" "$(field sX failTarget)" "Bash npm test"
+check "the error text is not kept" "$(grep -c secret "$PET_HOME/sessions/sX.json" | tr -d ' ')" "0"
+pre_call sX t2; fail_call sX t2
+pre_call sX t3; fail_call sX t3 true
+check "an interrupt is not a failure" "$(field sX failStreak)" "2"
+pre_call sX t4
+printf '{"hook_event_name":"PostToolUse","session_id":"sX","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"t4","tool_response":{}}' | "$EMIT"
+check "a success starts the count again" "$(field sX failStreak)" ""
+check "a failed call reaches the activity log as failed" \
+  "$(grep -c '"result":"failed"' "$PET_HOME/activity/sX.jsonl" | tr -d ' ')" "2"
+
 # ---- answering a permission prompt from the pet ------------------------------
 ask() {  # ask <session> — a PermissionRequest that waits up to 10s, stdout to a file
   printf '{"hook_event_name":"PermissionRequest","session_id":"%s","cwd":"/tmp/p","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' "$1" \

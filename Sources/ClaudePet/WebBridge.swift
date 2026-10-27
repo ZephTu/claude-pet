@@ -374,6 +374,12 @@ final class WebBridge {
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
             if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // Going round in circles: said on the row's second line, where the
+            // notification text would otherwise go — see Struggle.
+            if Struggle.isStruggling(s) {
+                item["struggle"] = "\(s.failStreak) failed in a row"
+                    + (s.failTarget.isEmpty ? "" : " · " + s.failTarget)
+            }
             // "It answered and is waiting on the next instruction" is a fact
             // about the session, not about whether its second line happens to
             // carry text. It used to be read off `detail`, which meant dropping

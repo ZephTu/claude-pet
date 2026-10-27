@@ -202,6 +202,16 @@ enum HookEmit {
         let trouble = troubleAt(event: event, hook: hook, at: path, now: now)
         if !trouble.isEmpty { document["troubleAt"] = trouble }
 
+        // How many tool calls in a row have failed, and on what. A session that
+        // keeps failing the same command is working on paper and going nowhere;
+        // this is what lets the pet say so. Only the call's short target is
+        // kept, never Claude Code's error text.
+        let streak = failStreak(event: event, hook: hook, at: path)
+        if streak.count > 0 {
+            document["failStreak"] = streak.count
+            document["failTarget"] = streak.target
+        }
+
         write(document, to: path)
 
         // Only while the app is there to be clicked. A test that sets the wait
@@ -214,7 +224,7 @@ enum HookEmit {
         }
 
         // A finished tool call, with the duration Claude Code measured itself.
-        if event == "PostToolUse" {
+        if event == "PostToolUse" || event == "PostToolUseFailure" {
             recordActivity(sessionID: sessionID, hook: hook, now: now)
         }
 
@@ -315,7 +325,7 @@ enum HookEmit {
                                                  toolInput: hook["tool_input"] as? [String: Any] ?? [:]),
                 "since": now,
             ])
-        case "PostToolUse":
+        case "PostToolUse", "PostToolUseFailure":
             let key = id.isEmpty ? tool : id
             running.removeAll { ($0["id"] as? String) == key }
         default:
@@ -334,6 +344,9 @@ enum HookEmit {
     private static func troubleAt(event: String, hook: [String: Any],
                                   at path: URL, now: String) -> String {
         let previous = (readDocument(at: path)?["troubleAt"] as? String) ?? ""
+        if event == "PostToolUseFailure" {
+            return hook["is_interrupt"] as? Bool == true ? now : previous
+        }
         guard event == "PostToolUse" else {
             // Cleared when a new turn starts: last turn's trouble is not this
             // turn's.
@@ -341,6 +354,30 @@ enum HookEmit {
         }
         let response = hook["tool_response"] as? [String: Any]
         return (response?["interrupted"] as? Bool == true) ? now : previous
+    }
+
+    /// Counts failed tool calls in a row. A success or a new prompt starts the
+    /// count again; an interrupt is the user stopping it, not it failing, so it
+    /// leaves the count alone.
+    private static func failStreak(event: String, hook: [String: Any],
+                                   at path: URL) -> (count: Int, target: String) {
+        let old = readDocument(at: path)
+        let count = old?["failStreak"] as? Int ?? 0
+        let target = old?["failTarget"] as? String ?? ""
+        switch event {
+        case "PostToolUseFailure":
+            guard hook["is_interrupt"] as? Bool != true else { return (count, target) }
+            let tool = hook["tool_name"] as? String ?? ""
+            let what = ActivitySummary.phrase(
+                toolName: tool,
+                target: ActivitySummary.target(toolName: tool,
+                                               toolInput: hook["tool_input"] as? [String: Any] ?? [:]))
+            return (count + 1, what)
+        case "PostToolUse", "UserPromptSubmit", "SessionStart":
+            return (0, "")
+        default:
+            return (count, target)
+        }
     }
 
     /// Which multi-event phase the session is in, if any.
@@ -352,7 +389,8 @@ enum HookEmit {
     private static func phaseValue(event: String, at path: URL) -> String {
         switch event {
         case "PreCompact": return "compacting"
-        case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse", "SessionStart":
+        case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse",
+             "PostToolUseFailure", "SessionStart":
             return ""
         default:
             return (readDocument(at: path)?["phase"] as? String) ?? ""
@@ -426,6 +464,9 @@ enum HookEmit {
         // here the whole write is skipped and the phase never reaches the file.
         case "PreCompact": return "busy"
         case "PostToolUse": return "busy"
+        // A failed call is still the session working: Claude reads the error
+        // and carries on.
+        case "PostToolUseFailure": return "busy"
         case "Stop": return "idle"
         // A turn killed by an API error — rate limit, overload, auth. Stop does
         // not fire for it, so without this the session sat on "busy" until the
@@ -547,7 +588,9 @@ enum HookEmit {
         // of a normal build as broken.
         let response = hook["tool_response"] as? [String: Any]
         let result: ActivityEntry.Result
-        if let response {
+        if hook["hook_event_name"] as? String == "PostToolUseFailure" {
+            result = hook["is_interrupt"] as? Bool == true ? .interrupted : .failed
+        } else if let response {
             result = (response["interrupted"] as? Bool == true) ? .interrupted : .ok
         } else {
             result = .unknown

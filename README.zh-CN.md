@@ -38,6 +38,10 @@
 
 **不用回终端就能批准或拒绝。** 等你授权的那一行上有 **Allow** 和 **Deny** 两个按钮，等超过 60 秒弹出的警报气泡上也有。Claude Code 会同时在终端弹出自己的提示，谁先回答算谁的，所以终端的提示一点都不会被耽误；你在终端回答了，宠物上的按钮就自己消失。宠物等你点的时候会让 `PermissionRequest` 这条 hook 一直挂着（所以只有这一条装的超时是 600 秒，其他都是 5 秒），只在 App 开着的时候这样做，也只回答它显示的那一个提示：每个提示有自己的 id，提示换了之后再点旧按钮什么都不会批准。两个按钮都没有键盘快捷键。
 
+**原地打转。** 一个 session 最近连着四次工具调用都失败——同一个测试、同一个构建，一遍又一遍——远远看过去和正常干活一模一样。宠物按 Claude Code 自己发的 `PostToolUseFailure` 数连续失败的次数（按 Esc 打断不算失败，中间成功一次就从头数），到四次时猫还在敲键盘但头上多一个警告符号，气泡说出是哪个 session、哪条命令一直失败，那一行第二行写「4 failed in a row · Bash npm test」。只记命令的简短形式，错误信息一个字都不存。
+
+**你不在的时候。** 键盘鼠标十分钟没动，宠物记下这个时刻和当时的额度；你一回来动一下，它说一句：`While you were away (42m): 3 finished · tg-server waiting 12m · quota +18%`。什么都没发生就什么都不说。
+
 这两类加起来是一个数字，画在猫的耳朵边上，为零时不显示。
 
 「在跑」里有一行 90 秒没吭声、也没有工具在飞的话，会变成**空心点 + No recent activity**，并且不再算 busy——宠物会因此睡过去，也不会说这一轮结束了。这种基本都是你按 Esc 取消掉的那一轮：打断的时候 Claude Code 一个 hook 都不发，最后写进去的 `busy` 就一直留着，没有任何东西来把它改回去。这里故意不写「done」，因为宠物根本无从知道那轮到底做完没有；那个 session 只要再有任何动静，这行立刻恢复正常。
@@ -98,7 +102,7 @@ WebGL 跑不起来、或者贴图解不开，页面改成显示每个姿势的�
 
 额度播报依赖 [claude-hud](https://github.com/jarrodwatts/claude-hud) 这个 statusline 插件——宠物读的是它维护的 usage 缓存，而不是自己去调 Anthropic 的 usage API，所以不碰你的 OAuth token、也不占你的 rate limit。没装那个插件的话，除了额度以外一切照常。
 
-**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加十条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Notification / PermissionRequest / PreCompact / Stop / StopFailure / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
+**这个脚本会改你的 `~/.claude/settings.json`**：往 hooks 里追加十一条 `pet-emit`（SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure / Notification / PermissionRequest / PreCompact / Stop / StopFailure / SessionEnd），已有的 hook 一条不动、一个字节不改。备份、原子写、写完解析校验、出问题回滚都在 `pet-emit --patch-settings` 里做。settings.json 写坏了本机所有 session 都受影响，这是整个项目风险最高的一步，所以备份别删。
 
 装完要开一个新的 Claude Code session 才会生效，已经开着的不受影响。
 

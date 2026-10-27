@@ -631,7 +631,11 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // A session sharing its project with another shows its name here instead of
     // the notification text: the first column cannot tell them apart.
     const note = rows[i].querySelector(".note");
-    if (s.nameInline && s.title) {
+    if (s.struggle) {
+      // A session failing over and over outranks its own notification text.
+      note.textContent = s.struggle;
+      note.classList.add("bad");
+    } else if (s.nameInline && s.title) {
       note.textContent = s.title;
       note.classList.add("name");
     } else {

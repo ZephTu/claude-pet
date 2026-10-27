@@ -179,6 +179,7 @@ private extension SessionState {
             detail: detail, since: since, updatedAt: updatedAt, terminal: terminal,
             pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
             promptId: promptId, phase: phase, troubleAt: troubleAt,
-            backgroundAgents: backgroundAgents, askId: "")
+            backgroundAgents: backgroundAgents, askId: "",
+            failStreak: failStreak, failTarget: failTarget)
     }
 }

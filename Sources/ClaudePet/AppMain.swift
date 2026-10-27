@@ -277,7 +277,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         phase: StateAggregator.phase(state.sessions),
                                         flash: "",
                                         wanted: !badge.isEmpty,
-                                        blockedOn: state.waitingOn, motion: motion))
+                                        blockedOn: state.waitingOn, motion: motion,
+                                        struggling: state.sessions.contains(where: Struggle.isStruggling)))
         // A "done" line has no timer, so something has to retire it. Going back
         // to work is that something: once a session is busy again, the user has
         // plainly seen the news or stopped caring about it.
@@ -286,8 +287,45 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             bridge?.hush()
             stickyBubble = false
         }
+        noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
+    }
+
+    // MARK: - Away and back
+
+    /// When nobody has touched the machine since, or nil while somebody is
+    /// at it. Set once input has been idle for `AwayReport.awayAfter`.
+    private var awayStart: Date?
+    /// The five-hour quota reading at that moment, to say how much went.
+    private var quotaAtLeave: Int?
+
+    /// Says what happened while the person was away, once, as they come back.
+    private func noticeReturn(_ state: GlobalState, now: Date) {
+        guard !paused else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if awayStart == nil {
+            if idle >= AwayReport.awayAfter {
+                awayStart = now.addingTimeInterval(-idle)
+                quotaAtLeave = currentUsage()?.fiveHourPercent
+            }
+            return
+        }
+        guard let start = awayStart, idle < AwayReport.backWithin else { return }
+        awayStart = nil
+        let names = sessionNames(state)
+        let waiting = state.sessions
+            .filter { $0.state == .waiting }
+            .sorted { $0.since < $1.since }
+            .map { AwayReport.Waiting(name: names[$0.sessionId] ?? $0.project,
+                                      waited: now.timeIntervalSince($0.since)) }
+        let finished = (completions?.events ?? []).filter { $0.finishedAt >= start }.count
+        let used = currentUsage().flatMap { now in quotaAtLeave.map { now.fiveHourPercent - $0 } }
+        guard let line = AwayReport.line(away: now.timeIntervalSince(start), finished: finished,
+                                         waiting: waiting, quotaUsed: used) else { return }
+        bridge?.say(line, hold: 15, variant: .notice)
+        lastAnything = now
     }
 
     // MARK: - Talking

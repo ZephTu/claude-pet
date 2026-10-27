@@ -31,6 +31,10 @@ enum SettingsPatch {
         "PreCompact",
         // A turn that dies on an API error fires this INSTEAD of Stop.
         "StopFailure",
+        // A tool call that fails fires this INSTEAD of PostToolUse. Without it
+        // the failed call stayed "running" until the turn ended, and a session
+        // failing the same test over and over looked like steady work.
+        "PostToolUseFailure",
     ]
 
     /// Returns a process exit code: 0 on success, 1 on failure.
