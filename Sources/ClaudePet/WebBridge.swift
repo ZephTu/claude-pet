@@ -18,6 +18,8 @@ final class WebBridge {
     var onMute: ((String) -> Void)?
     /// The session list just became visible.
     var onPanelOpened: (() -> Void)?
+    /// A finish notice above the pet was clicked: the session it is about.
+    var onOpenNotice: ((String) -> Void)?
     /// The user answered a permission prompt from the pet: session, ask, answer.
     var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
     /// The user acknowledged these finished turns.
@@ -128,6 +130,8 @@ final class WebBridge {
                     return
                 }
                 switch row["action"] as? String {
+                case "openNotice":
+                    if let id = row["sessionId"] as? String, !id.isEmpty { self.onOpenNotice?(id) }
                 case "decide":
                     guard
                         let id = row["sessionId"] as? String, !id.isEmpty,
@@ -206,9 +210,19 @@ final class WebBridge {
 
     /// One "this session finished" notice in the stack above the pet. Unlike
     /// `say`, it never replaces anything: each keeps its own `hold`.
-    func notify(_ text: String, hold: TimeInterval, emphasis: String = "") {
+    /// - Parameter jumpable: whether a click can go to the session's terminal,
+    ///   which the notice says with a ↗ like a jumpable row does.
+    func notify(_ text: String, hold: TimeInterval, emphasis: String = "",
+                sessionId: String = "", jumpable: Bool = false) {
         guard isReady else { return }
-        evaluate("window.notify(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)));")
+        evaluate("window.notify(\(jsString(text)), \(Int(hold * 1000)), \(jsString(emphasis)), "
+                 + "\(jsString(sessionId)), \(jumpable));")
+    }
+
+    /// Takes down the notices for one session — it has just been opened.
+    func dismissNotice(_ sessionId: String) {
+        guard isReady else { return }
+        evaluate("window.dismissNotice(\(jsString(sessionId)));")
     }
 
     /// Routes a right click: a session row gets its own menu, anything else

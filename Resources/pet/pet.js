@@ -43,7 +43,25 @@ function reportLayout() {
   };
   const handler =
     window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.layout;
-  if (handler) handler.postMessage({ panel: box(panel), bubble: box(bubble) });
+  // The finish notices are clickable (each opens its session), so their
+  // column counts as message area too. One rectangle for both: Swift tests the
+  // pointer against it, and the two always sit stacked in the same corner.
+  let message = box(bubble);
+  if (notices.children.length) {
+    const r = notices.getBoundingClientRect();
+    const n = { x: r.left, y: r.top, w: r.width, h: r.height };
+    if (!message) {
+      message = n;
+    } else {
+      const x = Math.min(message.x, n.x), y = Math.min(message.y, n.y);
+      message = {
+        x: x, y: y,
+        w: Math.max(message.x + message.w, n.x + n.w) - x,
+        h: Math.max(message.y + message.h, n.y + n.h) - y,
+      };
+    }
+  }
+  if (handler) handler.postMessage({ panel: box(panel), bubble: message });
 }
 
 /* ---- Words ----------------------------------------------------------------
@@ -377,8 +395,8 @@ window.showQuota = function (rows, fallback) {
    second replaced the first, and a third inside the cooldown was never said.
    Each finish now gets its own notice with its own timer, newest nearest the
    pet, older ones pushed up. The stack is capped, and when it is full the
-   oldest gives way early — it is still in the Finished list. The notices take
-   no clicks, so they are not part of the hit region Swift is told about. */
+   oldest gives way early — it is still in the Finished list. A click on one
+   goes to its session, exactly like its row in Finished. */
 const MAX_NOTICES = 3;
 const NOTICE_GAP = 6;
 /* Same anchor as #bubble's `bottom`. */
@@ -405,22 +423,43 @@ function placeNotices() {
   }
 }
 
+/** A notice disappearing has to tell Swift, or its old rectangle keeps eating clicks. */
+function noticeGone(el) {
+  dropNotice(el);
+  reportLayout();
+}
+
 /**
  * Add one "this session finished" notice for `holdMs`.
  * @param {string} text e.g. "api-server: All 12 tests pass"
  * @param {number} holdMs
  * @param {string} [emphasis] the session's name inside `text`
  */
-window.notify = function (text, holdMs, emphasis) {
+window.notify = function (text, holdMs, emphasis, sessionId, jumpable) {
   // The open list already shows these as rows in Finished.
   if (!panel.hidden) return;
   const el = document.createElement("div");
   el.className = "notice-item";
   fill(el, text, emphasis);
+  el.dataset.sessionId = sessionId || "";
+  if (jumpable) {
+    const go = document.createElement("span");
+    go.className = "jump";
+    go.textContent = "\u2197";
+    el.appendChild(go);
+  }
   notices.appendChild(el);
   while (notices.children.length > MAX_NOTICES) dropNotice(notices.firstChild);
-  el._timer = setTimeout(function () { dropNotice(el); }, holdMs);
-  placeNotices();
+  el._timer = setTimeout(function () { noticeGone(el); }, holdMs);
+  reportLayout();
+};
+
+/** Called once a notice's session has been opened. */
+window.dismissNotice = function (sessionId) {
+  Array.prototype.slice.call(notices.children).forEach(function (el) {
+    if (el.dataset.sessionId === sessionId) dropNotice(el);
+  });
+  reportLayout();
 };
 
 /** Opening the list takes the notices down: it is carrying the same news. */
@@ -780,6 +819,9 @@ window.setPanelOpen = function (open) {
 window.hitRow = function (x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el || !el.closest) return null;
+  // A finish notice above the pet opens its session.
+  const notice = el.closest(".notice-item");
+  if (notice) return { action: "openNotice", sessionId: notice.dataset.sessionId || "" };
   // Allow / Deny, in a row or in the alarm. Checked before anything else: they
   // sit inside a jumpable row, and a click meant to approve must never instead
   // switch terminals.

@@ -323,6 +323,14 @@ public enum Chatter {
     /// corner of the screen, not a row; the full line is in the list.
     public static let summaryInBubble = 60
 
+    /// A "this session finished" notice, and which session it is about — so a
+    /// click on it can go there.
+    public struct DoneNotice: Sendable, Equatable {
+        public let sessionId: String
+        public let text: String
+        public let emphasis: String
+    }
+
     /// One notice per session that just came to rest, oldest first.
     ///
     /// Not rate-limited: each is a real transition and cannot run away on its
@@ -330,14 +338,14 @@ public enum Chatter {
     /// two sessions finishing close together.
     public static func doneNotices(previous: GlobalState?, current: GlobalState,
                                    names: [String: String] = [:],
-                                   summaries: [String: String] = [:]) -> [Utterance] {
+                                   summaries: [String: String] = [:]) -> [DoneNotice] {
         guard let previous else { return [] }
         return justFinished(previous: previous, current: current).map { session in
             let name = names[session.sessionId] ?? session.project
-            return Utterance(kind: .sessionDone,
-                             text: doneText(session, name: name,
-                                            summary: summaries[session.sessionId] ?? ""),
-                             emphasis: name)
+            return DoneNotice(sessionId: session.sessionId,
+                              text: doneText(session, name: name,
+                                             summary: summaries[session.sessionId] ?? ""),
+                              emphasis: name)
         }
     }
 

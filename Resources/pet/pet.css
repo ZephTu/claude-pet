@@ -350,6 +350,10 @@ html, body {
   font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
   animation: notice-in 0.18s ease-out;
 }
+.notice-item .jump { margin-left: 5px; color: #a99f96; }
+/* The column ignores the pointer, but each notice is clickable (it opens its
+   session), and elementFromPoint skips anything with pointer-events:none. */
+.notice-item { pointer-events: auto; }
 @keyframes notice-in { from { opacity: 0; transform: translateY(4px); } }
 #stage.calm .notice-item { animation: none; }
 

@@ -142,6 +142,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             self?.updateDwell(at: point, panelOpen: panelOpen)
         }
         bridge.onMute = { [weak self] id in self?.mute(sessionID: id) }
+        bridge.onOpenNotice = { [weak self] id in self?.openNotice(sessionID: id) }
         bridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
         }
@@ -338,7 +339,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                           names: sessionNames(state),
                                           summaries: latestSummaries(now: now))
         for notice in notices {
-            bridge?.notify(notice.text, hold: Chatter.noticeHold, emphasis: notice.emphasis)
+            let terminal = state.sessions.first { $0.sessionId == notice.sessionId }?.terminal
+            bridge?.notify(notice.text, hold: Chatter.noticeHold, emphasis: notice.emphasis,
+                           sessionId: notice.sessionId,
+                           jumpable: terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false)
         }
         if !notices.isEmpty {
             lastSpoken[.sessionDone] = now
@@ -959,6 +963,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Acknowledging finishes. Re-rendering immediately is what makes the badge
     /// and the list agree without waiting for the next tick.
+    /// A click on a finish notice: the same as clicking that session's row in
+    /// Finished. Go there and call its finishes read; with nowhere to go, open
+    /// the list, which is where the row is.
+    private func openNotice(sessionID: String) {
+        bridge?.dismissNotice(sessionID)
+        guard let terminal = latest.first(where: { $0.sessionId == sessionID })?.terminal,
+              TerminalTarget.canJump(kind: terminal.kind) else {
+            bridge?.setPanelOpen(true)
+            return
+        }
+        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
+        markRead((completions?.unread ?? []).filter { $0.sessionId == sessionID }.map(\.eventId))
+    }
+
     private func markRead(_ ids: [String]) {
         completions?.markRead(ids)
         render()

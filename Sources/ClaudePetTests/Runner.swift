@@ -910,6 +910,8 @@ struct Runner {
                 Chatter.next(state: oneDone, previous: wasBusy, usage: nil, now: t0,
                              lastSpoken: [:], lastAnything: nil) == nil)
         t.check("a notice stays up for ten seconds", Chatter.noticeHold == 10)
+        t.check("each notice knows its session, so a click can go there",
+                notices.map(\.sessionId) == ["a", "b"])
 
         // ---- CompletionQueue: finishes must survive not being shown ----
         // The bug this exists for: a finish that happens while another session is
