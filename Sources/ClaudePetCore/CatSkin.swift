@@ -1,42 +1,7 @@
 import Foundation
 
-/// Which figure the pet draws.
-///
-/// The robot is an SVG whose every state is a CSS rule. A skin made of painted
-/// artwork cannot work that way — it has as many states as it has pictures —
-/// so a second skin is not a re-skin of the first, it is a lossy projection of
-/// the pet's state onto however many pictures exist.
-public enum PetSkin: String, Sendable, Equatable, CaseIterable {
-    case robot
-    case cat
-
-    public var displayName: String {
-        switch self {
-        case .robot: return "Robot"
-        case .cat: return "Cat"
-        }
-    }
-
-    /// What a machine with nothing stored yet draws. The cat: it has a picture
-    /// for nearly every state the pet has, and the robot's one advantage — a
-    /// lamp that separates the busy states — stopped being an advantage when
-    /// compaction, reading and waiting-on-an-agent got drawings of their own.
-    ///
-    /// Not the same thing as the WebGL fallback. If the cat cannot draw, the
-    /// page reverts to the robot and says so (see `revertToRobot`); that path
-    /// has to stay the robot whatever the default is, because the robot is the
-    /// one that cannot fail.
-    public static let standard: PetSkin = .cat
-
-    /// Unknown values decode to the default rather than to nothing: a settings
-    /// file written by a newer build must not leave the user with no pet.
-    public static func named(_ raw: String?) -> PetSkin {
-        PetSkin(rawValue: raw ?? "") ?? standard
-    }
-}
-
-/// Pose and host-drawn glyph for the cat skin. Busy activity, compaction and
-/// background-agent waiting now have distinct artwork. The host still owns
+/// Pose and host-drawn glyph for the cat. Busy activity, compaction and
+/// background-agent waiting have distinct artwork. The host still owns
 /// question/approval glyphs so their meaning is independent of the picture.
 public enum CatSkin {
     public enum Pose: String, Sendable, Equatable, CaseIterable {
@@ -59,8 +24,7 @@ public enum CatSkin {
         /// It wants you to type something.
         case question
         /// It wants a decision, or a tool call came back interrupted. One glyph
-        /// for both, exactly as the robot does it — its monitor shows the same
-        /// warning in both cases, and the POSE is what tells them apart.
+        /// for both; the POSE is what tells them apart.
         case warn
     }
 

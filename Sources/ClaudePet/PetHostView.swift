@@ -74,13 +74,9 @@ final class PetHostView: NSView {
     /// in CSS, the boxes move here, and the two must change together.
     var isMirrored = false
 
-    /// Which figure is on screen. The hit region is measured off the drawing,
-    /// so swapping the drawing has to swap the rectangles with it.
-    var skin: PetSkin = .standard
-
     func opaqueRegionContains(_ p: NSPoint) -> Bool {
         PetLayout.isOpaque(at: cssPoint(from: p), panel: panelRect, bubble: bubbleRect,
-                           mirrored: isMirrored, skin: skin)
+                           mirrored: isMirrored)
     }
 
     // MARK: - Event routing

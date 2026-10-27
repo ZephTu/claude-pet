@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Pet — one-shot installer
 #
-# Afterwards a small robot lives on your desktop and mirrors the state of every
+# Afterwards a small cat lives on your desktop and mirrors the state of every
 # Claude Code session on this machine: green lamp while something is working,
 # amber while a session waits on you, red once it has waited a minute, dark when
 # everything is done.
@@ -109,7 +109,7 @@ say "==> app installed at $APP_DEST"
 open "$APP_DEST" 2>/dev/null || die "the app is installed but would not start; try opening $APP_DEST by hand"
 
 say ""
-say "Done 🎉 — a small robot should now be sitting in the bottom-right of your screen."
+say "Done 🎉 — a small cat should now be sitting in the bottom-right of your screen."
 say ""
 say "Worth knowing:"
 say "  · hooks only take effect in a NEWLY STARTED Claude Code session; open ones are unaffected"

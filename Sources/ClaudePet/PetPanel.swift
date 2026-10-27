@@ -228,11 +228,7 @@ final class PetPanel: NSPanel {
         webView.load(URLRequest(url: index))
     }
 
-    /// Which figure to draw. Changing it re-renders the page's pet slot; it does
-    /// not reload anything.
-    func setSkin(_ skin: PetSkin) { host.skin = skin }
-
-    /// The page could not draw the skin it was given and is showing the robot.
+    /// The cat could not draw itself and the page is showing still pictures.
     var onSkinFailed: ((String) -> Void)? {
         get { layoutHandler?.onSkinFailed }
         set { layoutHandler?.onSkinFailed = newValue }
@@ -335,8 +331,8 @@ extension PetPanel: WKNavigationDelegate {
 @MainActor
 final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
     private let onLayout: (CGRect?, CGRect?) -> Void
-    /// A skin that could not draw itself; the page has already fallen back to
-    /// the robot and this is how Swift finds out.
+    /// The cat could not draw itself; the page has already fallen back to its
+    /// still pictures and this is how Swift finds out.
     var onSkinFailed: ((String) -> Void)?
 
     init(onLayout: @escaping (CGRect?, CGRect?) -> Void) {
@@ -345,8 +341,6 @@ final class LayoutMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any] else { return }
-        // The page draws the robot instead, but the hit rectangles live on this
-        // side — without this the cat's box would be tested against a robot.
         if let why = body["skinFailed"] as? String { onSkinFailed?(why) }
         onLayout(Self.rect(body["panel"]), Self.rect(body["bubble"]))
     }

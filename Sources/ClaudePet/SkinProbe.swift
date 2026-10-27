@@ -7,15 +7,14 @@ import WebKit
 ///
 /// This exists because the one thing no test in this project can check is
 /// whether the drawing and the rectangles agree — the README says so, and the
-/// mirrored-layout bug proved it: every test passed and the antenna was still
-/// outside its hit region. A skin system doubles that surface, so the answer is
-/// to make looking cheap.
+/// mirrored-layout bug proved it: every test passed and part of the figure was
+/// still outside its hit region. The answer is to make looking cheap.
 ///
 /// `takeSnapshot` captures the page without the screen-recording permission
 /// this app has no business asking for, and the page loads through the real
 /// `pet://` handler, so a texture that would hang in production hangs here too.
 ///
-///     ClaudePet --probe-skin index.html /tmp/cat.png 'window.setSkin("cat")'
+///     ClaudePet --probe-skin index.html /tmp/cat.png 'window.setCatLook("working", "none")'
 ///
 /// `film` is the same thing over time, for the README's animation. The page
 /// drives its own state — the setup script installs whatever schedule it wants

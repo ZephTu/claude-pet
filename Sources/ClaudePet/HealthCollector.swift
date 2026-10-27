@@ -70,6 +70,23 @@ enum HealthCollector {
         ]
     }
 
+    /// The first thing wrong that can be found without a subprocess, or nil.
+    ///
+    /// Cheap enough to run on every right-click and at launch, which is what
+    /// lets the menu leave the connection report out until it has something
+    /// to say. Only the checks that mean "the pet cannot see your sessions":
+    /// hooks missing from settings.json, pet-emit gone, or nowhere to write.
+    static func quickProblem(petHome: URL) -> HealthCheck? {
+        let (installed, expected, binaryOK) = hookState(petHome: petHome)
+        let fm = FileManager.default
+        let writable = fm.isWritableFile(atPath: petHome.path)
+            || (try? fm.createDirectory(at: petHome, withIntermediateDirectories: true)) != nil
+        return [
+            HealthReport.hooks(installed: installed, expected: expected, binaryExists: binaryOK),
+            HealthReport.stateFiles(writable: writable, count: 0, corrupt: 0),
+        ].first { $0.status == .needsAttention }
+    }
+
     /// Where Claude Code is and what version it reports.
     ///
     /// Two subprocesses, run only when the user opens this window — never on a

@@ -162,49 +162,25 @@ struct Runner {
         // two numbers ever drift apart, every hit-test coordinate below is wrong.
         t.check("pet box matches #pet's right:20 bottom:20 in pet.css",
                 PetLayout.petBox.maxX == win.maxX - 20 && PetLayout.petBox.maxY == win.maxY - 20)
-        t.check("pet box centre is the SVG viewBox origin",
+        t.check("pet box centre is petCenter",
                 PetLayout.petBox.midX == PetLayout.petCenter.x
                 && PetLayout.petBox.midY == PetLayout.petCenter.y)
         t.check("panel and pet box do not overlap",
                 !expandedPanel.intersects(PetLayout.petBox))
-        t.check("both hit boxes stay inside the pet box",
-                PetLayout.petBox.contains(PetLayout.bodyBox)
-                && PetLayout.petBox.contains(PetLayout.antennaBox))
-        // The antenna box hangs above the body box. A gap between them would be
-        // a dead strip across the robot's neck.
-        t.check("antenna box overlaps the body box, leaving no dead strip",
-                PetLayout.antennaBox.maxY >= PetLayout.bodyBox.minY
-                && PetLayout.bodyBox.minX <= PetLayout.antennaBox.minX
-                && PetLayout.bodyBox.maxX >= PetLayout.antennaBox.maxX)
+        t.check("the cat's box stays inside the pet box",
+                PetLayout.petBox.contains(PetLayout.bodyBox))
 
         func opaque(_ x: CGFloat, _ y: CGFloat,
                     panel: CGRect? = nil, bubble: CGRect? = nil) -> Bool {
             PetLayout.isOpaque(at: CGPoint(x: x, y: y), panel: panel, bubble: bubble)
         }
-        // viewBox coordinate -> stage coordinate, the same mapping pet.css uses.
-        func at(_ vx: CGFloat, _ vy: CGFloat) -> CGPoint {
-            CGPoint(x: PetLayout.petCenter.x + vx, y: PetLayout.petCenter.y + vy)
-        }
-        func opaqueAt(_ vx: CGFloat, _ vy: CGFloat) -> Bool {
-            let p = at(vx, vy)
-            return opaque(p.x, p.y)
+        // Offsets from the pet's centre, so the checks read as "on the cat".
+        func opaqueAt(_ dx: CGFloat, _ dy: CGFloat) -> Bool {
+            opaque(PetLayout.petCenter.x + dx, PetLayout.petCenter.y + dy)
         }
 
-        t.check("the robot's torso is opaque", opaqueAt(-9, 6))
-        t.check("the monitor is opaque", opaqueAt(30, 0))
-        // The desk runs the full width of the drawing; the old circular region
-        // left both of its ends unclickable.
-        t.check("the desk's left end is opaque", opaqueAt(-44, 21))
-        t.check("the desk's right end is opaque", opaqueAt(44, 21))
-        // The bulb sits above the body box and is the brightest thing on screen;
-        // without antennaBox it would look clickable and pass clicks through.
-        t.check("the antenna bulb is opaque", opaqueAt(-8.7, -40.5))
-        t.check("the top of the antenna is opaque", opaqueAt(-9, -49))
-        t.check("above the antenna is transparent", !opaqueAt(-9, -56))
-        // urgent lifts the figure 5pt; the head must stay reachable mid-jolt.
-        t.check("the robot's head is opaque at rest", opaqueAt(-9, -18))
-        t.check("the robot's head is still opaque lifted 5pt by the urgent jolt",
-                opaqueAt(-9, -23))
+        t.check("the cat's middle is opaque", opaqueAt(0, 0))
+        t.check("the cat's paws are opaque", opaqueAt(0, 45))
         // Most of the window is transparent and must pass clicks through to whatever is under it
         // Mirrored layout: the pet moves to the window's left, so every box that
         // knows where it is has to move with it or the figure stops being
@@ -212,16 +188,11 @@ struct Runner {
         t.check("mirroring keeps the box the same size",
                 PetLayout.mirrored(PetLayout.bodyBox).width == PetLayout.bodyBox.width
                 && PetLayout.mirrored(PetLayout.bodyBox).height == PetLayout.bodyBox.height)
-        // The assertion that matters, and the one an earlier version got wrong:
-        // flipping MOVES the pet element, it does not mirror the drawing inside
-        // it. So every box keeps its offset within the pet. Reflecting instead
-        // gives the right answer for bodyBox — symmetric inside the pet — and
-        // puts the antenna bulb outside its own hit region.
-        for box in [PetLayout.bodyBox, PetLayout.antennaBox] {
-            t.check("a mirrored box keeps its offset inside the pet",
-                    PetLayout.mirrored(box).minX - PetLayout.mirroredPetBox.minX
-                        == box.minX - PetLayout.petBox.minX)
-        }
+        // Flipping MOVES the pet element, it does not mirror the drawing inside
+        // it, so the box keeps its offset within the pet.
+        t.check("a mirrored box keeps its offset inside the pet",
+                PetLayout.mirrored(PetLayout.bodyBox).minX - PetLayout.mirroredPetBox.minX
+                    == PetLayout.bodyBox.minX - PetLayout.petBox.minX)
         // The panel and the pet must not overlap at either width — this is what
         // stops a wider panel from creeping under the figure.
         let panelRight: CGFloat = 2 + 310
@@ -230,17 +201,13 @@ struct Runner {
         t.check("and the mirrored panel does too",
                 PetLayout.windowSize.width - panelRight > PetLayout.mirroredPetBox.maxX)
 
-        t.check("the mirrored boxes stay inside the mirrored pet",
-                PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.bodyBox))
-                && PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.antennaBox)))
+        t.check("the mirrored box stays inside the mirrored pet",
+                PetLayout.mirroredPetBox.contains(PetLayout.mirrored(PetLayout.bodyBox)))
         // Not an involution, and it should not be: this maps normal → flipped,
         // and the pet only ever moves in that one direction.
         t.check("everything shifts by exactly the pet's own displacement",
                 PetLayout.mirrored(PetLayout.bodyBox).minX - PetLayout.bodyBox.minX
                     == PetLayout.mirroredPetBox.minX - PetLayout.petBox.minX)
-        t.check("the antenna stays above the body after mirroring",
-                PetLayout.mirrored(PetLayout.antennaBox).maxY
-                    >= PetLayout.mirrored(PetLayout.bodyBox).minY)
         let mirroredBody = PetLayout.mirrored(PetLayout.bodyBox)
         t.check("a point on the mirrored body is opaque only when mirrored",
                 PetLayout.isOpaque(at: CGPoint(x: mirroredBody.midX, y: mirroredBody.midY),
@@ -324,9 +291,8 @@ struct Runner {
                 PetLayout.rescued(windowOrigin: CGPoint(x: -240, y: 100),
                                   visibleFrame: desk) == nil)
 
-        t.check("beyond the desk's left end is transparent", !opaqueAt(-54, 21))
-        t.check("beyond the desk's right end is transparent", !opaqueAt(54, 21))
-        t.check("below the desk is transparent", !opaqueAt(0, 40))
+        t.check("left of the cat is transparent", !opaqueAt(-58, 0))
+        t.check("below the cat is transparent", !opaqueAt(0, 58))
         t.check("the window's far corner is transparent", !opaque(10, 10))
         t.check("the collapsed panel's area is transparent", !opaque(100, 250))
         t.check("the expanded panel's area is opaque", opaque(100, 250, panel: expandedPanel))
@@ -808,184 +774,6 @@ struct Runner {
                 Chatter.duration(until: t0.addingTimeInterval(-60), now: t0) == "now")
 
 
-        // ---- Wellness: how long you have been at the desk ----
-        //
-        // There is no keyboard to watch, so "still here" is the newest updatedAt
-        // across live sessions. Every case below is about the one judgement that
-        // matters: what counts as having got up and walked away.
-        func atDesk(_ signAgo: TimeInterval, at when: Date) -> [SessionState] {
-            [SessionState(sessionId: "w", project: "w", cwd: "/tmp", state: .busy, tool: "",
-                          detail: "", since: when.addingTimeInterval(-signAgo),
-                          updatedAt: when.addingTimeInterval(-signAgo))]
-        }
-
-        // Ten minutes of work, sampled every five: the stretch adds up.
-        var clock = Wellness.DeskClock()
-        for step in stride(from: 0.0, through: 600.0, by: 300.0) {
-            let at = t0.addingTimeInterval(step)
-            clock = Wellness.advance(clock, sessions: atDesk(0, at: at), now: at)
-        }
-        t.check("the desk clock adds up an unbroken stretch",
-                Int(clock.sitting(now: t0.addingTimeInterval(600))) == 600)
-
-        // Seen by a pet that kept running through the break: the stretch ends as
-        // soon as nothing has stirred for half an hour, without waiting for
-        // anyone to come back and prove it.
-        let midBreak = t0.addingTimeInterval(600 + 31 * 60)
-        t.check("a stretch ends while the chair is still empty",
-                Wellness.advance(clock, sessions: atDesk(31 * 60, at: midBreak), now: midBreak)
-                    .startedAt == nil)
-
-        // Seen by a pet that was asleep or shut down for the same break: the gap
-        // is between the two signs of life, not against the wall clock.
-        let backAt = t0.addingTimeInterval(600 + 31 * 60)
-        t.check("half an hour away resets the stretch",
-                Int(Wellness.advance(clock, sessions: atDesk(0, at: backAt), now: backAt)
-                    .sitting(now: backAt)) == 0)
-
-        let shortGap = t0.addingTimeInterval(600 + 29 * 60)
-        t.check("a 29-minute gap is a coffee, not a break",
-                Int(Wellness.advance(clock, sessions: atDesk(0, at: shortGap), now: shortGap)
-                    .sitting(now: shortGap)) == 600 + 29 * 60)
-
-        t.check("no sessions means nobody at the desk",
-                Wellness.advance(clock, sessions: quiet.sessions, now: t0).startedAt == nil)
-
-        // ---- Wellness: what it says, and when it has earned the right ----
-        func sat(_ hours: Double) -> Wellness.DeskClock {
-            Wellness.DeskClock(startedAt: t0.addingTimeInterval(-hours * 3600), lastActive: t0)
-        }
-        let corpus = ["Keep going.", "One thing at a time."]
-        func nudge(_ clock: Wellness.DeskClock, working: Bool = true,
-                   greetedDay: Int? = Wellness.day(t0), when: Date = t0) -> Wellness.Nudge? {
-            Wellness.nudge(clock: clock, working: working, greetedDay: greetedDay,
-                           quotes: corpus, language: .english, now: when)
-        }
-
-        t.check("119 minutes at the desk is not worth mentioning",
-                nudge(sat(119.0 / 60)) == nil)
-        t.check("two hours at the desk is",
-                nudge(sat(2))?.kind == .sitLong)
-        t.check("the break line says how long it has been",
-                nudge(sat(3))?.text.contains("3h") == true)
-
-        t.check("the first work of the day gets a line",
-                nudge(sat(0), greetedDay: nil)?.kind == .greeting)
-        t.check("and only the first",
-                nudge(sat(0))?.kind != .greeting)
-        t.check("nothing to greet while no session is working",
-                nudge(sat(0), working: false, greetedDay: nil) == nil)
-        t.check("yesterday's greeting does not count for today",
-                nudge(sat(0), greetedDay: Wellness.day(t0) - 1)?.kind == .greeting)
-        // Both earned at once: the once-a-day line wins, and the break nudge is
-        // still standing there on the next pass.
-        t.check("the greeting outranks the break nudge",
-                nudge(sat(4), greetedDay: nil)?.kind == .greeting)
-
-        t.check("the greeting is one of the quotes",
-                corpus.contains(nudge(sat(0), greetedDay: nil)?.text ?? ""))
-        // Restarting the pet at lunchtime must not reshuffle the day's line.
-        t.check("the quote does not change during the day",
-                nudge(sat(0), greetedDay: nil)?.text
-                    == nudge(sat(0), greetedDay: nil, when: t0.addingTimeInterval(3 * 3600))?.text)
-        t.check("a new day brings a different line",
-                nudge(sat(0), greetedDay: nil)?.text
-                    != nudge(sat(0), greetedDay: nil, when: t0.addingTimeInterval(86400))?.text)
-
-        // quotes.json is a file on disk and files go missing; the day's first
-        // line is not allowed to be the empty string.
-        t.check("an unreadable quotes file still leaves something to say",
-                Wellness.nudge(clock: sat(0), working: true, greetedDay: nil, quotes: [],
-                               language: .english, now: t0)?.text.isEmpty == false)
-        t.check("and something to say in Chinese",
-                Wellness.nudge(clock: sat(0), working: true, greetedDay: nil, quotes: [],
-                               language: .chinese, now: t0)?.text.isEmpty == false)
-
-        t.check("the break nudge rotates what it asks for",
-                Set((0..<Phrases.sitLongVariants).map {
-                    Phrases.sitLong(hours: 2, variant: $0, language: .english)
-                }).count == Phrases.sitLongVariants)
-        t.check("the Chinese break nudge names the hours too",
-                Phrases.sitLong(hours: 3, variant: 0, language: .chinese).contains("3"))
-        t.check("a Chinese locale gets Chinese",
-                Phrases.Language.resolve(["zh-Hans-CN", "en-US"]) == .chinese)
-        t.check("anything else gets English",
-                Phrases.Language.resolve(["fr-FR"]) == .english
-                    && Phrases.Language.resolve([]) == .english)
-
-        // ---- Wellness: where these lines sit against the rest ----
-        let greetingNudge = Wellness.Nudge(kind: .greeting, text: "Keep going.")
-        let breakNudge = Wellness.Nudge(kind: .sitLong, text: "3h at the desk — stand up")
-        t.check("a wellness line is said when nothing outranks it",
-                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             wellness: greetingNudge)?.kind == .greeting)
-        t.check("no wellness line while a session waits on the user",
-                Chatter.next(state: waitingState, previous: quiet, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             wellness: greetingNudge) == nil)
-        // Which session came to rest is the one line the user is actively waiting
-        // for; a quote must never take its place.
-        t.check("a finished session outranks the greeting",
-                Chatter.next(state: oneFinished, previous: twoBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             wellness: greetingNudge)?.kind == .sessionDone)
-        // The greeting gets one moment a day, so it outranks the low-value lines
-        // rather than being quietly spent on a render where one of them fired.
-        t.check("the greeting is not lost to a long-running session",
-                Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             wellness: greetingNudge)?.kind == .greeting)
-        // The break nudge has no such claim: it comes round again in 45 minutes.
-        t.check("a long-running session outranks the break nudge",
-                Chatter.next(state: longBusy, previous: longBusy, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: nil,
-                             wellness: breakNudge)?.kind == .longRun)
-        t.check("the break nudge keeps its own cooldown",
-                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
-                             lastSpoken: [.sitLong: t0.addingTimeInterval(-60)],
-                             lastAnything: nil, wellness: breakNudge) == nil)
-        t.check("wellness lines wait out the global cooldown like everything else",
-                Chatter.next(state: quiet, previous: quiet, usage: nil, now: t0,
-                             lastSpoken: [:], lastAnything: t0.addingTimeInterval(-60),
-                             wellness: greetingNudge) == nil)
-
-        // ---- The shipped corpus ----
-        //
-        // quotes.json is the one thing here that is data rather than code, and
-        // `scripts/fetch-quotes.py` can append to it from the open internet. So
-        // the contract it has to keep is asserted rather than assumed: a line
-        // too long to fit the bubble, or an empty one, would reach a user as a
-        // broken morning and nothing else would have caught it.
-        //
-        // Located from #filePath rather than the working directory, so it holds
-        // wherever the binary is run from.
-        // Sources/ClaudePetTests/Runner.swift -> Sources/ClaudePetTests -> Sources -> root
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let corpusURL = repoRoot.appending(path: "Resources/pet/quotes.json")
-        let corpusData = (try? Data(contentsOf: corpusURL)) ?? Data()
-        let book = (try? JSONDecoder().decode([String: [String]].self, from: corpusData)) ?? [:]
-        t.check("the corpus is on disk and parses", !book.isEmpty)
-        // Below what a quarter of rotation needs; a corpus this thin is a sign
-        // something overwrote it rather than added to it.
-        t.check("both languages carry enough lines to rotate",
-                (book["en"]?.count ?? 0) >= 90 && (book["zh"]?.count ?? 0) >= 90)
-        t.check("no English line overflows the bubble",
-                book["en"]?.allSatisfy { (12...50).contains($0.count) } == true)
-        t.check("no Chinese line overflows the bubble",
-                book["zh"]?.allSatisfy { (6...22).contains($0.count) } == true)
-        t.check("nothing blank made it in",
-                book.values.allSatisfy { lines in
-                    lines.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                })
-        t.check("nothing is in there twice",
-                book.values.allSatisfy { Set($0).count == $0.count })
-        // The pet reads the file by these two keys and nothing else.
-        t.check("the corpus carries exactly the two languages the pet asks for",
-                Set(book.keys) == ["en", "zh"])
-
         // ---- The terminal tab title IS the session's name ----
         // The project column is only a directory name; three sessions in one repo match
         let orcaList = Data("""
@@ -1275,10 +1063,7 @@ struct Runner {
         t.check("quota lines are warnings",
                 Chatter.bubble(for: .quotaHigh) == .warn
                     && Chatter.bubble(for: .quotaResetting) == .warn)
-        t.check("pleasantries are chatter",
-                Chatter.bubble(for: .greeting) == .chat
-                    && Chatter.bubble(for: .sitLong) == .chat
-                    && Chatter.bubble(for: .longRun) == .chat)
+        t.check("remarks are chatter", Chatter.bubble(for: .longRun) == .chat)
         // Which messages stand down while the list is open. The list carries a
         // finished turn as a row of its own and chatter is not news; a quota
         // warning appears nowhere in the list, so it stays.
@@ -1295,7 +1080,7 @@ struct Runner {
 
         t.check("every kind has a window, so none can fall through to the default",
                 Chatter.Kind.allCases.allSatisfy { _ in true }
-                    && Chatter.Kind.allCases.count == 7)
+                    && Chatter.Kind.allCases.count == 5)
 
         // ---- PanelModel: what the user sees, and what survives a session ----
         func panelSess(_ id: String, _ act: SessionActivity, project: String,
@@ -2011,13 +1796,7 @@ struct Runner {
         t.check("no phase at all is the ordinary case",
                 StateAggregator.phase([phased("")]).isEmpty)
 
-        // ---- Skins: distinct artwork for phases and reading ----
-        t.check("nothing stored yet draws the cat",
-                PetSkin.named(nil) == .cat && PetSkin.standard == .cat)
-        t.check("an unknown skin name falls back to the same default",
-                PetSkin.named("weasel") == PetSkin.standard)
-        t.check("a known one is kept",
-                PetSkin.named("cat") == .cat && PetSkin.named("robot") == .robot)
+        // ---- The cat: distinct artwork for phases and reading ----
 
         func look(_ mood: String, phase: String = "", flash: String = "",
                   wanted: Bool = false, blockedOn: String = "",
@@ -2086,46 +1865,27 @@ struct Runner {
         t.check("a transient outranks the state it happens during",
                 look("busy", phase: "compacting", flash: "done").pose == .finished)
 
-        // Hit regions: two shapes, two answers. A cat clickable in the robot's
-        // rectangle is a cat with a dead head and a live patch of desk.
-        let catHead = CGPoint(x: 400, y: 152)      // high in the cat, above the robot's box
-        t.check("the cat is clickable where the cat is",
-                PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .cat))
-        t.check("...and the robot is not, because nothing is drawn there",
-                !PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil, skin: .robot))
-        t.check("the robot's antenna is still its own box",
-                PetLayout.isOpaque(at: CGPoint(x: 390, y: 154), panel: nil, bubble: nil,
-                                   skin: .robot))
-        t.check("both skins are clickable where both are drawn",
-                PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil, skin: .cat)
-                    && PetLayout.isOpaque(at: PetLayout.petCenter, panel: nil, bubble: nil,
-                                          skin: .robot))
+        // Hit region: measured off the artwork, so the whole cat is clickable.
+        let catHead = CGPoint(x: 400, y: 152)
+        t.check("the cat is clickable at its head",
+                PetLayout.isOpaque(at: catHead, panel: nil, bubble: nil))
         t.check("the cat's box moves with a mirrored layout too",
-                PetLayout.isOpaque(at: CGPoint(x: PetLayout.catBodyBox.midX - 320,
-                                               y: PetLayout.catBodyBox.midY),
-                                   panel: nil, bubble: nil, mirrored: true, skin: .cat))
+                PetLayout.isOpaque(at: CGPoint(x: PetLayout.bodyBox.midX - 320,
+                                               y: PetLayout.bodyBox.midY),
+                                   panel: nil, bubble: nil, mirrored: true))
+        t.check("the reading pose's tail is inside the hit region",
+                PetLayout.isOpaque(at: CGPoint(x: 350, y: 220), panel: nil, bubble: nil))
 
-        t.check("new reading tail is inside the cat hit region",
-                PetLayout.isOpaque(at: CGPoint(x: 350, y: 220), panel: nil, bubble: nil, skin: .cat))
-
-        // Resting the pointer and clicking have to ask the same question. The
-        // quota readout asked the robot's rectangle whatever was drawn, so the
-        // cat's lower quarter was clickable and hoverless at the same time.
-        let catPaws = CGPoint(x: 400, y: 240)      // low in the cat, below the robot's desk
+        // Resting the pointer and clicking have to ask the same question.
+        let catPaws = CGPoint(x: 400, y: 240)
         t.check("resting on the cat's paws counts as resting on the pet",
-                PetLayout.isOnPet(catPaws, skin: .cat))
-        t.check("...and on the robot the same point is not the pet at all",
-                !PetLayout.isOnPet(catPaws, skin: .robot))
-        t.check("the middle of the figure is the pet in either skin",
-                PetLayout.isOnPet(PetLayout.petCenter, skin: .cat)
-                    && PetLayout.isOnPet(PetLayout.petCenter, skin: .robot))
+                PetLayout.isOnPet(catPaws))
         // Same translation the hit region uses: the pet moved, so the question
         // "is the pointer on it" has to move with it.
         t.check("a mirrored layout moves what counts as the pet",
                 PetLayout.isOnPet(CGPoint(x: PetLayout.petCenter.x - 320,
-                                          y: PetLayout.petCenter.y),
-                                  skin: .cat, mirrored: true)
-                    && !PetLayout.isOnPet(PetLayout.petCenter, skin: .cat, mirrored: true))
+                                          y: PetLayout.petCenter.y), mirrored: true)
+                    && !PetLayout.isOnPet(PetLayout.petCenter, mirrored: true))
 
         t.finish()
     }
