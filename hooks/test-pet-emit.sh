@@ -431,5 +431,19 @@ emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
 wait $pid
 check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
+# ---- an editor's integrated terminal ------------------------------------------
+terminal() {  # terminal <session_id> → "kind handle"
+  /usr/bin/python3 -c "import json,sys;t=json.load(open(sys.argv[1])).get('terminal') or {};print(t.get('kind',''),t.get('handle',''))" \
+    "$PET_HOME/sessions/$1.json"
+}
+printf '{"hook_event_name":"SessionStart","session_id":"sC","cwd":"/w/app"}' \
+  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=vscode \
+        __CFBundleIdentifier=com.todesktop.230313mzl4w4u92 "$EMIT"
+check "Cursor's terminal is recorded with the app and the directory" \
+  "$(terminal sC)" "vscode com.todesktop.230313mzl4w4u92|/w/app"
+printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app"}' \
+  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT"
+check "a terminal we cannot address records nothing" "$(terminal sT)" " "
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
