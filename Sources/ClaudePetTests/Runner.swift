@@ -2004,6 +2004,37 @@ struct Runner {
                 AwayReport.line(away: 3600, finished: 1, waiting: [], quotaUsed: -40)
                     == "While you were away (1h 0m): 1 finished")
 
+        // ---- BackgroundShells: a turn over, a command still running ----
+        let wrapper = #"/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1-x.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval 'npm run dev -- --port 3000' < /dev/null && pwd -P >| /tmp/claude-1-cwd"#
+        t.check("the user's command comes out of Claude Code's wrapper",
+                BackgroundShells.command(fromShellArguments: wrapper) == "npm run dev -- --port 3000")
+        t.check("a quote inside the command survives",
+                BackgroundShells.command(fromShellArguments:
+                    #"zsh -c source x/shell-snapshots/snapshot-a && eval 'echo '\''hi'\''' < /dev/null && pwd -P"#)
+                    == "echo 'hi'")
+        t.check("a shell that is not Claude's wrapper yields nothing",
+                BackgroundShells.command(fromShellArguments: "/bin/sh -c make") == nil)
+        let bgShell = BackgroundShells.Shell(command: "npm run dev", since: t0.addingTimeInterval(-720))
+        t.check("a background command reads with how long it has run",
+                BackgroundShells.line(bgShell, now: t0) == "npm run dev · 12m")
+        let bgDetail = SessionDetail.detail(session: mk("b", .idle), insight: nil, lastActivity: nil,
+                                            background: [bgShell], now: t0)
+        t.check("the hover lists what is still running", bgDetail.background == ["npm run dev · 12m"])
+
+        // A real child shell shaped like Claude Code's, under this test runner.
+        let fake = Process()
+        fake.executableURL = URL(fileURLWithPath: "/bin/sh")
+        fake.arguments = ["-c", ": /tmp/shell-snapshots/snapshot-test && eval 'sleep 3' < /dev/null && true"]
+        if (try? fake.run()) != nil {
+            usleep(200_000)
+            let found = BackgroundShells.running(under: ProcessInfo.processInfo.processIdentifier)
+            t.check("a live command shell under a process is found, by its command",
+                    found.map(\.command) == ["sleep 3"])
+            fake.terminate()
+        } else {
+            t.check("could spawn a fake command shell", false)
+        }
+
         t.finish()
     }
 }

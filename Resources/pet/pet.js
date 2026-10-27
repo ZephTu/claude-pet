@@ -97,6 +97,7 @@ const TEXT = {
   // truncated to a different length on every row, because both columns were
   // shrinking in proportion to their own content.
   complete: "Answered",
+  inBackground: " in background",
   idle: "Idle",
   later: "later — ",
   done: "done",
@@ -545,8 +546,26 @@ function whatText(s) {
   // worth distinguishing from one that is merely sitting there. The flag comes
   // from Swift rather than from the second line's text, so suppressing a
   // boilerplate notification does not silently downgrade the row.
-  if (s.replied) return ours(TEXT.complete);
-  return ours(TEXT.idle);
+  // The turn is over but something it started is still running. Said instead
+  // of "Idle"/"Answered" rather than after it: the dot already says it is
+  // resting, and the longer phrase squeezed the name to three letters.
+  if (s.background) return ours(s.background + TEXT.inBackground);
+  return ours(s.replied ? TEXT.complete : TEXT.idle);
+}
+
+/**
+ * Which dot a row gets. Colour says whether it wants you; shape and motion say
+ * what it is doing, so two rows of the same colour still read differently —
+ * and still do with colour taken away.
+ */
+function dotClass(s) {
+  if (s.quiet) return "quiet";
+  if (s.state === "waiting") return s.asks === "permission" ? "waiting approve" : "waiting reply";
+  if (s.state === "busy") {
+    if (s.agent) return "busy agent";
+    return s.struggle ? "busy struggling" : "busy";
+  }
+  return s.background ? "idle bg" : "idle";
 }
 
 /** Markup for one live-session row. */
@@ -566,7 +585,7 @@ function sessionRowHTML(s) {
     ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
   return (
     '<div class="row' + wants + jumpable + napped + '"><div class="line">' +
-    '<span class="dot ' + (s.quiet ? "quiet" : s.state) + '"></span>' +
+    '<span class="dot ' + dotClass(s) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
     // See rowAge: which clock this is, and whether it counts up or counts back.
@@ -949,6 +968,13 @@ window.showDetail = function (d) {
       span(clocks, "dval", d.quiet);
     }
   }
+
+  // Commands the session left running after its turn ended.
+  (d.background || []).slice(0, 3).forEach(function (line) {
+    const bg = row("dlast");
+    span(bg, "ddot", "\u21bb").classList.add("bg");
+    span(bg, "dtext", line);
+  });
 
   if (d.last) {
     const last = row("dlast");

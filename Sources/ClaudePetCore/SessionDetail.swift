@@ -36,10 +36,13 @@ public enum SessionDetail {
         public var last = ""
         /// The last call was interrupted, so the marker beside it warns.
         public var lastBad = false
+        /// Commands still running in the background after the turn ended,
+        /// "npm run dev · 12m" — see BackgroundShells.
+        public var background: [String] = []
 
         public var isEmpty: Bool {
             path.isEmpty && contextPercent == nil && model.isEmpty
-                && turn.isEmpty && last.isEmpty
+                && turn.isEmpty && last.isEmpty && background.isEmpty
         }
     }
 
@@ -47,6 +50,7 @@ public enum SessionDetail {
         session: SessionState,
         insight: SessionInsight?,
         lastActivity: ActivityEntry?,
+        background: [BackgroundShells.Shell] = [],
         now: Date
     ) -> Detail {
         var d = Detail()
@@ -73,6 +77,7 @@ public enum SessionDetail {
             d.last = lastActivity.line()
             d.lastBad = lastActivity.result == .interrupted
         }
+        d.background = background.map { BackgroundShells.line($0, now: now) }
         return d
     }
 

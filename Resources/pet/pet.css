@@ -384,6 +384,7 @@ html, body {
 .ddot { flex: none; font-size: 7px; }
 .ddot.ok  { color: #67a498; }
 .ddot.bad { color: #e0a63c; }
+.ddot.bg  { color: #6fb8ad; font-size: 9px; }
 .qreset {
   flex: none; color: #8a837d; font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -558,6 +559,67 @@ html, body {
 /* Gone quiet: busy on paper, but nothing heard for a while. Hollow rather
    than filled — the pet is saying it does not know, not that it is done. */
 .dot.quiet   { background: none; box-shadow: inset 0 0 0 1.5px #8a6a52; }
+
+/* ---- What the dot says beyond its colour ------------------------------------
+   Colour answers "does it want me"; shape and motion answer "what is it doing",
+   so two rows of one colour still read apart, and still do for someone who
+   cannot tell the colours apart. Every motion here stops with the system's
+   Reduce motion (#stage.calm) and the shapes alone carry it. */
+/* Every dot sits in the same 8px slot, so a bigger one never shifts the name. */
+.dot { position: relative; margin: 0 1px; }
+
+/* Working: breathing, so a live session looks alive next to a stopped one. */
+@keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.dot.busy { animation: dot-breathe 2.4s ease-in-out infinite; }
+
+/* Claude has stopped and an agent it sent off is doing the work: a dashed ring
+   turning slowly — busy, but not Claude's own hands. */
+@keyframes dot-turn { to { transform: rotate(360deg); } }
+.dot.busy.agent {
+  width: 8px; height: 8px; margin: 0;
+  /* A three-quarter arc: a conic fill cut to a ring. A bordered circle with one
+     side transparent rendered as two loose dashes at this size. */
+  background: conic-gradient(#d97757 0 270deg, transparent 270deg);
+  -webkit-mask: radial-gradient(circle, transparent 2.3px, #000 2.6px);
+  animation: dot-turn 1.6s linear infinite;
+}
+
+/* Working, but the last several calls all failed: a small amber corner. */
+.dot.busy.struggling::after {
+  content: ""; position: absolute; right: -3px; top: -3px;
+  width: 4px; height: 4px; border-radius: 50%; background: #e0a63c;
+  box-shadow: 0 0 0 1px #2a2623;
+}
+
+/* Turn over, commands still running under it: the idle dot with a heartbeat
+   ring going out from it. */
+@keyframes dot-beat {
+  0%   { transform: scale(1); opacity: 0.9; }
+  70%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.dot.idle.bg { background: #8fa7a2; }
+.dot.idle.bg::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  box-sizing: border-box; border: 1px solid #6fb8ad;
+  animation: dot-beat 1.8s ease-out infinite;
+}
+
+/* Wanting a decision: a solid amber dot, a size up, with an exclamation bar.
+   Wanting an answer: the same amber as a ring — something to fill in. */
+.dot.waiting.approve { width: 8px; height: 8px; margin: 0; }
+.dot.waiting.approve::after {
+  content: ""; position: absolute; left: 3.25px; top: 1.5px;
+  width: 1.5px; height: 3.2px; border-radius: 1px; background: #2a2623;
+}
+.dot.waiting.reply {
+  width: 8px; height: 8px; margin: 0; box-sizing: border-box;
+  background: none; box-shadow: inset 0 0 0 1.75px #e0a63c;
+}
+.row.needs.urgent .dot.waiting.reply { background: none; box-shadow: inset 0 0 0 1.75px #e0533c; }
+#stage.calm .dot, #stage.calm .dot::after { animation: none !important; }
+/* With motion off the heartbeat has to stay visible as a still halo. */
+#stage.calm .dot.idle.bg::after { transform: scale(1.7); opacity: 0.7; }
 /* The name gives before anything else does.
    flex:none here meant a long session name simply made the row wider than the
    panel, which raised a horizontal scrollbar — and that bar takes vertical

@@ -57,6 +57,22 @@ three times, under three first lines that already said so.
 
 **While you were away.** After ten minutes with no keyboard or mouse input, the pet notes the time and your quota; the first input after that gets one line — `While you were away (42m): 3 finished · tg-server waiting 12m · quota +18%` — and nothing at all if nothing happened.
 
+**The dot at the start of a row** says two things at once: its colour says whether the session wants you, and its shape and motion say what it is doing — so rows of one colour still read apart, including for someone who cannot tell the colours apart.
+
+| Dot | Means |
+| --- | --- |
+| orange, breathing | working |
+| orange with a small amber corner | working, but the last four tool calls all failed |
+| orange three-quarter arc, turning | Claude has stopped; an agent it sent off is doing the work |
+| amber with an exclamation bar | wants a decision (red once it has waited past a minute) |
+| amber ring | wants an answer |
+| hollow brown ring | busy on paper, nothing heard for 90s |
+| green | finished, not looked at yet |
+| grey with a teal heartbeat | **turn over, commands still running in the background** — the row says `2 in background`, and hovering lists them (`npm run dev · 12m`), cut down by the same rule as the activity log |
+| grey | idle |
+
+The background check reads the process table every render rather than trusting the Stop payload, which is a snapshot of the moment the turn ended — a command that exits drops off within one tick. Only idle sessions are checked: while a turn runs, its own Bash call looks exactly like a background one. The cat does not wake up for background work; a dev server parked for the afternoon would keep it up all day. With the system's Reduce motion on, every animation stops and the shapes carry it alone.
+
 A number counts both kinds of attention, by the cat's ear. It is not shown at zero.
 
 A running row that has said nothing for 90 seconds, with no tool call in flight,

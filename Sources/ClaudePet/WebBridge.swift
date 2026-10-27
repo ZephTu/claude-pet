@@ -319,7 +319,7 @@ final class WebBridge {
         var doc: [String: Any] = [
             "path": d.path, "worktree": d.worktree, "model": d.model,
             "turn": d.turn, "tool": d.tool, "quiet": d.quiet,
-            "last": d.last, "lastBad": d.lastBad,
+            "last": d.last, "lastBad": d.lastBad, "background": d.background,
         ]
         if let percent = d.contextPercent { doc["context"] = percent }
         guard
@@ -358,6 +358,7 @@ final class WebBridge {
     var titles: [String: String] = [:]
 
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
+                      background: [String: [BackgroundShells.Shell]] = [:],
                       completions: [CompletionEvent] = [],
                       titlesByHandle: [String: String] = [:],
                       droppedNotice: Int = 0,
@@ -395,6 +396,13 @@ final class WebBridge {
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
             if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // Turn over, commands still running under it — see BackgroundShells.
+            if let shells = background[s.sessionId], !shells.isEmpty {
+                item["background"] = shells.count
+            }
+            // Claude has stopped and an agent it dispatched is doing the work:
+            // a different dot from Claude working itself.
+            if s.state == .busy, s.phase == "awaiting-agent" { item["agent"] = true }
             // Going round in circles: said on the row's second line, where the
             // notification text would otherwise go — see Struggle.
             if Struggle.isStruggling(s) {
