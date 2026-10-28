@@ -456,5 +456,32 @@ printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app"}' \
   | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT"
 check "a terminal we cannot address records nothing" "$(terminal sT)" " "
 
+# ---- LOCAL PATCH: config.json overrides pet-emit's own defaults --------------
+post() {  # post <session_id>: one finished tool call
+  emit_json "{\"session_id\":\"$1\",\"hook_event_name\":\"PostToolUse\",\"cwd\":\"/w/app\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"tool_response\":{\"interrupted\":false},\"duration_ms\":3}"
+}
+recorded() { [ -f "$PET_HOME/activity/$1.jsonl" ] && echo yes || echo no; }
+effective() { "$EMIT" --config | tr -d ' \n'; }
+rm -f "$PET_HOME/config.json"; rm -rf "$PET_HOME/activity"
+post cfg1
+check "no config.json: pet-emit's default (record) applies" "$(recorded cfg1)" "yes"
+check "--config reports the default" "$(effective)" '{"recordActivity":true}'
+printf '{"recordActivity": false}' > "$PET_HOME/config.json"; rm -rf "$PET_HOME/activity"
+post cfg2
+check "an explicit false in config.json turns recording off" "$(recorded cfg2)" "no"
+check "--config reports the override" "$(effective)" '{"recordActivity":false}'
+printf '{"recordActivity": "true"}' > "$PET_HOME/config.json"
+post cfg3
+check "a value that is not a boolean falls back to the default" "$(recorded cfg3)" "yes"
+printf '{ broken' > "$PET_HOME/config.json"
+post cfg4
+check "a broken config.json falls back to the default" "$(recorded cfg4)" "yes"
+check "--config never prints anything but JSON" "$(effective)" '{"recordActivity":true}'
+# stdin stays open for 3 s; a --config that read it to EOF would take that long.
+started=$(date +%s)
+"$EMIT" --config < <(sleep 3) > /dev/null
+check "--config does not read stdin" "$(( $(date +%s) - started < 2 ))" "1"
+rm -f "$PET_HOME/config.json"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

@@ -234,7 +234,11 @@ enum HookEmit {
 
         // A finished tool call, with the duration Claude Code measured itself.
         if event == "PostToolUse" || event == "PostToolUseFailure" {
-            recordActivity(sessionID: sessionID, hook: hook, now: now)
+            // LOCAL PATCH: per config.json, falling back to EmitDefaults when the
+            // file says nothing usable (right-click → Settings → Record Tool Activity).
+            if EffectiveConfig.recordActivity(petHome: baseDirectory) {
+                recordActivity(sessionID: sessionID, hook: hook, now: now)
+            }
         }
 
         // Stop is Claude Code telling us a turn ended — a confirmed event, not

@@ -2098,6 +2098,86 @@ struct Runner {
             t.check("could spawn a fake command shell", false)
         }
 
+        // ---- LOCAL PATCH: config.json says only what it says; pet-emit owns the defaults ----
+        let fm = FileManager.default
+        let cfgHome = fm.temporaryDirectory.appending(path: "claudepet-config-\(UUID().uuidString)")
+        let cfgFile = PetConfig.url(petHome: cfgHome)
+        func writeConfig(_ text: String) {
+            try? fm.createDirectory(at: cfgHome, withIntermediateDirectories: true)
+            try? Data(text.utf8).write(to: cfgFile)
+        }
+        func rawConfig() -> [String: Any] {
+            ((try? Data(contentsOf: cfgFile)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+                as? [String: Any]) ?? [:]
+        }
+        t.check("no config file says nothing (pet-emit's default applies)",
+                PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        writeConfig(#"{"recordActivity": true}"#)
+        t.check("an explicit true is read as true", PetConfig.load(petHome: cfgHome).recordActivity == true)
+        writeConfig(#"{"recordActivity": false}"#)
+        t.check("an explicit false is read as false", PetConfig.load(petHome: cfgHome).recordActivity == false)
+        writeConfig(#"{"mine": 1}"#)
+        t.check("a file without the key says nothing about it",
+                PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        writeConfig(#"{"recordActivity": "true"}"#)
+        t.check("the string \"true\" is not a value, so it says nothing",
+                PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        writeConfig(#"{"recordActivity": 1}"#)
+        t.check("the number 1 is not a value either", PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        writeConfig("{ this is not json")
+        t.check("an unreadable file says nothing", PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        writeConfig("")
+        t.check("an empty file says nothing", PetConfig.load(petHome: cfgHome).recordActivity == nil)
+
+        writeConfig(#"{"recordActivity": false, "mine": 42, "url": "https://x/y"}"#)
+        PetConfig.setRecordActivity(true, petHome: cfgHome)
+        t.check("the app writing a switch keeps keys added by hand",
+                rawConfig()["mine"] as? Int == 42 && PetConfig.load(petHome: cfgHome).recordActivity == true)
+        t.check("slashes are written as they are",
+                ((try? String(contentsOf: cfgFile, encoding: .utf8)) ?? "").contains("https://x/y"))
+
+        writeConfig("{ this is not json")
+        PetConfig.setRecordActivity(true, petHome: cfgHome)
+        func asides() -> [String] {
+            ((try? fm.contentsOfDirectory(atPath: cfgHome.path)) ?? [])
+                .filter { $0.hasPrefix("config.json.invalid-") }.sorted()
+                .compactMap { try? String(contentsOf: cfgHome.appending(path: $0), encoding: .utf8) }
+        }
+        t.check("an unreadable file is set aside, not overwritten", asides() == ["{ this is not json"])
+        t.check("and the explicit value replaces it", PetConfig.load(petHome: cfgHome).recordActivity == true)
+        writeConfig("second broken")
+        PetConfig.setRecordActivity(true, petHome: cfgHome)
+        t.check("a second set-aside keeps the first copy", Set(asides()) == ["{ this is not json", "second broken"])
+
+        let activityDir = cfgHome.appending(path: "activity")
+        try? fm.createDirectory(at: activityDir, withIntermediateDirectories: true)
+        try? Data("x\n".utf8).write(to: activityDir.appending(path: "s.jsonl"))
+        PetConfig.setRecordActivity(false, petHome: cfgHome)
+        t.check("turning recording off writes an explicit false and deletes what was recorded",
+                !fm.fileExists(atPath: activityDir.path) && PetConfig.load(petHome: cfgHome).recordActivity == false)
+
+        let dotfiles = cfgHome.appending(path: "dotfiles")
+        try? fm.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+        let realConfig = dotfiles.appending(path: "pet.json")
+        try? Data(#"{"recordActivity": false}"#.utf8).write(to: realConfig)
+        try? fm.removeItem(at: cfgFile)
+        try? fm.createSymbolicLink(at: cfgFile, withDestinationURL: realConfig)
+        PetConfig.setRecordActivity(true, petHome: cfgHome)
+        t.check("a symlinked config stays a symlink and its target gets the change",
+                (try? fm.attributesOfItem(atPath: cfgFile.path)[.type] as? FileAttributeType) == .typeSymbolicLink
+                    && PetConfig.load(petHome: cfgHome).recordActivity == true)
+        try? fm.removeItem(at: cfgFile)
+        mkfifo(cfgFile.path, 0o600)
+        let fifoStart = Date()
+        let fifoLoad = PetConfig.load(petHome: cfgHome)
+        t.check("a FIFO in place of the config says nothing, without blocking",
+                fifoLoad.recordActivity == nil && Date().timeIntervalSince(fifoStart) < 1)
+        try? fm.removeItem(at: cfgFile)
+        let padding = String(repeating: " ", count: PetConfig.maxBytes)
+        writeConfig("{\"recordActivity\": false," + padding + "\"pad\": 1}")
+        t.check("an oversized file says nothing", PetConfig.load(petHome: cfgHome).recordActivity == nil)
+        try? fm.removeItem(at: cfgHome)
+
         t.finish()
     }
 }

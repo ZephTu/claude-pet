@@ -12,6 +12,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onShortcutToggle: () -> Void
     private let onShowHealth: () -> Void
     private let onKeepListOpenToggle: () -> Void
+    private let onActivityLogToggle: () -> Void
     private let onLoginToggle: () -> Void
     private let onNoticeHold: (TimeInterval) -> Void
     private let onNoticeCount: (Int) -> Void
@@ -25,6 +26,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onShortcutToggle: @escaping () -> Void,
         onShowHealth: @escaping () -> Void,
         onKeepListOpenToggle: @escaping () -> Void,
+        onActivityLogToggle: @escaping () -> Void,
         onNoticeHold: @escaping (TimeInterval) -> Void,
         onNoticeCount: @escaping (Int) -> Void,
         onQuit: @escaping () -> Void
@@ -35,6 +37,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         self.onShortcutToggle = onShortcutToggle
         self.onShowHealth = onShowHealth
         self.onKeepListOpenToggle = onKeepListOpenToggle
+        self.onActivityLogToggle = onActivityLogToggle
         self.onLoginToggle = onLoginToggle
         self.onUnmuteAll = onUnmuteAll
         self.onQuit = onQuit
@@ -43,12 +46,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
+        keepListOpenOn: Bool = false, activityLogOn: Bool? = nil, problem: HealthCheck? = nil,
         noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
+            shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, activityLogOn: activityLogOn,
+            problem: problem,
             noticeHold: noticeHold, noticeCount: noticeCount
         )
         menu.popUp(positioning: nil, at: point, in: view)
@@ -60,6 +64,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     ///   when nothing is — which is when the connection report is left out.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, keepListOpenOn: Bool = false,
+                  activityLogOn: Bool? = nil,
                   problem: HealthCheck? = nil,
                   noticeHold: TimeInterval = Chatter.noticeHold,
                   noticeCount: Int = Chatter.noticeCount) -> NSMenu {
@@ -111,6 +116,18 @@ final class PetMenu: NSObject, NSMenuDelegate {
         shortcut.state = shortcutOn ? .on : .off
         shortcut.target = self
         options.addItem(shortcut)
+        // LOCAL PATCH: recordActivity in config.json, which pet-emit reads. nil:
+        // pet-emit did not say what is in effect, so the item is shown disabled
+        // (no action) instead of guessing.
+        let activity = NSMenuItem(title: "Record Tool Activity",
+                                  action: activityLogOn == nil ? nil : #selector(toggleActivityLog),
+                                  keyEquivalent: "")
+        activity.state = activityLogOn == true ? .on : .off
+        activity.toolTip = activityLogOn == nil
+            ? "pet-emit did not answer, so what is in effect cannot be shown."
+            : "Keeps a short history of each session's tool calls. Turning it off deletes what was recorded."
+        activity.target = self
+        options.addItem(activity)
         options.addItem(.separator())
 
         // The "this session finished" bubbles above the pet.
@@ -159,6 +176,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func toggleShortcut() { onShortcutToggle() }
     @objc private func showHealth() { onShowHealth() }
     @objc private func toggleKeepListOpen() { onKeepListOpenToggle() }
+    @objc private func toggleActivityLog() { onActivityLogToggle() }
     @objc private func pickHold(_ sender: NSMenuItem) {
         if let seconds = sender.representedObject as? TimeInterval { onNoticeHold(seconds) }
     }

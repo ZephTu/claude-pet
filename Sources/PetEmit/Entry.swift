@@ -37,6 +37,14 @@ struct Entry {
             print(petVersion)
             exit(0)
 
+        case "--config":
+            // LOCAL PATCH: the switches as the hook will act on them — the
+            // defaults in EmitDefaults overridden by config.json. The app reads
+            // this rather than keeping its own copy of the defaults.
+            FileHandle.standardOutput.write(EffectiveConfig.json(petHome: HookEmit.baseDirectory))
+            FileHandle.standardOutput.write(Data("\n".utf8))
+            exit(0)
+
         default:
             // No arguments: act as the hook. Read the payload and never fail —
             // any error here must not break the user's Claude Code session.

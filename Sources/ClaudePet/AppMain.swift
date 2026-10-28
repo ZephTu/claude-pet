@@ -164,6 +164,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         self.hotKey = hotKey
         if UserDefaults.standard.bool(forKey: Self.hotKeyKey) { hotKey.register() }
         bridge.onSnooze = { [weak self] id, point in self?.askSnooze(sessionID: id, at: point) }
+        // LOCAL PATCH: the earlier local build kept the switch as a flag file;
+        // carry it over. Then clear an activity entry left behind while
+        // recording is in effect off.
+        let legacyFlag = petHome.appending(path: "activity-log.on")
+        if FileManager.default.fileExists(atPath: legacyFlag.path) {
+            PetConfig.setRecordActivity(true, petHome: petHome)
+            try? FileManager.default.removeItem(at: legacyFlag)
+        }
+        if effectiveRecordActivity() == false { PetConfig.clearActivity(petHome: petHome) }
         let completions = CompletionStore(petHome: petHome)
         completions.reload(now: Date(), force: true)
         self.completions = completions
@@ -186,6 +195,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onShortcutToggle: { [weak self] in self?.toggleHotKey() },
             onShowHealth: { [weak self] in self?.showHealth() },
             onKeepListOpenToggle: { [weak self] in self?.toggleKeepListOpen() },
+            onActivityLogToggle: { [weak self] in self?.toggleActivityLog() },
             onNoticeHold: { [weak self] seconds in
                 self?.noticeHold = seconds
                 UserDefaults.standard.set(seconds, forKey: Self.noticeHoldKey)
@@ -209,6 +219,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           keepListOpenOn: self.keepListOpen,
+                          activityLogOn: self.effectiveRecordActivity(),
                           problem: HealthCollector.quickProblem(petHome: self.petHome),
                           noticeHold: self.noticeHold, noticeCount: self.noticeCount)
             }
@@ -728,6 +739,45 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// the system for less motion.
     private func applyMotionSetting() {
         bridge?.setCalm(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !windowVisible)
+    }
+
+    /// LOCAL PATCH: writes the opposite of what is in effect into config.json,
+    /// which pet-emit reads on every finished tool call; turning it off also
+    /// deletes what was recorded. Does nothing when pet-emit cannot say what is
+    /// in effect — the menu item is disabled then anyway.
+    private func toggleActivityLog() {
+        guard let current = effectiveRecordActivity() else { return }
+        PetConfig.setRecordActivity(!current, petHome: petHome)
+    }
+
+    /// LOCAL PATCH: `pet-emit --config` — the switches as the hook acts on them.
+    /// pet-emit owns the defaults, so the app asks instead of keeping a copy.
+    /// nil when pet-emit is missing, too slow, or prints something unexpected;
+    /// the app then shows the switch as unknown rather than guessing.
+    private func effectiveRecordActivity() -> Bool? {
+        let process = Process()
+        process.executableURL = petHome.appending(path: "pet-emit")
+        process.arguments = ["--config"]
+        // The same directory the app writes, whatever PET_HOME the app inherited.
+        var environment = ProcessInfo.processInfo.environment
+        environment["PET_HOME"] = petHome.path
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning && Date() < deadline { usleep(5_000) }
+        if process.isRunning {
+            process.terminate()
+            return nil
+        }
+        // Read after exit: the output is a few dozen bytes, far below the pipe
+        // buffer, and reading first would block past the deadline on a hung child.
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return object[PetConfig.recordActivityKey] as? Bool
     }
 
     /// Keep the session list up instead of opening it per glance.
