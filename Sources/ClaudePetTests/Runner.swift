@@ -2070,6 +2070,11 @@ struct Runner {
                 BackgroundShells.command(fromShellArguments:
                     "/bin/zsh -c source ~/.claude/shell-snapshots/snapshot-zsh-1-y.sh 2>/dev/null || true && eval /tmp/scratchpad/watch2.sh < /dev/null && pwd -P >| /tmp/claude-71d5-cwd")
                     == "/tmp/scratchpad/watch2.sh")
+        // Claude Code 2.1.312: no `< /dev/null`, and an inner quote is '"'"'
+        t.check("the newer wrapper without < /dev/null is read too",
+                BackgroundShells.command(fromShellArguments:
+                    #"/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-1-f.sh 2>/dev/null || true && { \builtin unalias -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'cd /r; tr '"'"'\r'"'"' x < a.log | tail -40' && pwd -P >| /tmp/claude-eb00-cwd"#)
+                    == #"cd /r; tr '\r' x < a.log | tail -40"#)
         t.check("a shell that is not Claude's wrapper yields nothing",
                 BackgroundShells.command(fromShellArguments: "/bin/sh -c make") == nil)
         let bgShell = BackgroundShells.Shell(command: "npm run dev", since: t0.addingTimeInterval(-720))
@@ -2082,7 +2087,7 @@ struct Runner {
         // A real child shell shaped like Claude Code's, under this test runner.
         let fake = Process()
         fake.executableURL = URL(fileURLWithPath: "/bin/sh")
-        fake.arguments = ["-c", ": /tmp/shell-snapshots/snapshot-test && eval 'sleep 3' < /dev/null && true"]
+        fake.arguments = ["-c", ": /tmp/shell-snapshots/snapshot-test && eval 'sleep 3' < /dev/null && pwd -P >| /dev/null"]
         if (try? fake.run()) != nil {
             usleep(200_000)
             let found = BackgroundShells.running(under: ProcessInfo.processInfo.processIdentifier)

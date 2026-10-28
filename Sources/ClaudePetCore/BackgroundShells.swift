@@ -51,15 +51,21 @@ public enum BackgroundShells {
     /// each inner quote written `'\''`, but a plain `eval ./watch.sh` bare. Both
     /// shapes were seen on the same machine; reading only the quoted one hid
     /// every simple background script.
+    ///
+    /// Claude Code 2.1.312 dropped the `< /dev/null` and writes an inner quote
+    /// `'"'"'` instead. Both still end in `&& pwd -P`, so the command is cut
+    /// there and an old-style `< /dev/null` is dropped after.
     public static func command(fromShellArguments arguments: String) -> String? {
-        guard let open = arguments.range(of: "&& eval "),
-              let close = arguments.range(of: " < /dev/null", options: .backwards,
-                                          range: open.upperBound..<arguments.endIndex)
+        guard let open = arguments.range(of: "&& eval ") else { return nil }
+        let rest = open.upperBound..<arguments.endIndex
+        guard let close = arguments.range(of: " && pwd -P", options: .backwards, range: rest)
         else { return nil }
         var body = arguments[open.upperBound..<close.lowerBound]
+        if body.hasSuffix(" < /dev/null") { body = body.dropLast(" < /dev/null".count) }
         if body.hasPrefix("'"), body.hasSuffix("'"), body.count >= 2 {
             body = body.dropFirst().dropLast()
             let command = body.replacingOccurrences(of: #"'\''"#, with: "'")
+                .replacingOccurrences(of: #"'"'"'"#, with: "'")
             return command.isEmpty ? nil : command
         }
         let command = String(body)
