@@ -582,11 +582,9 @@ enum HookEmit {
                         to: directory.appending(path: CompletionQueue.fileName(for: event)))
     }
 
-    /// Appends one finished tool call to this session's log.
-    ///
-    /// Append, not read-modify-write: a hook has to finish fast, and a single
-    /// short line reaches the file in one write. The reader tolerates a
-    /// half-written last line, which is what a hook being killed leaves behind.
+    /// Records this session's last finished tool call, replacing the one before
+    /// — see ActivityLog. Write-then-rename, so a hook killed mid-write leaves
+    /// the previous call rather than half of this one.
     private static func recordActivity(sessionID: String, hook: [String: Any], now: String) {
         guard
             let finishedAt = CompletionQueue.parseDate(now),
@@ -616,8 +614,8 @@ enum HookEmit {
 
         let directory = activityDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        append(ActivityLog.encode(entry),
-               to: directory.appending(path: sanitise(sessionID) + ".jsonl"))
+        writeAtomically(ActivityLog.encode(entry),
+                        to: directory.appending(path: sanitise(sessionID) + ".jsonl"))
     }
 
     /// A session id is a uuid, but it arrives from outside and is about to
@@ -625,35 +623,6 @@ enum HookEmit {
     private static func sanitise(_ s: String) -> String {
         let ok = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
         return String(s.map { ok.contains($0) ? $0 : "_" })
-    }
-
-    /// Roughly this many bytes before the log is trimmed back.
-    private static let activityTrimAt = 24_000
-
-    private static func append(_ data: Data, to path: URL) {
-        guard !data.isEmpty else { return }
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else {
-            try? data.write(to: path)
-            return
-        }
-        if let handle = try? FileHandle(forWritingTo: path) {
-            defer { try? handle.close() }
-            try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        }
-        // Trimming reads the whole file, so it happens by size rather than on
-        // every call — a hook cannot afford that on every tool use.
-        let size = (try? fm.attributesOfItem(atPath: path.path)[.size]) as? Int ?? 0
-        if size > activityTrimAt { trim(path) }
-    }
-
-    private static func trim(_ path: URL) {
-        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-        guard lines.count > ActivityLog.shown else { return }
-        writeAtomically(Data((lines.suffix(ActivityLog.shown).joined(separator: "\n") + "\n").utf8),
-                        to: path)
     }
 
     /// Write-then-rename so a reader never sees a half-written file.

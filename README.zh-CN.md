@@ -135,7 +135,7 @@ WebGL 跑不起来、或者贴图解不开，页面改成显示每个姿势的�
 | --- | --- | --- |
 | `sessions/<id>.json` | 一个 session **当前**的状态：项目、目录、状态、在飞的工具调用、pid、时间戳 | session 结束时 |
 | `events/<id>~<turn>.json` | 每结束一轮写一条 | 7 天，或超过 500 条 |
-| `activity/<id>.jsonl` | 这个 session 最近的工具调用：工具、简短目标、耗时、结果 | session 结束时，或手动 Clear History |
+| `activity/<id>.jsonl` | 这个 session **最后一次**工具调用：工具、简短目标、耗时、结果，给悬停卡片用；每次调用覆盖上一次 | session 结束时 |
 | `read.json` | 哪些完成记录你已经看过了 | 跟着它指向的记录一起清 |
 | `usage.json` | 额度数字，只在你按下面接了 statusline 时才有 | 每次覆盖 |
 

@@ -49,20 +49,15 @@ public struct ActivityEntry: Sendable, Equatable {
     }
 }
 
-/// Reading and ageing the per-session activity log.
+/// Reading the per-session activity record.
 ///
-/// Stored as one line of JSON per call, appended. Append-only because the
-/// writer is a hook: it must finish fast and must survive being killed
-/// mid-write, and a truncated last line costs exactly that line.
+/// Holds only the session's last finished tool call, one line of JSON, which
+/// is all the row hover shows. It used to keep a history for a Recent
+/// Activity menu; with that menu gone, the history was written for nobody.
+/// The hook replaces the file whole (write-then-rename) rather than appending.
 public enum ActivityLog {
-    /// How many calls one session shows.
-    public static let shown = 20
     /// How long a call stays in the log.
     public static let retention: TimeInterval = 24 * 60 * 60
-    /// Total across all sessions, so a machine left running cannot grow the
-    /// directory without bound.
-    public static let totalCap = 2000
-
     public static func encode(_ e: ActivityEntry) -> Data {
         let doc: [String: Any] = [
             "tool": e.tool,
@@ -100,7 +95,7 @@ public enum ActivityLog {
 
     /// The most recent calls still inside the retention window, newest first.
     public static func recent(_ entries: [ActivityEntry], now: Date,
-                              limit: Int = shown) -> [ActivityEntry] {
+                              limit: Int) -> [ActivityEntry] {
         entries
             .filter { now.timeIntervalSince($0.finishedAt) <= retention }
             .sorted { $0.finishedAt > $1.finishedAt }
@@ -108,12 +103,4 @@ public enum ActivityLog {
             .map { $0 }
     }
 
-    /// How many entries each session may keep so the total stays under the cap.
-    ///
-    /// Shared out evenly rather than first-come: one chatty session must not be
-    /// able to push every other session's history out of the log.
-    public static func perSessionBudget(sessionCount: Int) -> Int {
-        guard sessionCount > 0 else { return totalCap }
-        return max(shown, totalCap / sessionCount)
-    }
 }
