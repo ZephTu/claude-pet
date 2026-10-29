@@ -52,7 +52,7 @@
 就三个地方，`uninstall.sh` 都能还原：
 
 1. `~/Applications/ClaudePet.app` —— 宠物本体
-2. `~/.claude/pet/` —— hook 程序、session 状态、完成记录和活动日志
+2. `~/.claude/pet/` —— hook 程序、session 状态、完成记录和每个 session 的最后一次工具调用
 3. **`~/.claude/settings.json` —— 追加 11 条 hook**
 
 第三条是唯一需要留心的：那个文件管着你所有 Claude Code session 的行为。安装脚本的做法是**只追加、不修改**——你已有的 hook 配置一条都不会被碰，改之前会自动备份到 `~/.claude/settings.json.bak-claudepet-<时间戳>`，改完立刻解析验证，任何异常都会自动还原备份。重复安装是幂等的，不会挂两遍。

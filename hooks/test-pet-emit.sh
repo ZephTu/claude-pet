@@ -298,7 +298,7 @@ check "and how long Claude Code said it took" \
   "$(/usr/bin/python3 -c "import json;print(json.loads(open('$PET_HOME/activity/sL.jsonl').readline())['ms'])")" \
   "2900"
 
-# A secret in the command must not reach the log — this file lives for a day.
+# A secret in the command must not reach the log.
 post sL /Users/dev/Projects/api Bash '{"command":"deploy --token sk-live-abc123"}' 10 false
 check "a token in the command never lands in the log" \
   "$(grep -c 'sk-live-abc123' "$PET_HOME/activity/sL.jsonl" || true)" "0"
@@ -306,6 +306,8 @@ check "a token in the command never lands in the log" \
 post sL /Users/dev/Projects/api Bash '{"command":"sleep 99"}' 400 true
 check "an interruption is recorded as such" \
   "$(grep -c '"result":"interrupted"' "$PET_HOME/activity/sL.jsonl" || true)" "1"
+check "only the last call is kept, not a history" \
+  "$(wc -l < "$PET_HOME/activity/sL.jsonl" | tr -d ' ')|$(grep -c 'npm test' "$PET_HOME/activity/sL.jsonl" || true)" "1|0"
 
 # Trouble is a timestamp that CHANGES, not a flag that sits there — the app
 # watches for the change so the warning fires once per failure.
@@ -389,13 +391,13 @@ check "one failure starts the count" "$(field sX failStreak)" "1"
 check "the count names what failed" "$(field sX failTarget)" "Bash npm test"
 check "the error text is not kept" "$(grep -c secret "$PET_HOME/sessions/sX.json" | tr -d ' ')" "0"
 pre_call sX t2; fail_call sX t2
+check "a failed call reaches the activity log as failed" \
+  "$(grep -c '"result":"failed"' "$PET_HOME/activity/sX.jsonl" | tr -d ' ')" "1"
 pre_call sX t3; fail_call sX t3 true
 check "an interrupt is not a failure" "$(field sX failStreak)" "2"
 pre_call sX t4
 printf '{"hook_event_name":"PostToolUse","session_id":"sX","cwd":"/tmp/x","tool_name":"Bash","tool_use_id":"t4","tool_response":{}}' | "$EMIT"
 check "a success starts the count again" "$(field sX failStreak)" ""
-check "a failed call reaches the activity log as failed" \
-  "$(grep -c '"result":"failed"' "$PET_HOME/activity/sX.jsonl" | tr -d ' ')" "2"
 
 # ---- answering a permission prompt from the pet ------------------------------
 ask() {  # ask <session> — a PermissionRequest that waits up to 10s, stdout to a file

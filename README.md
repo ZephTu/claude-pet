@@ -164,7 +164,7 @@ Inside `~/.claude/pet/`:
 | --- | --- | --- |
 | `sessions/<id>.json` | the CURRENT state of one session: project, directory, state, running tool calls, pid, timestamps | when the session ends |
 | `events/<id>~<turn>.json` | one record per finished turn | 7 days, or 500 rows |
-| `activity/<id>.jsonl` | that session's recent tool calls: tool, short target, duration, result | when the session ends, or `Clear History` |
+| `activity/<id>.jsonl` | that session's last finished tool call only — tool, short target, duration, result — for the row hover; each call replaces the one before | when the session ends |
 | `read.json` | which finished turns you have acknowledged | with the events they refer to |
 | `usage.json` | quota numbers, only if you wired up the statusline below | overwritten each time |
 

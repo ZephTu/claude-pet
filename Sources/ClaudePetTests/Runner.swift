@@ -1572,10 +1572,10 @@ struct Runner {
         let log = [act("Bash", "a", ago: 10), act("Read", "b", ago: 5),
                    act("Edit", "c", ago: 25 * 3600)]
         t.check("the newest call leads and anything past a day is gone",
-                ActivityLog.recent(log, now: t0).map(\.target) == ["b", "a"])
+                ActivityLog.recent(log, now: t0, limit: 5).map(\.target) == ["b", "a"])
         t.check("the list is capped",
                 ActivityLog.recent(Array(repeating: act("Bash", "x", ago: 1), count: 50),
-                                   now: t0).count == ActivityLog.shown)
+                                   now: t0, limit: 3).count == 3)
 
         t.check("entries survive a round trip",
                 ActivityLog.decode(String(data: ActivityLog.encode(log[0]), encoding: .utf8)!)
@@ -1586,13 +1586,6 @@ struct Runner {
                 ActivityLog.decode(torn).count == 1)
         t.check("a log of pure garbage reads as empty, not as a crash",
                 ActivityLog.decode("nonsense\nmore nonsense").isEmpty)
-
-        // One chatty session must not push every other session's history out.
-        t.check("the budget is shared out, not first-come",
-                ActivityLog.perSessionBudget(sessionCount: 10) == 200
-                && ActivityLog.perSessionBudget(sessionCount: 0) == ActivityLog.totalCap)
-        t.check("a busy machine still leaves each session a readable amount",
-                ActivityLog.perSessionBudget(sessionCount: 500) == ActivityLog.shown)
 
         // ---- SessionDetail: what hovering a row is actually for ----
         let hovered = SessionState(
