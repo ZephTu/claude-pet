@@ -458,5 +458,23 @@ printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app"}' \
   | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT"
 check "a terminal we cannot address records nothing" "$(terminal sT)" " "
 
+# ---- Ghostty ------------------------------------------------------------------
+# The handle is the Claude Code process's tty, resolved from its pid — the hook
+# cannot read its own, being run detached. Whether one is resolvable depends on
+# where this script runs: under a real session there is a Claude Code ancestor
+# holding a terminal, in CI there is not. So what is asserted is the shape rather
+# than a value. GHOSTTY_SURFACE_ID is exported precisely because it must NOT be
+# used: it is an address, not the id Ghostty's scripting interface answers to,
+# and a jump on it would match no tab.
+printf '{"hook_event_name":"SessionStart","session_id":"sG","cwd":"/w/app"}' \
+  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=ghostty \
+        GHOSTTY_SURFACE_ID=0x26088a1939867766 "$EMIT"
+case "$(terminal sG)" in
+  " "|"ghostty /dev/tty"*) ghostty_handle="a tty path or nothing" ;;
+  *) ghostty_handle="$(terminal sG)" ;;
+esac
+check "a ghostty handle is a tty path or nothing, never the surface id" \
+  "$ghostty_handle" "a tty path or nothing"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))

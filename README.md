@@ -91,6 +91,7 @@ rights itself the moment that session does anything again.
 
 - **Orca** goes through its own CLI (`orca terminal switch`) and needs no system permission at all
 - **iTerm2** goes through AppleScript, so the **first jump raises a macOS Automation prompt**; deny it and jumps fail silently afterwards
+- **Ghostty** goes through AppleScript too — its scripting interface arrived in **Ghostty 1.4.0**, so older versions have no ↗ — and raises the same Automation prompt on the first jump. The tab is addressed by its tty: `GHOSTTY_SURFACE_ID` is an address rather than the id the scripting interface answers to, and tty is the one field a shell's environment and that interface both carry
 - **VS Code, Cursor and other VS Code forks** have no way to address one terminal from outside, so the jump asks the editor to open the session's project folder — which raises the window that already has it open. You land in the right window, not necessarily on the right terminal tab. No permission needed. The folder is the workspace Claude Code's IDE integration reports (`~/.claude/ide/*.lock`), else the enclosing git repository, else the session's directory
 - Other terminals cannot be addressed — those rows have no ↗ and clicking them just closes the list
 

@@ -68,10 +68,11 @@
 
 不发系统通知、不出声。
 
-**点列表里带 ↗ 的行，直接跳回那个 session 所在的终端标签页。** 支持 Orca、iTerm2，以及 VS Code / Cursor 的内置终端：
+**点列表里带 ↗ 的行，直接跳回那个 session 所在的终端标签页。** 支持 Orca、iTerm2、Ghostty，以及 VS Code / Cursor 的内置终端：
 
 - **Orca** 走它自带的 CLI（`orca terminal switch`），不需要任何系统权限
 - **iTerm2** 走 AppleScript，**第一次跳转会弹一次 macOS 自动化授权**，拒绝之后就静默失效
+- **Ghostty** 同样走 AppleScript，它的脚本接口是 **Ghostty 1.4.0** 才有的，更老的版本没有 ↗；第一次跳转会弹同样的授权框。标签页用 tty 定位：`GHOSTTY_SURFACE_ID` 是个地址，不是脚本接口认的那个 id，而 tty 是 shell 环境和脚本接口都带的唯一一个字段
 - **VS Code、Cursor 等 VS Code 系编辑器**没有从外部指定某个终端的接口，所以跳转是让编辑器打开这个 session 的项目文件夹——已经开着这个文件夹的窗口会被提到前面。能跳到对的窗口，但不一定落在对的终端标签上。不需要授权。文件夹优先用 Claude Code IDE 集成登记的工作区（`~/.claude/ide/*.lock`），没有就用所在的 git 仓库根目录，再没有就用 session 目录本身
 - 其他终端认不出来，那些行不带 ↗、点了只会展开/收起面板
 

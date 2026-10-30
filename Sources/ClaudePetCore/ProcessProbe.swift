@@ -87,6 +87,29 @@ public enum ProcessProbe {
         }
     }
 
+    /// The controlling terminal of `pid`, as a device path, or nil when it has
+    /// none — a daemon, or a process the shell put in its own session.
+    ///
+    /// Ghostty names its tabs by tty, and a hook cannot read its own: Claude
+    /// Code runs tool commands and hooks detached from the terminal, so their
+    /// controlling terminal is already gone by the time pet-emit looks. The
+    /// Claude Code process itself still has one, which is why this takes a pid
+    /// rather than reading `/dev/tty`.
+    public static func controllingTTY(pid: Int32) -> String? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        let result = mib.withUnsafeMutableBufferPointer { mibBuffer -> Int32 in
+            sysctl(mibBuffer.baseAddress, u_int(mibBuffer.count), &info, &size, nil, 0)
+        }
+        guard result == 0, size > 0 else { return nil }
+        let device = info.kp_eproc.e_tdev
+        // NODEV is the kernel's "no controlling terminal"; it is -1 as a dev_t,
+        // and 0 is never a tty either.
+        guard device != -1, device != 0, let name = devname(device, S_IFCHR) else { return nil }
+        return "/dev/" + String(cString: name)
+    }
+
     /// Walks up the process tree looking for a process with this name, starting
     /// at `pid`'s parent.
     ///
