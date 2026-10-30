@@ -515,6 +515,41 @@ struct Runner {
         t.check("waiting without a permission request is never treated as approved",
                 !StateAggregator.wasApproved(mk("q", .waiting)))
 
+        // ---- A dialog closed with no hook: Claude Code's own status says so ----
+        let statusFile = Data(#"""
+            {"pid":5289,"sessionId":"dlg","status":"idle","statusUpdatedAt":1789467610063}
+            """#.utf8)
+        let reading = ClaudeSessionStatus.parse(statusFile, sessionId: "dlg")
+        t.check("Claude Code's status file is read",
+                reading == ClaudeSessionStatus.Reading(
+                    status: "idle", at: Date(timeIntervalSince1970: 1_789_467_610.063)))
+        t.check("another session's status file is not ours (pid reused, or /clear)",
+                ClaudeSessionStatus.parse(statusFile, sessionId: "other") == nil)
+        t.check("a status file without a status is no reading",
+                ClaudeSessionStatus.parse(Data(#"{"sessionId":"dlg"}"#.utf8), sessionId: "dlg") == nil)
+        let dialog = SessionState(sessionId: "dlg", project: "bigtest", cwd: "/tmp", state: .waiting,
+                                  tool: "", detail: "Auto-mode setup proposal is ready for review",
+                                  since: t0, updatedAt: t0, pid: 5289)
+        let closed = StateAggregator.waitEnded(dialog, reading: reading)
+        t.check("a dialog answered with no hook ends the wait",
+                closed?.state == .idle && closed?.since == reading?.at && closed?.detail == "")
+        t.check("a status from the second the wait began is not its answer",
+                StateAggregator.waitEnded(dialog, reading: .init(status: "idle",
+                                                                 at: t0.addingTimeInterval(0.9))) == nil)
+        t.check("a dialog still open keeps the session waiting",
+                StateAggregator.waitEnded(dialog, reading: .init(status: "waiting",
+                                                                 at: t0.addingTimeInterval(5))) == nil)
+        t.check("no status file leaves the hooks' word standing",
+                StateAggregator.waitEnded(dialog, reading: nil) == nil)
+        t.check("Claude Code busy again shows the row busy",
+                StateAggregator.waitEnded(dialog, reading: .init(status: "busy",
+                                                                 at: t0.addingTimeInterval(5)))?.state == .busy)
+        let afterDialog = StateAggregator.aggregate([dialog], now: t0.addingTimeInterval(120),
+                                                    isLive: { _, _ in true }, approved: { _ in false },
+                                                    ended: { StateAggregator.waitEnded($0, reading: reading) })
+        t.check("a closed dialog stops the pet waving",
+                afterDialog.mood == .idle && afterDialog.waitingProject == nil)
+
         // With a pid recorded, a live process keeps the session listed however long it idles
         let ancient = Date(timeIntervalSince1970: 1_700_000_000)
         let idleButOpen = SessionState(

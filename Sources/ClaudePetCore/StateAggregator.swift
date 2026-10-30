@@ -76,10 +76,38 @@ public enum StateAggregator {
         return ProcessProbe.startedToolShell(under: pid, since: s.since)
     }
 
-    /// `isLive` and `approved` are injectable so tests can decide them without
-    /// spawning processes; the defaults ask the kernel.
+    /// What a waiting session has moved on to, when Claude Code says the wait
+    /// is over and no hook has. Nil while it is still waiting, or when there is
+    /// nothing to go on.
+    ///
+    /// Only a status written at least a second after the wait began counts:
+    /// `since` is stored to the second, and the status Claude Code wrote just
+    /// before the hook fired must not be read as the answer to it.
+    public static func waitEnded(_ s: SessionState,
+                                 reading: ClaudeSessionStatus.Reading?) -> SessionState? {
+        guard s.state == .waiting, let reading,
+              reading.at >= s.since.addingTimeInterval(1)
+        else { return nil }
+        switch reading.status {
+        // The notification text was about the dialog, and on an idle row it
+        // would read as Claude's reply.
+        case "busy": return s.moved(to: .busy, at: reading.at, detail: "")
+        case "idle": return s.moved(to: .idle, at: reading.at, detail: "")
+        default: return nil
+        }
+    }
+
+    public static func waitEnded(_ s: SessionState) -> SessionState? {
+        guard s.state == .waiting, let pid = s.pid else { return nil }
+        return waitEnded(s, reading: ClaudeSessionStatus.read(pid: pid, sessionId: s.sessionId))
+    }
+
+    /// `isLive`, `approved` and `ended` are injectable so tests can decide them
+    /// without spawning processes; the defaults ask the kernel and Claude Code.
     /// - Parameter approved: a waiting session this returns true for is shown
     ///   as busy, until its PostToolUse makes that true on disk as well.
+    /// - Parameter ended: a waiting session as it is now, if Claude Code has
+    ///   closed what it was waiting on — see `waitEnded`.
     /// - Parameter hidden: sessionId → mute mark. Muted sessions are removed
     ///   before anything else happens, so they affect neither the list nor the
     ///   pet's mood: a muted session stuck on a permission prompt must not leave
@@ -93,9 +121,11 @@ public enum StateAggregator {
         hidden: [String: Date] = [:],
         snoozed: [String: Snooze.Mark] = [:],
         isLive: (SessionState, Date) -> Bool = Self.isLive,
-        approved: (SessionState) -> Bool = Self.wasApproved
+        approved: (SessionState) -> Bool = Self.wasApproved,
+        ended: (SessionState) -> SessionState? = Self.waitEnded
     ) -> GlobalState {
-        let live = all.filter { isLive($0, now) }.map { approved($0) ? $0.approvedNow() : $0 }
+        let live = all.filter { isLive($0, now) }
+            .map { approved($0) ? $0.approvedNow() : ended($0) ?? $0 }
         let alive = live.filter { !HiddenSessions.isHidden($0, marks: hidden) }
         let hiddenCount = live.count - alive.count
 
@@ -174,9 +204,14 @@ public enum StateAggregator {
 private extension SessionState {
     /// The same session, working on the command it was given permission for.
     func approvedNow() -> SessionState {
+        moved(to: .busy, at: since, detail: detail)
+    }
+
+    /// The same session in another state since `at`, with nothing left to answer.
+    func moved(to state: SessionActivity, at: Date, detail: String) -> SessionState {
         SessionState(
-            sessionId: sessionId, project: project, cwd: cwd, state: .busy, tool: tool,
-            detail: detail, since: since, updatedAt: updatedAt, terminal: terminal,
+            sessionId: sessionId, project: project, cwd: cwd, state: state, tool: tool,
+            detail: detail, since: at, updatedAt: max(updatedAt, at), terminal: terminal,
             pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
             promptId: promptId, phase: phase, troubleAt: troubleAt,
             backgroundAgents: backgroundAgents, askId: "",
