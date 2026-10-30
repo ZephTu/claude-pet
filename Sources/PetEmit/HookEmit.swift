@@ -132,7 +132,7 @@ enum HookEmit {
             "waitingOn": waitingOn,
             "updatedAt": now,
         ]
-        if let terminal = terminalRef(cwd: cwd) {
+        if let terminal = terminalRef(cwd: cwd, sessionID: sessionID) {
             document["terminal"] = terminal
         }
         // The pet decides liveness from this, so an idle session stays listed.
@@ -257,11 +257,35 @@ enum HookEmit {
     ///
     /// Returns nil for every terminal we cannot address, which is not a failure:
     /// that session's row simply will not be clickable.
-    private static func terminalRef(cwd: String) -> [String: String]? {
-        guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
+    /// - Parameter sessionID: used only to find the `claude attach` process when
+    ///   this session is running under one; see `terminalEnvironment`.
+    private static func terminalRef(cwd: String, sessionID: String) -> [String: String]? {
+        guard let ref = TerminalTarget.identify(environment: terminalEnvironment(sessionID: sessionID),
                                                 cwd: cwd)
         else { return nil }
         return ["kind": ref.kind, "handle": ref.handle]
+    }
+
+    /// Whose environment describes the tab the user is looking at.
+    ///
+    /// Normally the hook's own: it is a child of the Claude Code process, so it
+    /// inherited the terminal's variables.
+    ///
+    /// Not so when the session runs inside a background process the daemon owns
+    /// (`claude bg-spare`). The hook then inherits that process's environment,
+    /// which carries no `TERM_PROGRAM` and no handle for any terminal — only
+    /// stale leftovers like `GHOSTTY_BIN_DIR` from whatever shell started the
+    /// daemon. The tab the user is actually looking at belongs to a separate
+    /// `claude attach <session>` process, and its environment is the one that
+    /// describes that tab. Falls back to the hook's own, which is every
+    /// ordinary session.
+    private static func terminalEnvironment(sessionID: String) -> [String: String] {
+        let own = ProcessInfo.processInfo.environment
+        guard own["TERM_PROGRAM"] == nil,
+              let attached = ProcessProbe.attachedTerminalProcess(sessionID: sessionID),
+              let inspected = ProcessProbe.argsAndEnvironment(pid: attached)
+        else { return own }
+        return inspected.environment
     }
 
     /// When the user last actually typed into this session.
