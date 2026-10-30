@@ -23,6 +23,12 @@ import Foundation
 ///    open raises that window instead of opening another. Right window, not
 ///    necessarily the right terminal tab. No permission needed.
 ///
+///  - **ghostty** goes through AppleScript, which Ghostty has exposed since
+///    1.4.0, and needs the same Automation permission as iTerm2. The tab is
+///    addressed by tty: `GHOSTTY_SURFACE_ID` is an address rather than the uuid
+///    its scripting interface answers to, and tty is the one field the shell's
+///    environment and the scripting interface both carry.
+///
 /// Every failure path is silent-but-logged on purpose. A jump that does not work
 /// must never take the pet down or block the UI, and there is no good way to
 /// surface an error from a borderless accessory panel.
@@ -32,6 +38,7 @@ enum TerminalJump {
         case "orca": jumpOrca(handle: handle)
         case "iterm2": jumpITerm(sessionID: handle)
         case "vscode": jumpEditor(handle: handle)
+        case "ghostty": jumpGhostty(tty: handle)
         default: NSLog("ClaudePet: unknown terminal kind \(kind)")
         }
     }
@@ -40,6 +47,7 @@ enum TerminalJump {
 
     private static let orcaBundleID = "com.stablyai.orca"
     private static let iTermBundleID = "com.googlecode.iterm2"
+    private static let ghosttyBundleID = "com.mitchellh.ghostty"
 
     private static func jumpOrca(handle: String) {
         guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: orcaBundleID) else {
@@ -102,6 +110,44 @@ enum TerminalJump {
         }
     }
 
+    // MARK: - Ghostty
+
+    private static func jumpGhostty(tty: String) {
+        guard TerminalTarget.isSafeTTYPath(tty) else {
+            NSLog("ClaudePet: refusing to script Ghostty with a suspicious tty")
+            return
+        }
+        // Only if it is already running: scripting a stopped app launches it,
+        // and a click meant to raise a tab must not start a terminal instead.
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: ghosttyBundleID)
+            .isEmpty
+        else {
+            NSLog("ClaudePet: Ghostty is not running")
+            return
+        }
+        // `terminals` is flat on the application, which matters: the same filter
+        // written against `every tab of every window` comes back as a list of
+        // lists that `focus` will not take.
+        let script = """
+        tell application "Ghostty"
+          set matches to (every terminal whose tty is "\(tty)")
+          if (count of matches) is 0 then return "notfound"
+          focus (item 1 of matches)
+          return "ok"
+        end tell
+        """
+        run(URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", script]) { ok, stdout in
+            // The tab may have been closed since the hook ran; the script says
+            // so and still exits 0, so the status alone would raise Ghostty on
+            // whatever tab happened to be in front.
+            guard ok, stdout.contains("ok") else {
+                NSLog("ClaudePet: Ghostty tab not found for this session")
+                return
+            }
+            activate(bundleID: ghosttyBundleID)
+        }
+    }
+
     // MARK: - VS Code, Cursor and the like
 
     private static func jumpEditor(handle: String) {
@@ -155,17 +201,22 @@ enum TerminalJump {
     /// Called when the user opens the session list, not on a timer: it spawns a
     /// process, and a pet nobody is looking at has no business doing that.
     ///
-    /// The two backends run one after the other rather than in parallel. They
-    /// could overlap, but sharing an accumulator across two completion handlers
-    /// is exactly the shape Swift 6 rejects, and the whole thing happens once
-    /// per panel-open — the few hundred milliseconds are not worth the ceremony.
+    /// The backends run one after the other rather than in parallel. They could
+    /// overlap, but sharing an accumulator across completion handlers is exactly
+    /// the shape Swift 6 rejects, and the whole thing happens once per
+    /// panel-open — the few hundred milliseconds are not worth the ceremony.
+    /// Each one answers immediately when its terminal is not running, so the
+    /// cost is paid only for terminals actually in use.
     @MainActor
     static func fetchTitles(completion: @escaping @MainActor ([String: String]) -> Void) {
         orcaTitles { orca in
             iTermTitles { iterm in
-                var merged = orca
-                merged.merge(iterm) { existing, _ in existing }
-                completion(merged)
+                ghosttyTitles { ghostty in
+                    var merged = orca
+                    merged.merge(iterm) { existing, _ in existing }
+                    merged.merge(ghostty) { existing, _ in existing }
+                    completion(merged)
+                }
             }
         }
     }
@@ -195,6 +246,19 @@ enum TerminalJump {
         run(URL(fileURLWithPath: "/usr/bin/osascript"),
             ["-e", TerminalTitles.iTermListScript]) { ok, stdout in
             completion(ok ? TerminalTitles.parseITerm(stdout) : [:])
+        }
+    }
+
+    @MainActor
+    private static func ghosttyTitles(completion: @escaping @MainActor ([String: String]) -> Void) {
+        // Same reason as iTerm2: asking a stopped Ghostty for its tabs would
+        // launch it.
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: ghosttyBundleID)
+            .isEmpty
+        else { return completion([:]) }
+        run(URL(fileURLWithPath: "/usr/bin/osascript"),
+            ["-e", TerminalTitles.ghosttyListScript]) { ok, stdout in
+            completion(ok ? TerminalTitles.parseGhostty(stdout) : [:])
         }
     }
 

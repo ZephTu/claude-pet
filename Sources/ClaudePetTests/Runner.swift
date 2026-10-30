@@ -301,9 +301,9 @@ struct Runner {
         t.check("the bubble's area is transparent when hidden", !opaque(320, 130))
 
         // ---- TerminalTarget: jumping back to a session's terminal ----
-        t.check("orca, iterm2 and vscode are jumpable",
+        t.check("orca, iterm2, vscode and ghostty are jumpable",
                 TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2")
-                && TerminalTarget.canJump(kind: "vscode"))
+                && TerminalTarget.canJump(kind: "vscode") && TerminalTarget.canJump(kind: "ghostty"))
         // An unrecognised terminal degrades to "not clickable" rather than a dead click
         t.check("an unknown or empty kind is not jumpable",
                 !TerminalTarget.canJump(kind: "warp") && !TerminalTarget.canJump(kind: ""))
@@ -420,6 +420,55 @@ struct Runner {
                 ]) == nil)
         t.check("an empty handle is treated as absent",
                 TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": ""]) == nil)
+
+        // ---- Ghostty: addressed by tty, because its own ids do not line up ----
+        // GHOSTTY_SURFACE_ID is an address (0x26088a1939867766) while the AppleScript
+        // `terminal` objects are keyed by a uuid the shell never sees. tty is the one
+        // field both sides carry, so that is the handle.
+        let ghosttyEnv = ["TERM_PROGRAM": "ghostty", "GHOSTTY_SURFACE_ID": "0x26088a1939867766"]
+        t.check("ghostty is identified by the tty it is given",
+                TerminalTarget.identify(environment: ghosttyEnv, tty: "/dev/ttys005")
+                == TerminalRef(kind: "ghostty", handle: "/dev/ttys005"))
+        // A session with no controlling terminal is not a failure: that row is not clickable
+        t.check("ghostty without a resolvable tty yields no reference",
+                TerminalTarget.identify(environment: ghosttyEnv) == nil)
+        // The surface id must never be mistaken for a usable handle
+        t.check("the ghostty surface id is not used as a handle",
+                TerminalTarget.identify(environment: ghosttyEnv, tty: "0x26088a1939867766") == nil)
+        t.check("a stale ghostty handle from another terminal is ignored",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "iTerm.app",
+                                                      "ITERM_SESSION_ID": "w0t0p0:AB-CD"],
+                                        tty: "/dev/ttys005")
+                == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
+
+        // Same injection risk as the iTerm2 uuid: this ends up inside an AppleScript literal
+        t.check("a real tty path passes the AppleScript-injection guard",
+                TerminalTarget.isSafeTTYPath("/dev/ttys005"))
+        t.check("an empty tty is rejected", !TerminalTarget.isSafeTTYPath(""))
+        t.check("a tty with no device name is rejected", !TerminalTarget.isSafeTTYPath("/dev/tty"))
+        t.check("a path outside /dev/tty is rejected", !TerminalTarget.isSafeTTYPath("/dev/null"))
+        t.check("a quote in a tty is rejected",
+                !TerminalTarget.isSafeTTYPath("/dev/ttys0\" & (do shell script \"rm -rf ~\") & \""))
+        t.check("a newline in a tty is rejected",
+                !TerminalTarget.isSafeTTYPath("/dev/ttys0\ndo shell script \"x\""))
+        t.check("a space in a tty is rejected", !TerminalTarget.isSafeTTYPath("/dev/ttys 0"))
+
+        // Ghostty prints the same handle<TAB>title shape iTerm2 does
+        t.check("ghostty titles parse, keyed by tty",
+                TerminalTitles.parseGhostty("/dev/ttys000\t✳ golang\n/dev/ttys001\truby\n")
+                == ["/dev/ttys000": "golang", "/dev/ttys001": "ruby"])
+
+        // The hook cannot read its own tty — Claude Code runs it detached — so this
+        // resolves one from a pid. The test process is that detached shape itself.
+        t.check("a process with no controlling terminal reports none",
+                ProcessProbe.controllingTTY(pid: 0) == nil)
+        if let own = ProcessProbe.controllingTTY(pid: ProcessInfo.processInfo.processIdentifier) {
+            t.check("a resolved tty is shaped like a device path, so it survives the guard",
+                    TerminalTarget.isSafeTTYPath(own))
+        } else {
+            // Running under the harness, which has no terminal: nothing to assert.
+            t.check("this test process has no controlling terminal", true)
+        }
 
         // ---- Liveness: ask the kernel, do not watch the clock ----
         // Reported by a user: an open session nobody is touching fires no hooks at all,

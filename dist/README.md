@@ -24,7 +24,7 @@ Its pose is the part you can read without focusing on it:
 It is animated frame by frame — loops for each pose, transitions between them, and the odd yawn or dance when it has been in one pose a while. With the system's Reduce motion on it holds still.
 
 **Left-click** to expand the list — what each session is running, and for how long.
-**Click a row marked ↗** to jump straight to that session's terminal tab (Orca and iTerm2; for VS Code and Cursor, to the window that has its project open).
+**Click a row marked ↗** to jump straight to that session's terminal tab (Orca, iTerm2 and Ghostty 1.4.0+; for VS Code and Cursor, to the window that has its project open).
 **Allow / Deny** a permission prompt from the pet itself; answering in the terminal works as always. Multiple-choice questions are left to the terminal.
 **Finish bubbles** stack above the cat, one per session that just finished, with the first line of what Claude said. Click one to jump to that session.
 **Hover a row** and the bubble shows where that session is, how full its context window is, how long the turn has run versus how long since anything happened, and its last tool call.
@@ -75,7 +75,7 @@ Removes the hooks, deletes the app, cleans up the directory. `settings.json` goe
 - Click-through is computed from a rectangle rather than the figure's outline, so a few apparently-transparent pixels near the cat still swallow clicks.
 - Roughly 7% of one core while the cat animates (the app plus the WebKit processes that draw it). Leaving it running all day costs a little battery; Reduce motion stops the animation.
 - No Apple Developer signature. The installer clears macOS's download quarantine flag automatically; if Gatekeeper still blocks it, allow it once under System Settings → Privacy & Security.
-- Jumping to an **iTerm2** tab raises a macOS Automation prompt the first time. Deny it and jumps fail silently from then on; you can re-allow it under System Settings → Privacy & Security → Automation. **Orca needs no permission at all.**
+- Jumping to an **iTerm2** or **Ghostty** tab raises a macOS Automation prompt the first time. Deny it and jumps fail silently from then on; you can re-allow it under System Settings → Privacy & Security → Automation. **Orca needs no permission at all.**
 
 ## Troubleshooting
 
@@ -86,7 +86,7 @@ Hooks only apply to **newly started** sessions. Open a new window. If that does 
 It should not be: liveness is a process check, so closing the terminal removes it immediately. If you do see one, its state file probably predates the upgrade (no process id recorded) — say anything in that session and it will correct itself.
 
 **A row has no ↗ and clicking does nothing**
-Only Orca, iTerm2, VS Code and Cursor sessions can be jumped to. Sessions that were already open before installing also lack it until they next run a hook.
+Only Orca, iTerm2, Ghostty (1.4.0+), VS Code and Cursor sessions can be jumped to. Sessions that were already open before installing also lack it until they next run a hook.
 
 **I want it to shut up for a while**
 Right-click → Take a Nap. To silence one session only, hover its row and click the ×.

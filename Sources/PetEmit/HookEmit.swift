@@ -132,13 +132,16 @@ enum HookEmit {
             "waitingOn": waitingOn,
             "updatedAt": now,
         ]
-        if let terminal = terminalRef(cwd: cwd) {
-            document["terminal"] = terminal
-        }
         // The pet decides liveness from this, so an idle session stays listed.
+        // Resolved before the terminal because Ghostty's handle is the tty, and
+        // this pid is the only process still holding one.
         let pid = claudePID()
         if let pid {
             document["pid"] = pid
+        }
+        if let terminal = terminalRef(cwd: cwd,
+                                      tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "") {
+            document["terminal"] = terminal
         }
         // Which prompt this is, so a click in the pet answers THIS one — see
         // PermissionDecision. Minted per request, and carried forward by the
@@ -257,9 +260,12 @@ enum HookEmit {
     ///
     /// Returns nil for every terminal we cannot address, which is not a failure:
     /// that session's row simply will not be clickable.
-    private static func terminalRef(cwd: String) -> [String: String]? {
+    /// - Parameter tty: the Claude Code process's controlling terminal. The hook
+    ///   cannot read its own — it is run detached — so this is resolved from the
+    ///   pid instead, and is empty for a session that has no terminal at all.
+    private static func terminalRef(cwd: String, tty: String) -> [String: String]? {
         guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
-                                                cwd: cwd)
+                                                cwd: cwd, tty: tty)
         else { return nil }
         return ["kind": ref.kind, "handle": ref.handle]
     }
