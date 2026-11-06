@@ -669,10 +669,14 @@ html, body {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
 }
-/* Turns, context and age read as one column ("48 72% 2m"), pushed together
-   to the right edge. */
+/* Turns, context and age read as one column ("48 · 72% · 2m"), pushed
+   together to the right edge. A middle dot keeps the three apart in less room
+   than a gap wide enough to do the same. */
 .meta {
-  margin-left: auto; display: flex; gap: 7px; align-items: baseline; flex: none;
+  margin-left: auto; display: flex; align-items: baseline; flex: none;
+}
+.meta > * + *::before {
+  content: "\00b7"; margin: 0 3px; color: #6b6560;
 }
 .meta .age { margin-left: 0; }
 .turns, .ctx {
