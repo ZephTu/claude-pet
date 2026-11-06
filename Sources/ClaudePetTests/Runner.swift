@@ -515,6 +515,31 @@ struct Runner {
         t.check("waiting without a permission request is never treated as approved",
                 !StateAggregator.wasApproved(mk("q", .waiting)))
 
+        // ---- Turns, counted from the transcript ----
+        func human(_ prompt: String) -> String {
+            #"{"type":"user","message":{"role":"user","content":"hi"},"promptId":"\#(prompt)","origin":{"kind":"human"}}"# + "\n"
+        }
+        let toolLine = #"{"type":"user","message":{"content":[{"type":"tool_result","content":"\"origin\":{\"kind\":\"human\"}"}]},"promptId":"p1"}"# + "\n"
+        let summaryLine = #"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"# + "\n"
+        let transcript = human("p1") + toolLine + human("p1") + summaryLine + human("p2")
+        let counted = TurnCount.advance(.init(), through: Data(transcript.utf8))
+        t.check("turns count typed prompts, not tool results or summaries", counted.turns == 2)
+        t.check("a message typed mid-turn joins that turn", counted.lastPrompt == "p2")
+        t.check("the whole transcript has been read", counted.offset == transcript.utf8.count)
+        let grown = transcript + human("p3") + #"{"type":"user","promptId":"p4","origin":{"ki"#
+        let more = TurnCount.advance(counted, through: Data(grown.utf8))
+        t.check("a grown transcript is read from where it stopped", more.turns == 3)
+        t.check("a line still being written waits for next time",
+                more.offset == (transcript + human("p3")).utf8.count)
+        let finished = TurnCount.advance(more, through: Data((transcript + human("p3") + human("p4")).utf8))
+        t.check("the finished line is counted once it is whole", finished.turns == 4)
+        t.check("a transcript shorter than what was read starts over",
+                TurnCount.advance(finished, through: Data(human("q").utf8)).turns == 1)
+        t.check("the transcript path Claude Code uses when the hook did not say",
+                TurnCount.defaultTranscript(cwd: "/Users/a/code-projects/claude.pet", sessionId: "s1",
+                                            home: "/Users/a")
+                == "/Users/a/.claude/projects/-Users-a-code-projects-claude-pet/s1.jsonl")
+
         // ---- A dialog closed with no hook: Claude Code's own status says so ----
         let statusFile = Data(#"""
             {"pid":5289,"sessionId":"dlg","status":"idle","statusUpdatedAt":1789467610063}

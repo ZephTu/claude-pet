@@ -369,7 +369,8 @@ final class WebBridge {
                       droppedNotice: Int = 0,
                       snoozed: [String: Snooze.Mark] = [:],
                       prefs: [String: SessionLabels.Prefs] = [:],
-                      branches: [String: String] = [:]) {
+                      branches: [String: String] = [:],
+                      turns: [String: Int] = [:]) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -401,6 +402,8 @@ final class WebBridge {
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
             if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // How long the conversation has gone on — see TurnCount.
+            if let count = turns[s.sessionId] { item["turns"] = count }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {
                 item["background"] = shells.count

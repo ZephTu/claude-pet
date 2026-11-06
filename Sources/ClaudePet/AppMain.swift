@@ -72,6 +72,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var completions: CompletionStore?
     private var hotKey: HotKey?
     private let git = GitCache()
+    private let turnCache = TurnCache()
     private var labelPrefs: [String: SessionLabels.Prefs] = [:]
     /// The session list stays up instead of being opened per glance.
     private var keepListOpen = false
@@ -157,6 +158,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         loadQuotaSaid()
         loadLabels()
         git.onUpdate = { [weak self] in self?.render() }
+        turnCache.onUpdate = { [weak self] in self?.render() }
         bridge.onRowMenu = { [weak self] id, point in self?.showRowMenu(sessionID: id, at: point) }
         // Off unless the user asked for it: claiming a system-wide chord
         // uninvited is taking something that was not offered.
@@ -278,7 +280,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
                              snoozed: snoozeMarks, prefs: labelPrefs,
-                             branches: branches(for: state.sessions))
+                             branches: branches(for: state.sessions),
+                             turns: turnCache.turns(for: state.sessions))
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not

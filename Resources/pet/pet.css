@@ -669,11 +669,16 @@ html, body {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
 }
-/* "ago" is the whole difference between a duration and an instant, and it is
-   the quietest thing in the row that can carry it: a number alone reads as
-   whichever the reader was already expecting. Dim and small, because it is
-   grammar rather than data — the number is the data. */
-.ago {
+/* Turns sit just left of the age and take over pushing the clock to the
+   right edge. The age keeps a fixed width so the turn counts line up as a
+   column whether the clock says 9s or 100h. */
+.turns {
+  margin-left: auto; color: #8a837d; flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.turns + .age { margin-left: 10px; min-width: 4ch; text-align: right; }
+/* The unit is grammar rather than data — the number is the data. */
+.turns .unit {
   padding-left: 3px; color: #6b6560; font-size: 9px;
 }
 /* Notification message — design doc section 2 keeps it out of the bubble and

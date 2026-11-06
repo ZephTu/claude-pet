@@ -215,6 +215,6 @@ private extension SessionState {
             pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
             promptId: promptId, phase: phase, troubleAt: troubleAt,
             backgroundAgents: backgroundAgents, askId: "",
-            failStreak: failStreak, failTarget: failTarget)
+            failStreak: failStreak, failTarget: failTarget, transcript: transcript)
     }
 }

@@ -102,6 +102,8 @@ const TEXT = {
   later: "later — ",
   done: "done",
   turns: " turns",
+  turnUnit: " turn",
+  turnsUnit: " turns",
   // Second lines and footers.
   closed: "session closed",
   empty: "No live sessions",
@@ -494,28 +496,36 @@ function ageText(seconds) {
   return Math.floor(seconds / 3600) + "h";
 }
 
-/** The age column, with the one word that says which reading it is. */
-function ageHTML(seconds, ago) {
-  return '<span class="age">' + ageText(seconds)
-    + (ago ? '<span class="ago">ago</span>' : "") + "</span>";
+/** The age column. */
+function ageHTML(seconds) {
+  return '<span class="age">' + ageText(seconds) + "</span>";
 }
 
 /**
- * How long, and how long since — the two readings of the same number.
+ * How many turns the conversation has had, left of the age. Counted from the
+ * transcript (see TurnCount), so it is absent until that has been read.
+ */
+function turnsHTML(n) {
+  if (!n) return "";
+  return '<span class="turns">' + n
+    + '<span class="unit">' + (n === 1 ? TEXT.turnUnit : TEXT.turnsUnit) + "</span></span>";
+}
+
+/**
+ * Which clock the age column shows.
  *
- * `SessionState.since` is when the CURRENT state began, so on a running or
- * blocked row it is a duration (how long this has been going) and on an idle
- * one it is an instant (when the answer landed). "Answered 6h" read as a
- * six-hour answer; "Answered 6h ago" is the fact.
+ * `SessionState.since` is when the CURRENT state began: on a running or
+ * blocked row that is how long this has been going, on an idle one how long
+ * ago the answer landed. The status word beside it ("Working", "Answered")
+ * already says which, so the number goes bare.
  *
  * A row with a call in flight shows that call's own clock instead, because the
  * question it answers — is this stuck? — is about the call, not the turn. The
  * hover readout names both, so the bare number is never the only thing.
  */
 function rowAge(s) {
-  if (s.state === "idle") return { seconds: s.waitedSeconds, ago: true };
-  if (s.toolSeconds != null) return { seconds: s.toolSeconds, ago: false };
-  return { seconds: s.waitedSeconds, ago: false };
+  if (s.state !== "idle" && s.toolSeconds != null) return s.toolSeconds;
+  return s.waitedSeconds;
 }
 
 /**
@@ -596,8 +606,9 @@ function sessionRowHTML(s) {
     '<span class="dot ' + dotClass(s) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
-    // See rowAge: which clock this is, and whether it counts up or counts back.
-    (function () { const a = rowAge(s); return ageHTML(a.seconds, a.ago); })() +
+    turnsHTML(s.turns) +
+    // See rowAge: which clock this is.
+    ageHTML(rowAge(s)) +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
@@ -623,7 +634,7 @@ function finishedRowHTML(f) {
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
     '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
-    ageHTML(f.agoSeconds, true) +
+    ageHTML(f.agoSeconds) +
     (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
