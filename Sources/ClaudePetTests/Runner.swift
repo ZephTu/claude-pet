@@ -421,6 +421,35 @@ struct Runner {
         t.check("an empty handle is treated as absent",
                 TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": ""]) == nil)
 
+        // ---- A session running under the daemon, with its tab held by `claude attach` ----
+        // The hook then inherits the background process's environment, which names no
+        // terminal at all. The one that describes the user's tab belongs to a separate
+        // process, matched by the id on its command line.
+        let selfProcess = ProcessProbe.argsAndEnvironment(
+            pid: ProcessInfo.processInfo.processIdentifier)
+        t.check("a process's own arguments and environment read back",
+                selfProcess?.environment["PATH"] != nil && !(selfProcess?.args.isEmpty ?? true))
+        t.check("an empty session id matches no attach process",
+                ProcessProbe.attachedTerminalProcess(sessionID: "") == nil)
+        // A miss must stay a miss: borrowing some unrelated session's environment would
+        // offer a jump to a tab that has nothing to do with the row clicked.
+        t.check("a session id nothing is attached to matches no process",
+                ProcessProbe.attachedTerminalProcess(
+                    sessionID: "ffffffff-ffff-ffff-ffff-ffffffffffff") == nil)
+        // Claude Code abbreviates the id on the command line, so the recorded one starts
+        // with what is printed — matching the other way round would never hit.
+        t.check("the recorded id starts with the abbreviated one, not the reverse",
+                "7ca2af78-6899-497c-905e-ce3b730ee53c".hasPrefix("7ca2af78")
+                && !"7ca2af78".hasPrefix("7ca2af78-6899-497c-905e-ce3b730ee53c"))
+        // Leftovers like GHOSTTY_BIN_DIR survive into the daemon's environment, so
+        // "names a terminal" has to mean TERM_PROGRAM and nothing looser.
+        t.check("a daemon's leftover variables do not name a terminal",
+                TerminalTarget.identify(environment: [
+                    "GHOSTTY_BIN_DIR": "/Applications/Ghostty.app/Contents/MacOS",
+                    "GHOSTTY_RESOURCES_DIR": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+                    "TERM": "xterm-256color",
+                ]) == nil)
+
         // ---- Liveness: ask the kernel, do not watch the clock ----
         // Reported by a user: an open session nobody is touching fires no hooks at all,
         // so updatedAt stands still and it vanished from the panel after 15 minutes —

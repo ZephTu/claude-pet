@@ -168,6 +168,87 @@ public enum ProcessProbe {
         }
     }
 
+    // MARK: - The process that holds a session's terminal
+
+    /// A session's arguments and environment as the kernel kept them.
+    ///
+    /// `KERN_PROCARGS2` lays out: argc, the executable path, padding, then argc
+    /// argument strings, then the environment — all NUL-terminated. Readable for
+    /// this user's own processes, which is all this is ever asked about.
+    public static func argsAndEnvironment(pid: Int32)
+        -> (args: [String], environment: [String: String])? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else {
+            return nil
+        }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
+
+        var argc: Int32 = 0
+        withUnsafeMutableBytes(of: &argc) { target in
+            buffer.withUnsafeBytes { source in
+                target.copyMemory(from: UnsafeRawBufferPointer(rebasing: source.prefix(4)))
+            }
+        }
+        guard argc > 0 else { return nil }
+
+        // Split the tail into NUL-terminated strings, dropping the empty runs
+        // that pad the executable path out to an alignment boundary.
+        let strings = buffer[MemoryLayout<Int32>.size..<size]
+            .split(separator: 0, omittingEmptySubsequences: true)
+            .map { String(decoding: $0.map { UInt8(bitPattern: $0) }, as: UTF8.self) }
+        // The first is the executable path, then argc arguments, then the rest
+        // is the environment.
+        guard strings.count > Int(argc) else { return nil }
+        let args = Array(strings[1...Int(argc)])
+        var environment: [String: String] = [:]
+        for entry in strings[(Int(argc) + 1)...] {
+            guard let equals = entry.firstIndex(of: "=") else { continue }
+            environment[String(entry[..<equals])] = String(entry[entry.index(after: equals)...])
+        }
+        return (args, environment)
+    }
+
+    /// The `claude attach <session>` process holding this session's terminal, if
+    /// there is one.
+    ///
+    /// A session can be running inside a background process the daemon owns
+    /// (`claude bg-spare`) while the terminal the user is actually looking at
+    /// belongs to a separate `claude attach` process. Hooks then run under the
+    /// background one, whose environment carries no `TERM_PROGRAM` and whose
+    /// controlling terminal is not a tab anyone can see — so the session has to
+    /// be matched to its attach process by the id on that process's command
+    /// line. Only a process that holds a terminal counts, which is the whole
+    /// point of finding it.
+    public static func attachedTerminalProcess(sessionID: String) -> Int32? {
+        guard !sessionID.isEmpty else { return nil }
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        let count = size / MemoryLayout<kinfo_proc>.stride + 16
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        size = count * MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return nil }
+        let found = size / MemoryLayout<kinfo_proc>.stride
+
+        for proc in procs.prefix(found) {
+            let pid = proc.kp_proc.p_pid
+            guard pid > 0, proc.kp_eproc.e_tdev != -1, proc.kp_eproc.e_tdev != 0 else { continue }
+            // Reading a command line is the expensive part, so it happens only
+            // for processes that are Claude Code and do hold a terminal.
+            guard isClaude(pid: pid), let inspected = argsAndEnvironment(pid: pid) else { continue }
+            // argv[0] is the executable, so the subcommand and its argument
+            // follow it.
+            let arguments = inspected.args.dropFirst()
+            guard arguments.first == "attach" else { continue }
+            // Claude Code abbreviates the id on the command line, so the
+            // recorded one starts with what is printed, not the other way round.
+            if arguments.contains(where: { !$0.isEmpty && sessionID.hasPrefix($0) }) { return pid }
+        }
+        return nil
+    }
+
     public static func childPIDs(of pid: Int32) -> [Int32] {
         guard pid > 0 else { return [] }
         var buffer = [pid_t](repeating: 0, count: 256)
