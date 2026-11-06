@@ -22,8 +22,10 @@ public enum SessionDetail {
     public struct Detail: Sendable, Equatable {
         public var path = ""
         public var worktree = ""
-        /// 0-100, or nil when no statusline is wired up or its reading is stale.
+        /// 0-100: the statusline's reading while fresh, else the transcript's.
         public var contextPercent: Int?
+        /// Prompts typed into this session so far — see TranscriptStats.
+        public var turns = 0
         public var model = ""
         public var turn = ""
         /// How long the call currently in flight has been running, when there is
@@ -49,6 +51,7 @@ public enum SessionDetail {
     public static func detail(
         session: SessionState,
         insight: SessionInsight?,
+        transcript: TranscriptStats.Progress? = nil,
         lastActivity: ActivityEntry?,
         background: [BackgroundShells.Shell] = [],
         now: Date
@@ -61,6 +64,8 @@ public enum SessionDetail {
             d.contextPercent = insight.contextPercent
             d.model = insight.modelName
         }
+        if d.contextPercent == nil { d.contextPercent = transcript?.contextPercent }
+        d.turns = transcript?.turns ?? 0
 
         d.turn = Chatter.duration(until: now, now: session.since)
         // The oldest call still in flight: the same number the row shows, named.

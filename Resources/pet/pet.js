@@ -102,8 +102,6 @@ const TEXT = {
   later: "later — ",
   done: "done",
   turns: " turns",
-  turnUnit: " turn",
-  turnsUnit: " turns",
   // Second lines and footers.
   closed: "session closed",
   empty: "No live sessions",
@@ -501,14 +499,25 @@ function ageHTML(seconds) {
   return '<span class="age">' + ageText(seconds) + "</span>";
 }
 
+/* A speech bubble, drawn in the text colour: "this many exchanges". */
+const BUBBLE_SVG = '<svg class="glyph" viewBox="0 0 10 10" aria-hidden="true">'
+  + '<path d="M1.5 1.5h7v5h-4.2l-2.3 2v-2h-.5z" fill="none" stroke="currentColor"'
+  + ' stroke-width="1" stroke-linejoin="round"/></svg>';
+
 /**
- * How many turns the conversation has had, left of the age. Counted from the
- * transcript (see TurnCount), so it is absent until that has been read.
+ * What the row says about the conversation as a whole, left of the age: how
+ * many turns it has had and how full its context is. Both come from the
+ * transcript (see TranscriptStats), so they are absent until it has been read.
+ * Neither carries a word — the bubble and the % sign stand in for one, and the
+ * hover readout spells both out.
  */
-function turnsHTML(n) {
-  if (!n) return "";
-  return '<span class="turns">' + n
-    + '<span class="unit">' + (n === 1 ? TEXT.turnUnit : TEXT.turnsUnit) + "</span></span>";
+function metaHTML(s) {
+  let html = "";
+  if (s.turns) html += '<span class="turns">' + BUBBLE_SVG + s.turns + "</span>";
+  if (typeof s.context === "number") {
+    html += '<span class="ctx' + (s.context >= 80 ? " hot" : "") + '">' + s.context + "%</span>";
+  }
+  return html;
 }
 
 /**
@@ -606,9 +615,9 @@ function sessionRowHTML(s) {
     '<span class="dot ' + dotClass(s) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
-    turnsHTML(s.turns) +
+    '<span class="meta">' + metaHTML(s) +
     // See rowAge: which clock this is.
-    ageHTML(rowAge(s)) +
+    ageHTML(rowAge(s)) + "</span>" +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
@@ -968,6 +977,12 @@ window.showDetail = function (d) {
     if (d.model) span(meter, "qreset", d.model);
   } else if (d.model) {
     span(row("dclocks"), "dmodel", d.model);
+  }
+
+  if (d.turns) {
+    const talk = row("dclocks");
+    span(talk, "dval", String(d.turns));
+    span(talk, "dkey", d.turns === 1 ? "turn so far" : "turns so far");
   }
 
   if (d.turn || d.tool) {

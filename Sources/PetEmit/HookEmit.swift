@@ -135,7 +135,7 @@ enum HookEmit {
         if let terminal = terminalRef(cwd: cwd) {
             document["terminal"] = terminal
         }
-        // The pet counts the session's turns from it — see TurnCount.
+        // The pet counts the session's turns from it — see TranscriptStats.
         if let transcript = hook["transcript_path"] as? String, transcript.hasPrefix("/") {
             document["transcript"] = transcript
         }

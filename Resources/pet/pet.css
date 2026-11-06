@@ -669,18 +669,21 @@ html, body {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
 }
-/* Turns sit just left of the age and take over pushing the clock to the
-   right edge. The two read as one column ("48 turns 2m"), so they sit
-   close rather than in separately aligned columns. */
-.turns {
-  margin-left: auto; color: #8a837d; flex: none;
-  font-variant-numeric: tabular-nums;
+/* Turns, context and age read as one column ("48 72% 2m"), pushed together
+   to the right edge. */
+.meta {
+  margin-left: auto; display: flex; gap: 7px; align-items: baseline; flex: none;
 }
-.turns + .age { margin-left: 5px; }
-/* The unit is grammar rather than data — the number is the data. */
-.turns .unit {
-  padding-left: 3px; color: #6b6560; font-size: 9px;
+.meta .age { margin-left: 0; }
+.turns, .ctx {
+  color: #8a837d; font-variant-numeric: tabular-nums;
 }
+.turns .glyph {
+  width: 9px; height: 9px; margin-right: 2px; vertical-align: -1px; color: #6b6560;
+}
+/* Nearly full: the next compaction is close, and with it the detail of
+   everything before. Same warm as a row that wants you. */
+.ctx.hot { color: #e0a63c; }
 /* Notification message — design doc section 2 keeps it out of the bubble and
    shows it only here. */
 .detail {
