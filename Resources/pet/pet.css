@@ -670,13 +670,13 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 /* Turns sit just left of the age and take over pushing the clock to the
-   right edge. The age keeps a fixed width so the turn counts line up as a
-   column whether the clock says 9s or 100h. */
+   right edge. The two read as one column ("48 turns 2m"), so they sit
+   close rather than in separately aligned columns. */
 .turns {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
 }
-.turns + .age { margin-left: 10px; min-width: 4ch; text-align: right; }
+.turns + .age { margin-left: 5px; }
 /* The unit is grammar rather than data — the number is the data. */
 .turns .unit {
   padding-left: 3px; color: #6b6560; font-size: 9px;
