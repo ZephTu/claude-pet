@@ -39,6 +39,16 @@ public enum TerminalTitles {
     /// Parses the tab-separated `id<TAB>title` lines the iTerm2 AppleScript
     /// prints, one per session.
     public static func parseITerm(_ stdout: String) -> [String: String] {
+        parseTabSeparated(stdout)
+    }
+
+    /// Ghostty's list script prints the same `handle<TAB>title` shape, keyed by
+    /// tty instead of a session id.
+    public static func parseGhostty(_ stdout: String) -> [String: String] {
+        parseTabSeparated(stdout)
+    }
+
+    private static func parseTabSeparated(_ stdout: String) -> [String: String] {
         var titles: [String: String] = [:]
         for line in stdout.split(separator: "\n") {
             let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
@@ -91,6 +101,19 @@ public enum TerminalTitles {
             set out to out & (id of s as text) & tab & tabTitle & linefeed
           end repeat
         end repeat
+      end repeat
+    end tell
+    return out
+    """
+
+    /// The AppleScript that lists every Ghostty tab's tty and its title.
+    /// `terminals` is flat on the application, so unlike iTerm2 this needs no
+    /// window and tab walk, and a terminal carries its own name.
+    public static let ghosttyListScript = """
+    set out to ""
+    tell application "Ghostty"
+      repeat with s in terminals
+        set out to out & (tty of s) & tab & (name of s) & linefeed
       end repeat
     end tell
     return out

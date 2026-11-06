@@ -21,7 +21,12 @@ public enum TerminalTarget {
     /// - Parameter cwd: the session's directory. Only an editor's terminal
     ///   needs it: the editor has no handle for a terminal, so the jump goes to
     ///   the window that has this directory open instead.
-    public static func identify(environment env: [String: String], cwd: String = "") -> TerminalRef? {
+    /// - Parameter tty: the session's controlling terminal, as a device path.
+    ///   Only Ghostty needs it: the variable it exports per tab
+    ///   (`GHOSTTY_SURFACE_ID`) is not the id its AppleScript interface answers
+    ///   to, and tty is the one field both sides agree on.
+    public static func identify(environment env: [String: String], cwd: String = "",
+                                tty: String = "") -> TerminalRef? {
         let program = env["TERM_PROGRAM"] ?? ""
         let orca = env["ORCA_TERMINAL_HANDLE"] ?? ""
         let iterm = env["ITERM_SESSION_ID"] ?? ""
@@ -31,6 +36,12 @@ public enum TerminalTarget {
             return iterm.isEmpty ? nil : TerminalRef(kind: "iterm2", handle: iterm)
         case "Orca":
             return orca.isEmpty ? nil : TerminalRef(kind: "orca", handle: orca)
+        case "ghostty":
+            // Ghostty exposes no stale-able handle of its own: GHOSTTY_SURFACE_ID
+            // is an address, and its AppleScript `terminal` objects are keyed by
+            // a uuid the shell never sees. Both do agree on tty, and a tty is
+            // reassigned only after the tab that held it is gone.
+            return isSafeTTYPath(tty) ? TerminalRef(kind: "ghostty", handle: tty) : nil
         case "vscode":
             // VS Code and everything forked from it — Cursor, Windsurf — say
             // "vscode" here. Which one it actually is comes from the app.
@@ -51,7 +62,24 @@ public enum TerminalTarget {
     /// written by a future pet-emit this binary predates — makes the row
     /// non-clickable rather than giving the user a dead click.
     public static func canJump(kind: String) -> Bool {
-        kind == "orca" || kind == "iterm2" || kind == "vscode"
+        kind == "orca" || kind == "iterm2" || kind == "vscode" || kind == "ghostty"
+    }
+
+    // MARK: - Ghostty
+
+    /// Is this a tty device path, and therefore safe to paste into the
+    /// AppleScript that asks Ghostty for it?
+    ///
+    /// Same reasoning as `isSafeITermUUID`: the value is read from one process's
+    /// environment, written to a file, and read back by another that puts it
+    /// inside a script it executes. A quote or a newline would close the literal
+    /// and run the rest as code. Real paths are `/dev/ttys003`, so letters and
+    /// digits after `/dev/tty` is all that needs to be allowed.
+    public static func isSafeTTYPath(_ path: String) -> Bool {
+        let prefix = "/dev/tty"
+        guard path.hasPrefix(prefix) else { return false }
+        let rest = path.dropFirst(prefix.count)
+        return !rest.isEmpty && rest.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 
     // MARK: - VS Code and its forks
