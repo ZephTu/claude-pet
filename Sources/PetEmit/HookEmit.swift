@@ -135,6 +135,10 @@ enum HookEmit {
         if let terminal = terminalRef(cwd: cwd) {
             document["terminal"] = terminal
         }
+        // The pet counts the session's turns from it — see TranscriptStats.
+        if let transcript = hook["transcript_path"] as? String, transcript.hasPrefix("/") {
+            document["transcript"] = transcript
+        }
         // The pet decides liveness from this, so an idle session stays listed.
         let pid = claudePID()
         if let pid {

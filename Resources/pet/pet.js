@@ -494,28 +494,47 @@ function ageText(seconds) {
   return Math.floor(seconds / 3600) + "h";
 }
 
-/** The age column, with the one word that says which reading it is. */
-function ageHTML(seconds, ago) {
-  return '<span class="age">' + ageText(seconds)
-    + (ago ? '<span class="ago">ago</span>' : "") + "</span>";
+/** The age column. */
+function ageHTML(seconds) {
+  return '<span class="age">' + ageText(seconds) + "</span>";
+}
+
+/* A speech bubble, drawn in the text colour: "this many exchanges". */
+const BUBBLE_SVG = '<svg class="glyph" viewBox="0 0 10 10" aria-hidden="true">'
+  + '<path d="M1.5 1.5h7v5h-4.2l-2.3 2v-2h-.5z" fill="none" stroke="currentColor"'
+  + ' stroke-width="1" stroke-linejoin="round"/></svg>';
+
+/**
+ * What the row says about the conversation as a whole, left of the age: how
+ * many turns it has had and how full its context is. Both come from the
+ * transcript (see TranscriptStats), so they are absent until it has been read.
+ * Neither carries a word — the bubble and the % sign stand in for one, and the
+ * hover readout spells both out.
+ */
+function metaHTML(s) {
+  let html = "";
+  if (s.turns) html += '<span class="turns">' + BUBBLE_SVG + s.turns + "</span>";
+  if (typeof s.context === "number") {
+    html += '<span class="ctx' + (s.context >= 80 ? " hot" : "") + '">' + s.context + "%</span>";
+  }
+  return html;
 }
 
 /**
- * How long, and how long since — the two readings of the same number.
+ * Which clock the age column shows.
  *
- * `SessionState.since` is when the CURRENT state began, so on a running or
- * blocked row it is a duration (how long this has been going) and on an idle
- * one it is an instant (when the answer landed). "Answered 6h" read as a
- * six-hour answer; "Answered 6h ago" is the fact.
+ * `SessionState.since` is when the CURRENT state began: on a running or
+ * blocked row that is how long this has been going, on an idle one how long
+ * ago the answer landed. The status word beside it ("Working", "Answered")
+ * already says which, so the number goes bare.
  *
  * A row with a call in flight shows that call's own clock instead, because the
  * question it answers — is this stuck? — is about the call, not the turn. The
  * hover readout names both, so the bare number is never the only thing.
  */
 function rowAge(s) {
-  if (s.state === "idle") return { seconds: s.waitedSeconds, ago: true };
-  if (s.toolSeconds != null) return { seconds: s.toolSeconds, ago: false };
-  return { seconds: s.waitedSeconds, ago: false };
+  if (s.state !== "idle" && s.toolSeconds != null) return s.toolSeconds;
+  return s.waitedSeconds;
 }
 
 /**
@@ -596,8 +615,9 @@ function sessionRowHTML(s) {
     '<span class="dot ' + dotClass(s) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
-    // See rowAge: which clock this is, and whether it counts up or counts back.
-    (function () { const a = rowAge(s); return ageHTML(a.seconds, a.ago); })() +
+    '<span class="meta">' + metaHTML(s) +
+    // See rowAge: which clock this is.
+    ageHTML(rowAge(s)) + "</span>" +
     (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
@@ -623,7 +643,7 @@ function finishedRowHTML(f) {
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
     '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
-    ageHTML(f.agoSeconds, true) +
+    ageHTML(f.agoSeconds) +
     (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
@@ -957,6 +977,12 @@ window.showDetail = function (d) {
     if (d.model) span(meter, "qreset", d.model);
   } else if (d.model) {
     span(row("dclocks"), "dmodel", d.model);
+  }
+
+  if (d.turns) {
+    const talk = row("dclocks");
+    span(talk, "dval", String(d.turns));
+    span(talk, "dkey", d.turns === 1 ? "turn so far" : "turns so far");
   }
 
   if (d.turn || d.tool) {

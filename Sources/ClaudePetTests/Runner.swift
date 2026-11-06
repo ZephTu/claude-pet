@@ -515,6 +515,52 @@ struct Runner {
         t.check("waiting without a permission request is never treated as approved",
                 !StateAggregator.wasApproved(mk("q", .waiting)))
 
+        // ---- Turns, counted from the transcript ----
+        func human(_ prompt: String) -> String {
+            #"{"type":"user","message":{"role":"user","content":"hi"},"promptId":"\#(prompt)","origin":{"kind":"human"}}"# + "\n"
+        }
+        let toolLine = #"{"type":"user","message":{"content":[{"type":"tool_result","content":"\"origin\":{\"kind\":\"human\"}"}]},"promptId":"p1"}"# + "\n"
+        let summaryLine = #"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"# + "\n"
+        let transcript = human("p1") + toolLine + human("p1") + summaryLine + human("p2")
+        let counted = TranscriptStats.advance(.init(), through: Data(transcript.utf8))
+        t.check("turns count typed prompts, not tool results or summaries", counted.turns == 2)
+        t.check("a message typed mid-turn joins that turn", counted.lastPrompt == "p2")
+        t.check("the whole transcript has been read", counted.offset == transcript.utf8.count)
+        let grown = transcript + human("p3") + #"{"type":"user","promptId":"p4","origin":{"ki"#
+        let more = TranscriptStats.advance(counted, through: Data(grown.utf8))
+        t.check("a grown transcript is read from where it stopped", more.turns == 3)
+        t.check("a line still being written waits for next time",
+                more.offset == (transcript + human("p3")).utf8.count)
+        let finished = TranscriptStats.advance(more, through: Data((transcript + human("p3") + human("p4")).utf8))
+        t.check("the finished line is counted once it is whole", finished.turns == 4)
+        t.check("a transcript shorter than what was read starts over",
+                TranscriptStats.advance(finished, through: Data(human("q").utf8)).turns == 1)
+        func reply(_ model: String, input: Int, created: Int, read: Int, requested: String = "") -> String {
+            #"{"type":"assistant","message":{"model":"\#(model)","content":[{"type":"tool_use","input":{"model":"haiku"}}],"usage":{"input_tokens":\#(input),"cache_creation_input_tokens":\#(created),"cache_read_input_tokens":\#(read),"output_tokens":9,"iterations":[{"input_tokens":1}]}},"requestedModel":"\#(requested.isEmpty ? model : requested)"}"# + "\n"
+        }
+        let talk = human("p1") + reply("claude-opus-5-5", input: 2, created: 1_000, read: 186_998)
+            + reply("<synthetic>", input: 0, created: 0, read: 0)
+        let ctx = TranscriptStats.advance(.init(), through: Data(talk.utf8))
+        t.check("context is what the last reply's request sent", ctx.contextTokens == 188_000)
+        t.check("a reply with no tokens (an API error) is not the context", ctx.model == "claude-opus-5-5")
+        t.check("a current model has a million-token window", ctx.contextPercent == 19)
+        let oldModel = TranscriptStats.advance(.init(), through: Data(
+            reply("claude-sonnet-4-5-20250929", input: 2, created: 0, read: 149_998).utf8))
+        t.check("an older model's window is 200k", oldModel.contextPercent == 75)
+        let asked = TranscriptStats.advance(.init(), through: Data(
+            reply("claude-sonnet-4-5", input: 0, created: 0, read: 150_000,
+                  requested: "claude-sonnet-4-5[1m]").utf8))
+        t.check("[1m] asks for the million", asked.contextPercent == 15)
+        let compacted = TranscriptStats.advance(ctx, through: Data(
+            (talk + reply("claude-opus-5-5", input: 5, created: 30_000, read: 0)).utf8))
+        t.check("a compaction shows as the next reply sending less", compacted.contextPercent == 3)
+        t.check("no reply yet is no reading, not 0%",
+                TranscriptStats.advance(.init(), through: Data(human("p").utf8)).contextPercent == nil)
+        t.check("the transcript path Claude Code uses when the hook did not say",
+                TranscriptStats.defaultTranscript(cwd: "/Users/a/code-projects/claude.pet", sessionId: "s1",
+                                            home: "/Users/a")
+                == "/Users/a/.claude/projects/-Users-a-code-projects-claude-pet/s1.jsonl")
+
         // ---- A dialog closed with no hook: Claude Code's own status says so ----
         let statusFile = Data(#"""
             {"pid":5289,"sessionId":"dlg","status":"idle","statusUpdatedAt":1789467610063}

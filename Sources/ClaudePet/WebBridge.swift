@@ -327,6 +327,7 @@ final class WebBridge {
             "last": d.last, "lastBad": d.lastBad, "background": d.background,
         ]
         if let percent = d.contextPercent { doc["context"] = percent }
+        if d.turns > 0 { doc["turns"] = d.turns }
         guard
             let data = try? JSONSerialization.data(withJSONObject: doc),
             let json = String(data: data, encoding: .utf8)
@@ -369,7 +370,9 @@ final class WebBridge {
                       droppedNotice: Int = 0,
                       snoozed: [String: Snooze.Mark] = [:],
                       prefs: [String: SessionLabels.Prefs] = [:],
-                      branches: [String: String] = [:]) {
+                      branches: [String: String] = [:],
+                      turns: [String: Int] = [:],
+                      context: [String: Int] = [:]) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -401,6 +404,10 @@ final class WebBridge {
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
             if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // How long the conversation has gone on, and how full its context
+            // is — see TranscriptStats.
+            if let count = turns[s.sessionId] { item["turns"] = count }
+            if let percent = context[s.sessionId] { item["context"] = percent }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {
                 item["background"] = shells.count

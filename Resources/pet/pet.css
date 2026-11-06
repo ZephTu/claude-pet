@@ -669,13 +669,25 @@ html, body {
   margin-left: auto; color: #8a837d; flex: none;
   font-variant-numeric: tabular-nums;
 }
-/* "ago" is the whole difference between a duration and an instant, and it is
-   the quietest thing in the row that can carry it: a number alone reads as
-   whichever the reader was already expecting. Dim and small, because it is
-   grammar rather than data — the number is the data. */
-.ago {
-  padding-left: 3px; color: #6b6560; font-size: 9px;
+/* Turns, context and age read as one column ("48 · 72% · 2m"), pushed
+   together to the right edge. A middle dot keeps the three apart in less room
+   than a gap wide enough to do the same. */
+.meta {
+  margin-left: auto; display: flex; align-items: baseline; flex: none;
 }
+.meta > * + *::before {
+  content: "\00b7"; margin: 0 3px; color: #6b6560;
+}
+.meta .age { margin-left: 0; }
+.turns, .ctx {
+  color: #8a837d; font-variant-numeric: tabular-nums;
+}
+.turns .glyph {
+  width: 9px; height: 9px; margin-right: 2px; vertical-align: -1px; color: #6b6560;
+}
+/* Nearly full: the next compaction is close, and with it the detail of
+   everything before. Same warm as a row that wants you. */
+.ctx.hot { color: #e0a63c; }
 /* Notification message — design doc section 2 keeps it out of the bubble and
    shows it only here. */
 .detail {

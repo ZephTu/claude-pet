@@ -47,6 +47,10 @@ check "SessionStart writes idle" "$(field s1 state)" "idle"
 check "project is cwd basename" "$(field s1 project)" "demo-app"
 check "cwd is kept whole" "$(field s1 cwd)" "/Users/dev/Projects/demo-app"
 
+emit_json '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/tmp/t","transcript_path":"/Users/dev/.claude/projects/-tmp-t/sT.jsonl"}'
+check "the transcript path is kept for counting turns" "$(field sT transcript)" "/Users/dev/.claude/projects/-tmp-t/sT.jsonl"
+rm -f "$PET_HOME/sessions/sT.json"
+
 emit UserPromptSubmit s1 /Users/dev/Projects/demo-app
 check "UserPromptSubmit writes busy" "$(field s1 state)" "busy"
 

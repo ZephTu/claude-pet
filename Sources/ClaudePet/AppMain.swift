@@ -72,6 +72,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var completions: CompletionStore?
     private var hotKey: HotKey?
     private let git = GitCache()
+    private let transcripts = TranscriptCache()
+    /// sessionId → turns and context, from the last render.
+    private var transcriptStats: [String: TranscriptStats.Progress] = [:]
     private var labelPrefs: [String: SessionLabels.Prefs] = [:]
     /// The session list stays up instead of being opened per glance.
     private var keepListOpen = false
@@ -157,6 +160,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         loadQuotaSaid()
         loadLabels()
         git.onUpdate = { [weak self] in self?.render() }
+        transcripts.onUpdate = { [weak self] in self?.render() }
         bridge.onRowMenu = { [weak self] id, point in self?.showRowMenu(sessionID: id, at: point) }
         // Off unless the user asked for it: claiming a system-wide chord
         // uninvited is taking something that was not offered.
@@ -273,12 +277,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         refreshTitlesIfPinned(for: state.sessions, now: now)
         noticeTransients(state, previous: lastState)
         backgroundShells = findBackgroundShells(state.sessions)
+        transcriptStats = transcripts.stats(for: state.sessions)
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              background: backgroundShells,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
                              droppedNotice: completions?.takeDropNotice() ?? 0,
                              snoozed: snoozeMarks, prefs: labelPrefs,
-                             branches: branches(for: state.sessions))
+                             branches: branches(for: state.sessions),
+                             turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
+                             context: contextPercents(for: state.sessions, now: now))
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
@@ -531,6 +538,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let data = SessionLabels.encode(labelPrefs)
         guard !data.isEmpty else { return }
         UserDefaults.standard.set(data, forKey: Self.labelsKey)
+    }
+
+    /// sessionId → how full its context is. A fresh statusline reading is
+    /// Claude Code's own number and wins; the transcript covers every session
+    /// the statusline has not drawn lately, or at all.
+    private func contextPercents(for sessions: [SessionState], now: Date) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for session in sessions {
+            let insight = insights[session.sessionId].flatMap { $0.isFresh(now: now) ? $0 : nil }
+            if let percent = insight?.contextPercent ?? transcriptStats[session.sessionId]?.contextPercent {
+                out[session.sessionId] = percent
+            }
+        }
+        return out
     }
 
     /// cwd → branch, for the directories currently on screen.
@@ -994,6 +1015,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             ActivityLog.decode((try? String(contentsOf: file, encoding: .utf8)) ?? ""),
             now: Date(), limit: 1).first
         return SessionDetail.detail(session: session, insight: insights[sessionID],
+                                    transcript: transcriptStats[sessionID],
                                     lastActivity: recent,
                                     background: backgroundShells[sessionID] ?? [], now: Date())
     }
