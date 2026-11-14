@@ -470,6 +470,84 @@ struct Runner {
             t.check("this test process has no controlling terminal", true)
         }
 
+        // ---- A session running under the daemon, with its tab held by `claude attach` ----
+        // The hook then inherits the background process's environment, which names no
+        // terminal at all, and that process's tty is not a tab anyone can see. Both
+        // answers come from a separate process, matched by the id on its command line.
+
+        // Leftovers like GHOSTTY_BIN_DIR survive into the daemon's environment, so
+        // "names a terminal" has to mean TERM_PROGRAM and nothing looser.
+        t.check("a daemon's leftover variables do not name a terminal",
+                TerminalTarget.identify(environment: [
+                    "GHOSTTY_BIN_DIR": "/Applications/Ghostty.app/Contents/MacOS",
+                    "GHOSTTY_RESOURCES_DIR": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+                    "TERM": "xterm-256color",
+                ], tty: "/dev/ttys002") == nil)
+
+        // What decides whether the scan below runs at all. Terminals that set no
+        // TERM_PROGRAM of their own would otherwise scan on every hook and never find
+        // anything, so the gate is the command line, not a missing variable.
+        t.check("a background session process is recognised by its flag",
+                ProcessProbe.isBackgroundSpare(
+                    arguments: "claude bg-spare --bg-spare /tmp/cc-daemon-501/x/spare/y.claim.sock"))
+        t.check("an ordinary claude process is not a background one",
+                !ProcessProbe.isBackgroundSpare(arguments: "/usr/local/bin/claude"))
+        t.check("an attach process is not a background one",
+                !ProcessProbe.isBackgroundSpare(arguments: "/usr/local/bin/claude attach 7ca2af78"))
+        // Whole argument, not substring: a socket path is free to contain anything.
+        t.check("the flag is not matched inside another argument",
+                !ProcessProbe.isBackgroundSpare(arguments: "claude resume /tmp/x--bg-spare/y"))
+
+        // Claude Code abbreviates the id on the command line, so the recorded one starts
+        // with what is printed — matching the other way round never hits.
+        let sessionID = "7ca2af78-6899-497c-905e-ce3b730ee53c"
+        t.check("an attach process is matched by the abbreviated id it was given",
+                ProcessProbe.attachMatches(arguments: ["attach", "7ca2af78"],
+                                           sessionID: sessionID))
+        t.check("the full id on the command line matches too",
+                ProcessProbe.attachMatches(arguments: ["attach", sessionID],
+                                           sessionID: sessionID))
+        t.check("a longer abbreviation still matches",
+                ProcessProbe.attachMatches(arguments: ["attach", "7ca2af78-6899"],
+                                           sessionID: sessionID))
+        t.check("another session's id does not match",
+                !ProcessProbe.attachMatches(arguments: ["attach", "deadbeef"],
+                                            sessionID: sessionID))
+        // A short argument is a prefix of far too many ids to be evidence of anything,
+        // and borrowing the wrong session's tab is worse than offering no jump.
+        t.check("an abbreviation shorter than Claude Code prints is not evidence",
+                !ProcessProbe.attachMatches(arguments: ["attach", "7ca2"], sessionID: sessionID))
+        // Only `attach` holds a tab; `resume` runs the session in that terminal itself,
+        // and its environment is already the hook's own.
+        t.check("a subcommand other than attach does not match",
+                !ProcessProbe.attachMatches(arguments: ["resume", "7ca2af78"],
+                                            sessionID: sessionID))
+        t.check("the id has to be an argument, not the subcommand",
+                !ProcessProbe.attachMatches(arguments: ["7ca2af78", "attach"],
+                                            sessionID: sessionID))
+        // A session id is a uuid, so an argument that is not shaped like one is not an
+        // abbreviation of anything, even where it happens to be a prefix.
+        t.check("an argument that is not shaped like an id does not match",
+                !ProcessProbe.attachMatches(arguments: ["attach", "last-session"],
+                                            sessionID: "last-session-0001"))
+        t.check("no arguments match nothing",
+                !ProcessProbe.attachMatches(arguments: [], sessionID: sessionID))
+        t.check("an empty session id matches nothing",
+                !ProcessProbe.attachMatches(arguments: ["attach", "7ca2af78"], sessionID: ""))
+
+        // The reading side, against this very process.
+        let selfProcess = ProcessProbe.argsAndEnvironment(
+            pid: ProcessInfo.processInfo.processIdentifier)
+        t.check("a process's own arguments and environment read back",
+                selfProcess?.environment["PATH"] != nil && !(selfProcess?.args.isEmpty ?? true))
+        t.check("an empty session id matches no attach process",
+                ProcessProbe.attachedTerminalProcess(sessionID: "") == nil)
+        // A miss must stay a miss: borrowing some unrelated session's environment would
+        // offer a jump to a tab that has nothing to do with the row clicked.
+        t.check("a session id nothing is attached to matches no process",
+                ProcessProbe.attachedTerminalProcess(
+                    sessionID: "ffffffff-ffff-ffff-ffff-ffffffffffff") == nil)
+
         // ---- Liveness: ask the kernel, do not watch the clock ----
         // Reported by a user: an open session nobody is touching fires no hooks at all,
         // so updatedAt stands still and it vanished from the panel after 15 minutes —
