@@ -365,10 +365,17 @@ html, body {
 }
 #bubble.readout > * + * { margin-top: 3px; }
 .dpath { display: flex; gap: 6px; align-items: baseline; }
+/* Wraps instead of truncating, at the <wbr> after each "/" — see setPath() and
+   fitPath() in pet.js. min-width:0 lets it shrink beside the branch in the flex
+   (uncrowded) layout instead of pushing the bubble wider. */
 .dwhere {
   color: #e8e4df; font-weight: 500;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+  white-space: normal;
 }
+/* One directory name: never broken at its own hyphens. `anywhere` is only for a
+   single name longer than the whole bubble. */
+.dseg { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .dtree { flex: none; color: #857c74; font-size: 10px; }
 .dtree::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
 .dclocks { display: flex; gap: 5px; align-items: baseline; color: #b5aea8; font-size: 10.5px; }
