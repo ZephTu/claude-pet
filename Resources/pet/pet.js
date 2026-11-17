@@ -938,6 +938,7 @@ window.showDetail = function (d) {
   speaking = true;
   variant("readout");
   bubble.textContent = "";
+  pathEl = null;
 
   function row(cls) {
     const el = document.createElement("div");
@@ -956,7 +957,13 @@ window.showDetail = function (d) {
   if (d.path) {
     // Paths and branch names are user text, so every one of these is textContent.
     const head = row("dpath");
-    span(head, "dwhere", d.path);
+    // The whole path, wrapped rather than cut: the tail is the part that tells
+    // two sessions apart, and an ellipsis (or the bubble's edge) eats exactly
+    // that. A <wbr> after every "/" makes the breaks land between directories,
+    // not mid-name.
+    pathEl = span(head, "dwhere", "");
+    pathParts = d.path.split("/");
+    setPath(pathEl, pathParts);
     if (d.worktree) span(head, "dtree", d.worktree);
   }
 
@@ -1018,8 +1025,60 @@ window.showDetail = function (d) {
   }
 
   bubble.hidden = false;
+  // Crowding decides the bubble's width, and the width decides how many lines
+  // the path takes, so the path is fitted only once that is settled.
+  syncCrowding();
+  if (pathEl) fitPath(pathEl, pathParts);
   reportLayout();
 };
+
+/* The readout's path, held between building the rows and fitting them. */
+let pathEl = null;
+let pathParts = null;
+
+/* Lines the path may take. The bubble hangs from a fixed floor (BUBBLE_FLOOR)
+   and grows upward, and in the crowded strip the rows below already use most
+   of that height: a third line pushes the top of the card out of the window. */
+const PATH_LINES = 2;
+
+/**
+ * Render path components with a break opportunity after each "/". Each
+ * component is its own inline-block so a line never breaks INSIDE a name —
+ * "code-projects" would otherwise split at its hyphen.
+ */
+function setPath(el, parts) {
+  el.textContent = "";
+  parts.forEach(function (part, i) {
+    const last = i === parts.length - 1;
+    const seg = document.createElement("span");
+    seg.className = "dseg";
+    seg.textContent = last ? part : part + "/";
+    el.appendChild(seg);
+    if (!last) el.appendChild(document.createElement("wbr"));
+  });
+}
+
+/**
+ * Shorten the path until it fits in PATH_LINES, fish-style: middle directories
+ * collapse to their first letter, outermost first, so `~/Documents/code-projects/claude-pet`
+ * becomes `~/D/code-projects/claude-pet` before it becomes `~/D/c/claude-pet`.
+ * The last component is never shortened — it is the one that names the session.
+ * Measured rather than counted: character widths vary too much in a
+ * proportional font for a length cap to be right.
+ */
+function fitPath(el, parts) {
+  const lh = parseFloat(getComputedStyle(el).lineHeight) || 15;
+  const fits = () => el.getBoundingClientRect().height <= lh * PATH_LINES + 1;
+  const short = parts.slice();
+  // Index 0 is "~" (or "" for an absolute path) and is already as short as it gets.
+  for (let i = 1; i < short.length - 1 && !fits(); i++) {
+    const p = short[i];
+    const abbr = p.charAt(0) === "." ? p.slice(0, 2) : p.charAt(0);
+    if (abbr === p) continue;
+    short[i] = abbr;
+    setPath(el, short);
+  }
+}
 
 /**
  * Sets the attention badge, or hides it when there is nothing to report.
