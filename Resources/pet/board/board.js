@@ -127,7 +127,9 @@ async function refresh(force) {
   }
   if (force !== "timer" || sig === null || sig !== ui.lastSig) {
     ui.lastSig = sig;
-    if (ui.pointerDown) ui.pendingRender = true;
+    // Only a timed rebuild waits for the mouse button; one you caused shows at once. (A native
+    // dropdown's menu swallows the mouseup, so waiting for it could hold the board stale.)
+    if (ui.pointerDown && force === "timer") ui.pendingRender = true;
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
@@ -1772,6 +1774,12 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
+  // A picked status / project / category shows at once; the refresh after saving confirms it.
+  if (["set-status", "set-project", "set-category"].includes(d.action)) {
+    ui.pointerDown = false;
+    const t = taskById(d.task);
+    if (t) { t[d.action.slice(4)] = el.value; render(); }
+  }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
@@ -1908,7 +1916,8 @@ $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); co
 
 refresh();
 setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
-document.addEventListener("mousedown", () => { ui.pointerDown = true; }, true);
+// Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
+document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseup", () => {
   ui.pointerDown = false;
   if (ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }
