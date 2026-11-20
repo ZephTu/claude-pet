@@ -166,6 +166,9 @@ const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}.
 function render() {
   // Never yank an open dropdown out from under the pointer.
   if (ui.dragging) return;
+  // Nor rebuild a box an input method (Pinyin…) is composing in: the new box would get the raw
+  // letters and the candidate window would close. Catch up when the composition ends.
+  if (ui.composing) { ui.renderPending = true; return; }
   const active = document.activeElement;
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
@@ -1010,8 +1013,12 @@ async function refreshPeek(first) {
   drawPeek(first);
 }
 function drawPeek(toBottom) {
+  if (ui.composing) { ui.peekPending = ui.peekPending || { toBottom: false }; ui.peekPending.toBottom ||= Boolean(toBottom); return; }
   const m = ui.modal;
   const box = $("#modal");
+  // The reply box is rebuilt with the rest; keep the cursor in it.
+  const active = document.activeElement;
+  const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
@@ -1043,6 +1050,7 @@ function drawPeek(toBottom) {
     </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
+  if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
 }
@@ -1770,6 +1778,23 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
 });
+
+// Input methods (Pinyin, Japanese…): hold every redraw while a word is being composed.
+document.addEventListener("compositionstart", () => { ui.composing = true; }, true);
+function compositionDone(ev) {
+  if (!ui.composing) return;
+  ui.composing = false;
+  // The committed text arrives with an input event around compositionend; let it land first.
+  setTimeout(() => {
+    const el = ev.target;
+    if (el && el.dataset && el.dataset.key && "value" in el) ui.drafts[el.dataset.key] = el.value;
+    if (ui.renderPending) { ui.renderPending = false; render(); }
+    if (ui.peekPending && ui.modal && ui.modal.type === "peek") drawPeek(ui.peekPending.toBottom);
+    ui.peekPending = null;
+  }, 0);
+}
+document.addEventListener("compositionend", compositionDone, true);
+document.addEventListener("focusout", compositionDone, true);   // in case a composition is cut off
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
