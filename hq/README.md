@@ -99,9 +99,9 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    | `later` | need to ask someone else, revisit |
    | `archive` | I don't have the context to answer — park it |
 
-   Answer in chat (Claude records it with an `hq-resolved` block) or on the board
-   (`hq ask resolve …`, or the pet panel); board answers are delivered to the bound session
-   on its next turn.
+   Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board
+   answer is typed straight into the asking session when it is live in Orca or iTerm2 ("send
+   now"); otherwise it is delivered at the start of that session's next turn.
 4. **Drafts are not done.** A message Claude drafted for you to send becomes an `@me` todo
    until you tick it.
 

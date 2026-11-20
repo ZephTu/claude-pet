@@ -102,17 +102,27 @@ const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
 
 // ------------------------------------------------------------------ data
-async function refresh() {
+// The page is rebuilt from data. A rebuild between a button's mousedown and mouseup swaps the
+// element under the pointer, and the browser then fires no click at all — which is what "the
+// first click sometimes does nothing" was. So: skip rebuilds when nothing changed, and hold a
+// timed rebuild while a mouse button is down.
+async function refresh(force) {
+  let sig = null;
   try {
-    const [board, sessions] = await Promise.all([apiJSON("board"), apiJSON("sessions")]);
-    ui.board = board;
-    ui.sessions = sessions;
+    const [boardText, sessionsText] = await Promise.all([api("board"), api("sessions")]);
+    sig = boardText + "\u0001" + sessionsText;
+    ui.board = JSON.parse(boardText);
+    ui.sessions = JSON.parse(sessionsText);
     $("#error").hidden = true;
   } catch (e) {
     $("#error").textContent = String(e.message || e);
     $("#error").hidden = false;
   }
-  render();
+  if (force !== "timer" || sig === null || sig !== ui.lastSig) {
+    ui.lastSig = sig;
+    if (ui.pointerDown) ui.pendingRender = true;
+    else render();
+  }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
 }
 window.hqRefresh = refresh;
@@ -197,7 +207,28 @@ function renderAsks() {
         ${RESOLUTIONS.map(([r, label, tip]) =>
           `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
       </div>
+      ${pushTarget(a) ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
+        <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
+        send to <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b> now${pushTarget(a).state === "busy" ? " (busy — it will queue)" : ""}</label>` : ""}
     </div>`).join("");
+}
+
+// The live session that raised an ask, if the board can type into its terminal.
+function pushTarget(a) {
+  const s = a.session && ui.sessions.find((x) => x.sessionId === a.session);
+  return s && SENDABLE[s.terminal && s.terminal.kind] ? s : null;
+}
+// Ticked by default while that session sits idle; a busy one would only queue it.
+function wantPush(a) {
+  const v = ui.drafts["push:" + a.id];
+  if (v !== undefined) return v;
+  const s = pushTarget(a);
+  return Boolean(s) && s.state !== "busy";
+}
+const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked" };
+function pushMessage(a, res, note) {
+  return `[HQ board] You asked "${a.text}" (${a.id}). The user answered: ${RES_TEXT[res] || res}` +
+    (note ? ` — ${note}` : "") + ". Carry on accordingly.";
 }
 
 function renderMyTodos() {
@@ -301,7 +332,8 @@ function renderTasks() {
     for (const name of [...order, ""]) {
       const group = visible.filter((t) => (t.project || "") === name)
         .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
-      if (!group.length) continue;
+      // Every listed project shows, even with nothing open — unless a search is narrowing things.
+      if (!group.length && (!name || !names.includes(name) || f)) continue;
       const key = name || "(none)";
       const shut = ui.collapsed.has(key);
       const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
@@ -314,7 +346,12 @@ function renderTasks() {
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
         ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}
         ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
-      if (!shut) html += group.map((t) => renderTask(t, "project")).join("");
+      if (!shut) {
+        const closed = tasks().filter((t) => (t.project || "") === name && !isOpen(t)).length;
+        html += group.length ? group.map((t) => renderTask(t, "project")).join("")
+          : `<div class="empty proj-empty">No open tasks${closed && !ui.showClosed ? ` (${closed} closed)` : ""}.
+              <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ New task</button></div>`;
+      }
     }
     return html;
   }
@@ -1012,11 +1049,29 @@ document.addEventListener("click", async (ev) => {
     case "resolve": {
       const note = ui.drafts["note:" + d.id] || "";
       delete ui.drafts["note:" + d.id];
+      const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
+      const target = a && pushTarget(a);
+      const push = Boolean(target) && wantPush(a);
+      delete ui.drafts["push:" + d.id];
       try {
         await api("resolve", { id: d.id, resolution: d.res, note });
-        toast(`${d.id} → ${d.res}`, false, async () => {
+        let msg = `${d.id} → ${d.res}`;
+        if (push) {
+          // Mark first: the message starts a turn at once, and that turn's hook must not inject
+          // the same answer again. Unmark if the message never got there.
+          try {
+            await api("delivered", { id: d.id, session: target.sessionId });
+            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note) });
+            msg += ` · sent to ${target.title || target.project}`;
+          } catch (e) {
+            try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
+            msg += ` · couldn't reach the session (${e.message || e}); it gets the answer with your next message there`;
+          }
+        }
+        // Undo reopens the ask; an answer already typed into a session cannot be taken back.
+        toast(msg, false, async () => {
           ui.drafts["note:" + d.id] = note;
-          await act("reopen", { id: d.id }, `${d.id} reopened`);
+          await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
         });
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
@@ -1207,6 +1262,7 @@ document.addEventListener("click", async (ev) => {
       return act("scan-apply", { names }, `Created ${names.length} project(s) and sorted tasks into them`);
     }
     case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
+    case "new-in-project": return openNewTask(d.p);
     case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
@@ -1247,6 +1303,7 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
+  if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
@@ -1355,7 +1412,20 @@ function finishDrag() {
 document.addEventListener("dragend", () => { finishDrag(); render(); });
 
 $("#refresh").addEventListener("click", refresh);
+function openNewTask(project) {
+  ui.newTask = true;
+  delete $("#newtask-form").dataset.drawn;
+  render();
+  if (project && $("#nt-proj")) $("#nt-proj").value = project;
+  const t = $("#nt-title");
+  if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
+}
 $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });
 
 refresh();
-setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh(); }, 4000);
+setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
+document.addEventListener("mousedown", () => { ui.pointerDown = true; }, true);
+document.addEventListener("mouseup", () => {
+  ui.pointerDown = false;
+  if (ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }
+}, true);

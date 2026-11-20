@@ -54,6 +54,8 @@ ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt
 echo "$ctx" | grep -q "T-001.1 → do: go with v2" && ok "board answer injected on next prompt"
 echo "$ctx" | grep -q "T-001.2: Ask Chengjie" && ok "still-open asks re-injected"
 hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.1 → do" && fail "board answer delivered twice" || ok "board answer delivered once"
+"$HQ" ask add T-001 "Deploy now?" >/dev/null; "$HQ" ask resolve T-001.3 do --via board --note "yes"; "$HQ" ask delivered T-001.3 --session sess-1
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.3 → do" && fail "pushed answer injected again" || ok "an answer already sent to the session is not injected again"
 
 MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
@@ -64,7 +66,7 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/root/tasks/T-001-*/TASK.md
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
-"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==2' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==3' && ok "board --json exposes todos and asks"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and isinstance(t["workdirs"], list), t' && ok "list fields with template comments parse as lists"
 
 "$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"

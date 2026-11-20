@@ -807,6 +807,16 @@ def cmd_addtodo(args):
 def cmd_ask(args):
     if args.action == "add":
         print(add_ask(find_card(args.target), " ".join(args.rest), session_id(None) or None))
+    elif args.action == "delivered":
+        # The board typed this answer straight into the session: don't inject it again next turn.
+        _, a = find_ask(args.target)
+        sid = args.session or a.get("session")
+        state = load_state()
+        if sid in state:
+            have = set(state[sid].get("delivered", []))
+            have = have - {args.target} if args.undo else have | {args.target}
+            state[sid]["delivered"] = sorted(have)
+            save_state(state)
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
         append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
@@ -1280,8 +1290,9 @@ def main():
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | resolve <ask-id> <res> [note…] | reopen <ask-id>")
-    p.add_argument("action", choices=["add", "resolve", "reopen"]); p.add_argument("target")
+    p.add_argument("action", choices=["add", "resolve", "reopen", "delivered"]); p.add_argument("target")
     p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.add_argument("--note")
+    p.add_argument("--session"); p.add_argument("--undo", action="store_true")
     p.set_defaults(fn=cmd_ask)
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")

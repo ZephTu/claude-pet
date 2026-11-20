@@ -128,6 +128,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"])
         case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
+        case "delivered":
+            return await hq(["ask", "delivered", str("id"), "--session=\(str("session"))"] + (body["undo"] as? Bool == true ? ["--undo"] : []))
         case "todo":
             let index = (body["index"] as? Int).map(String.init) ?? str("index")
             return await hq(["todo", str("task"), index, str("state"), "--via=board"])

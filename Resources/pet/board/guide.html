@@ -83,7 +83,7 @@
 <tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
 </table>
-回应会在绑定的 session <b>下一轮</b>送达给它。</li>
+<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
@@ -100,7 +100,7 @@
 <h2>Tasks（中栏）</h2>
 <ul>
 <li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
-  <ul><li><b>Project</b>（默认）：按项目分组，点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
+  <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"No open tasks"和 <b>+ New task</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
   <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
 <li><b>Collapse all / Expand all</b>：按项目分组时一键收起或展开所有项目组；按状态分组时一键收起所有点开的任务。</li>
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
@@ -247,7 +247,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="zh-limits">注意事项</h1>
 <ul>
 <li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
-<li>看板上的回应在 session <b>下一轮</b>才送达，不会唤醒空闲的 session；要它立刻处理，就在 Sessions 栏给它发一句。</li>
+<li>看板上的回应：勾选 send now 时立刻送达（Orca / iTerm2）；否则在 session <b>下一轮</b>送达。</li>
 <li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。</li>
 <li>Sessions 栏依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
 </ul>
@@ -334,7 +334,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
 </table>
-The bound session receives your answer on its <b>next turn</b>.</li>
+<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
 <li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
@@ -351,7 +351,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <h2>Tasks (middle)</h2>
 <ul>
 <li><b>Project | Status</b> next to the title switches the grouping (remembered):
-  <ul><li><b>Project</b> (default): one group per project — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
+  <ul><li><b>Project</b> (default): one group per project — every project shows, even one with no open tasks (it offers <b>+ New task</b> right there) — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
   <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
 <li><b>Collapse all / Expand all</b>: by project it folds or unfolds every group; by status it closes every open task.</li>
 <li>Tick <b>show closed</b> for done and abandoned.</li>
@@ -494,7 +494,7 @@ next: "run baseline on clusters A/C"
 <h1 id="en-limits">Good to know</h1>
 <ul>
 <li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
-<li>Board answers reach a session on its <b>next turn</b>; they don't wake an idle session. Send it a message from the Sessions column if it should act now.</li>
+<li>Board answers: with send now ticked they arrive at once (Orca / iTerm2); otherwise at the session's <b>next turn</b>.</li>
 <li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only.</li>
 <li>The Sessions column relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>
 </ul>
