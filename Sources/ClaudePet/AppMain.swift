@@ -26,6 +26,17 @@ struct AppMain {
                 HealthWindow.renderPreview(checks: sample, to: arguments[i + 1]) ? 0 : 1
             })
         }
+        // The HQ board with live data, as a PNG: `--render-board out.png [js]`.
+        if let i = arguments.firstIndex(of: "--render-board"), i + 1 < arguments.count {
+            app.setActivationPolicy(.prohibited)
+            let script = i + 2 < arguments.count ? arguments[i + 2] : ""
+            MainActor.assumeIsolated {
+                let window = BoardWindow()
+                window.renderPreview(to: arguments[i + 1], script: script) { exit($0 ? 0 : 1) }
+                _ = Unmanaged.passRetained(window)
+            }
+            app.run()
+        }
         // Renders the real page to a PNG, because the one thing no test here can
         // check is whether the drawing and the hit rectangles agree.
         if let i = arguments.firstIndex(of: "--probe-skin"), i + 2 < arguments.count {
@@ -199,7 +210,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.set(n, forKey: Self.noticeCountKey)
                 self?.bridge?.setMaxNotices(n)
             },
-            onQuit: { NSApp.terminate(nil) }
+            onQuit: { NSApp.terminate(nil) },
+            onShowBoard: { [weak self] in self?.showBoard() }
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
@@ -767,6 +779,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastJumpFailure = ""
     private var healthWindow: HealthWindow?
+    private var boardWindow: BoardWindow?
+
+    /// The HQ task board. One window, reused: closing hides it, reopening
+    /// refreshes it.
+    private func showBoard() {
+        let window = boardWindow ?? BoardWindow()
+        boardWindow = window
+        window.present()
+    }
     /// sessionId → what the statusline last told us. Empty when no statusline
     /// is wired up, which simply means the hover says less.
     private var insights: [String: SessionInsight] = [:]

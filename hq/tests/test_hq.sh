@@ -52,7 +52,12 @@ printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/ro
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==2' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and t["workdirs"]==[], t' && ok "list fields with template comments parse as lists"
 
+"$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"
+"$HQ" bind T-002 --session sess-2 >/dev/null
+hook '{"session_id":"sess-2","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "bound this session to an HQ task from the board" && ok "board-side bind announced on next prompt"
+hook '{"session_id":"sess-2","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "from the board" && fail "announced twice" || ok "announcement only once"
 "$HQ" set T-001 status=waiting-on-me "waiting_on_me=pick a dataset"
 "$HQ" board | grep -q "等你: pick a dataset" && ok "set + board"
 

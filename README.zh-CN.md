@@ -96,6 +96,24 @@ session 只要进程还活着就一直列在上面，不管多久没动静——
 
 **右键 → Settings → Connection Status** 报告实际接通了什么，用五档而不是对错两档：`OK` / `Not set up` / `Not supported` / `Needs attention` / `Unknown`。这个区分是有意义的——「你从没开过这个」和「这个坏了」在一个勾一个叉里长得一模一样。Copy 给你一份能直接贴的摘要，home 目录折成 `~`；它只讲管道，不讲你在干什么。自检只读，不会去改 `settings.json`。它也不抢键盘焦点，你正在打的字不会被打断。
 
+## 任务看板（HQ）
+
+session 一多、分散在好几个仓库里，难的就变成了记住每个 session 在干什么、它问过你什么、你回答了没有。**HQ** 把这些状态从对话里搬到任务卡上，桌宠给你一个看它的窗口。
+
+右键桌宠 → **Task Board…**：
+
+- **Needs you**：所有 session 问过你、你还没回应的问题，每条四种回应——**Do**（可附说明）、**Drop**、**Ask later**（要问别人）、**No context**（不了解背景，先归档）。还有你的 `@me` 待办和等你处理的任务。没回答的不会被默认当成"不做"。
+- **Tasks**：每件事一张卡——状态、下一步、可勾选的待办、日志。绑定到任务的 session 会先读卡、再把进展写回去，所以 session 随时可以关，下一个接着干。
+- **Sessions**：所有在跑的 session 和它的最后一条消息：绑定到任务、看对话、跳到终端，或者**直接在这里给它发消息**（支持 Orca 和 iTerm2，效果和你亲手输入一样）。
+
+HQ 是可选的、单独安装——会加三个 hook 和一个小的 Python 命令行工具（只用 `python3` 标准库）：
+
+```bash
+hq/install.sh --root ~/claude-hq     # 任务卡放在哪个目录都行
+```
+
+原理和任务卡格式见 [hq/README.md](hq/README.md)。
+
 ## 猫
 
 <img src="docs/images/cat-moves.gif" width="480" alt="八个姿势并排，各自做自己的小动作：打哈欠、对着电脑想事情、对着一摞纸叹气、等 agent 时打盹、拍拍你、被晾着时原地蹦、完成后跳舞、看书">

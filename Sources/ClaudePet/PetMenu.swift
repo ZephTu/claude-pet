@@ -17,6 +17,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onNoticeCount: (Int) -> Void
     private let onUnmuteAll: () -> Void
     private let onQuit: () -> Void
+    private let onShowBoard: (() -> Void)?
 
     init(
         onPauseToggle: @escaping () -> Void,
@@ -27,8 +28,10 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onKeepListOpenToggle: @escaping () -> Void,
         onNoticeHold: @escaping (TimeInterval) -> Void,
         onNoticeCount: @escaping (Int) -> Void,
-        onQuit: @escaping () -> Void
+        onQuit: @escaping () -> Void,
+        onShowBoard: (() -> Void)? = nil
     ) {
+        self.onShowBoard = onShowBoard
         self.onNoticeHold = onNoticeHold
         self.onNoticeCount = onNoticeCount
         self.onPauseToggle = onPauseToggle
@@ -70,6 +73,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
                                     action: #selector(showHealth), keyEquivalent: "")
             health.target = self
             menu.addItem(health)
+            menu.addItem(.separator())
+        }
+
+        if onShowBoard != nil {
+            let board = NSMenuItem(title: "Task Board…", action: #selector(showBoard), keyEquivalent: "")
+            board.target = self
+            menu.addItem(board)
             menu.addItem(.separator())
         }
 
@@ -166,4 +176,5 @@ final class PetMenu: NSObject, NSMenuDelegate {
         if let n = sender.representedObject as? Int { onNoticeCount(n) }
     }
     @objc private func quit() { onQuit() }
+    @objc private func showBoard() { onShowBoard?() }
 }

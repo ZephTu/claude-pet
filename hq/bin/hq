@@ -90,15 +90,15 @@ def parse_card(path):
                 continue
             k, v = line.split(":", 1)
             v = v.strip()
-            if v.startswith("[") and v.endswith("]"):
-                try:
-                    v = json.loads(v)
-                except ValueError:
-                    pass
-            elif v.startswith('"'):
+            if v.startswith('"'):
                 v = v[1:v.rfind('"')] if v.count('"') >= 2 else v[1:]
             else:
-                v = re.sub(r"\s{2,}#\s.*$", "", v)
+                v = re.sub(r"\s{2,}#\s.*$", "", v).strip()  # template comments
+                if v.startswith("[") and v.endswith("]"):
+                    try:
+                        v = json.loads(v)
+                    except ValueError:
+                        pass
             meta[k.strip()] = v
     todos = []
     for line in body.splitlines():
@@ -369,7 +369,10 @@ def cmd_bind(args):
     meta = parse_card(card)
     state = load_state()
     prev = state.get(sid, {}).get("task")
-    state[sid] = {"task": meta["id"], "bound_at": now_iso(), "cwd": os.getcwd(),
+    # Bound from inside the session (its own Bash tool) the session reads this output now;
+    # bound from outside (the board) it learns the rules on its next prompt.
+    from_inside = sid == os.environ.get("CLAUDE_CODE_SESSION_ID")
+    state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
                   "delivered": state.get(sid, {}).get("delivered", [])}
     save_state(state)
     sessions = meta.get("sessions") if isinstance(meta.get("sessions"), list) else []
@@ -434,13 +437,35 @@ def cmd_todo(args):
     die(f"{args.task} has no todo #{args.index}")
 
 
+def cmd_addtodo(args):
+    card = find_card(args.task)
+    lines = open(card, encoding="utf-8").read().split("\n")
+    item = f"- [ ] {args.text.strip()}"
+    head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办)", l, re.I)), None)
+    last_todo = None
+    for i, l in enumerate(lines):
+        if TODO_RE.match(l) and (head is None or i > head):
+            last_todo = i
+    if last_todo is not None:
+        lines.insert(last_todo + 1, item)
+    elif head is not None:
+        j = head + 1
+        while j < len(lines) and lines[j].strip().startswith("<!--"):
+            j += 1
+        lines.insert(j, item)
+    else:
+        lines += ["", "## Todo", item]
+    atomic_write(card, "\n".join(lines))
+    set_fields(card, {})
+
+
 def cmd_ask(args):
     if args.action == "add":
         print(add_ask(find_card(args.target), " ".join(args.rest), session_id(None) or None))
     elif args.action == "resolve":
         if not args.rest:
             die("usage: hq ask resolve <ask-id> <do|drop|later|archive> [note…]")
-        resolve_ask(args.target, args.rest[0], " ".join(args.rest[1:]), via=args.via)
+        resolve_ask(args.target, args.rest[0], args.note or " ".join(args.rest[1:]), via=args.via)
 
 
 def cmd_asks(args):
@@ -458,6 +483,143 @@ def cmd_asks(args):
     for a in out:
         st = "" if a["state"] == "open" else f"  [{a['state']}{': ' + a['note'] if a.get('note') else ''}]"
         print(f"{a['id']:<8} {a['text']}{st}")
+
+
+# ---------------------------------------------------------------- live sessions
+PET_SESSIONS = os.path.expanduser("~/.claude/pet/sessions")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def transcript_tail(path, nbytes=600_000):
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - nbytes))
+        lines = f.read().decode("utf-8", "ignore").splitlines()
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def message_text(o):
+    """Visible text of a transcript entry: the user's typed prompt or Claude's prose."""
+    if o.get("isSidechain") or o.get("isMeta"):
+        return None
+    c = o.get("message", {}).get("content")
+    if o.get("type") == "user":
+        if isinstance(c, str):
+            t = c
+        elif isinstance(c, list):
+            if any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c):
+                return None
+            t = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        else:
+            return None
+        if t.startswith("<") and ("command-" in t[:40] or "local-command" in t[:40]
+                                  or "system-reminder" in t[:40] or "task-notification" in t[:40]):
+            return None
+        return t.strip() or None
+    if o.get("type") == "assistant" and isinstance(c, list):
+        t = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        return t.strip() or None
+    return None
+
+
+def recent_messages(path, n=8):
+    msgs = []
+    for o in transcript_tail(path):
+        t = message_text(o)
+        if t:
+            msgs.append({"role": o["type"], "text": t, "ts": o.get("timestamp")})
+    return msgs[-n:]
+
+
+def session_title(entries):
+    for o in reversed(entries):
+        if o.get("type") == "custom-title" and o.get("customTitle"):
+            return o["customTitle"]
+    return None
+
+
+def live_sessions():
+    state = load_state()
+    out = []
+    if not os.path.isdir(PET_SESSIONS):
+        return out
+    for name in os.listdir(PET_SESSIONS):
+        if not name.endswith(".json"):
+            continue
+        d = load_json(os.path.join(PET_SESSIONS, name), None)
+        if not isinstance(d, dict) or not pid_alive(d.get("pid")):
+            continue
+        sid = d.get("sessionId") or name[:-5]
+        last = None
+        # Screenshots and big tool results can fill the tail; widen once if needed.
+        for nbytes in (300_000, 3_000_000):
+            entries = transcript_tail(d.get("transcript"), nbytes)
+            for o in reversed(entries):
+                if o.get("type") == "assistant":
+                    last = message_text(o)
+                    if last:
+                        break
+            if last:
+                break
+        out.append({
+            "sessionId": sid,
+            "title": session_title(entries),
+            "project": d.get("project") or os.path.basename(d.get("cwd", "")),
+            "cwd": d.get("cwd"),
+            "state": d.get("state"),
+            "waitingOn": d.get("waitingOn"),
+            "updatedAt": d.get("updatedAt"),
+            "terminal": d.get("terminal"),
+            "transcript": d.get("transcript"),
+            "task": state.get(sid, {}).get("task"),
+            "lastText": (last or "")[:400],
+        })
+    out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
+    return out
+
+
+def cmd_sessions(args):
+    s = live_sessions()
+    if args.json:
+        print(json.dumps(s, ensure_ascii=False, indent=1))
+        return
+    for x in s:
+        print(f"{x['sessionId'][:8]}  {x['state'] or '?':<8} {x['task'] or '-':<6} "
+              f"{x['project']:<20} {x['title'] or ''}")
+
+
+def cmd_peek(args):
+    path = None
+    for name in os.listdir(PET_SESSIONS) if os.path.isdir(PET_SESSIONS) else []:
+        if name.startswith(args.session):
+            path = load_json(os.path.join(PET_SESSIONS, name), {}).get("transcript")
+            break
+    msgs = recent_messages(path, args.n) if path else []
+    if args.json:
+        print(json.dumps(msgs, ensure_ascii=False, indent=1))
+        return
+    for m in msgs:
+        print(f"[{m['role']}] {m['text']}\n")
 
 
 # ---------------------------------------------------------------- hooks
@@ -518,16 +680,21 @@ def hook_main():
     meta = parse_card(card)
 
     if event == "SessionStart":
+        s["announced"] = True
+        save_state(state)
         ctx = protocol(meta)
         t = open_asks_text(meta)
         emit(event, ctx + ("\n\n" + t if t else ""))
 
     elif event == "UserPromptSubmit":
         s["turn_start"] = time.time()
+        lines = []
+        if not s.get("announced", True):
+            lines.append("The user bound this session to an HQ task from the board.\n" + protocol(meta))
+            s["announced"] = True
         delivered = set(s.get("delivered", []))
         fresh = [a for a in read_asks(meta["dir"])
                  if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered]
-        lines = []
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
@@ -593,12 +760,20 @@ def main():
     p.add_argument("task"); p.add_argument("index", type=int)
     p.add_argument("state", choices=["done", "drop", "open"]); p.add_argument("--via", default="cli")
     p.set_defaults(fn=cmd_todo)
+    p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
+    p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | hq ask resolve <ask-id> <res> [note…]")
     p.add_argument("action", choices=["add", "resolve"]); p.add_argument("target")
-    p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.set_defaults(fn=cmd_ask)
+    p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.add_argument("--note")
+    p.set_defaults(fn=cmd_ask)
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_asks)
+    p = sub.add_parser("sessions", help="live Claude Code sessions (needs Claude Pet)")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sessions)
+    p = sub.add_parser("peek", help="recent messages of a live session"); p.add_argument("session")
+    p.add_argument("-n", type=int, default=8); p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_peek)
     p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")
     p.set_defaults(fn=lambda a: hook_main())
 

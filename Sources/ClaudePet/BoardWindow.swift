@@ -1,0 +1,248 @@
+import AppKit
+import ClaudePetCore
+import WebKit
+
+/// The HQ task board: tasks, the asks ledger, and live sessions in one window.
+///
+/// Unlike the pet's own panel this is an ordinary window that takes the
+/// keyboard — the board is for typing notes and messages, so it must be key.
+/// Everything it shows and changes goes through the `hq` CLI (see hq/README.md);
+/// this file only renders a page and relays a short, fixed list of operations.
+/// No task logic lives in Swift.
+@MainActor
+final class BoardWindow: NSWindow {
+    private let webView: WKWebView
+    /// Retained for as long as the web view: WKWebView does not own it.
+    private let scheme: PetSchemeHandler?
+    private let bridge = BoardBridge()
+
+    init() {
+        let config = WKWebViewConfiguration()
+        scheme = Bundle.module.url(forResource: "pet", withExtension: nil)
+            .map { PetSchemeHandler(root: $0) }
+        if let scheme {
+            config.setURLSchemeHandler(scheme, forURLScheme: PetSchemeHandler.scheme)
+        }
+        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 760), configuration: config)
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+                   styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
+                   backing: .buffered, defer: false)
+        title = "HQ"
+        titlebarAppearsTransparent = true
+        titleVisibility = .hidden
+        appearance = NSAppearance(named: .darkAqua)
+        backgroundColor = NSColor(calibratedRed: 0.137, green: 0.125, blue: 0.114, alpha: 1)
+        isReleasedWhenClosed = false
+        minSize = NSSize(width: 760, height: 480)
+        contentView = webView
+        // See PetPanel: handlers go on the view's live configuration copy.
+        webView.configuration.userContentController.addScriptMessageHandler(
+            bridge, contentWorld: .page, name: "hq")
+        center()
+        setFrameAutosaveName("HQBoard")
+        if let url = PetSchemeHandler.url(path: "board/board.html") {
+            webView.load(URLRequest(url: url))
+        } else {
+            NSLog("ClaudePet: board resources missing from bundle")
+        }
+    }
+
+    /// Brings the board forward and gives it the keyboard. The pet is an
+    /// accessory app, so it has to activate itself for the window to be key.
+    func present() {
+        NSApp.activate()
+        makeKeyAndOrderFront(nil)
+        webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
+    }
+
+    /// Renders the live board to a PNG — the development check for layout,
+    /// since screen capture needs a permission this app should not ask for.
+    /// Waits for the page to load real data through hq, runs an optional
+    /// script (expand a task, open a peek), then snapshots.
+    func renderPreview(to path: String, script: String, done: @escaping @MainActor (Bool) -> Void) {
+        setFrameOrigin(NSPoint(x: 40, y: 40))
+        orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
+            webView.evaluateJavaScript(script.isEmpty ? "null" : script) { _, _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+                    webView.takeSnapshot(with: nil) { image, _ in
+                        MainActor.assumeIsolated {
+                            guard let tiff = image?.tiffRepresentation,
+                                  let rep = NSBitmapImageRep(data: tiff),
+                                  let png = rep.representation(using: .png, properties: [:])
+                            else { return done(false) }
+                            done((try? png.write(to: URL(fileURLWithPath: path))) != nil)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Relays the page's requests to `hq` and to the terminals. Every operation is
+/// on a fixed list and every argument is passed as a separate argv entry, so
+/// nothing the page sends is ever interpreted by a shell.
+@MainActor
+final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
+    private static let orcaBundleID = "com.stablyai.orca"
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) async -> (Any?, String?) {
+        let body = message.body as? [String: Any] ?? [:]
+        func str(_ key: String) -> String { body[key] as? String ?? "" }
+
+        switch body["op"] as? String ?? "" {
+        case "board": return await hq(["board", "--json"])
+        case "sessions": return await hq(["sessions", "--json"])
+        case "peek": return await hq(["peek", str("session"), "-n", "14", "--json"])
+        case "resolve":
+            return await hq(["ask", "resolve", str("id"), str("resolution"),
+                             "--via", "board", "--note=\(str("note"))"])
+        case "todo":
+            let index = (body["index"] as? Int).map(String.init) ?? str("index")
+            return await hq(["todo", str("task"), index, str("state"), "--via=board"])
+        case "set":
+            let fields = (body["fields"] as? [String]) ?? []
+            guard !fields.isEmpty else { return (nil, "no fields") }
+            return await hq(["set", str("task")] + fields)
+        case "log": return await hq(["log", str("task"), "--", str("message")])
+        case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
+        case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
+        case "unbind": return await hq(["unbind", "--session=\(str("session"))"])
+        case "new":
+            var args = ["new", "--category=\(str("category").isEmpty ? "dev" : str("category"))"]
+            if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
+            return await hq(args + ["--", str("title")])
+        case "send": return await send(session: str("session"), text: str("text"))
+        case "jump":
+            guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
+            TerminalJump.jump(kind: t.kind, handle: t.handle)
+            return (["ok": true], nil)
+        case "open":
+            let path = str("path")
+            guard path.hasSuffix("/TASK.md"), FileManager.default.fileExists(atPath: path) else {
+                return (nil, "not a task card")
+            }
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return (["ok": true], nil)
+        default:
+            return (nil, "unknown operation")
+        }
+    }
+
+    // MARK: - hq
+
+    private var hqPath: String {
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/bin/hq").path
+    }
+
+    /// Runs hq and hands its stdout back as text; the page parses JSON itself.
+    private func hq(_ args: [String]) async -> (Any?, String?) {
+        guard FileManager.default.isExecutableFile(atPath: hqPath) else {
+            return (nil, "HQ is not installed — run hq/install.sh --root <dir>")
+        }
+        let r = await Self.run(hqPath, args)
+        if r.status != 0 {
+            return (nil, r.err.isEmpty ? "hq exited \(r.status)" : r.err.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return (r.out, nil)
+    }
+
+    // MARK: - Terminals
+
+    private struct Terminal { let kind: String; let handle: String }
+
+    private func terminal(of session: String) -> Terminal? {
+        guard !session.isEmpty, !session.contains("/") else { return nil }
+        let file = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: ".claude/pet/sessions/\(session).json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let t = obj["terminal"] as? [String: Any],
+              let kind = t["kind"] as? String, let handle = t["handle"] as? String
+        else { return nil }
+        return Terminal(kind: kind, handle: handle)
+    }
+
+    /// Types the message into the session's terminal and presses Enter — to
+    /// Claude it is indistinguishable from the user typing it.
+    private func send(session: String, text: String) async -> (Any?, String?) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return (nil, "empty message") }
+        guard let t = terminal(of: session) else { return (nil, "no terminal recorded for this session") }
+        switch t.kind {
+        case "orca":
+            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
+                return (nil, "Orca is not installed")
+            }
+            let cli = app.appending(path: "Contents/Resources/bin/orca").path
+            let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
+                                         "--enter", "--wait-submit", "5", "--json"])
+            return r.status == 0 ? (["ok": true, "detail": r.out], nil)
+                                 : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
+        case "iterm2":
+            let uuid = TerminalTarget.iTermUUID(from: t.handle)
+            guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, "unexpected iTerm2 session id") }
+            // write text presses Return after each line, which would submit a
+            // multi-line message early, so lines are joined.
+            let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+            let escaped = flat.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let script = """
+            tell application "iTerm2"
+              repeat with w in windows
+                repeat with t in tabs of w
+                  repeat with s in sessions of t
+                    if (id of s as text) contains "\(uuid)" then
+                      tell s to write text "\(escaped)"
+                      return "ok"
+                    end if
+                  end repeat
+                end repeat
+              end repeat
+            end tell
+            return "notfound"
+            """
+            let r = await Self.run("/usr/bin/osascript", ["-e", script])
+            return r.out.contains("ok") ? (["ok": true], nil) : (nil, "iTerm2 session not found")
+        default:
+            return (nil, "sending to \(t.kind) terminals is not supported yet — use Jump")
+        }
+    }
+
+    // MARK: - Process
+
+    private struct Result: Sendable { let status: Int32; let out: String; let err: String }
+
+    private nonisolated static func run(_ tool: String, _ args: [String]) async -> Result {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: tool)
+                p.arguments = args
+                var env = ProcessInfo.processInfo.environment
+                env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "")
+                p.environment = env
+                let out = Pipe(), err = Pipe()
+                p.standardOutput = out
+                p.standardError = err
+                do {
+                    try p.run()
+                    // Read before waiting, or a full pipe blocks the child forever.
+                    let o = out.fileHandleForReading.readDataToEndOfFile()
+                    let e = err.fileHandleForReading.readDataToEndOfFile()
+                    p.waitUntilExit()
+                    continuation.resume(returning: Result(
+                        status: p.terminationStatus,
+                        out: String(data: o, encoding: .utf8) ?? "",
+                        err: String(data: e, encoding: .utf8) ?? ""))
+                } catch {
+                    continuation.resume(returning: Result(status: -1, out: "", err: error.localizedDescription))
+                }
+            }
+        }
+    }
+}

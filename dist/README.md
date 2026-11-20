@@ -62,6 +62,11 @@ The third is the one to pay attention to: that file governs the behaviour of eve
 
 The pet reads the state files under `~/.claude/pet/sessions/`, which record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, makes no network requests, and uploads nothing.**
 
+## Optional: task board (HQ)
+
+`./hq/install.sh --root ~/claude-hq` adds the task board behind right-click → Task Board…
+(needs `python3`). Details in `hq/README.md`.
+
 ## Uninstall
 
 ```bash
