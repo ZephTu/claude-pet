@@ -353,3 +353,24 @@ select.place { max-width: 100px; }
 .wdirs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 2px 0 0; }
 .sec-h { flex-wrap: wrap; row-gap: 4px; }
 .sec-h > .meta { margin-left: 4px; }
+
+/* subscription limits in the top bar, like the HUD */
+#counts { align-items: center; }
+.quota { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.qbar { width: 46px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; display: inline-block; }
+.qbar i { display: block; height: 100%; background: var(--teal); }
+.quota.mid .qbar i { background: var(--amber); } .quota.hi .qbar i { background: var(--red); }
+.quota.hi b { color: var(--red); }
+.qr { color: var(--faint); font-size: 11px; }
+/* context window used, on session rows */
+.ctx.mid { color: var(--amber); } .ctx.hi { color: var(--red); }
+/* the top bar shares its width: counts never wrap, the filter box gives way first */
+#counts > span { white-space: nowrap; }
+#mode, #counts, #quota { flex: none; }
+#quota { display: flex; gap: 12px; color: var(--dim); font-size: 12px; align-items: center; }
+#search { flex: 0 1 200px; min-width: 100px; }
+#top { gap: 8px; }
+#top > .btn, #top > a.btn { flex: none; }
+.qbar { width: 34px; }
+#quota { gap: 10px; }
+#search { min-width: 80px; }

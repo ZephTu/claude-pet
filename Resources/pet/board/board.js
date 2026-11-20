@@ -161,6 +161,12 @@ function statusWord(s) {
   if (p.background) return `${p.background} in background`;
   return p.replied ? "Answered" : "Idle";
 }
+// How full a session's context window is, as the pet's list shows it.
+function ctxTag(s) {
+  const p = ((ui.dots || {})[s.sessionId] || {}).context;
+  if (p == null) return "";
+  return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 60 ? "mid" : ""}" title="Context window used">${p}% ctx</span>`;
+}
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -180,6 +186,7 @@ async function refresh(force) {
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
+    ui.usage = pet.usage || null;
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
@@ -412,9 +419,31 @@ function renderCounts() {
   const legacy = all.filter((t) => isOpen(t) && t.waiting_on_me).length;
   const activeN = all.filter(isOpen).length;
   $("#counts").innerHTML =
-    `<span><b>${asks}</b> asks</span><span><b>${mine + legacy}</b> your todos</span>` +
-    `<span><b>${activeN}</b> open tasks</span>` +
-    `<span><b>${ui.sessions.length}</b> live sessions</span>`;
+    `<span title="Unanswered asks"><b>${asks}</b> asks</span><span title="Your todos"><b>${mine + legacy}</b> todos</span>` +
+    `<span title="Open tasks"><b>${activeN}</b> tasks</span>` +
+    `<span title="Live sessions"><b>${ui.sessions.length}</b> live</span>`;
+  $("#quota").innerHTML = usageChips();
+}
+// The subscription's 5-hour and weekly limits — percent used and when each resets — as the
+// statusline last saw them (see BoardBridge.usageSnapshot). Nothing when there is no fresh copy.
+function untilText(iso) {
+  const m = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+  if (isNaN(m)) return "";
+  if (m < 60) return `${m}m`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
+  return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+}
+function usageChips() {
+  const u = ui.usage;
+  if (!u) return "";
+  const one = (label, long, w) => {
+    if (!w || w.used == null) return "";
+    const p = Math.round(w.used);
+    const r = w.resets_at ? untilText(w.resets_at) : "";
+    return `<span class="quota ${p >= 90 ? "hi" : p >= 70 ? "mid" : ""}" title="${long}: ${p}% used${r ? ` · resets in ${r}` : ""}">${label}
+      <span class="qbar"><i style="width:${Math.min(100, p)}%"></i></span><b>${p}%</b>${r ? `<span class="qr">↻ ${r}</span>` : ""}</span>`;
+  };
+  return one("5h", "5-hour limit", u.five_hour) + one("week", "Weekly limit", u.seven_day);
 }
 
 function renderAsks() {
@@ -738,7 +767,7 @@ function focusCard(t) {
   const sess = (s) => `<div class="bsess">
       ${dot(s)}
       <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
+        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
         ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
@@ -910,7 +939,7 @@ function renderTaskBody(t) {
     ${live.length ? live.map((s) => `<div class="bsess">
         ${dot(s)}
         <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}</div></div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
           ${s.background
@@ -984,7 +1013,7 @@ function renderSessions(items = ui.sessions, plain = false) {
           ${taskCtl}
         </div>
         <div class="shead">
-          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
             ${s.background
@@ -1317,7 +1346,7 @@ function drawContext() {
       </section>
       <section class="ctx-sec">
         <h4>Sessions on this task</h4>
-        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}${ctxTag(s)}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
         ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
         ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
       </section>
