@@ -127,7 +127,7 @@ Once a dozen sessions are open across several repos, the hard part is rememberin
 one was doing, what it asked you, and whether you ever answered. **HQ** moves that state out
 of the conversations into task cards, and the pet gives you a window onto it.
 
-Right-click the pet → **Task Board…**:
+**Double-click the pet** to show or hide the board (or right-click → **Task Board…**):
 
 - **Needs you** — every question a session put to you that you have not answered yet, each
   with four answers: **Do** (with a note), **Drop**, **Ask later**, **No context**. Plus your

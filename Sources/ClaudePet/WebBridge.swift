@@ -29,6 +29,8 @@ final class WebBridge {
     /// The user wants to be reminded about this session later; the point is
     /// where to put the menu.
     var onSnooze: ((String, CGPoint) -> Void)?
+    /// The pet itself was double-clicked (not a row): the task board's toggle.
+    var onDoubleClickPet: (() -> Void)?
     /// Right-click landed on a session row rather than on the pet.
     var onRowMenu: ((String, CGPoint) -> Void)?
 
@@ -75,12 +77,33 @@ final class WebBridge {
         // Pinned: a click is not a request to close, and there is nothing to
         // open either. Asserting the state rather than returning outright covers
         // the one case where they disagree — pinning while the panel is shut.
-        if panelPinned { return setPanelOpen(true) }
+        if panelPinned {
+            lastToggle = (Date(), true)
+            return setPanelOpen(true)
+        }
         webView.evaluateJavaScript("window.togglePanel();") { [weak self] result, _ in
             MainActor.assumeIsolated {
-                if result as? Bool == true { self?.onPanelOpened?() }
+                let open = result as? Bool == true
+                self?.lastToggle = (Date(), !open)
+                if open { self?.onPanelOpened?() }
             }
         }
+    }
+
+    /// When the last click on the pet toggled the list, and whether the list
+    /// was open before it. Row clicks never set this, so double-clicking a row
+    /// does nothing extra.
+    private var lastToggle: (at: Date, wasOpen: Bool)?
+
+    /// A double-click on the pet: put the list back the way the first click
+    /// found it, then toggle the board.
+    func handleDoubleClick() {
+        guard let t = lastToggle,
+              Date().timeIntervalSince(t.at) <= NSEvent.doubleClickInterval + 0.2
+        else { return }
+        lastToggle = nil
+        setPanelOpen(t.wasOpen || panelPinned)
+        onDoubleClickPet?()
     }
 
     /// The user asked for the list to stay up — AppMain's "Keep List Open".

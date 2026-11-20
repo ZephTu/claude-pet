@@ -54,8 +54,14 @@ final class BoardWindow: NSWindow {
     /// Brings the board forward and gives it the keyboard. The pet is an
     /// accessory app, so it has to activate itself for the window to be key.
     func present() {
+        // Activation is only a request on macOS 14+, and an accessory app
+        // asking from a menu or a click on a non-activating panel is often
+        // refused — the window then opened *behind* the frontmost app, which
+        // looked like the first "Task Board…" doing nothing. Order it front
+        // regardless, then ask for the keyboard.
         NSApp.activate()
-        makeKeyAndOrderFront(nil)
+        orderFrontRegardless()
+        makeKey()
         webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
     }
 

@@ -154,6 +154,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         noticeCount = Chatter.noticeCount(stored: UserDefaults.standard.integer(forKey: Self.noticeCountKey))
         bridge.panelPinned = keepListOpen
         panel.onClick = { point in bridge.handleClick(at: point) }
+        panel.onDoubleClick = { bridge.handleDoubleClick() }
+        bridge.onDoubleClickPet = { [weak self] in self?.toggleBoard() }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
             self?.updateDwell(at: point, panelOpen: panelOpen)
@@ -787,6 +789,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let window = boardWindow ?? BoardWindow()
         boardWindow = window
         window.present()
+    }
+
+    /// Double-click on the pet: show the board, or put it away if it is
+    /// already in view. A board that is open but buried counts as not shown.
+    private func toggleBoard() {
+        if let w = boardWindow, w.isVisible, w.occlusionState.contains(.visible) {
+            w.orderOut(nil)
+        } else {
+            showBoard()
+        }
     }
     /// sessionId → what the statusline last told us. Empty when no statusline
     /// is wired up, which simply means the hover says less.

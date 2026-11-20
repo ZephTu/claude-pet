@@ -26,6 +26,10 @@ final class PetHostView: NSView {
     /// anywhere else on the pet toggles the panel — and only the page knows
     /// where the rows ended up.
     var onClick: ((CGPoint) -> Void)?
+    /// The second click of a double-click. Its first click has already gone
+    /// to `onClick` — waiting to see whether a second follows would put a delay
+    /// on every single click, so the receiver undoes the first instead.
+    var onDoubleClick: (() -> Void)?
     /// Right click, in this view's coordinates.
     var onRightClick: ((NSPoint) -> Void)?
 
@@ -121,7 +125,9 @@ final class PetHostView: NSView {
         dragAnchor = nil
         windowAnchor = nil
         isDragging = false
-        if !wasDragging {
+        if !wasDragging, event.clickCount == 2 {
+            onDoubleClick?()
+        } else if !wasDragging, event.clickCount == 1 {
             onClick?(cssPoint(from: convert(event.locationInWindow, from: nil)))
         } else {
             onDragEnded?()
