@@ -101,6 +101,7 @@
 <li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
   <ul><li><b>Project</b>（默认）：按项目分组，点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
   <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
+<li><b>Collapse all / Expand all</b>：按项目分组时一键收起或展开所有项目组；按状态分组时一键收起所有点开的任务。</li>
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
@@ -119,6 +120,7 @@
 </table>
 <h2>Sessions（右栏）</h2>
 <ul>
+<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
 <li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
 <li>消息：<b>Enter</b> 发送，<b>Shift+Enter</b> 换行，效果和你在终端里亲手输入完全一样，session 正忙时会排队。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
@@ -340,6 +342,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <li><b>Project | Status</b> next to the title switches the grouping (remembered):
   <ul><li><b>Project</b> (default): one group per project — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
   <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
+<li><b>Collapse all / Expand all</b>: by project it folds or unfolds every group; by status it closes every open task.</li>
 <li>Tick <b>show closed</b> for done and abandoned.</li>
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
@@ -358,6 +361,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 </table>
 <h2>Sessions (right)</h2>
 <ul>
+<li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
 <li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
 <li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
 <li>Messages: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>

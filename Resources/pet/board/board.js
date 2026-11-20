@@ -26,7 +26,8 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
   drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(),
-  groupBy: pref("hq-groupby", "project"), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
+  groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
+  scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -140,6 +141,14 @@ function render() {
   $("#groupby").innerHTML = ["project", "status"].map((g) =>
     `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? "Project" : "Status"}</button>`).join("");
   $("#activefirst").hidden = ui.groupBy !== "project";
+  $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
+    `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? "List" : "Project"}</button>`).join("");
+  // One button: by project it folds / unfolds every group; by status it closes open task cards.
+  const groupKeys = [...new Set(tasks().map((t) => t.project || "(none)"))];
+  const anyOpen = ui.groupBy === "project" ? groupKeys.some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
+  $("#foldall").textContent = anyOpen ? "Collapse all" : "Expand all";
+  $("#foldall").title = ui.groupBy === "project" ? "Fold or unfold every project group" : "Close every open task";
+  $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
   $("#activefirst input").checked = ui.activeFirst;
   $("#projects-panel").hidden = !ui.projOpen;
   if (ui.projOpen) $("#projects-panel").innerHTML = renderProjects();
@@ -484,7 +493,7 @@ const ICON = {
 function renderSessions() {
   if (!ui.sessions.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
   const openTasks = tasks().filter(isOpen);
-  return ui.sessions.map((s) => {
+  const card = (s) => {
     const t = s.task && taskById(s.task);
     const sid = s.sessionId;
     const sorted = openTasks.slice().sort((a, b) =>
@@ -511,7 +520,7 @@ function renderSessions() {
           ${taskCtl}
         </div>
         <div class="shead">
-          <div class="meta smeta">${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
             <button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>
@@ -526,7 +535,42 @@ function renderSessions() {
         </div>` : ""}
       </div>
     </div>`;
-  }).join("");
+  };
+  if (ui.sgroupBy !== "project") return ui.sessions.map(card).join("");
+  // By project: same order as the Tasks column (active first if ticked), "No project" last.
+  const names = projectNames();
+  let order = [...names];
+  const activity = Object.fromEntries(order.map((n) => [n, projectActivity(n)]));
+  if (ui.activeFirst) order = order.slice().sort((x, y) => (activity[y] || 0) - (activity[x] || 0));
+  const byProject = (n) => ui.sessions.filter((x) => sessionProject(x) === n);
+  const extra = [...new Set(ui.sessions.map(sessionProject).filter((n) => n && !names.includes(n)))];
+  let html = "";
+  for (const name of [...order, ...extra, ""]) {
+    const group = byProject(name);
+    if (!group.length) continue;
+    const key = name || "(none)";
+    const shut = ui.scollapsed.has(key);
+    html += `<div class="group-title proj" data-action="scollapse" data-key="${esc(key)}" title="Click to ${shut ? "expand" : "collapse"}">
+      <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || "No project")}
+      <span class="meta">${group.length}</span></div>`;
+    if (!shut) html += group.map(card).join("");
+  }
+  return html;
+}
+
+// A session's project: its task's project if bound, else the project owning its directory.
+function sessionProject(s) {
+  const t = s.task && taskById(s.task);
+  if (t && t.project) return t.project;
+  const cwd = (s.cwd || "").replace(/\/+$/, "");
+  let best = "", depth = -1;
+  for (const pr of projects()) {
+    for (const raw of pr.paths) {
+      const p = raw.replace(/\/+$/, "");
+      if ((cwd === p || cwd.startsWith(p + "/")) && p.length > depth) { best = pr.name; depth = p.length; }
+    }
+  }
+  return best;
 }
 
 function renderNewTask() {
@@ -1045,6 +1089,23 @@ document.addEventListener("click", async (ev) => {
         toast("Removed", false, () => act("ref", { action: "add", task: d.task, ref }, "Restored"));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
+    }
+    case "sgroup-by": ui.sgroupBy = d.g; savePref("hq-sgroupby", d.g); return render();
+    case "scollapse":
+      ui.scollapsed.has(d.key) ? ui.scollapsed.delete(d.key) : ui.scollapsed.add(d.key);
+      savePref("hq-scollapsed", JSON.stringify([...ui.scollapsed]));
+      return render();
+    case "fold-all": {
+      if (ui.groupBy === "project") {
+        const keys = [...new Set(tasks().map((t) => t.project || "(none)"))];
+        const anyOpen = keys.some((k) => !ui.collapsed.has(k));
+        ui.collapsed = new Set(anyOpen ? keys : []);
+        if (anyOpen) ui.expanded.clear();
+        savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
+      } else {
+        ui.expanded.clear();
+      }
+      return render();
     }
     case "group-by": ui.groupBy = d.g; savePref("hq-groupby", d.g); return render();
     case "collapse":

@@ -47,7 +47,7 @@ main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.
 h2 { margin: 2px 0 10px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint);
   display: flex; align-items: center; gap: 8px; }
 h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
-.toggle { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--faint);
+.toggle { margin-left: 8px; text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--faint);
   display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .empty { color: var(--faint); font-size: 12px; padding: 4px 2px 8px; }
 
@@ -157,6 +157,12 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .dragging { opacity: .45; }
 .task.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
 .toggle.af { margin-left: 0; }
+.pchip { color: var(--blue); }
+.toggle, .foldall { white-space: nowrap; }
+#col-tasks h2 { flex-wrap: wrap; row-gap: 6px; }
+.foldall { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 11px; padding: 0 8px; }
+.foldall[hidden] { display: none; }
+.foldall + .toggle { margin-left: 4px; }
 .toggle.af[hidden] { display: none; }
 .act { font-size: 11px; color: var(--teal); font-weight: 500; white-space: nowrap; }
 #tasks.reordering .task, #tasks.reordering .group-title:not(.proj) { display: none; }
