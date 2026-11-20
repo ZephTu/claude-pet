@@ -158,8 +158,12 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .task.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
 .toggle.af { margin-left: 0; }
 .pchip { color: var(--blue); }
+.icon.armed { width: auto; padding: 0 6px; color: #fff; background: var(--red); border-color: var(--red); font-size: 11px; }
+.bgtag { font-size: 10px; padding: 0 5px; border-radius: 6px; border: 1px solid rgba(127,166,217,.45); color: var(--blue); }
+select.place { max-width: 100px; }
 .proj-empty { display: flex; align-items: center; gap: 8px; padding: 2px 8px 8px 38px; }
-.push { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.push { display: block; margin-top: 6px; font-size: 12px; color: var(--dim); cursor: pointer; line-height: 1.5; }
+.push input { vertical-align: -2px; margin: 0 6px 0 0; }
 .push b { color: var(--text); font-weight: 600; }
 .scan-i { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
 .scan-i b { white-space: nowrap; }

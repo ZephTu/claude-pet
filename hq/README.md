@@ -154,6 +154,13 @@ grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tr
 A task's `workdirs` fill themselves: binding a session to a task adds that session's directory
 (not your home folder or the task root). You can also type one when creating a task.
 
+## Starting sessions from the board
+
+A task's **▶ New session** starts `claude` in the task's workdir, named after the task and bound to
+it from the first prompt (it reads the card, reports, and waits). It opens in a new Orca, iTerm2 or
+Terminal tab, or in the background (`claude --bg`); background sessions show on the board with
+Attach (`claude attach` in your terminal) and Stop.
+
 ## Leads
 
 Copy `templates/lead.md` (scaffolded into your root) to `<root>/.claude/agents/bench-lead.md`,

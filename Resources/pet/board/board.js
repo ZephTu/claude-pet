@@ -109,10 +109,10 @@ const list = (v) => (Array.isArray(v) ? v : []);
 async function refresh(force) {
   let sig = null;
   try {
-    const [boardText, sessionsText] = await Promise.all([api("board"), api("sessions")]);
-    sig = boardText + "\u0001" + sessionsText;
+    const [boardText, sessionsText, agentsText] = await Promise.all([api("board"), api("sessions"), api("agents")]);
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText;
     ui.board = JSON.parse(boardText);
-    ui.sessions = JSON.parse(sessionsText);
+    ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
     $("#error").textContent = String(e.message || e);
@@ -128,6 +128,39 @@ async function refresh(force) {
 window.hqRefresh = refresh;
 
 // ------------------------------------------------------------------ render
+// Background sessions (claude --bg) have no terminal; `claude agents --json` names them. Mark the
+// ones the pet already tracks, and add any it doesn't.
+function mergeBackground(sessions, agents) {
+  const bg = (Array.isArray(agents) ? agents : []).filter((a) => a.kind === "background");
+  const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+  for (const a of bg) {
+    const s = byId.get(a.sessionId);
+    // `claude attach` / `stop` take the short id that `claude agents` prints, not the session id.
+    if (s) { s.background = true; s.bgId = a.id; s.title = s.title || a.name; continue; }
+    sessions.push({ sessionId: a.sessionId, title: a.name, cwd: a.cwd, project: (a.cwd || "").split("/").pop(),
+                    state: a.status, updatedAt: a.startedAt ? new Date(a.startedAt).toISOString() : null,
+                    terminal: null, background: true, bgId: a.id, lastText: "" });
+  }
+  return sessions;
+}
+
+// Where "New session" opens: the user's choice, else the terminal most sessions run in.
+const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: "Background" };
+function launchPlace() {
+  const saved = pref("hq-launch", "");
+  if (PLACES[saved]) return saved;
+  const counts = {};
+  for (const s of ui.sessions) { const k = s.terminal && s.terminal.kind; if (k === "orca" || k === "iterm2") counts[k] = (counts[k] || 0) + 1; }
+  return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || "terminal";
+}
+function launchDir(t) {
+  const w = list(t.workdirs)[0];
+  if (w) return w;
+  const pr = projects().find((p) => p.name === t.project);
+  return pr && pr.paths[0] ? pr.paths[0] : "";
+}
+const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
+
 function render() {
   // Never yank an open dropdown out from under the pointer.
   if (ui.dragging) return;
@@ -498,7 +531,13 @@ function renderTaskBody(t) {
         <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
     ${todos}
 
-    ${secHead("Sessions", t, "bind", "Bind a live session")}
+    <div class="sec-h"><h3>Sessions</h3>
+      <button class="icon ${adding("bind") ? "on" : ""}" title="Bind a live session" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button>
+      <span style="flex:1"></span>
+      <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} — it starts bound, reads the card and reports">▶ New session</button>
+      <select class="bind mini place" data-action="launch-place" title="Where new sessions open">
+        ${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}
+      </select></div>
     ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
         ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
             ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
@@ -507,10 +546,13 @@ function renderTaskBody(t) {
     ${live.length ? live.map((s) => `<div class="bsess">
         <span class="dot ${esc(s.state || "")}"></span>
         <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
-          <div class="meta">${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
-          <button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>
+          ${s.background
+            ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
+               <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
+            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
           <button class="icon" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
         </div></div>`).join("")
       : `<div class="empty">No live session is working on this.${list(t.sessions).length ? " Earlier sessions: click an item in Needs you, or use the context view." : ""}</div>`}
@@ -543,6 +585,8 @@ const ICON = {
   peek: '<svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
   jump: '<svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5 7 9M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/></svg>',
   message: '<svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
+  attach: '<svg viewBox="0 0 16 16"><path d="M2.5 4.5h11v8h-11zM5 7.5l2 1.5-2 1.5M8.5 10.5h2.5"/></svg>',
+  stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
 };
 
 function renderSessions() {
@@ -563,8 +607,8 @@ function renderSessions() {
     const busy = s.state === "busy";
     const kind = s.terminal && s.terminal.kind;
     const canSend = Boolean(SENDABLE[kind]);
-    const why = canSend ? "" : `Messaging from the Task Board isn't supported for ${
-      kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
+    const why = canSend ? "" : s.background ? "A background session has no terminal to type into — Attach to talk to it."
+      : `Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)));
     return `<div class="card session">
@@ -575,10 +619,13 @@ function renderSessions() {
           ${taskCtl}
         </div>
         <div class="shead">
-          <div class="meta smeta">${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
-            <button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>
+            ${s.background
+              ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="Attach — open it in a terminal">${ICON.attach}</button>
+                 <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
+              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>`}
             <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
         </div>
@@ -1268,6 +1315,35 @@ document.addEventListener("click", async (ev) => {
     }
     case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
     case "new-in-project": return openNewTask(d.p);
+    case "launch": {
+      const t = taskById(d.task);
+      const dir = t && launchDir(t);
+      if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
+      const place = launchPlace();
+      try {
+        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t) });
+        toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
+      } catch (e) { toast(String(e.message || e), true); }
+      setTimeout(() => refresh(), 2500);
+      return;
+    }
+    case "attach": {
+      const place = launchPlace() === "bg" ? "terminal" : launchPlace();
+      try { await api("attach", { session: d.session, where: place }); toast(`Opening it in ${PLACES[place]}…`); }
+      catch (e) { toast(String(e.message || e), true); }
+      return;
+    }
+    case "stop":
+      // WKWebView shows no confirm() dialog, so confirm with a second click instead.
+      if (ui.stopArmed !== d.session) {
+        ui.stopArmed = d.session;
+        render();
+        toast("Click stop again to stop it — its conversation is kept, Attach resumes it");
+        setTimeout(() => { if (ui.stopArmed === d.session) { ui.stopArmed = null; render(); } }, 4000);
+        return;
+      }
+      ui.stopArmed = null;
+      return act("stop", { session: d.session }, "Stopped");
     case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
@@ -1310,6 +1386,7 @@ document.addEventListener("change", (ev) => {
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
+  if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }

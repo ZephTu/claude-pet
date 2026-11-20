@@ -115,6 +115,7 @@
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
 <tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）</td><td>你和 session</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕</td><td>你</td></tr>
+<tr><td><b>▶ New session</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。旁边的下拉框选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>Background</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
 <tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
 <tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
 <tr><td><b>Open card</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
@@ -123,6 +124,7 @@
 <ul>
 <li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
 <li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
+<li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
 <li>消息：<b>Enter</b> 发送，<b>Shift+Enter</b> 换行，效果和你在终端里亲手输入完全一样，session 正忙时会排队。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
 </ul>
@@ -247,6 +249,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="zh-limits">注意事项</h1>
 <ul>
 <li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
+<li>后台 session 只能在<b>信任过</b>的目录里启动（在那个目录里正常打开过一次 Claude Code 并同意信任即可）；否则看板会提示原因。</li>
 <li>看板上的回应：勾选 send now 时立刻送达（Orca / iTerm2）；否则在 session <b>下一轮</b>送达。</li>
 <li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。</li>
 <li>Sessions 栏依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
@@ -366,6 +369,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
 <tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo)</td><td>you and sessions</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕</td><td>you</td></tr>
+<tr><td><b>▶ New session</b></td><td>starts a Claude Code session in the task's workdir (or its project's directory), named "id title", <b>bound to the task from the start</b>; it reads the card, reports where it stands, the next step and what needs you in three lines, then waits. The menu beside it picks where (remembered): <b>Orca / iTerm2 / Terminal</b> open a new tab; <b>Background</b> opens no window. The default is the terminal most of your sessions run in</td><td>you</td></tr>
 <tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
 <tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
 <tr><td><b>Open card</b></td><td>opens the card file in your editor</td><td></td></tr>
@@ -374,6 +378,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <ul>
 <li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
 <li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
+<li><b>Background sessions</b> (blue "background" tag) have no terminal: <b>Attach</b> (terminal icon) opens <code>claude attach</code> in your chosen terminal so you can talk to it; <b>Stop</b> (square icon, click twice) stops it — the conversation is kept and Attach resumes it. They can't be messaged from the board.</li>
 <li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
 <li>Messages: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
 </ul>
@@ -494,6 +499,7 @@ next: "run baseline on clusters A/C"
 <h1 id="en-limits">Good to know</h1>
 <ul>
 <li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
+<li>A background session can only start in a folder you have <b>trusted</b> (open Claude Code there once and accept); otherwise the board says so.</li>
 <li>Board answers: with send now ticked they arrive at once (Orca / iTerm2); otherwise at the session's <b>next turn</b>.</li>
 <li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only.</li>
 <li>The Sessions column relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>

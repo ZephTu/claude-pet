@@ -163,6 +163,22 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
         case "send": return await send(session: str("session"), text: str("text"))
+        case "launch":
+            return await launch(task: str("task"), title: str("title"), dir: str("dir"),
+                                place: str("where"), prompt: str("prompt"))
+        case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
+                                                    command: [claudePath() ?? "claude", "attach", str("session")],
+                                                    title: "attach " + str("session").prefix(8))
+        case "stop":
+            guard let claude = claudePath() else { return (nil, "can't find the claude command") }
+            let r = await Self.run(claude, ["stop", str("session")])
+            return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
+        case "agents":
+            // Background sessions have no terminal, so the pet's records can't say what they are;
+            // `claude agents --json` can.
+            guard let claude = claudePath() else { return ("[]", nil) }
+            let r = await Self.run(claude, ["agents", "--json"])
+            return (r.status == 0 ? r.out : "[]", nil)
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
@@ -187,6 +203,132 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (["ok": true], nil)
         default:
             return (nil, "unknown operation")
+        }
+    }
+
+    // MARK: - New sessions
+
+    /// The claude CLI. The pet runs outside any shell, so PATH doesn't know about it: look in the
+    /// usual install places, then ask a login shell once.
+    private var cachedClaude: String??
+    private func claudePath() -> String? {
+        if let c = cachedClaude { return c }
+        let home = NSHomeDirectory()
+        let candidates = ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
+                          "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+        var found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        if found == nil {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            p.arguments = ["-lic", "command -v claude"]
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = Pipe()
+            try? p.run()
+            p.waitUntilExit()
+            let path = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) { found = path }
+        }
+        cachedClaude = .some(found)
+        return found
+    }
+
+    /// Single-quoted for a POSIX shell: nothing inside is interpreted.
+    private static func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
+    /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
+    /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
+    /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
+    private func launch(task: String, title: String, dir: String, place: String, prompt: String) async -> (Any?, String?) {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
+            return (nil, "no such directory: \(dir)")
+        }
+        guard let claude = claudePath() else { return (nil, "can't find the claude command") }
+        let name = String("\(task) \(title)".prefix(60))
+        if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt) }
+        let sid = UUID().uuidString.lowercased()
+        let bound = await hq(["bind", task, "--session=\(sid)"])
+        if let err = bound.1 { return (nil, err) }
+        var cmd = [claude, "--session-id", sid, "--name", name]
+        cmd.append(prompt)
+        let opened = await openInTerminal(place: place, dir: dir, command: cmd, title: name)
+        if opened.1 != nil { _ = await hq(["unbind", "--session=\(sid)"]) }
+        return opened.1 == nil ? (["ok": true, "session": sid, "where": place], nil) : opened
+    }
+
+    /// `claude --bg` picks its own session id (it ignores --session-id), so a background session
+    /// can't be bound before it starts. It is told to bind itself first — that also hands it the
+    /// task's rules — and the board binds it too as soon as `claude agents` reports its id.
+    private func launchBackground(claude: String, task: String, name: String, dir: String, prompt: String) async -> (Any?, String?) {
+        let first = "Start by running `\(hqPath) bind \(task)` — it binds this background session to the task and prints its rules. Then: "
+        let r = await Self.run(claude, ["--bg", "--name", name, first + prompt], cwd: dir)
+        // An untrusted folder can't show its trust prompt in the background; claude says so.
+        if r.status != 0 || (r.out + r.err).localizedCaseInsensitiveContains("not trusted") {
+            return (nil, "claude --bg: " + (r.err.isEmpty ? r.out : r.err).prefix(300))
+        }
+        guard let short = (r.out + r.err).range(of: #"\b[0-9a-f]{8}\b"#, options: .regularExpression)
+            .map({ String((r.out + r.err)[$0]) }) else {
+            return (["ok": true, "where": "bg"], nil)
+        }
+        for _ in 0..<10 {
+            let list = await Self.run(claude, ["agents", "--json", "--all"])
+            if let data = list.out.data(using: .utf8),
+               let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               let row = rows.first(where: { ($0["id"] as? String) == short }),
+               let sid = row["sessionId"] as? String {
+                let who = await hq(["whoami", "--session=\(sid)"])
+                if (who.0 as? String)?.contains(task) != true { _ = await hq(["bind", task, "--session=\(sid)"]) }
+                return (["ok": true, "session": sid, "where": "bg", "id": short], nil)
+            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+        return (["ok": true, "where": "bg", "id": short], nil)
+    }
+
+    /// Runs a command in a new tab of the chosen terminal, in `dir`.
+    private func openInTerminal(place: String, dir: String, command: [String], title: String) async -> (Any?, String?) {
+        // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
+        var line = "cd \(Self.shq(dir)) && "
+        if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(Self.shq(root)) " }
+        line += command.map(Self.shq).joined(separator: " ")
+        switch place {
+        case "orca":
+            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
+                return (nil, "Orca is not installed")
+            }
+            let cli = app.appending(path: "Contents/Resources/bin/orca").path
+            // In the Orca workspace for that folder when there is one, else in the current one.
+            var r = await Self.run(cli, ["terminal", "create", "--worktree", "path:\(dir)", "--title", title,
+                                         "--command", line, "--focus", "--json"])
+            if r.status != 0 {
+                r = await Self.run(cli, ["terminal", "create", "--title", title, "--command", line, "--focus", "--json"])
+            }
+            if r.status == 0 { NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate() }
+            return r.status == 0 ? (["ok": true], nil) : (nil, "orca: " + (r.err.isEmpty ? r.out : r.err).prefix(300))
+        case "iterm2", "terminal":
+            let esc = line.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let script = place == "iterm2" ? """
+            tell application "iTerm2"
+              activate
+              if (count of windows) = 0 then
+                create window with default profile
+              else
+                tell current window to create tab with default profile
+              end if
+              tell current session of current window to write text "\(esc)"
+            end tell
+            """ : """
+            tell application "Terminal"
+              activate
+              do script "\(esc)"
+            end tell
+            """
+            let r = await Self.run("/usr/bin/osascript", ["-e", script])
+            return r.status == 0 ? (["ok": true], nil) : (nil, "\(place): " + (r.err.isEmpty ? r.out : r.err).prefix(300))
+        default:
+            return (nil, "unknown place to open: \(place)")
         }
     }
 
@@ -306,13 +448,20 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     private struct Result: Sendable { let status: Int32; let out: String; let err: String }
 
-    private nonisolated static func run(_ tool: String, _ args: [String]) async -> Result {
+    private nonisolated static func run(_ tool: String, _ args: [String], cwd: String? = nil) async -> Result {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: tool)
                 p.arguments = args
+                if let cwd { p.currentDirectoryURL = URL(fileURLWithPath: cwd) }
                 var env = ProcessInfo.processInfo.environment
+                // If the pet itself was started from inside a Claude Code session, don't let its
+                // children look like part of that session (claude refuses to nest; hq would think
+                // a board-side bind came from inside the session).
+                for key in env.keys where key == "CLAUDECODE" || key == "CLAUDE_PID" || key.hasPrefix("CLAUDE_CODE_") {
+                    env.removeValue(forKey: key)
+                }
                 env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "")
                 p.environment = env
                 let out = Pipe(), err = Pipe()
