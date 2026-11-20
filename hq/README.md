@@ -67,7 +67,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
@@ -101,7 +101,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 
    On the board the answers read **Yes** (`do`; with a note, the note is the answer), **No**
    (`drop`), **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
-   snooze`), and the session is told you'll answer later — and **⋯ → No context** (`archive`).
+   snooze`, `--until` to pick the time), and the session is told you'll answer later — and **⋯ → No context** (`archive`).
    There is also **To todo**, for an ask that is really something you
    will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
    to file such things as todos in the first place — an ask is only for a question they need

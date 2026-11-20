@@ -430,8 +430,9 @@ function render() {
   // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
   if (key && !active.isConnected) {
     const inModal = Boolean(activeRegion && activeRegion.id === "modal");
+    // …and a visible one: Today's cards stay in the DOM, hidden, while All is showing.
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
-      .find((x) => Boolean(x.closest("#modal")) === inModal);
+      .find((x) => Boolean(x.closest("#modal")) === inModal && x.getClientRects().length);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -606,6 +607,7 @@ function pushMessageAll(answers) {
 function autoPick(id, hasNote) {
   const t = taskById(id.replace(/\.\d+$/, ""));
   if (!t || openAsks(t).length < 2) return;        // a lone ask's buttons answer at once
+  if (!openAsks(t).some((a) => a.id === id)) return;   // a put-off ask (for later) isn't in the group
   if (hasNote && !ui.picks[id]) { ui.picks[id] = "do"; ui.autoPicked.add(id); render(); }
   else if (!hasNote && ui.autoPicked.has(id) && !(ui.atts["ask:" + id] || []).length) {
     delete ui.picks[id]; ui.autoPicked.delete(id); render();
@@ -1752,7 +1754,8 @@ async function resolveAll(taskId) {
       try {
         x.made = await answerAsk(x.a, x.res, x.note);
         done.push(x);
-        delete ui.picks[x.a.id]; delete ui.drafts["note:" + x.a.id]; delete ui.drafts["push:" + x.a.id]; delete ui.atts["ask:" + x.a.id];
+        delete ui.picks[x.a.id]; delete ui.drafts["push:" + x.a.id];
+        if (x.res !== "snooze") { delete ui.drafts["note:" + x.a.id]; delete ui.atts["ask:" + x.a.id]; }
       } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
     }
     if (!done.length) return;
@@ -1767,7 +1770,7 @@ async function resolveAll(taskId) {
     for (const [sid, xs] of bySession) {
       const s = xs[0].target;
       try {
-        for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
+        for (const x of xs) if (x.res !== "snooze") await api("delivered", { id: x.a.id, session: sid });
         await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
         sent.push(...xs);
         msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
@@ -1822,8 +1825,8 @@ document.addEventListener("click", async (ev) => {
       ui.resolving.add(d.id);
       const note = answerNote(d.id);
       const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
-      delete ui.drafts["note:" + d.id];
-      delete ui.atts["ask:" + d.id];
+      // Later leaves the ask open, so a half-written note and its images stay for tomorrow.
+      if (d.res !== "snooze") { delete ui.drafts["note:" + d.id]; delete ui.atts["ask:" + d.id]; }
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
       const target = a && pushTarget(a);
       const push = Boolean(target) && wantPush(a);
@@ -1835,7 +1838,8 @@ document.addEventListener("click", async (ev) => {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
           try {
-            await api("delivered", { id: d.id, session: target.sessionId });
+            // (Later is not an answer: nothing to keep the hook from repeating.)
+            if (d.res !== "snooze") await api("delivered", { id: d.id, session: target.sessionId });
             await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy" });
             msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
           } catch (e) {
