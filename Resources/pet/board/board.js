@@ -12,6 +12,7 @@ const RESOLUTIONS = [
   ["drop", "Drop", "Won't do — stop tracking it"],
   ["later", "Ask later", "Need to ask someone else — revisit"],
   ["archive", "No context", "I can't answer this — park it"],
+  ["todo", "To todo", "Something I'll do myself — make it an @me todo on this task and close the ask"],
 ];
 // Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
@@ -25,7 +26,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -97,8 +98,70 @@ async function undoTodo(task, i) {
 const tasks = () => (ui.board ? ui.board.tasks : []);
 const taskById = (id) => tasks().find((t) => t.id === id);
 const isOpen = (t) => ["waiting-on-me", "blocked", "active"].includes(t.status);
+// ---- drafts survive the pet quitting: what you typed, the images you added and the answers you
+// picked are kept in localStorage (per machine), and put back when the board loads.
+const DRAFTS_KEY = "hq-drafts-v1";
+(function restoreDrafts() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}");
+    Object.assign(ui.drafts, d.drafts || {});
+    Object.assign(ui.atts, d.atts || {});
+    Object.assign(ui.picks, d.picks || {});
+  } catch (e) { /* nothing kept, or storage off */ }
+})();
+function saveDrafts() {
+  clearTimeout(saveDrafts.t);
+  saveDrafts.t = setTimeout(() => {
+    const drafts = Object.fromEntries(Object.entries(ui.drafts).filter(([, v]) => v !== "" && v != null));
+    const atts = Object.fromEntries(Object.entries(ui.atts).filter(([, v]) => v && v.length));
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts, atts, picks: ui.picks })); } catch (e) { /* full or off */ }
+  }, 300);
+}
+// Drop what belonged to asks that are no longer open (answered elsewhere, or reopened then closed).
+function pruneDrafts() {
+  if (!ui.board) return;
+  const open = new Set(tasks().flatMap((t) => openAsks(t).map((a) => a.id)));
+  const gone = (id) => !open.has(id);
+  for (const k of Object.keys(ui.drafts)) { const m = /^(?:note|push):(.+)$/.exec(k); if (m && gone(m[1])) delete ui.drafts[k]; }
+  for (const k of Object.keys(ui.atts)) { const m = /^ask:(.+)$/.exec(k); if (m && gone(m[1])) delete ui.atts[k]; }
+  for (const id of Object.keys(ui.picks)) if (gone(id)) delete ui.picks[id];
+}
+window.addEventListener("pagehide", () => { clearTimeout(saveDrafts.t); saveDrafts.t = null; try {
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts: ui.drafts, atts: ui.atts, picks: ui.picks })); } catch (e) { /* */ } });
+
 const openAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
+// The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
+// a reply (from here or its terminal) clears it, same as in the pet's list.
+const newTag = (sid) => (ui.unread && ui.unread[sid]
+  ? `<span class="newtag" title="Finished — not looked at yet. Peek, Jump or reply to clear it.">new</span>` : "");
+// A session's dot, drawn exactly as in the pet's list (pet.js dotClass — keep the two in step):
+// colour says whether it wants you, shape and motion what it is doing. Sessions the pet doesn't
+// list (a `claude --bg` one, say) fall back to their plain state.
+function dotClass(s) {
+  const p = (ui.dots || {})[s.sessionId];
+  if (!p) return s.state === "busy" || s.state === "waiting" ? s.state : "idle";
+  if (p.quiet) return "quiet";
+  if (p.state === "waiting") return p.asks === "permission" ? "waiting approve" : "waiting reply";
+  if (p.state === "busy") return p.agent ? "busy agent" : p.struggle ? "busy struggling" : "busy";
+  return p.background ? "idle bg" : "idle";
+}
+const DOT_TIP = { quiet: "Gone quiet — nothing heard for a while", "waiting approve": "Waiting for your approval",
+  "waiting reply": "Waiting for your answer", "busy agent": "Waiting on an agent it sent off",
+  "busy struggling": "Working — the last several calls failed", busy: "Working", "idle bg": "Turn over — something it started is still running in the background", idle: "Idle" };
+// A session's status word, as the pet's list says it (pet.js row status — keep in step): what it
+// is running, "1 in background", "Answered"… Sessions the pet doesn't list fall back to the state.
+function statusWord(s) {
+  const p = (ui.dots || {})[s.sessionId];
+  if (!p) return s.state || "?";
+  if (p.state === "waiting") return p.asks === "permission" ? "Needs approval" : "Awaiting reply";
+  if (p.activity) return p.activity;
+  if (p.quiet) return "No recent activity";
+  if (p.state === "busy") return "Working";
+  if (p.background) return `${p.background} in background`;
+  return p.replied ? "Answered" : "Idle";
+}
+const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -110,9 +173,14 @@ const list = (v) => (Array.isArray(v) ? v : []);
 async function refresh(force) {
   let sig = null;
   try {
-    const [boardText, sessionsText, agentsText] = await Promise.all([api("board"), api("sessions"), api("agents")]);
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText;
+    const [boardText, sessionsText, agentsText, unreadText] = await Promise.all([api("board"), api("sessions"), api("agents"),
+      api("pet").catch(() => "{}")]);
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText;
     ui.board = JSON.parse(boardText);
+    const pet = JSON.parse(unreadText || "{}");
+    ui.unread = pet.unread || {};
+    ui.dots = pet.dots || {};
+    pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
@@ -121,7 +189,9 @@ async function refresh(force) {
   }
   if (force !== "timer" || sig === null || sig !== ui.lastSig) {
     ui.lastSig = sig;
-    if (ui.pointerDown) ui.pendingRender = true;
+    // Only a timed rebuild waits for the mouse button; one you caused shows at once. (A native
+    // dropdown's menu swallows the mouseup, so waiting for it could hold the board stale.)
+    if (ui.pointerDown && force === "timer") ui.pendingRender = true;
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
@@ -148,6 +218,46 @@ function mergeBackground(sessions, agents) {
 
 // Where "New session" opens: the user's choice, else the terminal most sessions run in.
 const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: "Background" };
+// Sessions the board starts or resumes skip Claude Code's permission prompts — the user's choice,
+// remembered; off unless ticked.
+const skipPerms = () => pref("hq-skip-perms", "0") === "1";
+function launchOptions() {
+  return `<label class="skipperm" title="Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files">
+    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> skip permissions</label>`;
+}
+// ---- earlier sessions of a task, to resume one (hq history). Fetched when shown, kept a minute.
+const HISTORY_MS = 60 * 1000;
+function ensureHistory(taskId) {
+  const h = ui.history[taskId];
+  if ((h && Date.now() - h.at < HISTORY_MS) || ui.historyLoading.has(taskId)) return;
+  ui.historyLoading.add(taskId);
+  apiJSON("history", { task: taskId })
+    .then((rows) => { ui.history[taskId] = { at: Date.now(), rows: Array.isArray(rows) ? rows : [] }; })
+    .catch(() => { ui.history[taskId] = { at: Date.now(), rows: [] }; })
+    .finally(() => { ui.historyLoading.delete(taskId); render(); });
+}
+// Ended sessions of a task, newest first (a live one is listed with the live sessions instead).
+function earlierSessions(t) {
+  ensureHistory(t.id);
+  const live = new Set(ui.sessions.map((s) => s.sessionId));
+  return ((ui.history[t.id] || {}).rows || []).filter((r) => !r.live && !live.has(r.sessionId));
+}
+const resumeTip = (r) => `Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`;
+function earlierList(t) {
+  const rows = earlierSessions(t);
+  if (!rows.length) return "";
+  const shown = ui.histAll.has(t.id) ? rows : rows.slice(0, 3);
+  return `<div class="meta past-h">Earlier sessions</div>` + shown.map((r) => `<div class="bsess past">
+      <span class="dot idle"></span>
+      <div style="flex:1;min-width:0"><div class="stitle">${esc(r.title || r.sessionId.slice(0, 8))}</div>
+        <div class="meta">ended · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
+      <div class="icons">
+        <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="Read its conversation">${ICON.peek}</button>
+        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
+        <button class="icon" data-confirm="Remove?" data-action="forget-session" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" title="Remove it from this task's sessions (the conversation itself is kept)">✕</button>
+      </div></div>`).join("") +
+    (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? "Show fewer" : `Show all ${rows.length}`}</button>` : "");
+}
 function launchPlace() {
   const saved = pref("hq-launch", "");
   if (PLACES[saved]) return saved;
@@ -161,15 +271,67 @@ function launchDir(t) {
   const pr = projects().find((p) => p.name === t.project);
   return pr && pr.paths[0] ? pr.paths[0] : "";
 }
+// ---- "▶ Do it" on an @claude todo: hand it to the task's live session, or start one for it.
+const DO_PROMPT = (t, text) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then do this todo from it: "${text}". Tick it on the card when it's done, or say what is blocking it.`;
+const HANDED_MS = 30 * 60 * 1000;   // how long a handed-over todo says so
+function doItButton(t, x) {
+  if (x.state !== "open" || x.owner !== "claude") return "";
+  const key = `${t.id}|${x.text}`;
+  const h = ui.handed[key];
+  if (ui.handing.has(key)) return `<button class="btn small ghost doit" disabled>Handing…</button>`;
+  if (h && Date.now() - h.at < HANDED_MS) {
+    return `<button class="btn small ghost doit" title="Handed to ${esc(h.to)} ${ago(new Date(h.at).toISOString())} — click to hand it over again" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
+  }
+  const s = doTarget(t);
+  const tip = s ? `Send it to ${s.title || s.project} as a message${s.state === "busy" ? " (busy — it will queue)" : ""}`
+    : "No session on this task can take a message — start one that does this todo";
+  return `<button class="btn small doit" title="${esc(tip)}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">▶ Do it</button>`;
+}
+// The live session to hand a task's todo to: one the board can type into, most recently active first.
+function doTarget(t) {
+  return liveFor(t.id).filter((s) => SENDABLE[s.terminal && s.terminal.kind])
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
+}
+async function doTodo(taskId, text) {
+  const t = taskById(taskId);
+  const key = `${taskId}|${text}`;
+  if (!t || ui.handing.has(key)) return;
+  ui.handing.add(key);
+  render();
+  try {
+    const s = doTarget(t);
+    if (s) {
+      const busy = s.state === "busy";
+      await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy });
+      ui.handed[key] = { to: s.title || s.project, at: Date.now() };
+      toast(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`);
+    } else {
+      const dir = launchDir(t);
+      if (!dir) throw new Error("This task has no directory yet — bind a session or give the project a directory first");
+      const place = launchPlace();
+      await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms() });
+      ui.handed[key] = { to: "a new session", at: Date.now() };
+      toast(`Started a session on ${t.id} (${PLACES[place]}) to do it`);
+      setTimeout(() => refresh(), 2500);
+    }
+  } catch (e) { toast(String(e.message || e), true); }
+  finally { ui.handing.delete(key); render(); }
+}
+
 const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
 
 function render() {
+  saveDrafts();
   // Never yank an open dropdown out from under the pointer.
   if (ui.dragging) return;
+  // Nor rebuild a box an input method (Pinyin…) is composing in: the new box would get the raw
+  // letters and the candidate window would close. Catch up when the composition ends.
+  if (ui.composing) { ui.renderPending = true; return; }
   const active = document.activeElement;
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+  const activeRegion = active && active.closest ? active.closest("#modal") : null;
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
@@ -216,8 +378,15 @@ function render() {
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
   paintTaskIds();
-  if (key) {
-    const el = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+  paintArmed();
+  // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
+  // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
+  // a session's message box in the Sessions column shares its key with the conversation window's
+  // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
+  if (key && !active.isConnected) {
+    const inModal = Boolean(activeRegion && activeRegion.id === "modal");
+    const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
+      .find((x) => Boolean(x.closest("#modal")) === inModal);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -253,20 +422,50 @@ function renderAsks() {
   for (const t of tasks()) for (const a of openAsks(t)) items.push([t, a]);
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>`;
-  return `<h3>Asks · ${items.length}</h3>` + items.map(([t, a]) => askCard(t, a)).join("");
+  const byTask = new Map();
+  for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
+  return `<h3>Asks · ${items.length}</h3>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("");
 }
 
-function askCard(t, a) {
+// A task with several open asks answers them together: each answer button only picks, and one
+// Send at the bottom records them all and types a single message into the session.
+function renderAskGroup(t, asks) {
+  if (asks.length < 2) return asks.map((a) => askCard(t, a)).join("");
+  const target = groupTarget(asks);
+  const picked = asks.filter((a) => ui.picks[a.id]).length;
+  const sending = asks.some((a) => ui.resolving.has(a.id));
+  const allPush = target && asks.every((a) => wantPush(a));
+  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { group: true, sharedTarget: Boolean(target) })).join("")}
+    <div class="askbar">
+      <span class="meta">${picked} of ${asks.length} answered</span>
+      ${target ? `<label class="push" title="Type all the answers into that session as one message, so it carries on now">
+        <input type="checkbox" data-action="push-group" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${allPush ? "checked" : ""}>
+        send to <b>${esc(target.title || target.project)}</b> now${target.state === "busy" ? " (busy — it will queue)" : ""}</label>` : `<span style="flex:1"></span>`}
+      <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" ${picked && !sending ? "" : "disabled"}
+        title="Record every answer you picked${target ? " and send them in one message" : ""}">${sending ? "Sending…" : picked ? `Send ${picked} answer${picked === 1 ? "" : "s"}` : "Send answers"}</button>
+    </div></div>`;
+}
+// The one live session every ask in a group came from, if the board can type into it.
+function groupTarget(asks) {
+  const ts = asks.map(pushTarget);
+  return ts[0] && ts.every((x) => x && x.sessionId === ts[0].sessionId) ? ts[0] : null;
+}
+
+function askCard(t, a, opt = {}) {
+  const pick = ui.picks[a.id];
+  const attKey = "ask:" + a.id;
   return `
-    <div class="card ask">
+    <div class="card ask ${pick ? "picked" : ""}">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
       <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       <div class="row">
-        <input class="note" data-key="note:${esc(a.id)}" placeholder="note (optional)" value="${esc(draft("note:" + a.id))}">
-        ${RESOLUTIONS.map(([r, label, tip]) =>
-          `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
+        <input class="note" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="note (optional) · paste or drop images" value="${esc(draft("note:" + a.id))}">
+        ${RESOLUTIONS.map(([r, label, tip]) => opt.group
+          ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)} — pick, then Send below" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
+          : `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
       </div>
-      ${pushTarget(a) ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
+      ${attachStrip(attKey)}
+      ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         send to <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b> now${pushTarget(a).state === "busy" ? " (busy — it will queue)" : ""}</label>` : ""}
     </div>`;
@@ -284,10 +483,50 @@ function wantPush(a) {
   const s = pushTarget(a);
   return Boolean(s) && s.state !== "busy";
 }
-const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked" };
+const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked",
+  todo: "Made it an @me todo — the user will do it themselves; don't ask again" };
+// "To todo" is the board's own answer: the ask becomes an @me todo on its task, and is closed as
+// "do" with a note saying so. Returns what an Undo needs.
+async function answerAsk(a, res, note) {
+  if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
+  const task = a.id.replace(/\.\d+$/, "");
+  const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
+  await api("addtodo", { task, text });
+  try {
+    await api("resolve", { id: a.id, resolution: "do", note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
+  } catch (e) {
+    try { await dropMadeTodo({ task, text }); } catch (e2) { /* best effort */ }
+    throw e;
+  }
+  return { task, text };
+}
+// Undo of "To todo": the todo it added goes too (marked dropped, so the card keeps the trace).
+async function dropMadeTodo(made) {
+  if (!made) return;
+  await refresh();
+  const t = taskById(made.task);
+  const x = t && t.todos.find((y) => y.state === "open" && (y.owner ? `@${y.owner} ${y.text}` : y.text) === made.text);
+  if (x) await api("todo", { task: made.task, index: x.i, state: "drop", text: x.text });
+}
+// An answer names its ask by id plus the question's opening words — enough for the session to
+// match it to what it asked (it never saw the id: hq assigns it after the turn), without
+// repeating the whole question back into the prompt.
+function gist(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t.length > 30 ? t.slice(0, 30) + "…" : t;
+}
 function pushMessage(a, res, note) {
-  return `[HQ board] You asked "${a.text}" (${a.id}). The user answered: ${RES_TEXT[res] || res}` +
-    (note ? ` — ${note}` : "") + ". Carry on accordingly.";
+  return `[HQ board] ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}` + (note ? ` — ${note}` : "");
+}
+function pushMessageAll(answers) {
+  return "[HQ board] Answers:\n" +
+    answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n");
+}
+// An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
+function answerNote(id) {
+  const text = (ui.drafts["note:" + id] || "").trim();
+  const imgs = (ui.atts["ask:" + id] || []).map((x) => x.path);
+  return [text, ...imgs].filter(Boolean).join(" ");
 }
 
 function renderMyTodos() {
@@ -327,7 +566,7 @@ function renderMyTodos() {
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
         <div class="meta">${age(x.created)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
-      <button class="btn small ghost" title="Won't do (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
+      <button class="btn small ghost" title="Won't do (you can undo)" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
     </div>`).join("") + recent.map((r) => `
     <div class="todo ${r.to === "drop" ? "dropped" : "done"}">
       <span class="box ${r.to === "drop" ? "dropped" : "done"}">${r.to === "drop" ? "–" : "✓"}</span>
@@ -494,11 +733,12 @@ function focusCard(t) {
   const box = (x) => `<div class="todo">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
-      <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
+      ${doItButton(t, x)}
+      <button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   const sess = (s) => `<div class="bsess">
-      <span class="dot ${esc(s.state || "")}"></span>
-      <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
-        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
+      ${dot(s)}
+      <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
+        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
         ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
@@ -506,21 +746,25 @@ function focusCard(t) {
       </div></div>`;
   // Clicking the card opens or closes its details, like a row in All; the details themselves
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
+  // Open, the details carry the full todo and session lists, so the card's own short ones step
+  // aside — each shows once.
   return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="icon" title="Not today — take it off today's list (the task stays)" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      <button class="icon" title="Not today — take it off today's list (the task stays)" data-confirm="Not today?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
-    ${asks.length ? `<div class="fsec">${asks.map((a) => askCard(t, a)).join("")}</div>` : ""}
-    ${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
+    ${asks.length ? `<div class="fsec">${renderAskGroup(t, asks)}</div>` : ""}
+    ${detail ? "" : `${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
     <div class="fsec">${live.map(sess).join("")}
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
         <span style="flex:1"></span>
-        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>
+        ${live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
+          ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">↻ Resume</button>` : ""; })()}
+        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>`}
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
   </div>`;
 }
@@ -566,11 +810,13 @@ function logEntries(t) {
 const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
 
-function secHead(title, t, what, tip, count) {
+function secHead(title, t, what, tip, count, extra = "") {
   const on = ui.adding.has(`${t.id}:${what}`);
   return `<div class="sec-h"><h3>${title}${count != null ? ` <span class="meta">${count}</span>` : ""}</h3>
-    <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button></div>`;
+    <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button>${extra}</div>`;
 }
+// A directory as it reads best: the home directory as ~.
+const tildePath = (p) => String(p).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
@@ -601,12 +847,14 @@ function renderTaskBody(t) {
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
-      ${x.state === "open" ? `<button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
+      ${doItButton(t, x)}
+      ${x.state === "open" ? `<button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
-  const todos = !t.todos.length ? `<div class="empty">No todos.</div>`
-    : (openTodos.length ? "" : `<div class="empty">All done.</div>`) + shownTodos.map(todoRow).join("") +
-      (finished.length > FINISHED_SHOWN
-        ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
+  // "All done" and the finished toggle sit on the Todos heading line, not on lines of their own.
+  const todoState = (!t.todos.length ? `<span class="meta">none</span>` : openTodos.length ? "" : `<span class="meta">all done</span>`) +
+    (finished.length > FINISHED_SHOWN
+      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
+  const todos = shownTodos.map(todoRow).join("");
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
   const logs = logEntries(t);
@@ -614,28 +862,34 @@ function renderTaskBody(t) {
   const refs = list(t.refs).map(resolveRef);
   const groups = ["ticket", "pr", "doc", "link", "none"].map((kd) => [kd, refs.filter((r) => r.kind === kd)]).filter(([, r]) => r.length);
   const resOpen = ui.resOpen.has(t.id);
+  // One line for status / project / category, one for the directories. `next` already heads the
+  // card, so here it is only an edit button (sessions read it from the card, so editing it does
+  // steer the next one).
+  const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
+  const dirs = list(t.workdirs);
   return `<div class="task-body">
-    <div class="field"><label>status</label>
-      <select data-action="set-status" data-task="${esc(t.id)}">
+    <div class="metarow">
+      <label>status <select data-action="set-status" data-task="${esc(t.id)}">
         ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
-      </select></div>
-    <div class="field"><label>project</label>
-      <select data-action="set-project" data-task="${esc(t.id)}">
+      </select></label>
+      <label>project <select data-action="set-project" data-task="${esc(t.id)}">
         <option value="" ${t.project ? "" : "selected"}>(no project)</option>
         ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
-      </select></div>
-    <div class="field"><label>category</label>
-      <select data-action="set-category" data-task="${esc(t.id)}">
+      </select></label>
+      <label>category <select data-action="set-category" data-task="${esc(t.id)}">
         <option value="" ${t.category ? "" : "selected"}>(none)</option>
         ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
-      </select></div>
-    ${field("next", "next", "the next concrete step")}
-    <div class="field"><label>workdirs</label><div class="meta">${list(t.workdirs).length
-        ? list(t.workdirs).map(esc).join("<br>") : "— added automatically when a session is bound"}</div></div>
+      </select></label>
+      <span style="flex:1"></span>
+      <button class="btn small ghost ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}" title="Edit the next step — sessions read it from the card">✎ next</button>
+    </div>
+    ${editNext ? field("next", "next", "the next concrete step") : ""}
+    <div class="meta wdirs" title="${esc(dirs.join("\n") || "Added automatically when a session is bound")}">workdirs · ${dirs.length
+        ? dirs.map((x) => esc(tildePath(x))).join(" · ") : "added automatically when a session is bound"}</div>
 
-    ${secHead("Todos", t, "todo", "Add a todo")}
+    ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
     ${adding("todo") ? `<div class="row nowrap addbox">
         <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
         <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
@@ -647,25 +901,26 @@ function renderTaskBody(t) {
       <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} — it starts bound, reads the card and reports">▶ New session</button>
       <select class="bind mini place" data-action="launch-place" title="Where new sessions open">
         ${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}
-      </select></div>
+      </select>${launchOptions()}</div>
     ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
         ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
             ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
            <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
         : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
     ${live.length ? live.map((s) => `<div class="bsess">
-        <span class="dot ${esc(s.state || "")}"></span>
-        <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
+        ${dot(s)}
+        <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
           ${s.background
             ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
             : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
-          <button class="icon" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
+          <button class="icon" data-confirm="Unbind?" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
         </div></div>`).join("")
-      : `<div class="empty">No live session is working on this.${list(t.sessions).length ? " Earlier sessions: click an item in Needs you, or use the context view." : ""}</div>`}
+      : `<div class="empty">No live session is working on this.</div>`}
+    ${earlierList(t)}
 
     ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
     ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
@@ -681,7 +936,7 @@ function renderTaskBody(t) {
     ${resOpen ? `<div class="res">
       ${groups.map(([kd, rs]) => `<div class="res-g"><div class="meta">${KIND_LABEL[kd]}</div>${rs.map((r) => `<div class="res-i">
           ${r.url ? `<a href="#" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
-          <button class="icon" title="Remove" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
+          <button class="icon" title="Remove" data-confirm="Remove?" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
         || `<div class="empty">No related tickets, PRs or docs yet.</div>`}
       <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="Add a URL, or a ticket / PR like QA-123, repo#45" value="${esc(draft(k("addref")))}">
         <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
@@ -722,14 +977,14 @@ function renderSessions(items = ui.sessions, plain = false) {
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
     return `<div class="card session">
-      <span class="dot ${esc(s.state || "")}" title="${esc(s.state || "")}"></span>
+      ${dot(s)}
       <div class="body">
         <div class="shead">
-          <div class="stitle" title="${esc(s.title || s.project || "")}">${esc(s.title || s.project || sid.slice(0, 8))}</div>
+          <div class="stitle" title="${esc(s.title || s.project || "")}">${newTag(sid)}${esc(s.title || s.project || sid.slice(0, 8))}</div>
           ${taskCtl}
         </div>
         <div class="shead">
-          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
             ${s.background
@@ -826,10 +1081,10 @@ function renderProjects() {
         <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="Edit to rename (tasks are updated)">
         ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">Save</button>` : ""}
         <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-        <button class="icon" title="Remove this project" data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
+        <button class="icon" title="Remove this project" ${tasks().some((x) => x.project === pr.name) ? "" : `data-confirm="Remove?"`} data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
       </div>
       <div class="proj-paths">${pr.paths.map((x) => `<div class="res-i"><span class="meta">${esc(x)}</span>
-          <button class="icon" title="Remove this directory" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
+          <button class="icon" title="Remove this directory" data-confirm="Remove?" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
         || `<div class="meta">No directory — tasks are only assigned by hand.</div>`}
         ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="a directory whose tasks belong here" value="${esc(draft("projpath:" + pr.name))}">
           <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">Add</button></div>`
@@ -903,7 +1158,7 @@ function renderCategories() {
     return `<div class="cat-row">
       <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="Edit and press Enter to rename (tasks are updated)">
       <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-      <button class="btn small ghost" data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
+      <button class="btn small ghost" ${categoryCount(c) ? "" : `data-confirm="Remove?"`} data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
     </div>`;
   }).join("");
   const unlisted = used.map((c) => `<div class="cat-row"><span class="chip">${esc(c)}</span>
@@ -967,8 +1222,12 @@ async function refreshPeek(first) {
   drawPeek(first);
 }
 function drawPeek(toBottom) {
+  if (ui.composing) { ui.peekPending = ui.peekPending || { toBottom: false }; ui.peekPending.toBottom ||= Boolean(toBottom); return; }
   const m = ui.modal;
   const box = $("#modal");
+  // The reply box is rebuilt with the rest; keep the cursor in it.
+  const active = document.activeElement;
+  const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
@@ -1000,6 +1259,7 @@ function drawPeek(toBottom) {
     </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
+  if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
 }
@@ -1057,7 +1317,7 @@ function drawContext() {
       </section>
       <section class="ctx-sec">
         <h4>Sessions on this task</h4>
-        ${live.map((s) => `<div class="row ctx-s"><span class="dot ${esc(s.state || "")}"></span><span>${esc(s.title || s.project)}</span><span class="meta">${esc(s.state || "")}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
         ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
         ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
       </section>
@@ -1220,14 +1480,38 @@ function scrollToCard(elementId) {
   setTimeout(() => node.classList.remove("flash"), 1400);
 }
 
+// The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
+function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
+function paintArmed() {
+  if (!ui.armed) return;
+  for (const b of document.querySelectorAll("[data-confirm]")) {
+    if (confirmKey(b.dataset) === ui.armed) { b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+  }
+}
+
 // ------------------------------------------------------------------ actions
-// ---- images in a message: pasted or dropped, saved to a file, sent as their paths (Claude Code
-// reads an image from a path in the prompt).
+// ---- images in a message or an ask's note: pasted or dropped, saved to a file, sent as their
+// paths (Claude Code reads an image from a path in the prompt). Keyed by session id, or
+// "ask:<id>" for an ask's note.
 function attachStrip(sid) {
   const list = ui.atts[sid] || [];
   if (!list.length) return "";
   return `<div class="atts">${list.map((a, i) => `<span class="att" title="${esc(a.path)}"><img src="${a.url}" alt="">
       <button class="icon" title="Remove" data-action="att-remove" data-session="${esc(sid)}" data-i="${i}">✕</button></span>`).join("")}</div>`;
+}
+// A 128×96 JPEG preview of an image, small enough to keep with the drafts.
+function thumbnail(dataURL) {
+  return new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = 128; c.height = 96;
+      const k = Math.max(128 / img.width, 96 / img.height), w = img.width * k, h = img.height * k;
+      c.getContext("2d").drawImage(img, (128 - w) / 2, (96 - h) / 2, w, h);
+      try { ok(c.toDataURL("image/jpeg", 0.75)); } catch (e) { ok(dataURL); }
+    };
+    img.onerror = () => ok(dataURL);
+    img.src = dataURL;
+  });
 }
 function readAsDataURL(file) {
   return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(file); });
@@ -1240,38 +1524,42 @@ async function addImages(sid, files) {
     try {
       const url = await readAsDataURL(f);
       const saved = await api("saveImage", { data: url });
-      (ui.atts[sid] = ui.atts[sid] || []).push({ path: saved.path, url });
+      // Only a small preview is kept (it is saved with the draft); the full image is the file.
+      (ui.atts[sid] = ui.atts[sid] || []).push({ path: saved.path, url: await thumbnail(url) });
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
-  if (added) { ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
+  if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
 }
 document.addEventListener("paste", (ev) => {
-  const box = ev.target.closest && ev.target.closest("textarea[data-session]");
+  const box = ev.target.closest && ev.target.closest("textarea[data-session], input[data-att]");
   if (!box || !ev.clipboardData) return;
   const files = [...ev.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile());
   if (!files.length) return;     // plain text pastes as usual
   ev.preventDefault();
-  addImages(box.dataset.session, files);
+  addImages(box.dataset.session || box.dataset.att, files);
 });
 document.addEventListener("dragover", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
   ev.preventDefault();
   zone.classList.add("dropping");
 });
 document.addEventListener("dragleave", (ev) => {
-  const zone = ev.target.closest && ev.target.closest(".send");
+  const zone = ev.target.closest && ev.target.closest(".send, .card.ask");
   if (zone) zone.classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
-  const box = zone.querySelector("textarea[data-session]");
-  if (box) addImages(box.dataset.session, [...ev.dataTransfer.files]);
+  const box = zone.querySelector("textarea[data-session], input[data-att]");
+  if (box) addImages(box.dataset.session || box.dataset.att, [...ev.dataTransfer.files]);
 });
+
+// A busy session queues what it is sent; there is no new turn to wait for.
+const isBusy = (sid) => (ui.sessions.find((x) => x.sessionId === sid) || {}).state === "busy";
 
 // While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
 // so a second click can't type the same message into the session again.
@@ -1287,14 +1575,16 @@ async function send(sid) {
   const images = ui.atts[sid] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  const queued = isBusy(sid);
   ui.sending.add(sid);
   render();
   if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
   try {
-    await api("send", { session: sid, text: message });
+    await api("send", { session: sid, text: message, queue: queued });
     delete ui.drafts[key];
     delete ui.atts[sid];
-    toast(images.length ? `Sent with ${images.length} image${images.length === 1 ? "" : "s"}` : "Sent");
+    const withImgs = images.length ? ` with ${images.length} image${images.length === 1 ? "" : "s"}` : "";
+    toast(queued ? `Delivered${withImgs} — queued until the session finishes its turn` : `Sent${withImgs}`);
   } catch (e) {
     toast(String(e.message || e), true);
   } finally {
@@ -1315,43 +1605,162 @@ async function saveField(el) {
   await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, "Saved");
 }
 
+const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts";
+
+// Record every answer picked on a task's asks, then type them into their session as one message.
+async function resolveAll(taskId) {
+  const t = taskById(taskId);
+  const asks = t ? openAsks(t).filter((a) => ui.picks[a.id] && !ui.resolving.has(a.id)) : [];
+  if (!asks.length) return;
+  const answers = asks.map((a) => ({ a, res: ui.picks[a.id], note: answerNote(a.id),
+    draft: ui.drafts["note:" + a.id], imgs: ui.atts["ask:" + a.id],
+    // Taken now: a refresh during the awaits below can drop the session from ui.sessions.
+    target: pushTarget(a), push: Boolean(pushTarget(a)) && wantPush(a) }));
+  for (const x of answers) ui.resolving.add(x.a.id);
+  render();
+  const done = [];
+  try {
+    for (const x of answers) {
+      try {
+        x.made = await answerAsk(x.a, x.res, x.note);
+        done.push(x);
+        delete ui.picks[x.a.id]; delete ui.drafts["note:" + x.a.id]; delete ui.drafts["push:" + x.a.id]; delete ui.atts["ask:" + x.a.id];
+      } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
+    }
+    if (!done.length) return;
+    let msg = `${done.length} answer${done.length === 1 ? "" : "s"} recorded`;
+    // One message per session (normally the one that asked them all).
+    const bySession = new Map();
+    for (const x of done.filter((x) => x.push)) {
+      const sid = x.target.sessionId;
+      bySession.set(sid, (bySession.get(sid) || []).concat([x]));
+    }
+    const sent = [];
+    for (const [sid, xs] of bySession) {
+      const s = xs[0].target;
+      try {
+        for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
+        await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
+        sent.push(...xs);
+        msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
+      } catch (e) {
+        for (const x of xs) { try { await api("delivered", { id: x.a.id, session: sid, undo: true }); } catch (e2) { /* best effort */ } }
+        msg += ` · couldn't reach the session (${e.message || e}); it gets the answers with your next message there`;
+      }
+    }
+    toast(msg, false, async () => {
+      // Reopen everything first, then put the notes back — a refresh in between would prune
+      // drafts of asks that are still closed.
+      for (const x of done) {
+        try { await api("reopen", { id: x.a.id }); await dropMadeTodo(x.made); } catch (e) { toast(String(e.message || e), true); }
+      }
+      for (const x of done) {
+        ui.drafts["note:" + x.a.id] = x.draft || "";
+        if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
+        ui.picks[x.a.id] = x.res;
+      }
+      toast(sent.length ? "Reopened — the message already sent stays in the session" : "Reopened");
+      refresh();
+    });
+  } finally {
+    try { await refresh(); } finally { for (const x of answers) ui.resolving.delete(x.a.id); render(); }
+  }
+}
+
 document.addEventListener("click", async (ev) => {
   const el = ev.target.closest("[data-action]");
   if (!el || el.tagName === "SELECT") return;
   const d = el.dataset;
+  // Removing or unbinding asks twice: the first click turns the button into a red "Unbind?" for
+  // 4 s, the second does it. (WKWebView has no confirm() dialog.)
+  if (d.confirm) {
+    const key = confirmKey(d);
+    if (ui.armed !== key) {
+      ui.armed = key;
+      clearTimeout(ui.armTimer);
+      ui.armTimer = setTimeout(() => { if (ui.armed === key) { ui.armed = null; render(); } }, 4000);
+      return render();
+    }
+    ui.armed = null;
+    clearTimeout(ui.armTimer);
+  }
   switch (d.action) {
     case "resolve": {
       // one answer per ask, even if the button is clicked again while it's being sent
       if (ui.resolving.has(d.id)) return;
       ui.resolving.add(d.id);
-      const note = ui.drafts["note:" + d.id] || "";
+      const note = answerNote(d.id);
+      const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
       delete ui.drafts["note:" + d.id];
+      delete ui.atts["ask:" + d.id];
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
       const target = a && pushTarget(a);
       const push = Boolean(target) && wantPush(a);
       delete ui.drafts["push:" + d.id];
       try {
-        await api("resolve", { id: d.id, resolution: d.res, note });
-        let msg = `${d.id} → ${d.res}`;
+        const made = await answerAsk(a, d.res, note);
+        let msg = `${d.id} → ${d.res === "todo" ? "@me todo" : d.res}`;
         if (push) {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
           try {
             await api("delivered", { id: d.id, session: target.sessionId });
-            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note) });
-            msg += ` · sent to ${target.title || target.project}`;
+            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy" });
+            msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
           } catch (e) {
             try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
             msg += ` · couldn't reach the session (${e.message || e}); it gets the answer with your next message there`;
           }
         }
         // Undo reopens the ask; an answer already typed into a session cannot be taken back.
+        // Reopen first: a refresh while the ask is still closed would prune the restored note.
         toast(msg, false, async () => {
-          ui.drafts["note:" + d.id] = note;
-          await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
+          try {
+            await api("reopen", { id: d.id });
+            await dropMadeTodo(made);
+            ui.drafts["note:" + d.id] = draftNote || "";
+            if (imgs) ui.atts["ask:" + d.id] = imgs;
+            toast(push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
+          } catch (e) { toast(String(e.message || e), true); }
+          await refresh();
         });
-      } catch (e) { toast(String(e.message || e), true); }
+      } catch (e) {
+        // Not answered: the note and images go back where they were.
+        if (draftNote) ui.drafts["note:" + d.id] = draftNote;
+        if (imgs) ui.atts["ask:" + d.id] = imgs;
+        toast(String(e.message || e), true);
+      }
       try { await refresh(); } finally { ui.resolving.delete(d.id); }
+      return;
+    }
+    case "pick":
+      if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
+      return render();
+    case "resolve-all": return resolveAll(d.task);
+    case "do-todo": return doTodo(d.task, d.text);
+    case "forget-session": {
+      const t = taskById(d.task);
+      if (!t) return;
+      const before = list(t.sessions);
+      const after = before.filter((x) => !d.session.startsWith(String(x)));
+      const set = (v) => api("set", { task: d.task, fields: [`sessions=${JSON.stringify(v)}`] });
+      try {
+        await set(after);
+        toast("Removed from this task's sessions", false, async () => { await set(before); delete ui.history[d.task]; await refresh(); });
+      } catch (e) { toast(String(e.message || e), true); }
+      delete ui.history[d.task];
+      return refresh();
+    }
+    case "hist-all": ui.histAll.has(d.task) ? ui.histAll.delete(d.task) : ui.histAll.add(d.task); return render();
+    case "resume": {
+      const t = taskById(d.task);
+      const place = launchPlace() === "bg" ? "terminal" : launchPlace();
+      try {
+        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "" });
+        toast(`Resuming it in ${PLACES[place]} — bound to ${d.task}`);
+      } catch (e) { toast(String(e.message || e), true); }
+      delete ui.history[d.task];
+      setTimeout(() => refresh(), 2500);
       return;
     }
     case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
@@ -1371,6 +1780,10 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "expand":
+      // Only a click on the card itself folds it — not one in a box, on a label or ask, or one
+      // that ends a text selection.
+      if (ev.target !== el && ev.target.closest(NO_EXPAND)) return;
+      if (String(window.getSelection() || "").trim()) return;
       ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
       return render();
     case "goto": return revealTask(d.task);
@@ -1428,9 +1841,10 @@ document.addEventListener("click", async (ev) => {
       const key = `${d.field}:${d.task}`;
       const v = ui.drafts[key] ?? "";
       delete ui.drafts[key];
+      ui.adding.delete(`${d.task}:${d.field}`);
       return act("set", { task: d.task, fields: [`${d.field}=${v}`] }, "Saved");
     }
-    case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; return render();
+    case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; ui.adding.delete(`${d.task}:${d.field}`); return render();
     case "add-todo": {
       const key = "addtodo:" + d.task;
       const text = (ui.drafts[key] || "").trim();
@@ -1575,7 +1989,7 @@ document.addEventListener("click", async (ev) => {
       if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
       const place = launchPlace();
       try {
-        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t) });
+        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms() });
         toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
       } catch (e) { toast(String(e.message || e), true); }
       setTimeout(() => refresh(), 2500);
@@ -1638,9 +2052,17 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
-  if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
+  if (d.action === "push-group") { for (const id of d.ids.split(" ")) ui.drafts["push:" + id] = el.checked; saveDrafts(); return; }
+  if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
+  if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  // A picked status / project / category shows at once; the refresh after saving confirms it.
+  if (["set-status", "set-project", "set-category"].includes(d.action)) {
+    ui.pointerDown = false;
+    const t = taskById(d.task);
+    if (t) { t[d.action.slice(4)] = el.value; render(); }
+  }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
@@ -1654,10 +2076,27 @@ document.addEventListener("change", (ev) => {
 document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
-  if (el.dataset.key) ui.drafts[el.dataset.key] = el.value;
+  if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
 });
+
+// Input methods (Pinyin, Japanese…): hold every redraw while a word is being composed.
+document.addEventListener("compositionstart", () => { ui.composing = true; }, true);
+function compositionDone(ev) {
+  if (!ui.composing) return;
+  ui.composing = false;
+  // The committed text arrives with an input event around compositionend; let it land first.
+  setTimeout(() => {
+    const el = ev.target;
+    if (el && el.dataset && el.dataset.key && "value" in el) ui.drafts[el.dataset.key] = el.value;
+    if (ui.renderPending) { ui.renderPending = false; render(); }
+    if (ui.peekPending && ui.modal && ui.modal.type === "peek") drawPeek(ui.peekPending.toBottom);
+    ui.peekPending = null;
+  }, 0);
+}
+document.addEventListener("compositionend", compositionDone, true);
+document.addEventListener("focusout", compositionDone, true);   // in case a composition is cut off
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
@@ -1760,7 +2199,8 @@ $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); co
 
 refresh();
 setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
-document.addEventListener("mousedown", () => { ui.pointerDown = true; }, true);
+// Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
+document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseup", () => {
   ui.pointerDown = false;
   if (ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }

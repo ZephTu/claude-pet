@@ -51,11 +51,14 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-echo "$ctx" | grep -q "T-001.1 → do: go with v2" && ok "board answer injected on next prompt"
+echo "$ctx" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "- T-001.1 \"Approve plan v2?\" → do: go with v2" in c, c' && ok "board answer injected on next prompt"
 echo "$ctx" | grep -q "T-001.2: Ask Chengjie" && ok "still-open asks re-injected"
-hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.1 → do" && fail "board answer delivered twice" || ok "board answer delivered once"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; t=sys.stdin.read(); c=json.loads(t)["hookSpecificOutput"]["additionalContext"] if t.strip() else ""; assert not any(x.startswith("- T-001.1 ") for x in c.splitlines()), c' && ok "board answer delivered once" || fail "board answer delivered twice"
 "$HQ" ask add T-001 "Deploy now?" >/dev/null; "$HQ" ask resolve T-001.3 do --via board --note "yes"; "$HQ" ask delivered T-001.3 --session sess-1
-hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.3 → do" && fail "pushed answer injected again" || ok "an answer already sent to the session is not injected again"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert not any(x.startswith("- T-001.3 ") for x in c.splitlines()), c' && ok "an answer already sent to the session is not injected again" || fail "pushed answer injected again"
+"$HQ" ask add T-001 "$(printf 'x%.0s' {1..80}) long question" >/dev/null
+"$HQ" ask resolve T-001.4 drop --via board >/dev/null
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; l=[x for x in c.splitlines() if x.startswith("- T-001.4 ")][0]; assert l == "- T-001.4 \"" + "x"*30 + "…\" → drop", l' && ok "an injected answer quotes only the question's opening words"
 
 MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
@@ -66,7 +69,7 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/root/tasks/T-001-*/TASK.md
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
-"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==3' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==4' && ok "board --json exposes todos and asks"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and isinstance(t["workdirs"], list), t' && ok "list fields with template comments parse as lists"
 
 "$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"
@@ -159,6 +162,40 @@ PY
 touch -t 200001010000 "$T"/root/tasks/T-001-*/TASK.md
 hook '{"session_id":"sess-1","hook_event_name":"Stop","last_assistant_message":"x"}' | grep -q '"decision": "block"' && ok "write-back guard blocks stale card"
 hook '{"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"x"}' | grep -q block && fail "guard looped" || ok "guard does not loop"
+
+# Two sessions on one task: an answer goes to the session that asked it, and only to it.
+"$HQ" new "Shared work" >/dev/null
+SID="$(basename "$(ls -d "$T"/root/tasks/T-*-shared-work)" | cut -d- -f1-2)"
+"$HQ" bind "$SID" --session sess-a >/dev/null; "$HQ" bind "$SID" --session sess-b >/dev/null
+MSG2='ok.\n\n```hq-asks\n- Run the review?\n- Draft the note?\n```'
+hook "{\"session_id\":\"sess-a\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
+ctxof() { hook "{\"session_id\":\"$1\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hi\"}" | python3 -c 'import json,sys; t=sys.stdin.read(); print(json.loads(t)["hookSpecificOutput"]["additionalContext"] if t.strip() else "")'; }
+ctxof sess-b | grep -q "$SID.1 (asked by another session on this task)" && ok "open asks say which ones another session on the task raised"
+"$HQ" ask resolve "$SID.1" do --via board >/dev/null
+ctxof sess-b | grep -q "$SID.1 \"" && fail "another session on the task got the answer" || ok "an answer is not given to another session on the same task"
+ctxof sess-a | grep -q "^- $SID.1 \"Run the review?\" → do" && ok "the session that asked gets its answer"
+"$HQ" ask resolve "$SID.2" drop --via board >/dev/null
+"$HQ" unbind --session sess-a >/dev/null
+ctxof sess-b | grep -q "^- $SID.2 \"Draft the note?\" → drop" && ok "once the asker has left the task, the next session on it takes the answer"
+ctxof sess-b | grep -q "^- $SID.1 " && fail "an answer the asker already had went out again after it was unbound" || ok "an answer already given to the asker is not given again once it leaves"
+# The asker ended: with the pet installed it drops a dead session's record, and the answer must
+# not wait for that session forever.
+"$HQ" bind "$SID" --session sess-c >/dev/null
+hook "{\"session_id\":\"sess-c\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"ok.\\n\\n\`\`\`hq-asks\\n- Ship it?\\n\`\`\`\"}" >/dev/null
+"$HQ" ask resolve "$SID.3" do --via board >/dev/null
+mkdir -p "$HOME/.claude/pet/sessions"
+echo "{\"pid\": $$}" > "$HOME/.claude/pet/sessions/sess-c.json"
+ctxof sess-b | grep -q "^- $SID.3 " && fail "a live asker's answer went to another session" || ok "a live asker keeps its answer"
+rm "$HOME/.claude/pet/sessions/sess-c.json"
+ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → do" && ok "once the asker has ended, the next session on the task takes the answer"
+rm -rf "$HOME/.claude/pet"
+
+# history: the sessions that worked on a task, with what resuming one needs.
+HSID=0a1b2c3d-1111-2222-3333-444455556666
+mkdir -p "$HOME/.claude/projects/-tmp-repo"
+printf '%s\n' '{"type":"custom-title","customTitle":"perf run"}' '{"type":"assistant","cwd":"/tmp/repo","message":{"content":[{"type":"text","text":"All done."}]}}' > "$HOME/.claude/projects/-tmp-repo/$HSID.jsonl"
+"$HQ" bind "$SID" --session "$HSID" >/dev/null
+"$HQ" history "$SID" --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["sessionId"]=="'"$HSID"'"][0]; assert r["cwd"]=="/tmp/repo" and r["title"]=="perf run" and r["lastText"]=="All done." and r["live"] is False, r' && ok "history lists a task's sessions with id, directory, name and last words"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

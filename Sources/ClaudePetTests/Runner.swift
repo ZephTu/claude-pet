@@ -1134,6 +1134,19 @@ struct Runner {
                 CompletionQueue.unread([ev("a", "T1", 0), ev("a", "T2", 1)], read: read)
                     .map(\.turnKey) == ["T2"])
 
+        // Typing into a session after it finished means its result was read.
+        func typedInto(_ sid: String, _ at: TimeInterval?) -> SessionState {
+            SessionState(sessionId: sid, project: "api", cwd: "/tmp/api", state: .busy, tool: "", detail: "",
+                         since: t0, updatedAt: t0, lastPromptAt: at.map { t0.addingTimeInterval($0) })
+        }
+        t.check("a finish you replied to afterwards counts as read",
+                CompletionQueue.answered([ev("a", "T1", 0)], sessions: [typedInto("a", 30)]) == [ev("a", "T1", 0).eventId])
+        t.check("a prompt from before the finish does not clear it",
+                CompletionQueue.answered([ev("a", "T1", 0)], sessions: [typedInto("a", -30)]).isEmpty)
+        t.check("replying to one session leaves another's finish unread",
+                CompletionQueue.answered([ev("a", "T1", 0), ev("b", "T1", 0)], sessions: [typedInto("a", 30), typedInto("b", nil)])
+                    == [ev("a", "T1", 0).eventId])
+
         // Retention: 7 days, 500 rows, read rows go first.
         let staleTurn = ev("a", "OLD", -8 * 24 * 3600)
         let freshTurn = ev("a", "NEW", -60)

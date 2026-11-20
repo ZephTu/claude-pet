@@ -395,6 +395,13 @@ final class WebBridge {
     /// handle → tab title, refreshed when the user opens the list.
     var titles: [String: String] = [:]
 
+    /// sessionId → what decides each row's dot and status word (see `dotClass` and the row
+    /// status in pet.js), as last pushed. The Task Board draws its session rows from this, so the
+    /// two never disagree.
+    private(set) var dotState: [String: [String: Any]] = [:]
+    private static let dotKeys: Set<String> = ["state", "quiet", "asks", "agent", "struggle", "background",
+                                               "activity", "replied"]
+
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       background: [String: [BackgroundShells.Shell]] = [:],
                       completions: [CompletionEvent] = [],
@@ -516,6 +523,12 @@ final class WebBridge {
             }
             return item
         }
+        var dots: [String: [String: Any]] = [:]
+        for item in items {
+            guard let sid = item["sessionId"] as? String else { continue }
+            dots[sid] = item.filter { Self.dotKeys.contains($0.key) }
+        }
+        dotState = dots
         guard
             let data = try? JSONSerialization.data(withJSONObject: items),
             let json = String(data: data, encoding: .utf8)

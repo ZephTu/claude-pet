@@ -71,7 +71,7 @@
 <ul>
 <li><b>挑任务</b>：顶部搜索框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。今天新建的任务自动加入今天。</li>
 <li><b>接着昨天的</b>：上一个有挑任务的日子里还没完成的任务，会在顶部提示，可以逐个 + 或 <b>Bring all</b>；<b>Not today</b> 今天不再提示。</li>
-<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片</b>展开完整的任务详情，再点收起；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
+<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后，待办和 session 只在详情里显示一份（详情里的更全：可以新增、看已完成的、绑定 session），卡片上方的简要列表会暂时隐去；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
 <li>右栏只列今天任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
 <li>今天的列表存在任务根目录的 <code>focus.json</code>，按日期保存。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus carry</code>。</li>
 </ul>
@@ -84,6 +84,7 @@
 <li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
+<li><b>删除 / 解绑都要点两下</b>：解绑 session、从任务移除以前的 session、删关联链接、待办的 ✕（不做）、今天列表的 ✕、删项目目录、删空的项目或分类——第一下按钮变成红色的"Unbind?""Remove?"等，4 秒内再点一下才执行，不点就恢复原样。</li>
 </ul>
 <h2>Needs you（左栏）</h2>
 <ul>
@@ -92,10 +93,14 @@
 <tr><th>按钮</th><th>含义</th></tr>
 <tr><td><b>Do</b></td><td>要做 / 同意，说明里写怎么做</td></tr>
 <tr><td><b>Drop</b></td><td>不做了，不再跟踪</td></tr>
-<tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
+<tr><td><b>Ask later</b></td><td>要先问别人，之后再说（问题关掉、不再算进红点，也不会给你留提醒——适合"球在别人手上"）</td></tr>
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
+<tr><td><b>To todo</b></td><td>这不是要回答的问题，是我自己要去做的事（比如"PR 合并后把消息发给 Ping"）：在这个任务里加一条 <code>@me</code> 待办（说明会接在后面），问题关掉，并告诉 session 我会自己做、别再问。Undo 会把这条待办标成已放弃并重新打开问题</td></tr>
 </table>
-<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。</li>
+<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。消息里只带问题编号和问题开头的几个字（如 <code>T-012.3 "再跑一次 release_test 验证删机器吗？参…": Do — 不用了</code>），不把整条问题再发一遍，省 token 也好读；只发编号不行，因为 session 自己并不知道编号。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
+<b>一个任务有好几个 session 时</b>：回应只送给提问的那个 session，同一任务下的其他 session 收不到，不会两边做同一件事；它们看到的"未回应的问题"里，别人问的会标注 "asked by another session on this task"。只有提问的 session 已经结束或者解绑了，回应才交给这个任务下一个开始新一轮的 session（只交给一个）。<br>
+<b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
+<b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下高亮（再点取消，可以改选），不会马上发出；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
@@ -123,11 +128,11 @@
 <p>点开一个任务：</p>
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
-<tr><td><b>project / status / category</b></td><td>下拉框，选了就保存</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
-<tr><td><b>next</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>project / status / category</b></td><td>同一行的三个下拉框，选了就保存；下面一行是工作目录（主目录显示成 ~，悬停看全路径）</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
+<tr><td><b>next</b></td><td>任务卡片顶部已经显示它，详情里只有一行末尾的 <b>✎ next</b> 按钮，点开才出现输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
-<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）</td><td>你和 session</td></tr>
-<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕</td><td>你</td></tr>
+<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。<code>@claude</code> 的待办有 <b>▶ Do it</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队）；没有就按 ▶ New session 的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕。下面的 <b>Earlier sessions</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Today 卡片上没有 session 在跑时，也有一个 ↻ Resume 续上最近那个。<b>skip permissions</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ Do it 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问</td><td>你</td></tr>
 <tr><td><b>▶ New session</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。旁边的下拉框选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>Background</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
 <tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
 <tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
@@ -136,10 +141,12 @@
 <h2>Sessions（右栏）</h2>
 <ul>
 <li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
-<li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
+<li>每张卡三行：状态点和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。<br>
+<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：橙色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；橙色带黄色小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；黄色实心带竖杠 = 等你授权；黄色空心圈 = 等你回答；灰色 = 空闲；褐色空心圈 = 很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
 <li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
-<li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样，session 正忙时会排队。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
+<li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样。session 空闲时，按钮等到 Claude 开始处理（最多 5 秒）才恢复；session 正忙时消息会排队，终端一接收就恢复，提示"Delivered — queued…"（不会干等 5 秒）。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。<b>草稿会保留</b>：消息框、ask 说明框、待办等输入框里没发出去的文字、加进去的图片，以及多条 ask 里已经选好的回答，都存在本机，看板刷新、关掉窗口、桌宠重启后都还在；发送或回应后才清掉，对应的 ask 在别处被回应了也会自动清掉。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
+<li><b>红色 new 标记</b> = 小猫的红点：这个 session 干完了一轮，你还没看过结果。下面这些都算"看过"，标记和小猫的红点一起消失：👁 打开对话、↗ 跳到终端、从看板给它发消息（包括回应 ask 时勾了 send to … now）、在终端里直接给它发下一条。只是打开看板、扫到摘要、展开任务卡片不算。</li>
 </ul>
 <h2>对话窗口（Peek）</h2>
 <ul>
@@ -348,7 +355,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <ul>
 <li><b>Pick</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. Tasks created today join automatically.</li>
 <li><b>Carry on</b>: open tasks from the last day you picked any are offered at the top — add them one by one or <b>Bring all</b>; <b>Not today</b> hides the offer for today.</li>
-<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click the card</b> to open the full task, again to fold it; <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
+<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click a blank part of the card</b> to open the full task, again to fold it (clicks in a text box, checkbox, button, ask or session row don't fold it, nor does selecting text). Opened, the todos and sessions show once, in the details (which can add todos, show finished ones and bind sessions) — the card's short lists step aside; <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
 <li>The right column lists only the sessions on today's tasks, plus sessions not on any task yet (to bind them).</li>
 <li>Today's list lives in <code>focus.json</code> in your task root, one entry per day. From a shell: <code>hq focus</code>, <code>hq focus add|remove T-012</code>, <code>hq focus carry</code>.</li>
 </ul>
@@ -360,6 +367,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
+<li><b>Removing or unbinding takes two clicks</b>: unbinding a session, removing an earlier session from a task, removing a link, a todo's ✕ (won't do), ✕ on today's list, removing a project directory, an empty project or category — the first click turns the button into a red "Unbind?", "Remove?"…; click again within 4 s to do it, or leave it and it goes back.</li>
 </ul>
 <h2>Needs you (left)</h2>
 <ul>
@@ -368,10 +376,14 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><th>Button</th><th>Meaning</th></tr>
 <tr><td><b>Do</b></td><td>yes / will do — the note says how</td></tr>
 <tr><td><b>Drop</b></td><td>won't do, stop tracking</td></tr>
-<tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
+<tr><td><b>Ask later</b></td><td>need to ask someone else first (the ask closes and leaves the badge, with no reminder for you — for when the ball is in someone else's court)</td></tr>
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
+<tr><td><b>To todo</b></td><td>not a question but something I'll do myself (e.g. "after the PRs merge, send the note to Ping"): adds an <code>@me</code> todo on the task (with your note), closes the ask and tells the session you'll do it — don't ask again. Undo drops that todo and reopens the ask</td></tr>
 </table>
-<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.</li>
+<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. The message names the ask by its id and the question's opening words (e.g. <code>T-012.3 "Re-run release_test to verify th…": Do — no need</code>) rather than repeating the whole question — shorter and easier to read; the id alone isn't enough, since the session never sees it. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.<br>
+<b>Several sessions on one task</b>: an answer goes only to the session that asked, never to the others on the task, so two of them don't do the same work; in their list of open asks, the ones another session raised are marked "asked by another session on this task". Only when the asker has ended or left the task does its answer go to the next session on the task to start a turn — to one of them.<br>
+<b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
+<b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — click to highlight (again to clear, or pick another), nothing is sent yet. When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
 <li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
@@ -399,11 +411,11 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p>Open a task:</p>
 <table>
 <tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
-<tr><td><b>project / status / category</b></td><td>menus; picking saves</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
-<tr><td><b>next</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
+<tr><td><b>project / status / category</b></td><td>three menus on one line; picking saves. The line below lists the workdirs (home shown as ~; hover for full paths)</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
+<tr><td><b>next</b></td><td>the card's header already shows it, so the details only have <b>✎ next</b> at the end of the first line, which opens the box (sessions read it from the card, so editing it steers the next one); edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
-<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo)</td><td>you and sessions</td></tr>
-<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕</td><td>you</td></tr>
+<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo). An <code>@claude</code> todo has <b>▶ Do it</b>: with a live session on the task that the board can message, it sends "please do this todo on the card, tick it when done" to the most recently active one (queued if busy); with none, it starts a session the way ▶ New session does, told to read the card and do that todo. Afterwards the button says who has it (for 30 minutes); clicking again hands it over again</td><td>you and sessions</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕. <b>Earlier sessions</b> below lists the task's ended sessions (name, how long ago, last words): 👁 reads the conversation, <b>↻ Resume</b> picks it up with <code>claude --resume</code> in the directory it ran in and binds it to the task again (the terminal tab keeps its name); <b>✕</b> (two clicks) takes it off the task's sessions — the conversation itself is kept. A Today card with nothing live offers ↻ Resume for the latest one. <b>skip permissions</b> (remembered, off by default): sessions the board starts, resumes or hands a todo to run with <code>--dangerously-skip-permissions</code>, so Claude doesn't stop to ask before running commands or editing files</td><td>you</td></tr>
 <tr><td><b>▶ New session</b></td><td>starts a Claude Code session in the task's workdir (or its project's directory), named "id title", <b>bound to the task from the start</b>; it reads the card, reports where it stands, the next step and what needs you in three lines, then waits. The menu beside it picks where (remembered): <b>Orca / iTerm2 / Terminal</b> open a new tab; <b>Background</b> opens no window. The default is the terminal most of your sessions run in</td><td>you</td></tr>
 <tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
 <tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
@@ -412,10 +424,12 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h2>Sessions (right)</h2>
 <ul>
 <li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
-<li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
+<li>Each card is three lines: the state dot and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.<br>
+<b>The dot and the status word are exactly the pet list's</b> (the word: "Working", the command it is running, "1 in background", "Answered"…; hover the dot for words): orange, breathing = working; a turning arc = waiting on an agent it sent off; orange with an amber corner = working, but the last several calls failed; grey-green with a ring going out = turn over, but a command or process it started still runs in the background; solid amber with a bar = waiting for your approval; an amber ring = waiting for your answer; grey = idle; a hollow brown ring = gone quiet. With Reduce motion on nothing moves, and the shapes alone tell them apart.</li>
 <li><b>Background sessions</b> (blue "background" tag) have no terminal: <b>Attach</b> (terminal icon) opens <code>claude attach</code> in your chosen terminal so you can talk to it; <b>Stop</b> (square icon, click twice) stops it — the conversation is kept and Attach resumes it. They can't be messaged from the board.</li>
 <li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
-<li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it; a busy session queues it. <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
+<li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it. To an idle session the button waits (up to 5 s) until Claude starts on it; a busy session queues it, so the button is back as soon as the terminal takes it, with "Delivered — queued…" (no five-second wait). <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. <b>Drafts are kept</b>: unsent text in the message, ask-note, todo and other boxes, the images you added, and answers picked on a group of asks are stored on this machine — they survive a refresh, closing the window and the pet restarting, and clear once sent or answered (or when that ask is answered somewhere else). Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
+<li><b>A red new tag</b> is the pet's red dot: the session finished a turn and you haven't looked at it yet. Any of these counts as looking, and clears it here and on the pet: 👁 opening the conversation, ↗ jumping to the terminal, messaging it from the board (an ask answer with send to … now included), or typing your next message in its terminal. Just having the board open, reading the one-line summary or opening the task card does not.</li>
 </ul>
 <h2>Conversation window (Peek)</h2>
 <ul>

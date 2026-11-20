@@ -68,6 +68,20 @@ h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
 .res-drop:hover { background: #4a2620; }
 .res-later:hover { background: #4a3d22; }
 .res-archive:hover { background: #333; }
+.res-todo { border-color: #4a5f7a; } .res-todo:hover { background: #2b3747; }
+.res-todo.on { background: #2b3747; border-color: #7fa6d9; }
+/* several asks on one task: answers are picked, then sent together */
+.res-do.on { background: #2f4641; border-color: #5f9488; }
+.res-drop.on { background: #4a2620; border-color: #b0634f; }
+.res-later.on { background: #4a3d22; border-color: #b08a45; }
+.res-archive.on { background: #333; border-color: var(--faint); }
+.askgroup .card.ask { margin-bottom: 6px; }
+.askgroup .card.ask.picked { border-left-color: var(--teal); }
+.askbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 2px 10px; }
+.askbar { flex-wrap: nowrap; }
+.askbar .push { margin-top: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askbar .btn { flex: none; }
+.card.ask .atts { margin-top: 6px; }
 
 .todo { display: flex; gap: 7px; align-items: flex-start; padding: 3px 0; }
 .box { flex: none; width: 15px; height: 15px; margin-top: 2px; border: 1.5px solid var(--faint); border-radius: 4px;
@@ -110,9 +124,31 @@ select.bind.mini { max-width: 92px; padding: 0 2px; font-size: 11.5px; color: va
 .icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .session .last { margin: 3px 0 0; }
 .card.session { padding: 8px 10px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); margin-top: 5px; }
-.dot.busy { background: var(--teal); box-shadow: 0 0 0 3px rgba(102,163,153,.18); }
-.dot.waiting { background: var(--amber); box-shadow: 0 0 0 3px rgba(224,166,60,.2); }
+/* Session dots: the same colours, shapes and motion as the pet's list (pet.css) — keep in step.
+   Colour = does it want you; shape and motion = what it is doing. */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #6b6560; margin-top: 5px;
+  position: relative; box-sizing: border-box; }
+.dot.waiting { background: #e0a63c; }
+.dot.busy { background: #d97757; animation: dot-breathe 2.4s ease-in-out infinite; }
+.dot.idle { background: #6b6560; }
+.dot.quiet { background: none; box-shadow: inset 0 0 0 1.5px #8a6a52; }
+@keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes dot-turn { to { transform: rotate(360deg); } }
+.dot.busy.agent { background: conic-gradient(#d97757 0 270deg, transparent 270deg);
+  -webkit-mask: radial-gradient(circle, transparent 2.3px, #000 2.6px); animation: dot-turn 1.6s linear infinite; }
+.dot.busy.struggling::after { content: ""; position: absolute; right: -3px; top: -3px; width: 4px; height: 4px;
+  border-radius: 50%; background: #e0a63c; box-shadow: 0 0 0 1px #2a2623; }
+@keyframes dot-beat { 0% { transform: scale(1); opacity: 0.9; } 70%, 100% { transform: scale(1.9); opacity: 0; } }
+.dot.idle.bg { background: #8fa7a2; }
+.dot.idle.bg::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-sizing: border-box;
+  border: 1px solid #6fb8ad; animation: dot-beat 1.8s ease-out infinite; }
+.dot.waiting.approve::after { content: ""; position: absolute; left: 3.25px; top: 1.5px; width: 1.5px; height: 3.2px;
+  border-radius: 1px; background: #2a2623; }
+.dot.waiting.reply { background: none; box-shadow: inset 0 0 0 1.75px #e0a63c; }
+@media (prefers-reduced-motion: reduce) {
+  .dot, .dot::after { animation: none !important; }
+  .dot.idle.bg::after { transform: scale(1.7); opacity: 0.7; }
+}
 .session { display: flex; gap: 9px; }
 .session .body { flex: 1; min-width: 0; }
 .stitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -199,8 +235,9 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .att { position: relative; width: 64px; height: 48px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); }
 .att img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .att .icon { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; }
-.send.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 8px; }
+.send.dropping, .card.ask.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 8px; }
 .icon.armed { width: auto; padding: 0 6px; color: #fff; background: var(--red); border-color: var(--red); font-size: 11px; }
+.btn.armed { color: #fff; background: var(--red); border-color: var(--red); }
 .bgtag { font-size: 10px; padding: 0 5px; border-radius: 6px; border: 1px solid rgba(127,166,217,.45); color: var(--blue); }
 select.place { max-width: 100px; }
 .proj-empty { display: flex; align-items: center; gap: 8px; padding: 2px 8px 8px 38px; }
@@ -292,3 +329,27 @@ select.place { max-width: 100px; }
 #toast.bad { border-color: var(--red); }
 #toast { display: flex; gap: 10px; align-items: center; z-index: 30; }
 #toast[hidden] { display: none; }
+
+/* the pet's red dot on a board session row: finished, not looked at yet */
+.newtag { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px; margin-right: 6px;
+  border-radius: 8px; background: var(--red); color: #fff; vertical-align: 2px; letter-spacing: .02em; }
+
+/* "▶ Do it" on an @claude todo */
+.todo .doit { flex: none; align-self: flex-start; margin-top: 1px; white-space: nowrap; }
+
+/* skip-permissions choice next to "where new sessions open" */
+.skipperm { font-size: 11.5px; color: var(--dim); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+/* earlier (ended) sessions of a task, to resume */
+.past-h { margin: 8px 0 4px; }
+.bsess.past { opacity: .85; }
+.bsess.past .btn { white-space: nowrap; }
+.bsess.past .meta { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* task details, compact: status / project / category on one line, directories on one line */
+.metarow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 6px 0 4px; }
+.metarow label { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11.5px; }
+.metarow select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
+  color: var(--text); max-width: 170px; }
+.wdirs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 2px 0 0; }
+.sec-h { flex-wrap: wrap; row-gap: 4px; }
+.sec-h > .meta { margin-left: 4px; }

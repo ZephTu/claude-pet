@@ -118,6 +118,12 @@ final class BoardWindow: NSWindow {
 @MainActor
 final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static let orcaBundleID = "com.stablyai.orca"
+    /// The pet's unread finishes per session, and how the board marks one session's read.
+    /// Set by the app; nil when the board is rendered on its own (`--render-board`).
+    static var unreadBySession: (() -> [String: Int])?
+    /// What the pet's list draws each session's dot from — the board draws the same dot.
+    static var petDots: (() -> [String: [String: Any]])?
+    static var onSeen: ((String) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -129,7 +135,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch body["op"] as? String ?? "" {
         case "board": return await hq(["board", "--json"])
         case "sessions": return await hq(["sessions", "--json"])
-        case "peek": return await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
+        case "peek":
+            // An open conversation shows the newest reply: that is reading it.
+            let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
+            if r.1 == nil { Self.onSeen?(str("session")) }
+            return r
+        case "pet":
+            let pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
+            let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
+            return (String(decoding: data, as: UTF8.self), nil)
         case "resolve":
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"])
@@ -174,11 +188,18 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
-        case "send": return await send(session: str("session"), text: str("text"))
+        case "send":
+            let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false)
+            if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
+            return r
         case "saveImage": return saveImage(dataURL: str("data"))
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
-                                place: str("where"), prompt: str("prompt"))
+                                place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false)
+        case "history": return await hq(["history", str("task"), "--json"])
+        case "resume":
+            return await resume(task: str("task"), session: str("session"), dir: str("dir"),
+                                place: str("where"), skip: body["skip"] as? Bool ?? false, name: str("name"))
         case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
                                                     command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
@@ -195,6 +216,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
+            Self.onSeen?(str("session"))
             return (["ok": true], nil)
         case "copy":
             NSPasteboard.general.clearContents()
@@ -269,7 +291,34 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
     /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
     /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
-    private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String) async -> (Any?, String?) {
+    /// The user's choice on the board: sessions it starts or resumes skip Claude Code's permission prompts.
+    private static let skipFlag = "--dangerously-skip-permissions"
+
+    /// Picks up an earlier session of a task where it left off: `claude --resume <id>` in the
+    /// directory it ran in (Claude Code keeps a conversation under that directory), bound to the
+    /// task again. A background place opens a terminal instead — there is nothing to attach to.
+    private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool,
+                        name: String = "") async -> (Any?, String?) {
+        guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+        let dir = (rawDir as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
+            return (nil, "no such directory: \(dir)")
+        }
+        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        let bound = await hq(["bind", task, "--session=\(session)"])
+        if let err = bound.1 { return (nil, err) }
+        let into = place == "bg" ? "terminal" : place
+        let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
+        // The tab keeps the session's own name, as the pet and the board show it.
+        let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
+        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title)
+        return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
+    }
+
+    private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String,
+                        skip: Bool = false) async -> (Any?, String?) {
         let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
@@ -277,11 +326,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
         let name = String("\(task) \(title)".prefix(60))
-        if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt) }
+        if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt, skip: skip) }
         let sid = UUID().uuidString.lowercased()
         let bound = await hq(["bind", task, "--session=\(sid)"])
         if let err = bound.1 { return (nil, err) }
-        var cmd = [claude, "--session-id", sid, "--name", name]
+        var cmd = [claude, "--session-id", sid, "--name", name] + (skip ? [Self.skipFlag] : [])
         cmd.append(prompt)
         let opened = await openInTerminal(place: place, dir: dir, command: cmd, title: name)
         if opened.1 != nil { _ = await hq(["unbind", "--session=\(sid)"]) }
@@ -291,9 +340,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// `claude --bg` picks its own session id (it ignores --session-id), so a background session
     /// can't be bound before it starts. It is told to bind itself first — that also hands it the
     /// task's rules — and the board binds it too as soon as `claude agents` reports its id.
-    private func launchBackground(claude: String, task: String, name: String, dir: String, prompt: String) async -> (Any?, String?) {
+    private func launchBackground(claude: String, task: String, name: String, dir: String, prompt: String,
+                                  skip: Bool = false) async -> (Any?, String?) {
         let first = "Start by running `\(hqPath) bind \(task)` — it binds this background session to the task and prints its rules. Then: "
-        let r = await Self.run(claude, ["--bg", "--name", name, first + prompt], cwd: dir)
+        let r = await Self.run(claude, ["--bg", "--name", name] + (skip ? [Self.skipFlag] : []) + [first + prompt], cwd: dir)
         // An untrusted folder can't show its trust prompt in the background; claude says so.
         if r.status != 0 || (r.out + r.err).localizedCaseInsensitiveContains("not trusted") {
             return (nil, "claude --bg: " + (r.err.isEmpty ? r.out : r.err).prefix(300))
@@ -432,7 +482,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// Types the message into the session's terminal and presses Enter — to
     /// Claude it is indistinguishable from the user typing it.
-    private func send(session: String, text: String) async -> (Any?, String?) {
+    /// `queue`: the session is busy, so the message waits in Claude Code's queue until the turn
+    /// ends — no turn will start within seconds, so don't sit watching for one.
+    private func send(session: String, text: String, queue: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, "empty message") }
         guard let t = terminal(of: session) else { return (nil, "no terminal recorded for this session") }
@@ -443,8 +495,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
-                                         "--enter", "--wait-submit", "5", "--json"])
-            return r.status == 0 ? (["ok": true, "detail": r.out], nil)
+                                         "--enter", "--json"] + (queue ? [] : ["--wait-submit", "5"]))
+            return r.status == 0 ? (["ok": true, "queued": queue, "detail": r.out], nil)
                                  : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)

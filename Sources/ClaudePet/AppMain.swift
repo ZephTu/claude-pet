@@ -196,6 +196,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         completions.reload(now: Date(), force: true)
         self.completions = completions
         bridge.onMarkRead = { [weak self] ids in self?.markRead(ids) }
+        // The board shares the "finished, not looked at" marks: it shows them on its session rows,
+        // and opening a conversation, jumping to it or replying from the board reads them.
+        BoardBridge.unreadBySession = { [weak self] in
+            Dictionary(grouping: self?.completions?.unread ?? [], by: \.sessionId).mapValues(\.count)
+        }
+        BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
+        BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
         panel.showOnDesktop()
         panel.updateLayoutSide()
@@ -286,6 +293,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         loadInsights()
         completions?.reload(now: now)
+        // You typed into a session after it finished: you saw what it said.
+        if let c = completions {
+            let replied = CompletionQueue.answered(c.unread, sessions: state.sessions)
+            if !replied.isEmpty { c.markRead(replied) }
+        }
         let unread = paused ? [] : (completions?.unread ?? [])
         let hq = taskIndex.snapshot(now: now)
         let motion = currentMotion(state, now: now)
@@ -1117,7 +1129,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
-        markRead((completions?.unread ?? []).filter { $0.sessionId == sessionID }.map(\.eventId))
+        markSessionRead(sessionID)
+    }
+
+    private func markSessionRead(_ sessionID: String) {
+        let ids = (completions?.unread ?? []).filter { $0.sessionId == sessionID }.map(\.eventId)
+        if !ids.isEmpty { markRead(ids) }
     }
 
     private func markRead(_ ids: [String]) {
