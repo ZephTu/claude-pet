@@ -138,6 +138,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard !fields.isEmpty else { return (nil, "no fields") }
             return await hq(["set", str("task")] + fields)
         case "log": return await hq(["log", str("task"), "--", str("message")])
+        case "focus":
+            return await hq(["focus", str("action")] + ((body["tasks"] as? [String]) ?? []) + ["--json"])
         case "scan": return await hq(["scan", "--json"])
         case "scan-apply":
             let only = ((body["names"] as? [String]) ?? []).joined(separator: ",")

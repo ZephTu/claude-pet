@@ -395,7 +395,8 @@ final class WebBridge {
                       prefs: [String: SessionLabels.Prefs] = [:],
                       branches: [String: String] = [:],
                       turns: [String: Int] = [:],
-                      context: [String: Int] = [:]) {
+                      context: [String: Int] = [:],
+                      tasks: [String: String] = [:]) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -430,6 +431,8 @@ final class WebBridge {
             // How long the conversation has gone on, and how full its context
             // is — see TranscriptStats.
             if let count = turns[s.sessionId] { item["turns"] = count }
+            // The HQ task this session is bound to, if any — see TaskIndex.
+            if let task = tasks[s.sessionId] { item["task"] = task }
             if let percent = context[s.sessionId] { item["context"] = percent }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {

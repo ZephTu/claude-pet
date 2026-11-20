@@ -9,6 +9,7 @@
 <body>
 <header id="top">
   <div class="brand">HQ</div>
+  <span class="seg mode" id="mode"></span>
   <div id="counts"></div>
   <div class="spacer"></div>
   <input id="search" type="search" placeholder="Filter tasks…" autocomplete="off">
@@ -19,7 +20,11 @@
   <a id="guide" class="btn ghost" href="guide.html" title="How to use HQ">Guide</a>
 </header>
 <div id="error" hidden></div>
-<main>
+<main id="today" hidden>
+  <section class="col" id="today-focus"></section>
+  <section class="col" id="today-sessions"></section>
+</main>
+<main id="all">
   <section class="col" id="col-you">
     <h2>Needs you</h2>
     <div id="asks"></div>

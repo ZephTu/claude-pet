@@ -26,6 +26,7 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
   drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
@@ -175,10 +176,19 @@ function render() {
   });
 
   renderCounts();
+  $("#mode").innerHTML = ["today", "all"].map((m) =>
+    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}">${m === "today" ? "Today" : "All"}</button>`).join("");
+  $("#today").hidden = ui.mode !== "today";
+  $("#all").hidden = ui.mode === "today";
+  if (ui.mode === "today") {
+    $("#today-focus").innerHTML = renderToday();
+    $("#today-sessions").innerHTML = renderTodaySessions();
+    $("#newtask-form").innerHTML = ""; delete $("#newtask-form").dataset.drawn;
+  }
   $("#asks").innerHTML = renderAsks();
   $("#mytodos").innerHTML = renderMyTodos();
-  $("#newtask-form").hidden = !ui.newTask;
-  if (ui.newTask && !$("#newtask-form").dataset.drawn) {
+  $("#newtask-form").hidden = !ui.newTask || ui.mode === "today";
+  if (ui.newTask && ui.mode !== "today" && !$("#newtask-form").dataset.drawn) {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
@@ -230,7 +240,11 @@ function renderAsks() {
   for (const t of tasks()) for (const a of openAsks(t)) items.push([t, a]);
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>`;
-  return `<h3>Asks · ${items.length}</h3>` + items.map(([t, a]) => `
+  return `<h3>Asks · ${items.length}</h3>` + items.map(([t, a]) => askCard(t, a)).join("");
+}
+
+function askCard(t, a) {
+  return `
     <div class="card ask">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
       <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
@@ -242,7 +256,7 @@ function renderAsks() {
       ${pushTarget(a) ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         send to <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b> now${pushTarget(a).state === "busy" ? " (busy — it will queue)" : ""}</label>` : ""}
-    </div>`).join("");
+    </div>`;
 }
 
 // The live session that raised an ask, if the board can type into its terminal.
@@ -416,6 +430,8 @@ function renderTask(t, mode) {
       <span class="tid">${esc(t.id)}</span>
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
+        ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
+            title="${focusIds().includes(t.id) ? "On today's list — click to remove" : "Add to today"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
         ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
         ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
@@ -426,6 +442,82 @@ function renderTask(t, mode) {
     </div>
     ${open ? renderTaskBody(t) : ""}
   </div>`;
+}
+
+// ------------------------------------------------------------------ Today
+// A working view: only the tasks picked for today, each with what it needs from you and its
+// sessions; everything else stays in All.
+const focusState = () => (ui.board && ui.board.focus) || { ids: [], carry: [] };
+const focusIds = () => focusState().ids || [];
+
+function renderToday() {
+  const f = focusState();
+  const picked = focusIds().map(taskById).filter(Boolean);
+  const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
+  const day = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  const carry = (f.carry || []).map(taskById).filter(Boolean);
+  const showCarry = carry.length && ui.carryDismissed !== f.today;
+  const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
+  return `<div class="today-h"><h2 class="big">Today</h2><span class="meta">${esc(day)} · ${picked.length} task${picked.length === 1 ? "" : "s"}</span>
+      <span style="flex:1"></span>
+      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to today…" value="${esc(draft("todaypick"))}">
+      <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
+      <button class="btn small" data-action="today-add">Add</button></div>
+    ${showCarry ? `<div class="card carry"><b>Still open from ${esc(f.last_day)}</b> — carry on with these today?
+      <div class="row" style="margin-top:6px">${carry.map((t) => `<button class="chip link" data-action="today-add-one" data-task="${esc(t.id)}" title="${esc(t.title)}">+ ${esc(t.id)} ${esc(t.title.slice(0, 24))}</button>`).join("")}</div>
+      <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="carry-all">Bring all ${carry.length}</button>
+        <button class="btn small ghost" data-action="carry-dismiss">Not today</button></div></div>` : ""}
+    ${draftNew}
+    ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
+      <b>Nothing picked for today.</b>
+      <div class="meta" style="margin-top:4px">Add tasks with the box above${showCarry ? ", bring yesterday's over," : ""} or star ☆ them in All. Tasks you create today join automatically.</div></div>`}`;
+}
+
+function focusCard(t) {
+  const asks = openAsks(t);
+  const open = t.todos.filter((x) => x.state === "open").sort((a, b) => (b.owner === "me") - (a.owner === "me"));
+  const live = liveFor(t.id);
+  const detail = ui.expanded.has(t.id);
+  const box = (x) => `<div class="todo">
+      <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
+      <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
+      <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
+  const sess = (s) => `<div class="bsess">
+      <span class="dot ${esc(s.state || "")}"></span>
+      <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
+        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
+      <div class="icons">
+        <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
+        ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
+          : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
+      </div></div>`;
+  return `<div class="fcard" id="ftask-${esc(t.id)}">
+    <div class="fhead">
+      <span class="tid">${esc(t.id)}</span>
+      <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
+      ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
+      <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
+      <button class="btn small ghost" data-action="expand" data-task="${esc(t.id)}">${detail ? "Less" : "Details"}</button>
+      <button class="icon" title="Not today — take it off today's list (the task stays)" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+    </div>
+    ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
+    ${asks.length ? `<div class="fsec">${asks.map((a) => askCard(t, a)).join("")}</div>` : ""}
+    ${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
+    <div class="fsec">${live.map(sess).join("")}
+      <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
+        <span style="flex:1"></span>
+        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>
+    ${detail ? renderTaskBody(t) : ""}
+  </div>`;
+}
+
+function renderTodaySessions() {
+  const ids = focusIds();
+  const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
+  const loose = ui.sessions.filter((s) => !s.task);
+  return `<h2>Sessions on today's tasks</h2>
+    ${onToday.length ? renderSessions(onToday, true) : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
+    ${loose.length ? `<h2 style="margin-top:18px">Not on a task</h2>${renderSessions(loose, true)}` : ""}`;
 }
 
 // ---- related resources: URLs as-is, shorthand (QA-123, repo#45) through hq.json "links" rules
@@ -593,8 +685,8 @@ const ICON = {
   stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
 };
 
-function renderSessions() {
-  if (!ui.sessions.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
+function renderSessions(items = ui.sessions, plain = false) {
+  if (!items.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
   const openTasks = tasks().filter(isOpen);
   const card = (s) => {
     const t = s.task && taskById(s.task);
@@ -642,14 +734,14 @@ function renderSessions() {
       </div>
     </div>`;
   };
-  if (ui.sgroupBy !== "project") return ui.sessions.map(card).join("");
+  if (plain || ui.sgroupBy !== "project") return items.map(card).join("");
   // By project: same order as the Tasks column (active first if ticked), "No project" last.
   const names = projectNames();
   let order = [...names];
   const activity = Object.fromEntries(order.map((n) => [n, projectActivity(n)]));
   if (ui.activeFirst) order = order.slice().sort((x, y) => (activity[y] || 0) - (activity[x] || 0));
-  const byProject = (n) => ui.sessions.filter((x) => sessionProject(x) === n);
-  const extra = [...new Set(ui.sessions.map(sessionProject).filter((n) => n && !names.includes(n)))];
+  const byProject = (n) => items.filter((x) => sessionProject(x) === n);
+  const extra = [...new Set(items.map(sessionProject).filter((n) => n && !names.includes(n)))];
   let html = "";
   for (const name of [...order, ...extra, ""]) {
     const group = byProject(name);
@@ -1319,6 +1411,29 @@ document.addEventListener("click", async (ev) => {
     }
     case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
     case "new-in-project": return openNewTask(d.p);
+    case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return render();
+    case "focus-toggle": {
+      const on = focusIds().includes(d.task);
+      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off today's list` : `${d.task} added to today`);
+    }
+    case "today-add": {
+      const v = (ui.drafts["todaypick"] || "").trim();
+      const id = (v.match(/T-\d+/i) || [])[0];
+      if (!id || !taskById(id.toUpperCase())) return toast("Pick a task from the list (type its id or title)", true);
+      delete ui.drafts["todaypick"];
+      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to today`);
+    }
+    case "today-add-one": return act("focus", { action: "add", tasks: [d.task] }, `${d.task} added to today`);
+    case "today-remove": {
+      const id = d.task;
+      try {
+        await api("focus", { action: "remove", tasks: [id] });
+        toast(`${id} off today's list`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back on today's list`));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
+    case "carry-all": return act("focus", { action: "carry", tasks: [] }, "Carried over");
+    case "carry-dismiss": ui.carryDismissed = focusState().today; savePref("hq-carry-dismissed", ui.carryDismissed); return render();
     case "launch": {
       const t = taskById(d.task);
       const dir = t && launchDir(t);

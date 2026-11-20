@@ -26,6 +26,16 @@ struct AppMain {
                 HealthWindow.renderPreview(checks: sample, to: arguments[i + 1]) ? 0 : 1
             })
         }
+        // What the pet reads from HQ, printed — a development check for TaskIndex.
+        if arguments.contains("--hq-snapshot") {
+            MainActor.assumeIsolated {
+                let s = TaskIndex().snapshot()
+                print("installed=\(s.installed) asks=\(s.openAsks.map { "\($0.id):\($0.text.prefix(30))" })")
+                print("focus=\(s.focusToday) carry=\(s.carry)")
+                for (sid, task) in s.taskBySession.sorted(by: { $0.key < $1.key }) { print("\(sid.prefix(8)) → \(task)") }
+            }
+            exit(0)
+        }
         // The HQ board with live data, as a PNG: `--render-board out.png [js]`.
         if let i = arguments.firstIndex(of: "--render-board"), i + 1 < arguments.count {
             app.setActivationPolicy(.prohibited)
@@ -276,6 +286,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         loadInsights()
         completions?.reload(now: now)
         let unread = paused ? [] : (completions?.unread ?? [])
+        let hq = taskIndex.snapshot(now: now)
         let motion = currentMotion(state, now: now)
         bridge?.push(state, motion: motion)
         // A phase belongs to a session, but the pet shows one figure, so any
@@ -299,14 +310,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              snoozed: snoozeMarks, prefs: labelPrefs,
                              branches: branches(for: state.sessions),
                              turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
-                             context: contextPercents(for: state.sessions, now: now))
+                             context: contextPercents(for: state.sessions, now: now),
+                             tasks: hq.taskBySession)
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
         // now", and a number that keeps standing there is still nagging.
         let badge = PanelModel.badge(
             needsYou: PanelModel.needsYou(state.sessions)
-                .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count,
+                .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count
+                + (paused ? 0 : hq.openAsks.count),   // questions on the HQ board want an answer too
             unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count)
         bridge?.setBadge(badge)
         // What the cat shows is decided here and pushed — see CatSkin.
@@ -317,6 +330,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         blockedOn: state.waitingOn, motion: motion,
                                         struggling: state.sessions.contains(where: Struggle.isStruggling)))
         announceFinishes(state, now: now)
+        if !paused { announceAsks(hq); promptForToday(hq, state: state, now: now) }
         noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
@@ -782,6 +796,38 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var lastJumpFailure = ""
     private var healthWindow: HealthWindow?
     private var boardWindow: BoardWindow?
+    /// HQ's view of the world: tasks per session, open asks, today's focus.
+    private let taskIndex = TaskIndex()
+    /// Asks already announced, so each new one is said once (nil until the first read, which
+    /// only records what is there — a restart must not replay old questions).
+    private var announcedAsks: Set<String>?
+    private static let dailyPromptKey = "hq.dailyPromptDay"
+
+    /// A new question on the HQ board gets a notice, like a finished turn does; clicking it goes
+    /// to the session that asked.
+    private func announceAsks(_ hq: TaskIndex.Snapshot) {
+        let ids = Set(hq.openAsks.map(\.id))
+        guard let already = announcedAsks else { announcedAsks = ids; return }
+        for ask in hq.openAsks where !already.contains(ask.id) {
+            let text = ask.text.count > 90 ? String(ask.text.prefix(90)) + "…" : ask.text
+            bridge?.notify("\(ask.task) asks: \(text)", hold: 25, emphasis: ask.task, sessionId: ask.session,
+                           jumpable: !ask.session.isEmpty)
+        }
+        announcedAsks = ids
+    }
+
+    /// Once a day, the first time the pet sees work while nothing is picked for today, it
+    /// suggests picking — mentioning yesterday's unfinished ones.
+    private func promptForToday(_ hq: TaskIndex.Snapshot, state: GlobalState, now: Date) {
+        guard hq.installed, hq.focusToday.isEmpty, !state.sessions.isEmpty else { return }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let day = fmt.string(from: now)
+        guard UserDefaults.standard.string(forKey: Self.dailyPromptKey) != day else { return }
+        UserDefaults.standard.set(day, forKey: Self.dailyPromptKey)
+        let carry = hq.carry.isEmpty ? "" : " — \(hq.carry.count) still open from last time"
+        bridge?.say("Pick today's tasks\(carry). Double-click me.", hold: 12)
+    }
 
     /// The HQ task board. One window, reused: closing hides it, reopening
     /// refreshes it.

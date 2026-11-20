@@ -111,6 +111,16 @@ printf '%s\n' "{\"type\":\"user\",\"cwd\":\"$T/repo-g\",\"message\":{\"content\"
 "$HQ" scan --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [x for x in d["projects"] if x["name"]=="repo-g"][0]["existing"]=="repo-g"' && ok "rescan marks it existing"
 grep -q "@me ping Wenbing <!--t:" "$T"/root/tasks/T-001-*/TASK.md && ok "addtodo stamps a hidden creation time"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; o=[x for x in t["todos"] if x["state"]=="open"]; assert all(x["created"] for x in o) and not any("<!--" in x["text"] for x in t["todos"]), o' && ok "every open todo has a created time; the stamp is hidden"
+# today's focus: new tasks join today; carry-over from the last day with picks
+"$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert "T-001" in f["ids"] and "T-002" in f["ids"], f' && ok "tasks created today are on today's focus"
+"$HQ" focus remove T-002 && "$HQ" focus --json | python3 -c 'import json,sys; assert "T-002" not in json.load(sys.stdin)["ids"]' && ok "focus remove"
+python3 - "$T/root/focus.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p)); d["days"] = {"2000-01-01": ["T-001", "T-002"]}; json.dump(d, open(p, "w"))
+PY
+"$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert f["last_day"]=="2000-01-01" and f["carry"]==["T-001","T-002"] and not f["ids"], f' && ok "unfinished tasks from the last day are offered"
+"$HQ" focus carry >/dev/null && "$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert f["ids"]==["T-001","T-002"] and not f["carry"], f' && ok "focus carry brings them over"
+"$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["focus"]["ids"]==["T-001","T-002"]' && ok "board --json includes today's focus"
 "$HQ" set T-001 status=waiting-on-me "next=pick a dataset"
 "$HQ" board | grep -q "你: ping Wenbing" && ok "set + board shows your next todo"
 "$HQ" set T-002 "waiting_on_me=legacy text" && "$HQ" board | grep -q "legacy text" && ok "a leftover waiting_on_me still shows as yours"

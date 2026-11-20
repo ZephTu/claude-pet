@@ -767,7 +767,9 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // competed with the activity column and won, so "Bash npm test 23s" got
     // squeezed down to "E 47s" — the branch is a disambiguator, and it must
     // never cost the row the thing it is actually reporting.
-    rows[i].querySelector(".branch").textContent = s.branch || "";
+    // The bound HQ task leads the second line ("T-062 Claude-pet Dashboard · main").
+    rows[i].querySelector(".branch").textContent =
+      s.task ? s.task + (s.branch ? " · " + s.branch : "") : (s.branch || "");
     const asks = rows[i].querySelector(".detail.asks");
     if (asks) asks.appendChild(decideButtons(s.sessionId, s.askId));
     const what = whatText(s);
@@ -789,7 +791,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
       note.textContent = s.detail || "";
     }
     rows[i].querySelector(".detail").classList
-      .toggle("blank", !s.branch && !note.textContent);
+      .toggle("blank", !s.branch && !s.task && !note.textContent);
     rows[i].dataset.sessionId = s.sessionId || "";
     if (s.title) rows[i].dataset.title = s.title;
     if (s.termHandle) {
