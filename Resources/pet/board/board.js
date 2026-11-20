@@ -26,7 +26,7 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
   drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {},
-  groupBy: pref("hq-groupby", "project"), collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
+  groupBy: pref("hq-groupby", "project"), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -139,6 +139,8 @@ function render() {
   }
   $("#groupby").innerHTML = ["project", "status"].map((g) =>
     `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? "Project" : "Status"}</button>`).join("");
+  $("#activefirst").hidden = ui.groupBy !== "project";
+  $("#activefirst input").checked = ui.activeFirst;
   $("#projects-panel").hidden = !ui.projOpen;
   if (ui.projOpen) $("#projects-panel").innerHTML = renderProjects();
   $("#cats-panel").hidden = !ui.catsOpen;
@@ -229,6 +231,23 @@ function renderWaiting() {
 
 // Within a status group: tasks with a live session first, then ones that had a session,
 // then the rest; ties go to open asks, then the most recently updated.
+// Latest activity of a live session in a project: bound to one of its tasks, or working in
+// one of its directories.
+function projectActivity(name) {
+  if (!name) return 0;
+  const pr = projects().find((p) => p.name === name);
+  const paths = pr ? pr.paths.map((p) => p.replace(/\/+$/, "")) : [];
+  let latest = 0;
+  for (const s of ui.sessions) {
+    const t = s.task && taskById(s.task);
+    const cwd = s.cwd || "";
+    if ((t && t.project === name) || paths.some((p) => cwd === p || cwd.startsWith(p + "/"))) {
+      latest = Math.max(latest, Date.parse(s.updatedAt) || 0);
+    }
+  }
+  return latest;
+}
+
 function taskRank(t) { return liveFor(t.id).length ? 2 : list(t.sessions).length ? 1 : 0; }
 function compareTasks(a, b) {
   return taskRank(b) - taskRank(a) || openAsks(b).length - openAsks(a).length ||
@@ -244,7 +263,12 @@ function renderTasks() {
   if (ui.groupBy === "project") {
     const names = projectNames();
     const extra = [...new Set(visible.map((t) => t.project || "").filter((n) => n && !names.includes(n)))];
-    for (const name of [...names, ...extra, ""]) {
+    let order = [...names, ...extra];
+    const activity = Object.fromEntries(order.map((n) => [n, projectActivity(n)]));
+    // Active first: projects with a live session float up, newest activity first; the rest keep
+    // the dragged order (Array.sort is stable).
+    if (ui.activeFirst) order = order.slice().sort((a, b) => (activity[b] || 0) - (activity[a] || 0));
+    for (const name of [...order, ""]) {
       const group = visible.filter((t) => (t.project || "") === name)
         .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
       if (!group.length) continue;
@@ -256,6 +280,7 @@ function renderTasks() {
       html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}" title="Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}"
           ${movable ? `draggable="true" data-drag-project="${esc(name)}"` : ""}>
         <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || "No project")} <span class="meta">${group.length}</span>
+        ${activity[name] ? `<span class="act" title="Latest session activity in this project">● ${ago(new Date(activity[name]).toISOString())}</span>` : ""}
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
         ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}
         ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
@@ -822,6 +847,30 @@ function markdown(text) {
   return out.join("");
 }
 
+// Bring a task into view in the middle column, whatever hides it: closed status, a search
+// filter that does not match, or a folded project group.
+function revealTask(id) {
+  const t = taskById(id);
+  if (!t) return toast(`${id} not found`, true);
+  if (!isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
+  const f = ui.filter.toLowerCase();
+  if (f && !`${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)) {
+    ui.filter = $("#search").value = "";
+  }
+  if (ui.groupBy === "project") {
+    ui.collapsed.delete(t.project || "(none)");
+    savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
+  }
+  ui.expanded.add(id);
+  render();
+  const node = document.getElementById("task-" + id);
+  if (node) {
+    node.scrollIntoView({ behavior: "smooth", block: "start" });
+    node.classList.add("flash");
+    setTimeout(() => node.classList.remove("flash"), 1200);
+  }
+}
+
 // ------------------------------------------------------------------ actions
 async function send(sid) {
   const key = "msg:" + sid;
@@ -884,15 +933,7 @@ document.addEventListener("click", async (ev) => {
     case "expand":
       ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
       return render();
-    case "goto": {
-      const t = taskById(d.task);
-      if (t && !isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
-      ui.expanded.add(d.task);
-      render();
-      const node = document.getElementById("task-" + d.task);
-      if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
+    case "goto": return revealTask(d.task);
     case "jump": return act("jump", { session: d.session });
     case "unbind": return act("unbind", { session: d.session }, "Unbound");
     case "open": return act("open", { path: d.path });
@@ -914,16 +955,7 @@ document.addEventListener("click", async (ev) => {
       ui.modal = back;
       return back.type === "context" ? drawContext() : drawPeek(true);
     }
-    case "ctx-goto": {
-      closePeek();
-      const t = taskById(d.task);
-      if (t && !isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
-      ui.expanded.add(d.task);
-      render();
-      const node = document.getElementById("task-" + d.task);
-      if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
+    case "ctx-goto": closePeek(); return revealTask(d.task);
     case "close-modal": return closePeek();
     case "copy-msg": {
       const m = ui.modal && ui.modal.msgs[Number(d.i)];
@@ -1083,6 +1115,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, "Bound — the session learns the task on its next message");
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, "Bound — the session learns the task on its next message");
   if (el.id === "show-closed") { ui.showClosed = el.checked; render(); }
+  if (el.id === "activefirst-cb") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
 
 document.addEventListener("input", (ev) => {
@@ -1119,45 +1152,67 @@ document.addEventListener("keydown", async (ev) => {
 });
 
 
-// ---- reorder projects by dragging a group header (Tasks) or a row (Projects panel)
-function dropTarget(ev) { return ev.target.closest && ev.target.closest("[data-drag-project]"); }
+// ---- reorder projects by dragging a group header (Tasks) or a row (Projects panel).
+// Forgiving on purpose: anywhere in the column counts — the nearest header decides the spot —
+// and while dragging in the Tasks column every group folds to its header, so the targets sit
+// next to each other instead of being pages apart.
+function dropZone(ev) { return ev.target.closest && ev.target.closest("#tasks, #projects-panel"); }
 function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after")); }
+function nearestTarget(zone, y) {
+  let best = null, dist = Infinity;
+  for (const el of zone.querySelectorAll("[data-drag-project]")) {
+    const r = el.getBoundingClientRect();
+    if (!r.height) continue;
+    const mid = r.top + r.height / 2;
+    const d = Math.abs(y - mid);
+    if (d < dist) { dist = d; best = { el, before: y < mid }; }
+  }
+  return best;
+}
 document.addEventListener("dragstart", (ev) => {
-  const el = dropTarget(ev);
+  const el = ev.target.closest && ev.target.closest("[data-drag-project]");
   if (!el || (ev.target.closest && ev.target.closest("input, textarea, select"))) return;
   ui.dragging = el.dataset.dragProject;
+  ui.dropAt = null;
   ev.dataTransfer.effectAllowed = "move";
   ev.dataTransfer.setData("text/plain", ui.dragging);
   el.classList.add("dragging");
+  // Folding has to wait a tick: changing the source element during dragstart cancels the drag.
+  if (el.closest("#tasks")) setTimeout(() => { if (ui.dragging) $("#tasks").classList.add("reordering"); }, 0);
 });
 document.addEventListener("dragover", (ev) => {
-  const el = dropTarget(ev);
-  if (!ui.dragging || !el || el.dataset.dragProject === ui.dragging) return;
+  if (!ui.dragging) return;
+  const zone = dropZone(ev);
+  if (!zone) return;
   ev.preventDefault();
+  ev.dataTransfer.dropEffect = "move";
+  const t = nearestTarget(zone, ev.clientY);
   clearDropMarks();
-  const r = el.getBoundingClientRect();
-  el.classList.add(ev.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
+  if (!t || t.el.dataset.dragProject === ui.dragging) { ui.dropAt = null; return; }
+  t.el.classList.add(t.before ? "drop-before" : "drop-after");
+  ui.dropAt = { name: t.el.dataset.dragProject, before: t.before };
 });
 document.addEventListener("drop", (ev) => {
-  const el = dropTarget(ev);
-  const moving = ui.dragging;
-  if (!moving || !el) return;
+  const moving = ui.dragging, at = ui.dropAt;
+  if (!moving || !dropZone(ev)) return;
   ev.preventDefault();
-  const before = el.classList.contains("drop-before");
+  finishDrag();
+  if (!at) return;
   const order = projectNames().filter((n) => n !== moving);
-  const at = order.indexOf(el.dataset.dragProject);
-  if (at < 0) return;
-  order.splice(before ? at : at + 1, 0, moving);
-  ui.dragging = null;
-  clearDropMarks();
-  act("project", { action: "order", names: order }, "Order saved");
+  const i = order.indexOf(at.name);
+  if (i < 0) return;
+  order.splice(at.before ? i : i + 1, 0, moving);
+  act("project", { action: "order", names: order },
+    ui.activeFirst ? "Order saved — projects with live sessions still come first (Active first)" : "Order saved");
 });
-document.addEventListener("dragend", () => {
+function finishDrag() {
   ui.dragging = null;
+  ui.dropAt = null;
   clearDropMarks();
+  $("#tasks").classList.remove("reordering");
   document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
-  render();
-});
+}
+document.addEventListener("dragend", () => { finishDrag(); render(); });
 
 $("#refresh").addEventListener("click", refresh);
 $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });

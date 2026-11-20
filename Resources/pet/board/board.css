@@ -155,6 +155,12 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .group-title.proj:hover .grip, .proj-row .grip { opacity: 1; }
 .proj-row .grip { margin-left: 0; }
 .dragging { opacity: .45; }
+.task.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
+.toggle.af { margin-left: 0; }
+.toggle.af[hidden] { display: none; }
+.act { font-size: 11px; color: var(--teal); font-weight: 500; white-space: nowrap; }
+#tasks.reordering .task, #tasks.reordering .group-title:not(.proj) { display: none; }
+#tasks.reordering .group-title.proj { margin: 4px 0; background: var(--panel); border-color: var(--line); }
 .drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
 .drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 .stag { font-size: 10.5px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
