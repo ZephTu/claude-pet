@@ -149,6 +149,18 @@ function dotClass(s) {
 const DOT_TIP = { quiet: "Gone quiet — nothing heard for a while", "waiting approve": "Waiting for your approval",
   "waiting reply": "Waiting for your answer", "busy agent": "Waiting on an agent it sent off",
   "busy struggling": "Working — the last several calls failed", busy: "Working", "idle bg": "Turn over — something it started is still running in the background", idle: "Idle" };
+// A session's status word, as the pet's list says it (pet.js row status — keep in step): what it
+// is running, "1 in background", "Answered"… Sessions the pet doesn't list fall back to the state.
+function statusWord(s) {
+  const p = (ui.dots || {})[s.sessionId];
+  if (!p) return s.state || "?";
+  if (p.state === "waiting") return p.asks === "permission" ? "Needs approval" : "Awaiting reply";
+  if (p.activity) return p.activity;
+  if (p.quiet) return "No recent activity";
+  if (p.state === "busy") return "Working";
+  if (p.background) return `${p.background} in background`;
+  return p.replied ? "Answered" : "Idle";
+}
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -232,6 +244,7 @@ function render() {
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+  const activeRegion = active && active.closest ? active.closest("#modal") : null;
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
@@ -278,8 +291,14 @@ function render() {
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
   paintTaskIds();
-  if (key) {
-    const el = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
+  // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
+  // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
+  // a session's message box in the Sessions column shares its key with the conversation window's
+  // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
+  if (key && !active.isConnected) {
+    const inModal = Boolean(activeRegion && activeRegion.id === "modal");
+    const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
+      .find((x) => Boolean(x.closest("#modal")) === inModal);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -385,7 +404,12 @@ async function answerAsk(a, res, note) {
   const task = a.id.replace(/\.\d+$/, "");
   const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
   await api("addtodo", { task, text });
-  await api("resolve", { id: a.id, resolution: "do", note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
+  try {
+    await api("resolve", { id: a.id, resolution: "do", note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
+  } catch (e) {
+    try { await dropMadeTodo({ task, text }); } catch (e2) { /* best effort */ }
+    throw e;
+  }
   return { task, text };
 }
 // Undo of "To todo": the todo it added goes too (marked dropped, so the card keeps the trace).
@@ -625,7 +649,7 @@ function focusCard(t) {
   const sess = (s) => `<div class="bsess">
       ${dot(s)}
       <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
+        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
         ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
@@ -785,7 +809,7 @@ function renderTaskBody(t) {
     ${live.length ? live.map((s) => `<div class="bsess">
         ${dot(s)}
         <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
           ${s.background
@@ -858,7 +882,7 @@ function renderSessions(items = ui.sessions, plain = false) {
           ${taskCtl}
         </div>
         <div class="shead">
-          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
             ${s.background
@@ -1191,7 +1215,7 @@ function drawContext() {
       </section>
       <section class="ctx-sec">
         <h4>Sessions on this task</h4>
-        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(s.state || "")}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
         ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
         ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
       </section>
@@ -1478,7 +1502,9 @@ async function resolveAll(taskId) {
   const asks = t ? openAsks(t).filter((a) => ui.picks[a.id] && !ui.resolving.has(a.id)) : [];
   if (!asks.length) return;
   const answers = asks.map((a) => ({ a, res: ui.picks[a.id], note: answerNote(a.id),
-    draft: ui.drafts["note:" + a.id], imgs: ui.atts["ask:" + a.id], push: Boolean(pushTarget(a)) && wantPush(a) }));
+    draft: ui.drafts["note:" + a.id], imgs: ui.atts["ask:" + a.id],
+    // Taken now: a refresh during the awaits below can drop the session from ui.sessions.
+    target: pushTarget(a), push: Boolean(pushTarget(a)) && wantPush(a) }));
   for (const x of answers) ui.resolving.add(x.a.id);
   render();
   const done = [];
@@ -1495,12 +1521,12 @@ async function resolveAll(taskId) {
     // One message per session (normally the one that asked them all).
     const bySession = new Map();
     for (const x of done.filter((x) => x.push)) {
-      const sid = pushTarget(x.a).sessionId;
+      const sid = x.target.sessionId;
       bySession.set(sid, (bySession.get(sid) || []).concat([x]));
     }
     const sent = [];
     for (const [sid, xs] of bySession) {
-      const s = ui.sessions.find((y) => y.sessionId === sid);
+      const s = xs[0].target;
       try {
         for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
         await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
@@ -1512,11 +1538,15 @@ async function resolveAll(taskId) {
       }
     }
     toast(msg, false, async () => {
+      // Reopen everything first, then put the notes back — a refresh in between would prune
+      // drafts of asks that are still closed.
+      for (const x of done) {
+        try { await api("reopen", { id: x.a.id }); await dropMadeTodo(x.made); } catch (e) { toast(String(e.message || e), true); }
+      }
       for (const x of done) {
         ui.drafts["note:" + x.a.id] = x.draft || "";
         if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
         ui.picks[x.a.id] = x.res;
-        try { await dropMadeTodo(x.made); await api("reopen", { id: x.a.id }); } catch (e) { toast(String(e.message || e), true); }
       }
       toast(sent.length ? "Reopened — the message already sent stays in the session" : "Reopened");
       refresh();
@@ -1559,13 +1589,23 @@ document.addEventListener("click", async (ev) => {
           }
         }
         // Undo reopens the ask; an answer already typed into a session cannot be taken back.
+        // Reopen first: a refresh while the ask is still closed would prune the restored note.
         toast(msg, false, async () => {
-          ui.drafts["note:" + d.id] = draftNote || "";
-          if (imgs) ui.atts["ask:" + d.id] = imgs;
-          await dropMadeTodo(made);
-          await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
+          try {
+            await api("reopen", { id: d.id });
+            await dropMadeTodo(made);
+            ui.drafts["note:" + d.id] = draftNote || "";
+            if (imgs) ui.atts["ask:" + d.id] = imgs;
+            toast(push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
+          } catch (e) { toast(String(e.message || e), true); }
+          await refresh();
         });
-      } catch (e) { toast(String(e.message || e), true); }
+      } catch (e) {
+        // Not answered: the note and images go back where they were.
+        if (draftNote) ui.drafts["note:" + d.id] = draftNote;
+        if (imgs) ui.atts["ask:" + d.id] = imgs;
+        toast(String(e.message || e), true);
+      }
       try { await refresh(); } finally { ui.resolving.delete(d.id); }
       return;
     }
@@ -1861,8 +1901,8 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
-  if (d.action === "push-group") { for (const id of d.ids.split(" ")) ui.drafts["push:" + id] = el.checked; return; }
-  if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
+  if (d.action === "push-group") { for (const id of d.ids.split(" ")) ui.drafts["push:" + id] = el.checked; saveDrafts(); return; }
+  if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
