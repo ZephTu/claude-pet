@@ -214,6 +214,7 @@ function render() {
     const v = scrolls[p.dataset.sid];
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
+  paintTaskIds();
   if (key) {
     const el = document.querySelector(`[data-key="${CSS.escape(key)}"]`);
     if (el) {
@@ -221,6 +222,17 @@ function render() {
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
     }
   }
+}
+
+// Every task id on the page — chips, row ids — takes its task's status colour.
+function paintTaskIds() {
+  const st = Object.fromEntries(tasks().map((t) => [t.id, t.status]));
+  document.querySelectorAll(".chip[data-task], .tid[data-task]").forEach((el) => {
+    const s = st[el.dataset.task];
+    if (!s) return;
+    el.dataset.st = s;
+    if (!el.title) el.title = STATUS_SHORT[s] || s;
+  });
 }
 
 function renderCounts() {
@@ -427,7 +439,7 @@ function renderTask(t, mode) {
   const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? "Waiting on you: " : "Next: ") + subText)}">⮑ ${esc(subText)}</div>` : "";
   return `<div class="task" id="task-${esc(t.id)}">
     <div class="task-head" data-action="expand" data-task="${esc(t.id)}">
-      <span class="tid">${esc(t.id)}</span>
+      <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
@@ -493,7 +505,7 @@ function focusCard(t) {
       </div></div>`;
   return `<div class="fcard" id="ftask-${esc(t.id)}">
     <div class="fhead">
-      <span class="tid">${esc(t.id)}</span>
+      <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>

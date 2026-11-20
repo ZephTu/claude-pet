@@ -311,7 +311,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              branches: branches(for: state.sessions),
                              turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
                              context: contextPercents(for: state.sessions, now: now),
-                             tasks: hq.taskBySession)
+                             tasks: hq.taskBySession, taskStatus: hq.statusBySession)
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not

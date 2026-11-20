@@ -17,6 +17,8 @@ final class TaskIndex {
     struct Snapshot {
         /// sessionId → "T-062 Claude-pet Dashboard"
         var taskBySession: [String: String] = [:]
+        /// sessionId → that task's status (active, blocked, waiting-on-me, done, abandoned)
+        var statusBySession: [String: String] = [:]
         var openAsks: [Ask] = []
         var focusToday: [String] = []
         /// Open tasks from the last day that had picks, not yet on today's list.
@@ -71,6 +73,7 @@ final class TaskIndex {
             for (sid, entry) in state {
                 guard let task = entry["task"] as? String else { continue }
                 snap.taskBySession[sid] = titles[task].map { "\(task) \($0)" } ?? task
+                if let st = statuses[task] { snap.statusBySession[sid] = st }
             }
         }
 

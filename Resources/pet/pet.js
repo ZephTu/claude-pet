@@ -622,7 +622,7 @@ function sessionRowHTML(s) {
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
-    '<div class="detail"><span class="branch"></span><span class="note"></span></div>'
+    '<div class="detail"><span class="task"></span><span class="branch"></span><span class="note"></span></div>'
     // A permission the pet can answer itself gets its own line of buttons.
     + (s.askId ? '<div class="detail asks"></div>' : "")
     + "</div>"
@@ -767,9 +767,12 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // competed with the activity column and won, so "Bash npm test 23s" got
     // squeezed down to "E 47s" — the branch is a disambiguator, and it must
     // never cost the row the thing it is actually reporting.
-    // The bound HQ task leads the second line ("T-062 Claude-pet Dashboard · main").
-    rows[i].querySelector(".branch").textContent =
-      s.task ? s.task + (s.branch ? " · " + s.branch : "") : (s.branch || "");
+    // The bound HQ task leads the second line, coloured by its status; without HQ it is empty
+    // and the line is what it always was.
+    const taskEl = rows[i].querySelector(".task");
+    taskEl.textContent = s.task || "";
+    taskEl.className = "task" + (s.taskStatus ? " st-" + s.taskStatus : "");
+    rows[i].querySelector(".branch").textContent = s.branch || "";
     const asks = rows[i].querySelector(".detail.asks");
     if (asks) asks.appendChild(decideButtons(s.sessionId, s.askId));
     const what = whatText(s);
