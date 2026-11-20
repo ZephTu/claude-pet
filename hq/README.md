@@ -172,7 +172,7 @@ A task's `workdirs` fill themselves: binding a session to a task adds that sessi
 
 The board opens on **Today**: only the tasks picked for today (`<root>/focus.json`, one list per
 day), each with its asks, open todos and sessions, plus a one-click carry-over of what was left
-open the last time. Tasks created today join automatically. `hq focus [add|remove|carry]`.
+open the last time. Tasks created today join automatically. `hq focus [add|remove|order|carry]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does).
 The cat shows each session's task in its list, counts open asks in its badge, announces new
 ones, and once a day suggests picking today's tasks.
 

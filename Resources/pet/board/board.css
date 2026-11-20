@@ -395,3 +395,14 @@ textarea.grow { resize: none; overflow-y: auto; line-height: 1.45; min-height: 3
   max-height: calc(1.45em * 5 + 10px); box-sizing: border-box; padding: 4px 8px; display: block; }
 .askrow { align-items: flex-start; }
 textarea.grow:placeholder-shown { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Today: active first toggle, and the grip that drags a card into your own order */
+.today-h .toggle.af { margin-left: 10px; }
+.tgrip { cursor: grab; color: var(--faint); font-size: 14px; padding: 0 2px; user-select: none; -webkit-user-select: none; }
+.tgrip:hover { color: var(--text); }
+.fcard.dragging { opacity: .5; }
+.fcard.drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.fcard.drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+/* The grip sits in the card's left margin, so the id and title don't move when it appears. */
+.fcard { position: relative; }
+.fcard .tgrip { position: absolute; left: 1px; top: 13px; font-size: 12px; }

@@ -818,6 +818,13 @@ def cmd_focus(args):
             days = load_focus()
             days[today()] = [i for i in days.get(today(), []) if i not in ids]
             save_focus(days)
+    elif args.action == "order":
+        # Today's list in the given order (the board's drag); anything not named keeps its place after.
+        ids = list(dict.fromkeys(parse_card(find_card(x))["id"] for x in args.tasks))   # no repeats
+        days = load_focus()
+        cur = days.get(today(), [])
+        days[today()] = [i for i in ids if i in cur] + [i for i in cur if i not in ids]
+        save_focus(days)
     elif args.action == "carry":
         focus_add(focus_state()["carry"])
     st = focus_state()
@@ -1540,8 +1547,8 @@ def main():
     p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto", "order"])
     p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
-    p = sub.add_parser("focus", help="today's focus: hq focus [add|remove T-012 ...|carry] [--json]")
-    p.add_argument("action", nargs="?", choices=["show", "add", "remove", "carry"], default="show")
+    p = sub.add_parser("focus", help="today's focus: hq focus [add|remove|order T-012 ...|carry] [--json]")
+    p.add_argument("action", nargs="?", choices=["show", "add", "remove", "order", "carry"], default="show")
     p.add_argument("tasks", nargs="*"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_focus)
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")
     p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("ref")
