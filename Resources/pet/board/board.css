@@ -185,7 +185,7 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .group-title.proj:hover .grip, .proj-row .grip { opacity: 1; }
 .proj-row .grip { margin-left: 0; }
 .dragging { opacity: .45; }
-.task.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
+.task.flash, .fcard.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
 .toggle.af { margin-left: 0; }
 .pchip { color: var(--blue); }
 .icon.armed { width: auto; padding: 0 6px; color: #fff; background: var(--red); border-color: var(--red); font-size: 11px; }

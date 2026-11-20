@@ -1156,6 +1156,13 @@ function markdown(text) {
 function revealTask(id) {
   const t = taskById(id);
   if (!t) return toast(`${id} not found`, true);
+  // In Today, a task on today's list is its card there: bring that card's top edge to the top
+  // of the column, without opening its details. Anything else is shown in All.
+  if (ui.mode === "today") {
+    if (focusIds().includes(id)) return scrollToCard("ftask-" + id);
+    ui.mode = "all";
+    savePref("hq-mode", "all");
+  }
   if (!isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
   const f = ui.filter.toLowerCase();
   if (f && !`${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)) {
@@ -1167,12 +1174,22 @@ function revealTask(id) {
   }
   ui.expanded.add(id);
   render();
-  const node = document.getElementById("task-" + id);
-  if (node) {
+  scrollToCard("task-" + id);
+}
+
+// Puts a card's top edge at the top of its scrolling column (with a little air) and flashes it.
+function scrollToCard(elementId) {
+  const node = document.getElementById(elementId);
+  if (!node) return;
+  const col = node.closest(".col");
+  if (col) {
+    const top = node.getBoundingClientRect().top - col.getBoundingClientRect().top + col.scrollTop - 8;
+    col.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  } else {
     node.scrollIntoView({ behavior: "smooth", block: "start" });
-    node.classList.add("flash");
-    setTimeout(() => node.classList.remove("flash"), 1200);
   }
+  node.classList.add("flash");
+  setTimeout(() => node.classList.remove("flash"), 1400);
 }
 
 // ------------------------------------------------------------------ actions
