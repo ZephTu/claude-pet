@@ -891,13 +891,23 @@ function renderTaskBody(t) {
   const refs = list(t.refs).map(resolveRef);
   const groups = ["ticket", "pr", "doc", "link", "none"].map((kd) => [kd, refs.filter((r) => r.kind === kd)]).filter(([, r]) => r.length);
   const resOpen = ui.resOpen.has(t.id);
-  // One line for status / project / category, one for the directories. `next` already heads the
-  // card, so here it is only an edit button (sessions read it from the card, so editing it does
-  // steer the next one).
+  // One line for status / project / category, one for the directories. They are settled once and
+  // rarely change, so they read as plain text; "✎ Edit" turns them into menus and opens `next`
+  // (which already heads the card; sessions read it from the card, so editing it steers them).
   const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
   const dirs = list(t.workdirs);
+  const editBtn = `<span style="flex:1"></span>
+      <button class="btn small ghost ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
+        title="${editNext ? "Done editing" : "Edit status, project, category and next"}">${editNext ? "Done" : "✎ Edit"}</button>`;
+  const meta = editNext ? "" : `<div class="metarow">
+      <span class="kv">status <b>${esc(LABEL[t.status] || t.status || "—")}</b></span>
+      <span class="kv">project <b>${esc(t.project || "—")}</b></span>
+      <span class="kv">category <b>${esc(t.category || "—")}</b></span>
+      ${editBtn}
+    </div>`;
   return `<div class="task-body">
-    <div class="metarow">
+    ${meta}
+    ${editNext ? `<div class="metarow">
       <label>status <select data-action="set-status" data-task="${esc(t.id)}">
         ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
       </select></label>
@@ -911,10 +921,9 @@ function renderTaskBody(t) {
         ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
       </select></label>
-      <span style="flex:1"></span>
-      <button class="btn small ghost ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}" title="Edit the next step — sessions read it from the card">✎ next</button>
+      ${editBtn}
     </div>
-    ${editNext ? field("next", "next", "the next concrete step") : ""}
+    ${field("next", "next", "the next concrete step")}` : ""}
     <div class="meta wdirs" title="${esc(dirs.join("\n") || "Added automatically when a session is bound")}">workdirs · ${dirs.length
         ? dirs.map((x) => esc(tildePath(x))).join(" · ") : "added automatically when a session is bound"}</div>
 
