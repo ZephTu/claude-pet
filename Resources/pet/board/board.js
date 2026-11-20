@@ -25,7 +25,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -743,7 +743,7 @@ function renderSessions(items = ui.sessions, plain = false) {
         ${open ? `<div class="send">
           <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
             placeholder="${busy ? "Busy — it will queue · paste or drop images" : "Message · paste or drop images"}">${esc(draft("msg:" + sid))}</textarea>
-          <button class="btn small primary" data-action="send" data-session="${esc(sid)}">Send</button>
+          ${sendButton(sid, true)}
         </div>${attachStrip(sid)}` : ""}
       </div>
     </div>`;
@@ -996,7 +996,7 @@ function drawPeek(toBottom) {
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
       <textarea data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
         placeholder="${canSend ? "Reply to this session — paste or drop images too" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
-      <button class="btn small primary" data-action="send" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}>Send</button>
+      ${sendButton(m.sid, canSend)}
     </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
@@ -1273,12 +1273,23 @@ document.addEventListener("drop", (ev) => {
   if (box) addImages(box.dataset.session, [...ev.dataTransfer.files]);
 });
 
+// While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
+// so a second click can't type the same message into the session again.
+function sendButton(sid, enabled) {
+  const inFlight = ui.sending.has(sid);
+  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? "Sending…" : "Send"}</button>`;
+}
+
 async function send(sid) {
+  if (ui.sending.has(sid)) return;
   const key = "msg:" + sid;
   const text = (ui.drafts[key] || "").trim();
   const images = ui.atts[sid] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  ui.sending.add(sid);
+  render();
+  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
   try {
     await api("send", { session: sid, text: message });
     delete ui.drafts[key];
@@ -1286,9 +1297,12 @@ async function send(sid) {
     toast(images.length ? `Sent with ${images.length} image${images.length === 1 ? "" : "s"}` : "Sent");
   } catch (e) {
     toast(String(e.message || e), true);
+  } finally {
+    ui.sending.delete(sid);
   }
   setTimeout(refresh, 1200);
   render();
+  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
 }
 
 async function saveField(el) {
@@ -1307,6 +1321,9 @@ document.addEventListener("click", async (ev) => {
   const d = el.dataset;
   switch (d.action) {
     case "resolve": {
+      // one answer per ask, even if the button is clicked again while it's being sent
+      if (ui.resolving.has(d.id)) return;
+      ui.resolving.add(d.id);
       const note = ui.drafts["note:" + d.id] || "";
       delete ui.drafts["note:" + d.id];
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
@@ -1334,7 +1351,8 @@ document.addEventListener("click", async (ev) => {
           await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
         });
       } catch (e) { toast(String(e.message || e), true); }
-      return refresh();
+      try { await refresh(); } finally { ui.resolving.delete(d.id); }
+      return;
     }
     case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
     case "undo-todo": return undoTodo(d.task, Number(d.i));
