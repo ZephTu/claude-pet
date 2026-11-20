@@ -127,6 +127,7 @@ async function refresh(force) {
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
 }
 window.hqRefresh = refresh;
+window.hqReveal = (id) => refresh().then(() => { if (id) revealTask(id); });
 
 // ------------------------------------------------------------------ render
 // Background sessions (claude --bg) have no terminal; `claude agents --json` names them. Mark the
@@ -544,7 +545,7 @@ function kindOfUrl(u) {
   return "link";
 }
 function resolveRef(ref) {
-  const url = (String(ref).match(/https?:\/\/[^\s<>"')]+/) || [])[0];
+  const url = (String(ref).match(/https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/) || [])[0];
   if (url) {
     const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
     return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
@@ -1078,7 +1079,11 @@ const PATH_BODY =
   "|(?:~|\\/)(?:[\\w.@+-]+\\/)+[\\w.@+-]*";
 const PATH_RE = new RegExp("(^|[\\s(（\\[\"'“‘:：,，])(" + PATH_BODY + ")", "g");
 const PATH_WHOLE = new RegExp("^(?:" + PATH_BODY + ")$");
-const URL_RE = /\bhttps?:\/\/[^\s<>"'）)\]]+/g;
+// A URL is ASCII: it ends at the first space, quote, bracket or non-ASCII character (a Chinese
+// comma or full-width bracket right after a link must not become part of it).
+// printable ASCII except quotes and angle brackets
+const URL_CHARS = /\bhttps?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/g;
+const URL_RE = URL_CHARS;
 const looksLikePath = (s) => PATH_WHOLE.test(s.trim());
 
 function inline(text) {
@@ -1092,9 +1097,10 @@ function inline(text) {
   s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) =>
     hold(`<a href="#" data-action="link" data-url="${esc(u)}">${esc(t)}</a>`));
   s = s.replace(URL_RE, (u) => {
-    const trail = (u.match(/[.,;:!?]+$/) || [""])[0];
+    // quotes, brackets and sentence punctuation right after a link belong to the sentence
+    const trail = (u.match(/[.,;:!?'"<>)\]]+$/) || [""])[0];
     const url = trail ? u.slice(0, -trail.length) : u;
-    return hold(`<a href="#" data-action="link" data-url="${esc(url)}">${esc(url)}</a>`) + trail;
+    return hold(`<a href="#" data-action="link" data-url="${esc(url)}">${esc(url)}</a>`) + esc(trail);
   });
   s = s.replace(PATH_RE, (all, pre, p) => {
     const trail = (p.match(/[.,;:!?]+$/) || [""])[0];
@@ -1106,14 +1112,35 @@ function inline(text) {
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => keep[Number(i)]);
 }
 
+// Code stays code, but a URL inside it can still be clicked. Matched on the raw text, then
+// escaped piece by piece, so an escaped quote can't leak into the link.
+function linkifyCode(code) {
+  let out = "", last = 0;
+  for (const m of code.matchAll(URL_CHARS)) {
+    const trail = (m[0].match(/[.,;:!?)\]]+$/) || [""])[0];
+    const url = trail ? m[0].slice(0, -trail.length) : m[0];
+    out += esc(code.slice(last, m.index)) + `<a href="#" data-action="link" data-url="${esc(url)}">${esc(url)}</a>`;
+    last = m.index + url.length;
+  }
+  return out + esc(code.slice(last));
+}
+
 function markdown(text) {
   const out = [];
   const parts = String(text).split(/^```/m);
   parts.forEach((part, idx) => {
     if (idx % 2 === 1) {                       // fenced code: drop the language tag line
       const nl = part.indexOf("\n");
-      const code = nl >= 0 && !/\s/.test(part.slice(0, nl).trim()) ? part.slice(nl + 1) : part;
-      out.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`);
+      const lang = nl >= 0 ? part.slice(0, nl).trim() : "";
+      const code = nl >= 0 && !/\s/.test(lang) ? part.slice(nl + 1) : part;
+      // HQ's own blocks are for people too: a titled list with live links, not a code box.
+      if (lang === "hq-asks" || lang === "hq-resolved") {
+        const items = code.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${lang === "hq-asks" ? "Asked you" : "Answers recorded"}</div>
+          <ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul></div>`);
+        return;
+      }
+      out.push(`<pre><code>${linkifyCode(code.replace(/\n$/, ""))}</code></pre>`);
       return;
     }
     let list = null, para = [];

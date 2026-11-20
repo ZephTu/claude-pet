@@ -166,6 +166,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         panel.onClick = { point in bridge.handleClick(at: point) }
         panel.onDoubleClick = { bridge.handleDoubleClick() }
         bridge.onDoubleClickPet = { [weak self] in self?.toggleBoard() }
+        bridge.onOpenBoardAt = { [weak self] task in self?.showBoard(reveal: task) }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
             self?.updateDwell(at: point, panelOpen: panelOpen)
@@ -311,7 +312,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              branches: branches(for: state.sessions),
                              turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
                              context: contextPercents(for: state.sessions, now: now),
-                             tasks: hq.taskBySession, taskStatus: hq.statusBySession)
+                             tasks: hq.taskBySession, taskStatus: hq.statusBySession,
+                             hqAsks: paused ? [] : hq.openAsks.map {
+                                 ["id": $0.id, "task": $0.task, "text": $0.text,
+                                  "status": hq.statusByTask[$0.task] ?? ""]
+                             })
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
@@ -831,10 +836,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     /// The HQ task board. One window, reused: closing hides it, reopening
     /// refreshes it.
-    private func showBoard() {
+    private func showBoard(reveal task: String = "") {
         let window = boardWindow ?? BoardWindow()
         boardWindow = window
-        window.present()
+        window.present(reveal: task)
     }
 
     /// Double-click on the pet: show the board, or put it away if it is

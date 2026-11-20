@@ -53,7 +53,7 @@ final class BoardWindow: NSWindow {
 
     /// Brings the board forward and gives it the keyboard. The pet is an
     /// accessory app, so it has to activate itself for the window to be key.
-    func present() {
+    func present(reveal task: String = "") {
         // Activation is only a request on macOS 14+, and an accessory app
         // asking from a menu or a click on a non-activating panel is often
         // refused — the window then opened *behind* the frontmost app, which
@@ -62,7 +62,13 @@ final class BoardWindow: NSWindow {
         NSApp.activate()
         orderFrontRegardless()
         makeKey()
-        webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
+        if task.isEmpty {
+            webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
+        } else {
+            // Ids look like T-123; anything else is not passed into the page.
+            let safe = task.range(of: #"^T-\d+$"#, options: .regularExpression) != nil ? task : ""
+            webView.evaluateJavaScript("window.hqReveal && window.hqReveal('\(safe)');")
+        }
     }
 
     /// The pet has no main menu (it is an accessory app), so the standard

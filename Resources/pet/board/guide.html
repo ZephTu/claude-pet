@@ -146,12 +146,13 @@
 <li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
 <li><b>复制</b>：选中文字 Cmd+C；每条消息悬停有 <b>Copy</b>；顶部 <b>Copy all</b> 复制整段对话。</li>
 <li><b>链接</b>：网页链接点击用浏览器打开；文件路径（<code>.md</code>、<code>.html</code>、代码文件、目录……）点击用默认程序打开，相对路径按该 session 的目录解析。脚本、可执行文件和 App 只会在访达里定位，不会直接运行。</li>
+<li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> 块显示成"Asked you"/"Answers recorded"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
 <li>底部可以直接回复。已经结束的 session 只能看历史。</li>
 </ul>
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
-<li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行显示它绑定的任务编号和标题（占满整行宽度；只有编号标签按状态着色）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
-<li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子）；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
+<li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
+<li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
 <li><b>每天挑任务</b>：每天第一次看到 session 活动、而今天还没挑任务时，小猫提醒一次"挑一下今天的任务"（会提到上次没完成的有几个）；双击小猫打开看板的 Today。</li>
 </ul>
 
@@ -421,12 +422,13 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>The session's last 30 messages, Claude's replies rendered as Markdown. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
 <li><b>Copy</b>: select and Cmd+C; hover a message for <b>Copy</b>; <b>Copy all</b> for the whole conversation.</li>
 <li><b>Links</b>: web links open in your browser; file paths (<code>.md</code>, <code>.html</code>, source files, folders, …) open in their default app, relative paths resolved against the session's directory. Scripts, executables and apps are only shown in Finder, never run.</li>
+<li>The <code>hq-asks</code> / <code>hq-resolved</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
 <li>Reply from the box at the bottom. Ended sessions are history-only.</li>
 </ul>
 <h1 id="en-pet">With the cat</h1>
 <ul>
-<li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to (using the whole line; only the id tag takes the status colour). Without HQ, or for an unbound session, the line is what it always was.</li>
-<li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you); a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
+<li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
+<li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
 <li><b>Pick today's tasks</b>: once a day, the first time the cat sees sessions at work while nothing is picked for today, it suggests picking (mentioning how many are still open from last time); double-click the cat to open Today.</li>
 </ul>
 

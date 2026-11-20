@@ -29,6 +29,8 @@ final class WebBridge {
     /// The user wants to be reminded about this session later; the point is
     /// where to put the menu.
     var onSnooze: ((String, CGPoint) -> Void)?
+    /// An ask row in the list: open the board at that task.
+    var onOpenBoardAt: ((String) -> Void)?
     /// The pet itself was double-clicked (not a row): the task board's toggle.
     var onDoubleClickPet: (() -> Void)?
     /// Right-click landed on a session row rather than on the pet.
@@ -153,6 +155,9 @@ final class WebBridge {
                     return
                 }
                 switch row["action"] as? String {
+                case "openBoard":
+                    self.onOpenBoardAt?(row["task"] as? String ?? "")
+                    self.closePanel()
                 case "openNotice":
                     if let id = row["sessionId"] as? String, !id.isEmpty { self.onOpenNotice?(id) }
                 case "decide":
@@ -397,7 +402,8 @@ final class WebBridge {
                       turns: [String: Int] = [:],
                       context: [String: Int] = [:],
                       tasks: [String: String] = [:],
-                      taskStatus: [String: String] = [:]) {
+                      taskStatus: [String: String] = [:],
+                      hqAsks: [[String: String]] = []) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -534,10 +540,13 @@ final class WebBridge {
             let finishedJSON = String(data: finishedData, encoding: .utf8)
         else { return }
 
-        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)"
+        // Open questions on the HQ board, so the badge's count has rows to point at.
+        let asksJSON = (try? JSONSerialization.data(withJSONObject: hqAsks))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)|\(asksJSON)"
         guard payload != lastSessionsPayload else { return }
         lastSessionsPayload = payload
-        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice));")
+        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice), \(asksJSON));")
     }
 
     /// A nil completionHandler swallows JS errors silently, which is exactly how

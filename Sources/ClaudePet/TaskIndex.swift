@@ -19,6 +19,8 @@ final class TaskIndex {
         var taskBySession: [String: String] = [:]
         /// sessionId → that task's status (active, blocked, waiting-on-me, done, abandoned)
         var statusBySession: [String: String] = [:]
+        /// taskId → status
+        var statusByTask: [String: String] = [:]
         var openAsks: [Ask] = []
         var focusToday: [String] = []
         /// Open tasks from the last day that had picks, not yet on today's list.
@@ -69,6 +71,7 @@ final class TaskIndex {
             snap.openAsks += asks(in: folder, task: id)
         }
 
+        snap.statusByTask = statuses
         if let state = json(hq.appending(path: "state/sessions.json")) as? [String: [String: Any]] {
             for (sid, entry) in state {
                 guard let task = entry["task"] as? String else { continue }

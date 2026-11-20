@@ -140,6 +140,10 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .ctx-s { margin: 4px 0; }
 .md li.task-li { list-style: none; margin-left: -18px; }
 .md .tick { color: var(--faint); }
+.hqblock { border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 6px 12px; margin: 8px 0; background: var(--panel); }
+.hqblock.hq-resolved { border-left-color: var(--teal); }
+.hqb-t { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
+.hqblock ul { margin: 0; padding-left: 18px; }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }
 /* Today */
 #today { display: grid; grid-template-columns: minmax(420px, 1.7fr) minmax(300px, 1fr); height: calc(100% - 46px); }
