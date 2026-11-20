@@ -200,6 +200,13 @@ printf '%s\n' '{"type":"custom-title","customTitle":"perf run"}' '{"type":"assis
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 
+# A template's placeholder todo ("- [ ] ...") is not listed, and numbering stays the card's own.
+"$HQ" new "Placeholder" >/dev/null
+PC="$(ls "$T"/root/tasks/T-*-placeholder/TASK.md)"; PID="$(basename "$(dirname "$PC")" | cut -d- -f1-2)"
+printf '%s\n' '- [ ] ...' '- [ ] real one' >> "$PC"
+"$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$PID"'"][0]; assert [(x["i"],x["text"]) for x in t["todos"]]==[(2,"real one")], t["todos"]' && ok "a placeholder todo is not listed, and the next keeps its number"
+"$HQ" todo "$PID" 2 done --text "real one" >/dev/null && grep -q '^- \[x\] real one' "$PC" && ok "ticking by that number ticks the right line" || fail "ticking by number missed"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

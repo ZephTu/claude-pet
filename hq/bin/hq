@@ -114,9 +114,14 @@ def parse_card(path):
                         pass
             meta[k.strip()] = v
     todos = []
+    n = 0                       # every todo line counts, as `hq todo <index>` counts them
     for line in body.splitlines():
         t = TODO_RE.match(line)
         if not t:
+            continue
+        n += 1
+        # A template's placeholder ("- [ ] ...") is not a todo; keep its number, don't list it.
+        if t.group(3).strip() in ("...", "…", ""):
             continue
         mark = t.group(2).lower()
         txt = t.group(3).strip()
@@ -128,7 +133,7 @@ def parse_card(path):
         o = re.match(r"@(\S+)\s+(.*)$", txt)
         if o:
             owner, txt = o.group(1), o.group(2)
-        todos.append({"i": len(todos) + 1,
+        todos.append({"i": n,
                       "state": {"x": "done", "-": "dropped", " ": "open"}[mark],
                       "owner": owner, "text": txt, "created": created})
     meta["todos"] = todos
