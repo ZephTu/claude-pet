@@ -83,6 +83,21 @@ grep -q "category 'defect' → 'perf'" "$T"/root/tasks/T-002-*/TASK.md && ok "re
 "$HQ" category add 'a#b' 2>/dev/null && fail "bad category accepted" || ok "category names are validated"
 "$HQ" ref add T-001 "https://example.com/doc" && "$HQ" ref add T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc","QA-1"]' && ok "ref add"
 "$HQ" ref remove T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc"]' && ok "ref remove"
+# projects: auto-assign by directory, rename / guarded remove like categories
+mkdir -p "$T/proj-x/sub"
+"$HQ" project add projx --path "$T/proj-x" && "$HQ" project list | grep -q "^projx" && ok "project add"
+P="$("$HQ" new "in project" --workdir "$T/proj-x/sub" | head -1)"
+grep -q "^project: projx" "$T"/root/tasks/$P-*/TASK.md && ok "new task gets its project from the workdir"
+"$HQ" new "no dir" >/dev/null; Q="$(ls "$T/root/tasks" | grep no-dir | cut -d- -f1-2)"
+(cd "$T/proj-x" && CLAUDE_CODE_SESSION_ID=sess-px "$HQ" bind "$Q" >/dev/null)
+grep -q "^project: projx" "$T"/root/tasks/$Q-*/TASK.md && ok "binding a session in a project dir assigns the project"
+"$HQ" unbind --session sess-px >/dev/null
+"$HQ" project rename projx projy >/dev/null && grep -q "^project: projy" "$T"/root/tasks/$P-*/TASK.md && ok "project rename rewrites cards"
+rc=0; "$HQ" project remove projy 2>/dev/null || rc=$?; [ "$rc" = 3 ] && ok "removing a used project needs --to"
+"$HQ" project remove projy --to '' >/dev/null && grep -q "^project: *$" "$T"/root/tasks/$P-*/TASK.md && ok "remove --to '' leaves tasks without a project"
+"$HQ" project add projz --path "$T/proj-x" >/dev/null && "$HQ" project auto | grep -q "assigned 2" && ok "project auto assigns by workdir"
+printf -- '---\nid: T-099\nproject:                 # a comment\nstatus: active\n---\n' > /dev/null
+"$HQ" board --json | python3 -c 'import json,sys; assert all(not str(t.get("project","")).startswith("#") for t in json.load(sys.stdin)["tasks"])' && ok "a blank field followed by a comment parses as empty"
 "$HQ" set T-001 status=waiting-on-me "waiting_on_me=pick a dataset"
 "$HQ" board | grep -q "等你: pick a dataset" && ok "set + board"
 

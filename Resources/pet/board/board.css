@@ -138,6 +138,20 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .md li.task-li { list-style: none; margin-left: -18px; }
 .md .tick { color: var(--faint); }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }
+/* projects */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; text-transform: none; letter-spacing: 0; }
+.seg button { background: transparent; border: 0; color: var(--faint); font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.seg button.on { background: var(--panel-2); color: var(--text); }
+.group-title.proj { cursor: pointer; user-select: none; font-size: 12.5px; color: var(--text); font-weight: 600; margin-top: 16px; }
+.group-title.proj:hover { color: var(--accent); }
+.caret { display: inline-block; width: 12px; color: var(--faint); }
+.stag { font-size: 10.5px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+.stag.waiting-on-me { color: var(--amber); border-color: rgba(224,166,60,.5); }
+.stag.blocked { color: #e8846e; border-color: rgba(224,83,60,.45); }
+.stag.active { color: var(--teal); border-color: rgba(102,163,153,.45); }
+.proj-row { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.proj-row:last-of-type { border-bottom: 0; }
+.proj-paths { margin: 4px 0 0 4px; }
 /* task body */
 .row.nowrap { flex-wrap: nowrap; }
 .row.nowrap input { flex: 1; min-width: 0; }

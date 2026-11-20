@@ -96,7 +96,7 @@ def parse_card(path):
             if v.startswith('"'):
                 v = v[1:v.rfind('"')] if v.count('"') >= 2 else v[1:]
             else:
-                v = re.sub(r"\s{2,}#\s.*$", "", v).strip()  # template comments
+                v = "" if v.startswith("#") else re.sub(r"\s{2,}#\s.*$", "", v).strip()  # template comments
                 if v.startswith("[") and v.endswith("]"):
                     try:
                         v = json.loads(v)
@@ -221,6 +221,144 @@ def category_usage():
         c = parse_card(p).get("category") or ""
         usage[c] = usage.get(c, 0) + 1
     return usage
+
+
+# ---------------------------------------------------------------- projects
+# A project groups tasks: { "name": ..., "paths": [dirs] } in hq.json. A task's directory decides
+# its project automatically (deepest matching path wins); the card's `project` field can be changed.
+def load_projects():
+    cfg = load_json(root_config_path(), None)
+    out = []
+    for pr in (cfg.get("projects") if isinstance(cfg, dict) else None) or []:
+        if isinstance(pr, dict) and isinstance(pr.get("name"), str) and pr["name"]:
+            out.append({"name": pr["name"],
+                        "paths": [x for x in pr.get("paths", []) if isinstance(x, str) and x]})
+    return out
+
+
+def save_projects(projects):
+    cfg = load_json(root_config_path(), {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["projects"] = projects
+    atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+
+
+def norm_path(x):
+    return os.path.realpath(os.path.expanduser(x))
+
+
+def project_for_path(path):
+    if not path:
+        return ""
+    target = norm_path(path)
+    best, depth = "", -1
+    for pr in load_projects():
+        for root in pr["paths"]:
+            r = norm_path(root)
+            if (target == r or target.startswith(r + os.sep)) and len(r) > depth:
+                best, depth = pr["name"], len(r)
+    return best
+
+
+def project_for_dirs(dirs):
+    for d in dirs or []:
+        name = project_for_path(d)
+        if name:
+            return name
+    return ""
+
+
+def ensure_project(name):
+    if name and name not in [x["name"] for x in load_projects()]:
+        save_projects(load_projects() + [{"name": name, "paths": []}])
+        print(f"hq: added project {name!r}", file=sys.stderr)
+
+
+def relabel(field, old, new, why):
+    """Rewrite `field` on every card (open or closed) where it equals `old`. Returns how many."""
+    n = 0
+    for p in card_paths():
+        meta = parse_card(p)
+        if (meta.get(field) or "") == old:
+            set_fields(p, {field: new, "updated": meta.get("updated", today())})
+            append_log(p, f"{field} {old!r} → {new or '(none)'!r} ({why})", touch=False)
+            n += 1
+    return n
+
+
+def cmd_project(args):
+    projects = load_projects()
+    names = [x["name"] for x in projects]
+    usage = {}
+    for p in card_paths():
+        name = parse_card(p).get("project") or ""
+        usage[name] = usage.get(name, 0) + 1
+    a = args.action
+    if a == "list":
+        rows = [dict(pr, count=usage.get(pr["name"], 0), listed=True) for pr in projects]
+        rows += [{"name": n, "paths": [], "count": c, "listed": False} for n, c in usage.items() if n and n not in names]
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return
+        for r in rows:
+            print(f"{r['name']:<22} {r['count']:>3} task(s)  {', '.join(r['paths']) or '-'}"
+                  + ("" if r["listed"] else "   (not in list — used on cards)"))
+        if usage.get(""):
+            print(f"{'(no project)':<22} {usage['']:>3} task(s)")
+        return
+    if a == "auto":
+        n = 0
+        for p in card_paths():
+            meta = parse_card(p)
+            if meta.get("project"):
+                continue
+            name = project_for_dirs(meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else [])
+            if name:
+                set_fields(p, {"project": name, "updated": meta.get("updated", today())})
+                n += 1
+        print(f"assigned {n} task(s)")
+        return
+    if not args.names:
+        die(f"usage: hq project {a} NAME ...")
+    name = check_category(args.names[0])
+    if a == "add":
+        if name in names:
+            die(f"project {name!r} already exists")
+        save_projects(projects + [{"name": name, "paths": [os.path.abspath(os.path.expanduser(x)) for x in args.path or []]}])
+    elif a == "paths":
+        if name not in names:
+            die(f"no project {name!r}")
+        new_paths = [os.path.abspath(os.path.expanduser(x)) for x in args.names[1:]]
+        save_projects([dict(pr, paths=new_paths) if pr["name"] == name else pr for pr in projects])
+    elif a == "rename":
+        if len(args.names) < 2:
+            die("usage: hq project rename OLD NEW")
+        new = check_category(args.names[1])
+        if new in names and new != name:
+            die(f"{new!r} already exists — to merge, use: hq project remove {name!r} --to {new!r}")
+        if name not in names and not usage.get(name):
+            die(f"no project {name!r}")
+        if name in names:
+            save_projects([dict(pr, name=new) if pr["name"] == name else pr for pr in projects])
+        else:
+            save_projects(projects + [{"name": new, "paths": []}])
+        print(f"renamed {name!r} → {new!r} ({relabel('project', name, new, 'project renamed')} task(s) updated)")
+    elif a == "remove":
+        n_used = usage.get(name, 0)
+        if n_used and args.to is None:
+            print(f"hq: {n_used} task(s) are in {name!r}. Re-run with --to <project> to move them, "
+                  f"or --to '' to leave them without a project.", file=sys.stderr)
+            sys.exit(3)
+        to = ""
+        if args.to:
+            to = check_category(args.to)
+            if to == name:
+                die("--to must be a different project")
+            ensure_project(to)
+        save_projects([pr for pr in load_projects() if pr["name"] != name])
+        n = relabel("project", name, to, "project removed") if n_used else 0
+        print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else ""))
 
 
 def cmd_category(args):
@@ -412,7 +550,8 @@ def cmd_board(args):
             out.append(d)
         cfg = load_json(root_config_path(), {})
         links = cfg.get("links", []) if isinstance(cfg, dict) else []
-        print(json.dumps({"root": hq_root(), "categories": load_categories(), "links": links, "tasks": out},
+        print(json.dumps({"root": hq_root(), "categories": load_categories(), "projects": load_projects(),
+                          "links": links, "tasks": out},
                          ensure_ascii=False, indent=1))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
@@ -474,12 +613,14 @@ def cmd_new(args):
     category = check_category(args.category) if args.category else (
         "other" if "other" in cats else (cats[0] if cats else ""))
     ensure_listed(category)
+    workdirs = [os.path.abspath(w) for w in (args.workdir or [])]
+    project = check_category(args.project) if args.project else project_for_dirs(workdirs)
+    ensure_project(project)
     os.makedirs(d)
     p = os.path.join(d, "TASK.md")
     atomic_write(p, text)
-    set_fields(p, {"id": tid, "title": args.title, "category": category, "status": "active",
-                   "lead": args.lead or "-", "updated": today(),
-                   "workdirs": [os.path.abspath(w) for w in (args.workdir or [])]})
+    set_fields(p, {"id": tid, "title": args.title, "project": project, "category": category,
+                   "status": "active", "lead": args.lead or "-", "updated": today(), "workdirs": workdirs})
     print(tid)
     print(p)
 
@@ -506,8 +647,12 @@ def cmd_bind(args):
     cwd = os.getcwd() if from_inside else (pet_session(sid) or {}).get("cwd")
     workdirs = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
     if (cwd and os.path.isdir(cwd) and cwd not in workdirs
-            and os.path.realpath(cwd) not in (os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~")))):
+            and os.path.realpath(cwd) not in ("/", os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~")))):
         fields["workdirs"] = workdirs + [cwd]
+    if not meta.get("project"):
+        guess = project_for_path(cwd) or project_for_dirs(workdirs)
+        if guess:
+            fields["project"] = guess
     if fields:
         set_fields(card, fields)
     if prev and prev != meta["id"]:
@@ -551,6 +696,9 @@ def cmd_set(args):
         if k == "category" and v:
             v = check_category(v)
             ensure_listed(v)
+        if k == "project" and v:
+            v = check_category(v)
+            ensure_project(v)
         fields[k] = v
     set_fields(find_card(args.task), fields)
 
@@ -924,7 +1072,7 @@ def main():
     p = sub.add_parser("show", help="print a task card and its open asks"); p.add_argument("task")
     p.set_defaults(fn=cmd_show)
     p = sub.add_parser("new", help="create a task card")
-    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category")
+    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category"); p.add_argument("--project")
     p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
     p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
     p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
@@ -944,6 +1092,11 @@ def main():
     p = sub.add_parser("category", help="hq category list | add NAME | rename OLD NEW | remove NAME [--to OTHER]")
     p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
     p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
+    p = sub.add_parser("project", help="hq project list | add NAME [--path DIR] | paths NAME DIR... | "
+                                         "rename OLD NEW | remove NAME [--to OTHER] | auto")
+    p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto"])
+    p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")
     p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("ref")
     p.set_defaults(fn=cmd_ref)

@@ -56,7 +56,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended),
+`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
@@ -102,6 +102,15 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 - [ ] @Wenbing restart the qebot pod     ← waiting on someone else
 - [x] done   ·   - [-] dropped
 ```
+
+## Projects
+
+Projects are the level above tasks: `hq.json` lists them with their directories
+(`hq project add claude-pet --path ~/code/claude-pet`). A task joins the project of its directory —
+when it is created with a workdir, or when a session is bound — and the card's `project` field can
+be changed any time. The board groups tasks by project by default (or by status, a toggle away).
+`hq project list | add | paths | rename | remove --to | auto` manage them; `auto` sorts every task
+that has no project by its workdirs.
 
 ## Categories
 

@@ -14,14 +14,19 @@ const RESOLUTIONS = [
   ["archive", "No context", "I can't answer this — park it"],
 ];
 // Categories live in <root>/hq.json and are edited from the Categories panel.
+const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
+const projectNames = () => projects().map((p) => p.name);
 const categories = () => (ui.board && Array.isArray(ui.board.categories) ? ui.board.categories : []);
 // Terminals the board can type into; anything else gets Jump only.
 const SENDABLE = { orca: "Orca", iterm2: "iTerm2" };
 const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2" };
 
+function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
+function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {},
+  groupBy: pref("hq-groupby", "project"), collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -131,6 +136,10 @@ function render() {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
+  $("#groupby").innerHTML = ["project", "status"].map((g) =>
+    `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? "Project" : "Status"}</button>`).join("");
+  $("#projects-panel").hidden = !ui.projOpen;
+  if (ui.projOpen) $("#projects-panel").innerHTML = renderProjects();
   $("#cats-panel").hidden = !ui.catsOpen;
   if (ui.catsOpen) $("#cats-panel").innerHTML = renderCategories();
   $("#tasks").innerHTML = renderTasks();
@@ -228,19 +237,39 @@ function compareTasks(a, b) {
 function renderTasks() {
   const f = ui.filter.toLowerCase();
   const visible = tasks().filter((t) => (ui.showClosed || isOpen(t)) &&
-    (!f || `${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category}`.toLowerCase().includes(f)));
+    (!f || `${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)));
   if (!visible.length) return `<div class="empty">No tasks${f ? " match" : ""}.</div>`;
   let html = "";
+  if (ui.groupBy === "project") {
+    const names = projectNames();
+    const extra = [...new Set(visible.map((t) => t.project || "").filter((n) => n && !names.includes(n)))];
+    for (const name of [...names, ...extra, ""]) {
+      const group = visible.filter((t) => (t.project || "") === name)
+        .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
+      if (!group.length) continue;
+      const key = name || "(none)";
+      const shut = ui.collapsed.has(key);
+      const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
+      const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
+      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}">
+        <span class="caret">${shut ? "▸" : "▾"}</span> ${esc(name || "No project")} <span class="meta">${group.length}</span>
+        ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
+        ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}</div>`;
+      if (!shut) html += group.map((t) => renderTask(t, "project")).join("");
+    }
+    return html;
+  }
   for (const st of ORDER) {
     const group = visible.filter((t) => t.status === st).sort(compareTasks);
     if (!group.length) continue;
     html += `<div class="group-title">${LABEL[st]} <span class="meta">${group.length}</span></div>`;
-    html += group.map(renderTask).join("");
+    html += group.map((t) => renderTask(t, "status")).join("");
   }
   return html;
 }
 
-function renderTask(t) {
+const STATUS_SHORT = { "waiting-on-me": "Waiting on you", blocked: "Blocked", active: "Active", done: "Done", abandoned: "Abandoned" };
+function renderTask(t, mode) {
   const asks = openAsks(t).length;
   const live = liveFor(t.id).length;
   const open = ui.expanded.has(t.id);
@@ -252,6 +281,8 @@ function renderTask(t) {
       <div class="ttitle">${esc(t.title)}${sub}</div>
       ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
       ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
+      ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
+        : t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="meta">${esc(t.category || "")} · ${t.age_days ?? "?"}d</span>
     </div>
     ${open ? renderTaskBody(t) : ""}
@@ -330,6 +361,12 @@ function renderTaskBody(t) {
     <div class="field"><label>status</label>
       <select data-action="set-status" data-task="${esc(t.id)}">
         ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
+      </select></div>
+    <div class="field"><label>project</label>
+      <select data-action="set-project" data-task="${esc(t.id)}">
+        <option value="" ${t.project ? "" : "selected"}>(no project)</option>
+        ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
+        ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
       </select></div>
     <div class="field"><label>category</label>
       <select data-action="set-category" data-task="${esc(t.id)}">
@@ -449,6 +486,8 @@ function renderNewTask() {
   const dflt = cats.includes("other") ? "other" : cats[0];
   return `<div class="card">
     <div class="field"><label>title</label><input id="nt-title" placeholder="What is this task?"></div>
+    <div class="field"><label>project</label><select id="nt-proj"><option value="">(auto from the workdir)</option>${projectNames().map((c) =>
+      `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
     <div class="field"><label>category</label><select id="nt-cat"><option value="">(none)</option>${cats.map((c) =>
       `<option value="${esc(c)}" ${c === dflt ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
     <div class="field"><label>workdir</label><input id="nt-dir" list="nt-dirs" placeholder="optional — type a path or pick one; binding a session adds its directory">
@@ -457,6 +496,51 @@ function renderNewTask() {
       ${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}">${esc(s.title || s.project)}</option>`).join("")}</select></div>
     <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-action="cancel-new">Cancel</button>
       <button class="btn primary" data-action="create">Create</button></div>
+  </div>`;
+}
+
+function renderProjects() {
+  const ps = projects();
+  const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
+  const unassigned = tasks().filter((t) => !t.project).length;
+  const rows = ps.map((pr) => {
+    const n = tasks().filter((t) => t.project === pr.name).length;
+    if (ui.projRemove[pr.name]) {
+      const key = "projto:" + pr.name;
+      return `<div class="cat-row removing"><span>Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(pr.name)}</b> to</span>
+        <select class="bind" data-key="${esc(key)}"><option value="">(no project)</option>
+          ${ps.filter((x) => x.name !== pr.name).map((x) => `<option value="${esc(x.name)}" ${ui.drafts[key] === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+        <button class="btn small res-drop" data-action="proj-remove-confirm" data-p="${esc(pr.name)}">Move &amp; remove</button>
+        <button class="btn small ghost" data-action="proj-remove-cancel" data-p="${esc(pr.name)}">Cancel</button></div>`;
+    }
+    const nk = "projname:" + pr.name;
+    const dirty = ui.drafts[nk] !== undefined && ui.drafts[nk] !== pr.name;
+    return `<div class="proj-row">
+      <div class="row nowrap">
+        <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="Edit to rename (tasks are updated)">
+        ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">Save</button>` : ""}
+        <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
+        <button class="icon" title="Remove this project" data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
+      </div>
+      <div class="proj-paths">${pr.paths.map((x) => `<div class="res-i"><span class="meta">${esc(x)}</span>
+          <button class="icon" title="Remove this directory" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
+        || `<div class="meta">No directory — tasks are only assigned by hand.</div>`}
+        ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="a directory whose tasks belong here" value="${esc(draft("projpath:" + pr.name))}">
+          <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">Add</button></div>`
+          : `<button class="btn small ghost" data-action="toggle-add" data-what="proj" data-task="${esc(pr.name)}" title="Add a directory">+ directory</button>`}</div>
+    </div>`;
+  }).join("");
+  return `<div class="card">
+    <div class="row"><b>Projects</b><span class="meta">group tasks; a task's directory picks its project</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-projects">Done</button></div>
+    <datalist id="proj-dirs">${dirs.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
+    ${rows || `<div class="empty">No projects yet.</div>`}
+    <div class="proj-row"><div class="row nowrap">
+      <input class="note" data-key="projnew" placeholder="new project name" value="${esc(draft("projnew"))}">
+      <input class="note" list="proj-dirs" data-key="projnewpath" placeholder="its directory (optional)" value="${esc(draft("projnewpath"))}">
+      <button class="btn small primary" data-action="proj-add">Add</button></div></div>
+    ${unassigned ? `<div class="row" style="margin-top:6px"><span class="meta">${unassigned} task(s) have no project.</span>
+      <button class="btn small" data-action="proj-auto">Assign by directory</button></div>` : ""}
   </div>`;
 }
 
@@ -904,6 +988,50 @@ document.addEventListener("click", async (ev) => {
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
+    case "group-by": ui.groupBy = d.g; savePref("hq-groupby", d.g); return render();
+    case "collapse":
+      ui.collapsed.has(d.key) ? ui.collapsed.delete(d.key) : ui.collapsed.add(d.key);
+      savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
+      return render();
+    case "open-projects": ui.projOpen = !ui.projOpen; return render();
+    case "close-projects": ui.projOpen = false; ui.projRemove = {}; return render();
+    case "proj-rename": {
+      const v = (ui.drafts["projname:" + d.p] || "").trim();
+      delete ui.drafts["projname:" + d.p];
+      if (!v || v === d.p) return render();
+      return act("project", { action: "rename", names: [d.p, v] }, `Renamed ${d.p} → ${v}`);
+    }
+    case "proj-path-remove": {
+      const pr = projects().find((x) => x.name === d.p);
+      return act("project", { action: "paths", names: [d.p, ...pr.paths.filter((x) => x !== d.path)] }, "Directory removed");
+    }
+    case "proj-path-add": {
+      const v = (ui.drafts["projpath:" + d.p] || "").trim();
+      if (!v) return;
+      delete ui.drafts["projpath:" + d.p];
+      const pr = projects().find((x) => x.name === d.p);
+      return act("project", { action: "paths", names: [d.p, ...pr.paths, v] }, "Directory added");
+    }
+    case "proj-remove": {
+      const n = tasks().filter((t) => t.project === d.p).length;
+      if (!n) return act("project", { action: "remove", names: [d.p] }, `Removed ${d.p}`);
+      ui.projRemove[d.p] = true;
+      return render();
+    }
+    case "proj-remove-cancel": delete ui.projRemove[d.p]; return render();
+    case "proj-remove-confirm": {
+      const to = ui.drafts["projto:" + d.p] ?? "";
+      delete ui.projRemove[d.p];
+      return act("project", { action: "remove", names: [d.p], to }, `Removed ${d.p}; tasks moved to ${to || "(no project)"}`);
+    }
+    case "proj-add": {
+      const name = (ui.drafts["projnew"] || "").trim();
+      const path = (ui.drafts["projnewpath"] || "").trim();
+      if (!name) return toast("Give the project a name", true);
+      delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
+      return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, `Added ${name}`);
+    }
+    case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
     case "cat-remove": {
@@ -926,7 +1054,7 @@ document.addEventListener("click", async (ev) => {
       const title = $("#nt-title").value.trim();
       if (!title) return toast("Give the task a title", true);
       try {
-        const out = await api("new", { title, category: $("#nt-cat").value, workdir: $("#nt-dir").value });
+        const out = await api("new", { title, category: $("#nt-cat").value, workdir: $("#nt-dir").value, project: $("#nt-proj").value });
         const id = String(out).split("\n")[0].trim();
         const sid = $("#nt-session").value;
         if (sid) await api("bind", { task: id, session: sid });
@@ -943,6 +1071,7 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
+  if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
   if (d.action === "set-status") return act("set", { task: d.task, fields: [`status=${el.value}`] }, "Status saved");

@@ -136,6 +136,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard !fields.isEmpty else { return (nil, "no fields") }
             return await hq(["set", str("task")] + fields)
         case "log": return await hq(["log", str("task"), "--", str("message")])
+        case "project":
+            let action = str("action")
+            var args = ["project", action] + ((body["names"] as? [String]) ?? [])
+            if action == "add" { for p in (body["paths"] as? [String]) ?? [] { args.append("--path=\(p)") } }
+            if let to = body["to"] as? String { args.append("--to=\(to)") }
+            return await hq(args)
         case "category":
             var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
             if let to = body["to"] as? String { args.append("--to=\(to)") }
@@ -147,6 +153,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "new":
             var args = ["new", "--category=\(str("category").isEmpty ? "dev" : str("category"))"]
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
+            if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
         case "send": return await send(session: str("session"), text: str("text"))
         case "jump":

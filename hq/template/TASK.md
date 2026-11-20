@@ -1,6 +1,7 @@
 ---
 id: T-000
 title: "One line: what this task is"
+project:                 # which project this belongs to (hq.json "projects"); set from the workdir
 category: dev            # free text, e.g. rca | test-followup | benchmark | process | dev | side
 status: active           # active | waiting-on-me | blocked | done | abandoned
 lead: -                  # the agent role that owns it, e.g. dev-lead (see .claude/agents/)

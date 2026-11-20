@@ -33,6 +33,7 @@
   <a href="#zh-board">看板上能做什么</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
+  <a href="#zh-proj">项目</a>
   <a href="#zh-cats">分类与工作目录</a>
   <a href="#zh-card">任务卡格式</a>
   <a href="#zh-leads">负责人（lead）</a>
@@ -45,6 +46,7 @@
 <p>同时开着十几个 Claude Code session 时，难的不再是干活本身，而是记住每个 session 在做什么、它问过你什么、你有没有回答。HQ 把这些状态从对话里搬到文件里：</p>
 <table>
 <tr><th>概念</th><th>是什么</th><th>存在多久</th></tr>
+<tr><td><b>项目（project）</b></td><td>一组相关任务，比如 claude-pet 下的几个功能。在 <code>hq.json</code> 里定义名字和对应的目录</td><td>长期</td></tr>
 <tr><td><b>任务卡</b></td><td><code>tasks/T-012-xxx/TASK.md</code>：目标、状态、下一步、待办、日志</td><td>到任务完成</td></tr>
 <tr><td><b>待回应事项（ask）</b></td><td>session 问过你、需要你决定或去做的事，记在 <code>asks.jsonl</code>，直到你回应</td><td>跟随任务</td></tr>
 <tr><td><b>session</b></td><td>绑定到某个任务的一条工作线程，随时可以关</td><td>随你</td></tr>
@@ -66,7 +68,7 @@
 <ul>
 <li>计数：未回应的 ask、你的待办、等你处理的任务、进行中的任务、在跑的 session。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
-<li><b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
+<li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
 </ul>
@@ -96,14 +98,17 @@
 </ul>
 <h2>Tasks（中栏）</h2>
 <ul>
-<li>按状态分组：Waiting on you / Blocked / Active；勾 <b>show closed</b> 显示已完成和已放弃。</li>
+<li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
+  <ul><li><b>Project</b>（默认）：按项目分组，点组名折叠或展开；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
+  <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
+<li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
 </ul>
 <p>点开一个任务：</p>
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
-<tr><td><b>status / category</b></td><td>下拉框，选了就保存</td><td>你；绑定的 session 也会改 status</td></tr>
+<tr><td><b>project / status / category</b></td><td>下拉框，选了就保存</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
 <tr><td><b>next / waiting on you</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
 <tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完（划线保留），✕ = 不做</td><td>你和 session</td></tr>
@@ -168,6 +173,15 @@
 </table>
 <p>在 Claude Code 里还可以用两个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）。</p>
 
+<h1 id="zh-proj">项目</h1>
+<ul>
+<li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
+<li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
+<li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
+<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto</code>。</li>
+</ul>
+
 <h1 id="zh-cats">分类与工作目录</h1>
 <h2>分类</h2>
 <ul>
@@ -198,6 +212,7 @@
 <pre>---
 id: T-012
 title: "release_test_all 排障"
+project: bigtest             # 所属项目；按工作目录自动设置
 category: test-followup      # 自由填写
 status: active               # active | waiting-on-me | blocked | done | abandoned
 lead: test-lead
@@ -246,7 +261,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 ~/.claude/hq/bin/hq                       命令行工具 + hook 入口
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
-&lt;任务根目录&gt;/hq.json                       分类列表</pre>
+&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则</pre>
 <p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
 </div>
 </article>
@@ -259,6 +274,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-board">What the board does</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
+  <a href="#en-proj">Projects</a>
   <a href="#en-cats">Categories and workdirs</a>
   <a href="#en-card">Task card format</a>
   <a href="#en-leads">Leads</a>
@@ -271,6 +287,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p>With a dozen Claude Code sessions open, the hard part is no longer the work — it is remembering what each session was doing, what it asked you, and whether you ever answered. HQ moves that state out of the conversations and into files:</p>
 <table>
 <tr><th>Concept</th><th>What it is</th><th>Lives</th></tr>
+<tr><td><b>Project</b></td><td>a group of related tasks — say, the features of claude-pet. Defined in <code>hq.json</code> with a name and its directories</td><td>long-term</td></tr>
 <tr><td><b>Task card</b></td><td><code>tasks/T-012-slug/TASK.md</code>: goal, status, next step, todos, log</td><td>until the task is done</td></tr>
 <tr><td><b>Ask</b></td><td>something a session needs you to decide or do, kept in <code>asks.jsonl</code> until you answer</td><td>with the task</td></tr>
 <tr><td><b>Session</b></td><td>a working thread bound to one task; close it any time</td><td>as long as you like</td></tr>
@@ -291,7 +308,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h2>Top bar</h2>
 <ul>
 <li>Counts: unanswered asks, your todos, tasks waiting on you, open tasks, live sessions.</li>
-<li><b>Filter tasks…</b> by id, title or refs. <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
+<li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
 </ul>
@@ -321,14 +338,17 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 </ul>
 <h2>Tasks (middle)</h2>
 <ul>
-<li>Grouped by status — Waiting on you / Blocked / Active; tick <b>show closed</b> for done and abandoned.</li>
+<li><b>Project | Status</b> next to the title switches the grouping (remembered):
+  <ul><li><b>Project</b> (default): one group per project — click its name to fold it; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
+  <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
+<li>Tick <b>show closed</b> for done and abandoned.</li>
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
 </ul>
 <p>Open a task:</p>
 <table>
 <tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
-<tr><td><b>status / category</b></td><td>menus; picking saves</td><td>you; a bound session also sets status</td></tr>
+<tr><td><b>project / status / category</b></td><td>menus; picking saves</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
 <tr><td><b>next / waiting on you</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
 <tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done (stays, struck through), ✕ = won't do</td><td>you and sessions</td></tr>
@@ -389,6 +409,15 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 </table>
 <p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board.</p>
 
+<h1 id="en-proj">Projects</h1>
+<ul>
+<li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
+<li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
+<li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
+<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto</code>.</li>
+</ul>
+
 <h1 id="en-cats">Categories and workdirs</h1>
 <h2>Categories</h2>
 <ul>
@@ -419,6 +448,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <pre>---
 id: T-012
 title: "Rerun perf baseline"
+project: bigtest             # set from the workdir automatically
 category: benchmark          # free text
 status: active               # active | waiting-on-me | blocked | done | abandoned
 lead: bench-lead
@@ -467,7 +497,7 @@ next: "run baseline on clusters A/C"
 ~/.claude/hq/bin/hq                    CLI and hook entry point
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
 ~/.claude/hq/state/sessions.json       session → task bindings
-&lt;root&gt;/hq.json                         category list</pre>
+&lt;root&gt;/hq.json                         projects, categories, link rules</pre>
 <p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
 </div>
 </article>
