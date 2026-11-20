@@ -177,7 +177,8 @@ def set_fields(path, fields):
 
 def append_log(path, msg, touch=True):
     text = open(path, encoding="utf-8").read().rstrip("\n")
-    text += f"\n- {today()}: {msg}\n"
+    # Local date and time to the second: a task's log often has many entries in one day.
+    text += f"\n- {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {msg}\n"
     atomic_write(path, text)
     if touch:
         set_fields(path, {})

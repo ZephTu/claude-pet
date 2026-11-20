@@ -196,7 +196,7 @@
 <tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;网址或 QA-123&gt;</code></td><td>增删关联资源</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
-<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行</td></tr>
+<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行，带本地日期和时间（精确到秒）</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
@@ -476,7 +476,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;url or QA-123&gt;</code></td><td>add / remove a related resource</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
-<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log</td></tr>
+<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log, stamped with the local date and time to the second</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>

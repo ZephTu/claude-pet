@@ -833,8 +833,10 @@ function resolveRef(ref) {
   return { ref, url: "", kind: "none", label: ref };
 }
 function logEntries(t) {
-  return String(t.body || "").split("\n").map((l) => l.match(/^\s*-\s+(\d{4}-\d{2}-\d{2}):\s+(.*)$/))
-    .filter(Boolean).map((m) => ({ date: m[1], text: m[2] }));
+  // `- 2026-11-20 20:05:18: text` (hq log writes the time since 11/20); older lines carry the day only.
+  return String(t.body || "").split("\n")
+    .map((l) => l.match(/^\s*-\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?):\s+(.*)$/))
+    .filter(Boolean).map((m) => ({ date: m[1].replace("T", " "), text: m[2] }));
 }
 const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
