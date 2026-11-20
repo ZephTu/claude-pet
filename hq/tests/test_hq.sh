@@ -47,6 +47,7 @@ hook '{"session_id":"sess-1","hook_event_name":"SessionStart"}' | python3 -c 'im
 MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
 [ "$("$HQ" asks T-001 | wc -l | tr -d ' ')" = 2 ] && ok "Stop hook records asks from hq-asks block"
+"$HQ" asks T-001 --json | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; assert a["context"].startswith("Done.") and "hq-asks" not in a["context"], a' && ok "asks keep the reply that raised them"
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
@@ -57,6 +58,8 @@ hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}
 MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
 "$HQ" asks T-001 --all | grep -q "T-001.2.*\[later: waiting on Chengjie\]" && ok "hq-resolved block resolves ask"
+"$HQ" ask reopen T-001.2 && "$HQ" asks T-001 | grep -q "T-001.2" && ok "ask reopen undoes a resolution"
+"$HQ" ask resolve T-001.2 later --note "waiting on Chengjie"
 
 printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/root/tasks/T-001-*/TASK.md
 "$HQ" todo T-001 1 done --via board

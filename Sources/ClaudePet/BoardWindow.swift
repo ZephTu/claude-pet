@@ -65,6 +65,22 @@ final class BoardWindow: NSWindow {
         webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
     }
 
+    /// The pet has no main menu (it is an accessory app), so the standard
+    /// editing shortcuts have no menu item to fire. Route them by hand, or
+    /// copy and paste simply do nothing in the board.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        var action: String?
+        if flags == .command {
+            action = ["c": "copy:", "v": "paste:", "x": "cut:", "a": "selectAll:", "z": "undo:"][key]
+        } else if flags == [.command, .shift], key == "z" {
+            action = "redo:"
+        }
+        if let action, NSApp.sendAction(Selector(action), to: nil, from: self) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
     /// Renders the live board to a PNG — the development check for layout,
     /// since screen capture needs a permission this app should not ask for.
     /// Waits for the page to load real data through hq, runs an optional
@@ -107,10 +123,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch body["op"] as? String ?? "" {
         case "board": return await hq(["board", "--json"])
         case "sessions": return await hq(["sessions", "--json"])
-        case "peek": return await hq(["peek", str("session"), "-n", "14", "--json"])
+        case "peek": return await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
         case "resolve":
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"])
+        case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
         case "todo":
             let index = (body["index"] as? Int).map(String.init) ?? str("index")
             return await hq(["todo", str("task"), index, str("state"), "--via=board"])
@@ -135,6 +152,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
             return (["ok": true], nil)
+        case "copy":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(str("text"), forType: .string)
+            return (["ok": true], nil)
+        case "openURL":
+            guard let url = URL(string: str("url")),
+                  let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme)
+            else { return (nil, "only web links can be opened") }
+            NSWorkspace.shared.open(url)
+            return (["ok": true], nil)
+        case "openPath": return openPath(str("path"), cwd: str("cwd"))
         case "open":
             let path = str("path")
             guard path.hasSuffix("/TASK.md"), FileManager.default.fileExists(atPath: path) else {
@@ -145,6 +173,38 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         default:
             return (nil, "unknown operation")
         }
+    }
+
+    // MARK: - Files
+
+    /// Opens a path mentioned in a conversation with its default app. Paths
+    /// come from transcript text, so anything that could run — an app, a
+    /// script, an executable — is only revealed in Finder, never opened.
+    private func openPath(_ raw: String, cwd: String) -> (Any?, String?) {
+        var path = raw.trimmingCharacters(in: .whitespaces)
+        if let r = path.range(of: #":\d+(:\d+)?$"#, options: .regularExpression) { path.removeSubrange(r) }
+        if path.hasPrefix("~") { path = (path as NSString).expandingTildeInPath }
+        if !path.hasPrefix("/") {
+            guard !cwd.isEmpty else { return (nil, "relative path and no working directory") }
+            path = (cwd as NSString).appendingPathComponent(path)
+        }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            return (nil, "not found: \(url.path)")
+        }
+        let risky: Set<String> = ["app", "command", "tool", "sh", "zsh", "bash", "terminal", "pkg",
+                                  "dmg", "workflow", "scpt", "applescript", "jar", "py", "rb", "pl"]
+        let ext = url.pathExtension.lowercased()
+        if isDir.boolValue && ext != "app" {
+            NSWorkspace.shared.open(url)
+        } else if risky.contains(ext) || (!isDir.boolValue && FileManager.default.isExecutableFile(atPath: url.path)) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return (["ok": true, "revealed": true], nil)
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+        return (["ok": true], nil)
     }
 
     // MARK: - hq

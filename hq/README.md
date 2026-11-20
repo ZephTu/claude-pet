@@ -56,7 +56,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq category list|add|rename|remove`,
+`hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq peek <session-id-prefix>` (live or ended),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently

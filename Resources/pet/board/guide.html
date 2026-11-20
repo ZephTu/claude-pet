@@ -82,7 +82,17 @@
 </table>
 回应会在绑定的 session <b>下一轮</b>送达给它。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办。点方框 = 做完；点 ✕ = 不做。</li>
-<li><b>Waiting on you</b>：任务卡上"等你处理"字段不为空的任务。处理完点 <b>Handled</b> 清空。</li>
+<li><b>Waiting on you</b>：任务卡上"等你处理"字段不为空的任务。处理完点 <b>Handled</b>。</li>
+<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）。</li>
+<li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。</li>
+</ul>
+<h2>上下文窗口</h2>
+<p>回答"这一项到底是什么、从哪来、去哪看"：</p>
+<ul>
+<li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
+<li><b>待办 / 等你处理</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
+<li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
+<li><b>Show task</b> 在中栏定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
 </ul>
 <h2>Tasks（中栏）</h2>
 <ul>
@@ -91,7 +101,7 @@
 <li>点开一个任务可以：
   <ul>
   <li>改 <b>status</b>、<b>category</b>（下拉）、<b>next</b>、<b>waiting on you</b>（回车保存）；查看 <b>workdirs</b>；</li>
-  <li>点待办前的方框切换：未做 → 做完 → 不做 → 未做；</li>
+  <li>点待办前的方框在"未做 ↔ 做完"之间切换，✕ 表示不做；</li>
   <li>在 "add todo" 框里加待办，开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做；</li>
   <li>查看、跳转、解绑正在为它工作的 session，或从下拉框绑定一个新的；</li>
   <li>在 Log 框里写一句话追加到日志；<b>Open card</b> 用默认编辑器打开任务卡文件。</li>
@@ -99,12 +109,17 @@
 </ul>
 <h2>Sessions（右栏）</h2>
 <ul>
-<li>每个在跑的 session：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）、标题、项目、最后一条回复。</li>
-<li><b>Bind to task…</b>：绑定到任务。session 会在下一条消息时收到任务规则。</li>
-<li><b>Peek</b>：看最近的对话。<b>Jump</b>：跳到它所在的终端。</li>
-<li>输入框：直接给它发消息，<b>Enter</b> 发送，<b>Shift+Enter</b> 换行。效果和你在终端里亲手输入完全一样。session 正忙时消息会排队。只支持 Orca 和 iTerm2 里的 session；其他终端里的 session 输入框是灰的，鼠标悬停会提示原因，用 Jump 过去就行。</li>
+<li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
+<li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
+<li>消息：<b>Enter</b> 发送，<b>Shift+Enter</b> 换行，效果和你在终端里亲手输入完全一样，session 正忙时会排队。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
 </ul>
-
+<h2>对话窗口（Peek）</h2>
+<ul>
+<li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
+<li><b>复制</b>：选中文字 Cmd+C；每条消息悬停有 <b>Copy</b>；顶部 <b>Copy all</b> 复制整段对话。</li>
+<li><b>链接</b>：网页链接点击用浏览器打开；文件路径（<code>.md</code>、<code>.html</code>、代码文件、目录……）点击用默认程序打开，相对路径按该 session 的目录解析。脚本、可执行文件和 App 只会在访达里定位，不会直接运行。</li>
+<li>底部可以直接回复。已经结束的 session 只能看历史。</li>
+</ul>
 <h1 id="zh-link">session 和看板怎么联动</h1>
 <p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
 <ol>
@@ -141,8 +156,9 @@
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
+<tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
 <tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
-<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录）</td></tr>
 </table>
 <p>在 Claude Code 里还可以用两个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）。</p>
 
@@ -275,19 +291,35 @@ next: "fix 分支跑 Jenkins 并提 PR"
 The bound session receives your answer on its <b>next turn</b>.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks. Box = done, ✕ = won't do.</li>
 <li><b>Waiting on you</b> — tasks whose "waiting on you" field is set. <b>Handled</b> clears it.</li>
+<li><b>Click an item's text</b> to open its <b>context window</b> (below).</li>
+<li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too.</li>
+</ul>
+<h2>Context window</h2>
+<p>Answers "what is this item, where did it come from, where do I look":</p>
+<ul>
+<li><b>An ask</b>: the Claude reply that raised it, and which session — open that conversation directly. (Asks recorded before this feature have no reply attached; open the conversation instead.)</li>
+<li><b>A todo / waiting item</b>: the task's status, next step and the whole card, log included.</li>
+<li>Both list the task's sessions: <b>live</b> ones open their conversation or jump; <b>ended</b> ones show their history (<b>History</b>).</li>
+<li><b>Show task</b> finds and opens the task in the middle column; <b>Open card</b> opens the card in your editor.</li>
 </ul>
 <h2>Tasks (middle)</h2>
 <ul>
 <li>Grouped by status; tick <b>show closed</b> for done and abandoned. Amber number = open asks, green = live sessions on it.</li>
-<li>Open a task to change <b>status</b>, <b>category</b>, <b>next</b> and <b>waiting on you</b> (Enter saves), see its <b>workdirs</b>; click a todo's box to cycle open → done → dropped; add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
+<li>Open a task to change <b>status</b>, <b>category</b>, <b>next</b> and <b>waiting on you</b> (Enter saves), see its <b>workdirs</b>; click a todo's box to toggle open ↔ done (✕ = won't do); add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
 </ul>
 <h2>Sessions (right)</h2>
 <ul>
-<li>Every live session: state dot (green working, grey idle, amber waiting on you), title, project, last reply.</li>
-<li><b>Bind to task…</b> — the session learns the task's rules with its next message.</li>
-<li><b>Peek</b> at recent messages, <b>Jump</b> to its terminal, or type a message: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it. Only sessions in Orca or iTerm2 can be messaged; for other terminals the box is greyed out — hover it for why, and use Jump instead.</li>
+<li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
+<li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
+<li>Messages: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
 </ul>
-
+<h2>Conversation window (Peek)</h2>
+<ul>
+<li>The session's last 30 messages, Claude's replies rendered as Markdown. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
+<li><b>Copy</b>: select and Cmd+C; hover a message for <b>Copy</b>; <b>Copy all</b> for the whole conversation.</li>
+<li><b>Links</b>: web links open in your browser; file paths (<code>.md</code>, <code>.html</code>, source files, folders, …) open in their default app, relative paths resolved against the session's directory. Scripts, executables and apps are only shown in Finder, never run.</li>
+<li>Reply from the box at the bottom. Ended sessions are history-only.</li>
+</ul>
 <h1 id="en-link">How sessions and the board connect</h1>
 <p>Once bound, three hooks make the session follow these rules:</p>
 <ol>
@@ -320,8 +352,9 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
+<tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
 <tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
-<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts)</td></tr>
 </table>
 <p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board.</p>
 

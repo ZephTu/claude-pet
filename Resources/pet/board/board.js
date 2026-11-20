@@ -21,7 +21,7 @@ const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", ite
 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {},
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -55,13 +55,35 @@ function ago(iso) {
   if (s < 86400 * 2) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
-function toast(msg, bad) {
+function toast(msg, bad, undo) {
   const t = $("#toast");
-  t.textContent = msg;
+  ui.undoFn = undo || null;
+  t.innerHTML = `<span>${esc(msg)}</span>` +
+    (undo ? ` <button class="btn small" data-action="undo-toast">Undo</button>` : "");
   t.className = bad ? "bad" : "";
   t.hidden = false;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), bad ? 6000 : 2200);
+  toast.timer = setTimeout(() => { t.hidden = true; ui.undoFn = null; }, undo ? 8000 : bad ? 6000 : 2200);
+}
+
+// Every one-click change that is easy to hit by accident can be taken back.
+const RECENT_MS = 60 * 60 * 1000;
+const TODO_STATE = { open: "open", done: "done", dropped: "drop", drop: "drop" };
+async function changeTodo(task, i, to, from, text) {
+  const label = { done: "Done", drop: "Won't do", open: "Reopened" }[to] || to;
+  try {
+    await api("todo", { task, index: i, state: to });
+    if (to !== "open") ui.recent = ui.recent.filter((r) => !(r.task === task && r.i === i))
+      .concat([{ task, i, text, to, from: TODO_STATE[from] || "open", at: Date.now() }]);
+    else ui.recent = ui.recent.filter((r) => !(r.task === task && r.i === i));
+    toast(`${label}: ${text}`, false, to === "open" ? null : () => undoTodo(task, i));
+  } catch (e) { toast(String(e.message || e), true); }
+  await refresh();
+}
+async function undoTodo(task, i) {
+  const r = ui.recent.find((x) => x.task === task && x.i === i);
+  ui.recent = ui.recent.filter((x) => x !== r);
+  await act("todo", { task, index: i, state: r ? r.from : "open" }, "Undone");
 }
 const tasks = () => (ui.board ? ui.board.tasks : []);
 const taskById = (id) => tasks().find((t) => t.id === id);
@@ -83,6 +105,7 @@ async function refresh() {
     $("#error").hidden = false;
   }
   render();
+  if (ui.modal && ui.modal.type === "peek") refreshPeek();
 }
 window.hqRefresh = refresh;
 
@@ -146,7 +169,7 @@ function renderAsks() {
   return `<h3>Asks · ${items.length}</h3>` + items.map(([t, a]) => `
     <div class="card ask">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
-      <div class="ask-text">${esc(a.text)}</div>
+      <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       <div class="row">
         <input class="note" data-key="note:${esc(a.id)}" placeholder="note (optional)" value="${esc(draft("note:" + a.id))}">
         ${RESOLUTIONS.map(([r, label, tip]) =>
@@ -159,13 +182,27 @@ function renderMyTodos() {
   const items = [];
   for (const t of tasks().filter(isOpen))
     for (const x of t.todos) if (x.state === "open" && x.owner === "me") items.push([t, x]);
-  if (!items.length) return `<h3>Your todos</h3><div class="empty">No open @me todos.</div>`;
+  // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
+  // reopen from the task itself — every change is also in the card's log.
+  ui.recent = ui.recent.filter((r) => Date.now() - r.at < RECENT_MS);
+  const recent = ui.recent.filter((r) => {
+    const t = taskById(r.task);
+    const x = t && t.todos.find((y) => y.i === r.i);
+    return x && x.state !== "open";
+  });
+  if (!items.length && !recent.length) return `<h3>Your todos</h3><div class="empty">No open @me todos.</div>`;
   return `<h3>Your todos · ${items.length}</h3><div class="card">` + items.map(([t, x]) => `
     <div class="todo">
-      <span class="box" title="Done" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done"></span>
-      <div style="flex:1"><span class="t">${esc(x.text)}</span>
+      <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
+      <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
         <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
-      <button class="btn small ghost" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop">✕</button>
+      <button class="btn small ghost" title="Won't do (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
+    </div>`).join("") + recent.map((r) => `
+    <div class="todo ${r.to === "drop" ? "dropped" : "done"}">
+      <span class="box ${r.to === "drop" ? "dropped" : "done"}">${r.to === "drop" ? "–" : "✓"}</span>
+      <div style="flex:1"><span class="t">${esc(r.text)}</span>
+        <div class="meta">${r.to === "drop" ? "won't do" : "done"} ${ago(new Date(r.at).toISOString())} · undo available for an hour · <span class="chip link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
+      <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">Undo</button>
     </div>`).join("") + `</div>`;
 }
 
@@ -175,7 +212,7 @@ function renderWaiting() {
   return `<h3>Waiting on you · ${items.length}</h3>` + items.map((t) => `
     <div class="card">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div>
-      <div class="ask-text">${esc(t.waiting_on_me)}</div>
+      <div class="ask-text clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</div>
       <div class="row"><button class="btn small" data-action="clear-waiting" data-task="${esc(t.id)}">Handled</button></div>
     </div>`).join("");
 }
@@ -219,11 +256,12 @@ function renderTaskBody(t) {
   const val = (f, v) => (ui.drafts[k(f)] ?? v ?? "");
   const todos = t.todos.length ? t.todos.map((x) => {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
-    const next = x.state === "open" ? "done" : x.state === "done" ? "drop" : "open";
+    const next = x.state === "open" ? "done" : "open";
     const owner = x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : "";
     return `<div class="todo ${x.state}">
-      <span class="box ${x.state}" title="click: ${next}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}">${mark}</span>
-      <span class="t">${owner}${esc(x.text)}</span></div>`;
+      <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
+      <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
+      ${x.state === "open" ? `<button class="btn small ghost" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   }).join("") : `<div class="empty">No todos.</div>`;
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
@@ -264,6 +302,13 @@ function renderTaskBody(t) {
   </div>`;
 }
 
+// Small line icons (currentColor), so the session cards need no button labels.
+const ICON = {
+  peek: '<svg viewBox="0 0 16 16"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
+  jump: '<svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5 7 9M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3"/></svg>',
+  message: '<svg viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
+};
+
 function renderSessions() {
   if (!ui.sessions.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
   const openTasks = tasks().filter(isOpen);
@@ -274,9 +319,9 @@ function renderSessions() {
       (list(b.workdirs).some((w) => s.cwd && s.cwd.startsWith(w)) ? 1 : 0) -
       (list(a.workdirs).some((w) => s.cwd && s.cwd.startsWith(w)) ? 1 : 0));
     const taskCtl = t
-      ? `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="meta">${esc(t.title)}</span>`
-      : `<select class="bind" data-action="bind-session" data-session="${esc(sid)}">
-           <option value="">Bind to task…</option>
+      ? `<span class="chip link" data-action="goto" data-task="${esc(t.id)}" title="${esc(t.title)}">${esc(t.id)}</span>`
+      : `<select class="bind mini" data-action="bind-session" data-session="${esc(sid)}" title="Bind this session to a task">
+           <option value="">Bind…</option>
            ${sorted.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(x.title)}</option>`).join("")}
          </select>`;
     const busy = s.state === "busy";
@@ -284,27 +329,29 @@ function renderSessions() {
     const canSend = Boolean(SENDABLE[kind]);
     const why = canSend ? "" : `Messaging from the Task Board isn't supported for ${
       kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
-    const peek = ui.peekOpen.has(sid)
-      ? `<div class="peek" data-sid="${esc(sid)}">${(ui.peeks[sid] || []).map((m) =>
-          `<div class="msg ${m.role}"><span class="who">${m.role === "user" ? "you" : "claude"} · ${ago(m.ts)}</span>${esc(m.text)}</div>`).join("") || `<div class="empty">Loading…</div>`}</div>`
-      : "";
+    // The message box only takes room when asked for (or while it holds a draft).
+    const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)));
     return `<div class="card session">
       <span class="dot ${esc(s.state || "")}" title="${esc(s.state || "")}"></span>
       <div class="body">
-        <div class="stitle">${esc(s.title || s.project || sid.slice(0, 8))}</div>
-        <div class="meta">${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
-        <div class="row" style="margin-top:4px">${taskCtl}</div>
+        <div class="shead">
+          <div class="stitle" title="${esc(s.title || s.project || "")}">${esc(s.title || s.project || sid.slice(0, 8))}</div>
+          ${taskCtl}
+        </div>
+        <div class="shead">
+          <div class="meta smeta">${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="icons">
+            <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
+            <button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>
+            <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
+          </div>
+        </div>
         ${s.lastText ? `<div class="last">${esc(s.lastText)}</div>` : ""}
-        <div class="row">
-          <button class="btn small ghost" data-action="peek" data-session="${esc(sid)}">${ui.peekOpen.has(sid) ? "Hide" : "Peek"}</button>
-          <button class="btn small ghost" data-action="jump" data-session="${esc(sid)}">Jump</button>
-        </div>
-        <div class="send ${canSend ? "" : "disabled"}" title="${esc(why)}">
-          <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}
-            placeholder="${!canSend ? "Not supported in this terminal" : busy ? "Busy — your message will queue" : "Message this session — Enter to send"}">${esc(draft("msg:" + sid))}</textarea>
-          <button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>Send</button>
-        </div>
-        ${peek}
+        ${open ? `<div class="send">
+          <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
+            placeholder="${busy ? "Busy — your message will queue" : "Message — Enter to send"}">${esc(draft("msg:" + sid))}</textarea>
+          <button class="btn small primary" data-action="send" data-session="${esc(sid)}">Send</button>
+        </div>` : ""}
       </div>
     </div>`;
   }).join("");
@@ -367,6 +414,239 @@ function renderCategories() {
   </div>`;
 }
 
+// ------------------------------------------------------------------ peek window
+// A session's recent conversation in a large overlay: select and copy freely,
+// click links and file paths. Click outside or press Esc to close.
+async function act2(op, args) {
+  try {
+    const r = await api(op, args);
+    if (r && r.revealed) toast("Shown in Finder (not opened: it could run code)");
+  } catch (e) { toast(String(e.message || e), true); }
+}
+async function copyText(text, msg) {
+  try { await api("copy", { text }); toast(msg); } catch (e) { toast(String(e.message || e), true); }
+}
+
+async function openPeek(sid, back) {
+  const s = ui.sessions.find((x) => x.sessionId === sid || x.sessionId.startsWith(sid));
+  ui.modal = { type: "peek", sid: s ? s.sessionId : sid, title: (s && (s.title || s.project)) || sid.slice(0, 8),
+               project: s ? s.project : "", cwd: s ? s.cwd : "", live: Boolean(s), msgs: null, sig: "", back: back || null };
+  drawPeek(true);
+  await refreshPeek(true);
+}
+function closePeek() {
+  ui.modal = null;
+  $("#modal").hidden = true;
+  $("#modal").innerHTML = "";
+}
+async function refreshPeek(first) {
+  const m = ui.modal;
+  if (!m) return;
+  let msgs;
+  try { msgs = await apiJSON("peek", { session: m.sid }); } catch (e) { return toast(String(e.message || e), true); }
+  if (ui.modal !== m) return;
+  if (msgs && !Array.isArray(msgs)) {          // --meta form: also says who the session is
+    if (!m.live) { m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
+                   m.project = m.project || (msgs.cwd || "").split("/").pop(); }
+    m.found = msgs.found;
+    msgs = msgs.messages || [];
+  }
+  const sig = JSON.stringify(msgs);
+  if (sig === m.sig) return;
+  // Never rebuild under a selection the user is making or about to copy.
+  const sel = window.getSelection();
+  if (!first && sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode)) return;
+  m.msgs = msgs;
+  m.sig = sig;
+  drawPeek(first);
+}
+function drawPeek(toBottom) {
+  const m = ui.modal;
+  const box = $("#modal");
+  const body = box.querySelector(".peek-body");
+  const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+  const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
+  const canSend = m.live && Boolean(SENDABLE[s.terminal && s.terminal.kind]);
+  const noSend = !m.live ? "This session has ended — history only" : "Not supported in this terminal";
+  const msgs = m.msgs;
+  const list = msgs === null ? `<div class="empty">Loading…</div>`
+    : !msgs.length ? `<div class="empty">${m.found === false ? "No transcript found for this session on this machine." : "No messages yet."}</div>`
+    : msgs.map((x, i) => `<div class="pmsg ${x.role}">
+        <div class="pwho">${x.role === "user" ? "You" : "Claude"} · ${ago(x.ts)}
+          <button class="btn small ghost" data-action="copy-msg" data-i="${i}" title="Copy this message">Copy</button></div>
+        <div class="md">${markdown(x.text)}</div>
+      </div>`).join("");
+  const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + m.sid);
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="Conversation">
+    <div class="phead">
+      ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="Back">←</button>` : ""}
+      <div><div class="stitle">${esc(m.title)}${m.live ? "" : ` <span class="chip">ended</span>`}</div><div class="meta">${esc(m.project || "")} · last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close</div></div>
+      <span style="flex:1"></span>
+      <button class="btn small" data-action="copy-all">Copy all</button>
+      ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
+      <button class="btn small ghost" data-action="close-modal" title="Close (Esc)">✕</button>
+    </div>
+    <div class="peek-body">${list}</div>
+    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
+      <textarea data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
+        placeholder="${canSend ? "Reply to this session — Enter to send" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
+      <button class="btn small primary" data-action="send" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}>Send</button>
+    </div>
+  </div>`;
+  box.hidden = false;
+  const nb = box.querySelector(".peek-body");
+  if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
+}
+document.addEventListener("mousedown", (ev) => {
+  // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
+  if (ui.modal && ev.target === $("#modal")) closePeek();
+});
+
+// ------------------------------------------------------------------ context window
+// What an ask / todo / "waiting on you" item is about, and where to go next:
+// the reply that raised it, the task card, and the sessions that worked on it.
+function openContext(kind, ref) {
+  ui.modal = { type: "context", kind, task: ref.task, id: ref.id, i: ref.i };
+  drawContext();
+}
+function drawContext() {
+  const m = ui.modal;
+  const t = taskById(m.task);
+  const box = $("#modal");
+  if (!t) { closePeek(); return toast("That task is gone", true); }
+  const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
+  const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
+  const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : m.kind === "todo" ? "Your todo" : "Waiting on you";
+  const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
+  const live = ui.sessions.filter((s) => s.task === t.id);
+  const liveIds = new Set(live.map((s) => s.sessionId.slice(0, 8)));
+  const past = list(t.sessions).filter((p) => !liveIds.has(String(p).slice(0, 8)));
+  const askSession = ask && ask.session ? ui.sessions.find((s) => s.sessionId === ask.session) : null;
+  const sessBtn = (sid, label, isLive) =>
+    `<button class="btn small" data-action="ctx-peek" data-session="${esc(sid)}">${label}</button>` +
+    (isLive ? ` <button class="btn small ghost" data-action="jump" data-session="${esc(sid)}">Jump</button>` : "");
+  const origin = !ask ? "" : `<section class="ctx-sec">
+      <h4>Where it came from</h4>
+      <div class="meta">Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}</div>
+      ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, "Open that conversation", Boolean(askSession))}</div>` : ""}
+      ${ask.context ? `<div class="md quote">${markdown(ask.context)}</div>`
+        : `<div class="empty">The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.</div>`}
+    </section>`;
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="Context">
+    <div class="phead">
+      <div><div class="meta">${heading} · <span class="chip link" data-action="ctx-goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div>
+        <div class="stitle ctx-title">${esc(text || "")}</div></div>
+      <span style="flex:1"></span>
+      <button class="btn small" data-action="ctx-goto" data-task="${esc(t.id)}">Show task</button>
+      <button class="btn small" data-action="open" data-path="${esc(t.path)}">Open card</button>
+      <button class="btn small ghost" data-action="close-modal" title="Close (Esc)">✕</button>
+    </div>
+    <div class="peek-body">
+      ${origin}
+      <section class="ctx-sec">
+        <h4>Task</h4>
+        <div class="meta">${esc(LABEL[t.status] || t.status)} · ${esc(t.category || "no category")} · updated ${t.age_days ?? "?"}d ago</div>
+        ${t.next ? `<div style="margin-top:4px">Next: ${inline(t.next)}</div>` : ""}
+        ${t.waiting_on_me ? `<div style="color:var(--amber)">Waiting on you: ${inline(t.waiting_on_me)}</div>` : ""}
+      </section>
+      <section class="ctx-sec">
+        <h4>Sessions on this task</h4>
+        ${live.map((s) => `<div class="row ctx-s"><span class="dot ${esc(s.state || "")}"></span><span>${esc(s.title || s.project)}</span><span class="meta">${esc(s.state || "")}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
+        ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
+        ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
+      </section>
+      <section class="ctx-sec">
+        <h4>Task card</h4>
+        <div class="md">${markdown(t.body || "")}</div>
+      </section>
+    </div>
+  </div>`;
+  box.hidden = false;
+}
+
+// ------------------------------------------------------------------ markdown
+// Small and safe: everything is escaped first; only these constructs become markup.
+const FILE_EXT = "md|markdown|html?|txt|log|jsonl|json|ya?ml|toml|csv|tsv|xml|pdf|png|jpe?g|gif|svg|webp|" +
+  "py|sh|swift|js|mjs|ts|tsx|jsx|css|go|java|kt|c|h|cc|cpp|hpp|rs|rb|sql|ipynb|conf|ini|env|patch|diff";
+// A file with a known extension (optionally :line[:col]), or an absolute / ~ path of 2+ parts.
+const PATH_BODY =
+  "(?:~|\\.{1,2})?\\/?(?:[\\w.@+-]+\\/)*[\\w@+-][\\w.@+-]*\\.(?:" + FILE_EXT + ")(?![\\w])(?::\\d+(?::\\d+)?)?" +
+  "|(?:~|\\/)(?:[\\w.@+-]+\\/)+[\\w.@+-]*";
+const PATH_RE = new RegExp("(^|[\\s(（\\[\"'“‘:：,，])(" + PATH_BODY + ")", "g");
+const PATH_WHOLE = new RegExp("^(?:" + PATH_BODY + ")$");
+const URL_RE = /\bhttps?:\/\/[^\s<>"'）)\]]+/g;
+const looksLikePath = (s) => PATH_WHOLE.test(s.trim());
+
+function inline(text) {
+  const keep = [];
+  const hold = (html) => `\u0000${keep.push(html) - 1}\u0000`;
+  let s = String(text);
+  // inline code first; a path inside backticks is still clickable
+  s = s.replace(/`([^`\n]+)`/g, (_, c) => hold(looksLikePath(c)
+    ? `<code><a href="#" data-action="link" data-path="${esc(c.trim())}">${esc(c)}</a></code>`
+    : `<code>${esc(c)}</code>`));
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) =>
+    hold(`<a href="#" data-action="link" data-url="${esc(u)}">${esc(t)}</a>`));
+  s = s.replace(URL_RE, (u) => {
+    const trail = (u.match(/[.,;:!?]+$/) || [""])[0];
+    const url = trail ? u.slice(0, -trail.length) : u;
+    return hold(`<a href="#" data-action="link" data-url="${esc(url)}">${esc(url)}</a>`) + trail;
+  });
+  s = s.replace(PATH_RE, (all, pre, p) => {
+    const trail = (p.match(/[.,;:!?]+$/) || [""])[0];
+    const path = trail ? p.slice(0, -trail.length) : p;
+    if (!path || path === "/" || /^\.+$/.test(path)) return all;
+    return pre + hold(`<a href="#" class="path" data-action="link" data-path="${esc(path)}">${esc(path)}</a>`) + trail;
+  });
+  s = esc(s).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => keep[Number(i)]);
+}
+
+function markdown(text) {
+  const out = [];
+  const parts = String(text).split(/^```/m);
+  parts.forEach((part, idx) => {
+    if (idx % 2 === 1) {                       // fenced code: drop the language tag line
+      const nl = part.indexOf("\n");
+      const code = nl >= 0 && !/\s/.test(part.slice(0, nl).trim()) ? part.slice(nl + 1) : part;
+      out.push(`<pre><code>${esc(code.replace(/\n$/, ""))}</code></pre>`);
+      return;
+    }
+    let list = null, para = [];
+    const flushPara = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
+    const flushList = () => { if (list) { out.push(`<${list.tag}>${list.items.join("")}</${list.tag}>`); list = null; } };
+    for (const raw of part.split("\n")) {
+      const line = raw.replace(/\s+$/, "");
+      let m;
+      if (!line.trim()) { flushPara(); flushList(); continue; }
+      if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flushPara(); flushList(); out.push(`<h4>${inline(m[2])}</h4>`); continue; }
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        flushPara(); flushList();
+        if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) continue;  // separator row
+        const cells = line.trim().slice(1, -1).split("|").map((c) => `<td>${inline(c.trim())}</td>`).join("");
+        const last = out[out.length - 1];
+        if (last && last.startsWith("<table>")) out[out.length - 1] = last.replace("</table>", `<tr>${cells}</tr></table>`);
+        else out.push(`<table><tr>${cells}</tr></table>`);
+        continue;
+      }
+      if ((m = line.match(/^(\s*)([-*]|\d+[.)])\s+(.*)$/))) {
+        flushPara();
+        const tag = /\d/.test(m[2]) ? "ol" : "ul";
+        if (!list || list.tag !== tag) { flushList(); list = { tag, items: [] }; }
+        const box = m[3].match(/^\[([ xX-])\]\s+(.*)$/);   // task-list items
+        const body = box ? `<span class="tick">${{ " ": "☐", x: "☑", X: "☑", "-": "⊟" }[box[1]]}</span> ${inline(box[2])}` : inline(m[3]);
+        list.items.push(`<li${m[1].length >= 2 ? ' class="sub"' : ""}${box ? ' class="task-li"' : ""}>${body}</li>`);
+        continue;
+      }
+      if ((m = line.match(/^>\s?(.*)$/))) { flushPara(); flushList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
+      flushList();
+      para.push(line);
+    }
+    flushPara(); flushList();
+  });
+  return out.join("");
+}
+
 // ------------------------------------------------------------------ actions
 async function send(sid) {
   const key = "msg:" + sid;
@@ -401,10 +681,31 @@ document.addEventListener("click", async (ev) => {
     case "resolve": {
       const note = ui.drafts["note:" + d.id] || "";
       delete ui.drafts["note:" + d.id];
-      return act("resolve", { id: d.id, resolution: d.res, note }, `${d.id} → ${d.res}`);
+      try {
+        await api("resolve", { id: d.id, resolution: d.res, note });
+        toast(`${d.id} → ${d.res}`, false, async () => {
+          ui.drafts["note:" + d.id] = note;
+          await act("reopen", { id: d.id }, `${d.id} reopened`);
+        });
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
     }
-    case "todo": return act("todo", { task: d.task, index: Number(d.i), state: d.state });
-    case "clear-waiting": return act("set", { task: d.task, fields: ["waiting_on_me="] }, "Cleared");
+    case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
+    case "undo-todo": return undoTodo(d.task, Number(d.i));
+    case "undo-toast": {
+      const fn = ui.undoFn;
+      ui.undoFn = null;
+      $("#toast").hidden = true;
+      return fn && fn();
+    }
+    case "clear-waiting": {
+      const prev = (taskById(d.task) || {}).waiting_on_me || "";
+      try {
+        await api("set", { task: d.task, fields: ["waiting_on_me="] });
+        toast("Marked handled", false, () => act("set", { task: d.task, fields: [`waiting_on_me=${prev}`] }, "Undone"));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
     case "expand":
       ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
       return render();
@@ -421,12 +722,47 @@ document.addEventListener("click", async (ev) => {
     case "unbind": return act("unbind", { session: d.session }, "Unbound");
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
-    case "peek":
-      if (ui.peekOpen.has(d.session)) { ui.peekOpen.delete(d.session); return render(); }
-      ui.peekOpen.add(d.session);
+    case "peek": return openPeek(d.session);
+    case "toggle-msg": {
+      if (ui.msgOpen.has(d.session)) { ui.msgOpen.delete(d.session); delete ui.drafts["msg:" + d.session]; return render(); }
+      ui.msgOpen.add(d.session);
       render();
-      try { ui.peeks[d.session] = await apiJSON("peek", { session: d.session }); } catch (e) { toast(String(e.message || e), true); }
-      return render();
+      const ta = document.querySelector(`textarea[data-key="msg:${CSS.escape(d.session)}"]`);
+      if (ta) ta.focus();
+      return;
+    }
+    case "ctx": return openContext(d.kind, { task: d.task, id: d.id, i: Number(d.i) });
+    case "ctx-peek": return openPeek(d.session, ui.modal);
+    case "modal-back": {
+      const back = ui.modal && ui.modal.back;
+      if (!back) return closePeek();
+      ui.modal = back;
+      return back.type === "context" ? drawContext() : drawPeek(true);
+    }
+    case "ctx-goto": {
+      closePeek();
+      const t = taskById(d.task);
+      if (t && !isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
+      ui.expanded.add(d.task);
+      render();
+      const node = document.getElementById("task-" + d.task);
+      if (node) node.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    case "close-modal": return closePeek();
+    case "copy-msg": {
+      const m = ui.modal && ui.modal.msgs[Number(d.i)];
+      if (m) await copyText(m.text, "Message copied");
+      return;
+    }
+    case "copy-all":
+      if (ui.modal) await copyText(ui.modal.msgs.map((m) => `${m.role === "user" ? "You" : "Claude"}:\n${m.text}`).join("\n\n"), "Conversation copied");
+      return;
+    case "link":
+      ev.preventDefault();
+      if (d.url) return act2("openURL", { url: d.url });
+      if (d.path) return act2("openPath", { path: d.path, cwd: (ui.modal && ui.modal.cwd) || "" });
+      return;
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
     case "cat-remove": {
@@ -483,6 +819,10 @@ document.addEventListener("input", (ev) => {
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
+  if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
+  if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
+    ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
+  }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
   if (el.tagName === "TEXTAREA" && el.dataset.session && !ev.shiftKey) { ev.preventDefault(); return send(el.dataset.session); }
   if (el.dataset.field) { ev.preventDefault(); el.blur(); return; }
