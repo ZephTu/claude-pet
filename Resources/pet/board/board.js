@@ -408,17 +408,21 @@ function renderTask(t, mode) {
   const live = liveFor(t.id).length;
   const open = ui.expanded.has(t.id);
   const mine = t.waiting_on_me || (t.todos.find((x) => x.state === "open" && x.owner === "me") || {}).text;
-  const sub = mine && isOpen(t) ? `<div class="tsub waiting" title="Waiting on you">⮑ ${esc(mine)}</div>`
-    : (t.next && isOpen(t) ? `<div class="tsub">⮑ ${esc(t.next)}</div>` : "");
+  // Row 1: id · title (one line) · badges. Row 2: the subtitle across the full width, two lines max.
+  const subText = mine && isOpen(t) ? mine : (t.next && isOpen(t) ? t.next : "");
+  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? "Waiting on you: " : "Next: ") + subText)}">⮑ ${esc(subText)}</div>` : "";
   return `<div class="task" id="task-${esc(t.id)}">
     <div class="task-head" data-action="expand" data-task="${esc(t.id)}">
       <span class="tid">${esc(t.id)}</span>
-      <div class="ttitle">${esc(t.title)}${sub}</div>
-      ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
-      ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
-      ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
-        : t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
-      <span class="meta">${esc(t.category || "")} · ${t.age_days ?? "?"}d</span>
+      <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
+      <div class="tright">
+        ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
+        ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
+        ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
+          : t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
+        <span class="meta">${esc(t.category || "")} · ${t.age_days ?? "?"}d</span>
+      </div>
+      ${sub}
     </div>
     ${open ? renderTaskBody(t) : ""}
   </div>`;
