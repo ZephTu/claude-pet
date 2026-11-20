@@ -7,13 +7,16 @@
 
 const JT = {
   en: {
-    tab: "Scheduled", loading: "Loading…", newJob: "+ New job",
-    count: "{n} jobs", on: "{n} on", runningN: "{n} running", failingN: "{n} failing",
+    tab: "Scheduled", loading: "Loading…", newJob: "New job",
+    count: "{n} jobs", count1: "1 job", on: "{n} on", runningN: "{n} running", failingN: "{n} failing",
     intro: "Jobs made here run on schedule even when the pet is closed. A run missed while the Mac slept runs once when it wakes.",
     noRunner: "Claude Pet's runner (~/.claude/pet/pet-emit) is missing, so jobs can't run. Reinstall Claude Pet.",
-    empty: "No scheduled jobs yet. A job runs a Claude prompt or a shell command on a timetable — a morning summary of last night's CI, a reminder to look at your PRs, a cleanup every Sunday.",
+    empty: "No scheduled jobs yet. A job runs a Claude prompt or a shell command on a timetable — start from one of these:",
+    tpl1: "Summarise last night's CI every morning", tpl1P: "Summarise last night's failed CI jobs and list the three things I should look at today",
+    tpl2: "Check my PRs for new comments every hour", tpl2P: "Look at my open PRs for new review comments and list them, if there are any",
+    tpl3: "Clear caches once a week",
     claude: "Claude", shell: "Shell",
-    next: "Next", never: "not run yet", paused: "off", runningFor: "running · {d}",
+    next: "Next", never: "not run yet", paused: "Paused", runningFor: "running · {d}", lastRun: "Last",
     runNow: "Run now", stop: "Stop", edit: "Edit", del: "Delete", delSure: "Delete?",
     toggleOn: "Switch on", toggleOff: "Switch off", history: "Runs (newest first)",
     hStart: "Started", hResult: "Result", hTook: "Took", hCost: "Cost", hSummary: "Summary",
@@ -24,38 +27,41 @@ const JT = {
     today: "today", tomorrow: "tomorrow", yesterday: "yesterday",
     days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
     sec: "{n}s", minSec: "{m}m {s}s", hourMin: "{h}h {m}m",
-    every: "Every {n} min", everyH: "Every {n} h", daily: "Daily {t}", weekdaysAt: "Weekdays {t}", weeklyAt: "{d} {t}",
+    every: "Every {n} min", everyH: "Every {n} h", hourly: "Every hour", daily: "Daily {t}", weekdaysAt: "Weekdays {t}", weeklyAt: "{d} {t}",
     cronAt: "cron {c}", daySep: ", ",
-    // form
-    newTitle: "New scheduled job", editTitle: "Edit job", kindQ: "What it runs",
+    // form: a question on the left, its answer on the right
+    newTitle: "New scheduled job", editTitle: "Edit job",
+    q_what: "What", q_where: "Where", q_whereS: "It starts in this folder and reads its CLAUDE.md",
+    q_can: "What it may do", q_canS: "Nobody is there to click Allow", q_tell: "Tell me", q_more: "More", q_moreS: "Usually fine as it is",
     kindClaude: "Claude prompt", kindClaudeD: "One claude -p turn in the background; it can use your skills and MCP tools.",
     kindShell: "Shell command", kindShellD: "A command or script; its exit code and output are kept.",
-    name: "Name", namePh: "Morning CI summary", cwd: "Folder (it starts here and reads this folder's CLAUDE.md)", choose: "Choose…",
-    prompt: "Prompt (sent as written, every run)",
+    name: "Name", namePh: "Morning CI summary", cwd: "Folder", choose: "Choose…",
+    prompt: "Prompt",
     promptPh: "/my-skill summarise last night's failed CI jobs and list the three things I should look at today",
-    promptHelp: "As in the terminal: start with /skill-name to use a skill, or just describe the work and Claude picks one. Your MCP servers, plugins and hooks load as usual.",
-    command: "Command (runs in your login shell, with the PATH your terminal has)", model: "Model", modelDefault: "Default",
-    perm: "Permissions — nobody is there to click Allow, so decide now",
-    p_standard: "Standard", p_standardD: "Only what your Claude Code settings already allow; anything else is refused and noted in the run.",
-    p_edits: "Edit files", p_editsD: "May also edit files in the folder; other requests are still refused.",
+    promptHelp: "Sent as written, every run. As in the terminal: start with /skill-name to use a skill, or just describe the work and Claude picks one. Your MCP servers, plugins and hooks load as usual.",
+    cmdLbl: "Command", cmdPh: "./scripts/nightly.sh", command: "Runs in your login shell, with the PATH your terminal has.",
+    modelDefault: "the default model",
+    p_standard: "Only what's allowed", p_standardD: "Only what your Claude Code settings already allow; anything else is refused and noted in the run.",
+    p_edits: "Also edit files", p_editsD: "May also edit files in the folder; other requests are still refused.",
     p_all: "Everything", p_allD: "Skips every permission check. Only for prompts you fully trust.",
-    session: "Session",
-    s_fresh: "New session every run", s_freshD: "Clean and cheap; runs don't see each other.",
-    s_resume: "Same session every run", s_resumeD: "Each run continues the last one — for work that needs to remember, like \"what's new since last time\".",
-    keep: "Keep the newest", keepTail: "runs' sessions on disk (older ones are deleted; 1 = only the latest)",
-    compact: "Compact the session first when its context is", compactTail: "% full (0 = never)",
-    limit: "Time limit", minutes: "minutes",
+    m_model: "Use {model}, and stop it after {limit} minutes.", m_limit: "Stop it after {limit} minutes.",
+    m_quota: "Skip the run when the weekly quota is at {w}% or the 5-hour quota at {f}% (0 = don't check).",
     quotaQ: "Quota guard — before each run, look at your subscription's limits and skip the run if too much is used, leaving the rest for your own work",
-    quotaWeek: "Skip when the weekly quota is at", quotaOr: "% or the 5-hour quota at", quotaTail: "% (0 = don't check)",
     quotaNow: "Now: week {w} · 5-hour {f}", quotaUnknown: "Now: not known yet — the pet's statusline reading or a first run will tell",
-    usageCol: "Quota used", weekUp: "week +{n}%", fiveUp: "5h +{n}%", under1: "<1% of the week",
+    m_fresh: "Each run {mode}, and the newest {n} runs' sessions are kept on disk (1 = only the latest).",
+    m_resume: "Each run {mode}, compacted first when its context is {n}% full (0 = never).",
+    s_fresh: "starts a new session", s_freshD: "Clean and cheap; runs don't see each other.",
+    s_resume: "continues the same session", s_resumeD: "Each run continues the last one — for work that needs to remember, like \"what's new since last time\".",
+    usageCol: "Quota used", usageLbl: "Last run used", weekUp: "week +{n}%", fiveUp: "5h +{n}%", under1: "<1% of the week",
     ctxNow: "session context {n}%",
     skipWeek: "Skipped — weekly quota at {p}% (limit {l}%)", skipFive: "Skipped — 5-hour quota at {p}% (limit {l}%)",
     skipBusy: "Skipped — the previous run was still going",
-    when: "When it runs", pr_every: "Every N minutes", pr_daily: "Daily", pr_weekdays: "Weekdays", pr_weekly: "Some days", pr_cron: "Cron",
-    everyLbl: "Every", minutesLbl: "minutes", at: "at", cronHelp: "minute hour day month weekday",
-    nextThree: "Next: {list}", slept: "Missed while the Mac slept? It runs once when it wakes.",
-    notify: "The pet tells you", n_failure: "when it fails", n_always: "after every run", n_never: "never",
+    when: "When it runs",
+    f_weekdays: "every weekday", f_daily: "every day", f_weekly: "on some days", f_hourly: "every hour", f_every: "every few minutes", f_cron: "by cron",
+    w_at: "Run {freq} at {time}", w_days: "Run {freq} {days} at {time}", w_hourly: "Run {freq}", w_every: "Run {freq}: every {n} minutes",
+    w_cron: "Run {freq} {cron}", cronHelp: "minute hour day month weekday",
+    nextThree: "Next:", slept: "Missed while the Mac slept? It runs once when it wakes.",
+    n_failure: "when it fails", n_always: "after every run", n_never: "never",
     enabled: "On", cancel: "Cancel", save: "Save", saveRun: "Save and run now", saved: "Saved", deleted: "Deleted",
     started: "Started", stopping: "Stopping…",
     // run detail
@@ -65,13 +71,16 @@ const JT = {
     convoTip: "Read this run's conversation",
   },
   zh: {
-    tab: "定时任务", loading: "加载中…", newJob: "+ 新建定时任务",
-    count: "{n} 个任务", on: "{n} 个开着", runningN: "{n} 个在跑", failingN: "{n} 个最近失败",
+    tab: "定时任务", loading: "加载中…", newJob: "新建定时任务",
+    count: "{n} 个", on: "{n} 个开着", runningN: "{n} 个在跑", failingN: "{n} 个最近失败",
     intro: "在这里建的任务按时运行，猫关着也照跑。Mac 睡着时错过的那次，醒来后补跑一次。",
     noRunner: "找不到 Claude Pet 的执行程序（~/.claude/pet/pet-emit），任务跑不起来。请重新安装 Claude Pet。",
-    empty: "还没有定时任务。定时任务按时间表跑一段 Claude prompt 或一条 Shell 命令——比如每天早上汇总昨晚的 CI、每小时看看 PR 有没有新评论、每周日清一次缓存。",
+    empty: "还没有定时任务。定时任务按时间表跑一段 Claude prompt 或一条 Shell 命令——从一个模板开始：",
+    tpl1: "每天早上汇总昨晚的 CI", tpl1P: "汇总昨晚失败的 CI job，列出今天要我看的 3 件事",
+    tpl2: "每小时看 PR 有没有新评论", tpl2P: "看看我开着的 PR 有没有新评论，有就列出来",
+    tpl3: "每周清一次缓存",
     claude: "Claude", shell: "Shell",
-    next: "下次", never: "还没跑过", paused: "已关闭", runningFor: "运行中 · {d}",
+    next: "下次", never: "还没跑过", paused: "已暂停", runningFor: "运行中 · {d}", lastRun: "上次",
     runNow: "立即运行", stop: "停止", edit: "编辑", del: "删除", delSure: "确定删除？",
     toggleOn: "打开", toggleOff: "关闭", history: "运行历史（新的在上）",
     hStart: "开始", hResult: "结果", hTook: "耗时", hCost: "花费", hSummary: "摘要",
@@ -82,38 +91,41 @@ const JT = {
     today: "今天", tomorrow: "明天", yesterday: "昨天",
     days: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
     sec: "{n} 秒", minSec: "{m} 分 {s} 秒", hourMin: "{h} 小时 {m} 分",
-    every: "每 {n} 分钟", everyH: "每 {n} 小时", daily: "每天 {t}", weekdaysAt: "工作日 {t}", weeklyAt: "每{d} {t}",
+    every: "每 {n} 分钟", everyH: "每 {n} 小时", hourly: "每小时", daily: "每天 {t}", weekdaysAt: "每个工作日 {t}", weeklyAt: "每{d} {t}",
     cronAt: "cron {c}", daySep: "、",
-    newTitle: "新建定时任务", editTitle: "编辑定时任务", kindQ: "要定时做的事",
+    newTitle: "新建定时任务", editTitle: "编辑定时任务",
+    q_what: "做什么", q_where: "在哪跑", q_whereS: "从这里启动，会读这里的 CLAUDE.md",
+    q_can: "能做什么", q_canS: "跑的时候没人点「允许」", q_tell: "跑完告诉我", q_more: "更多", q_moreS: "一般不用动",
     kindClaude: "Claude prompt", kindClaudeD: "在后台用 claude -p 跑一轮，可以用你的技能和 MCP 工具。",
     kindShell: "Shell 命令", kindShellD: "跑一条命令或脚本，记下退出码和输出。",
-    name: "名称", namePh: "早报：昨晚 CI 失败汇总", cwd: "工作目录（从这里启动，会读这里的 CLAUDE.md）", choose: "选择…",
-    prompt: "Prompt（每次运行时原样发给 Claude）",
+    name: "名称", namePh: "早报：昨晚 CI 失败汇总", cwd: "工作目录", choose: "选择…",
+    prompt: "Prompt",
     promptPh: "/my-skill 汇总昨晚失败的 CI job，列出今天要我看的 3 件事",
-    promptHelp: "和在终端里一样：开头写 /技能名 就调用那个技能；不写也行，Claude 会按描述自己挑。你的 MCP 服务器、插件、hooks 照常加载。",
-    command: "命令（用你的登录 shell 跑，PATH 和终端里一样）", model: "模型", modelDefault: "默认",
-    perm: "权限——跑的时候没人点「允许」，所以先说好能做什么",
-    p_standard: "标准", p_standardD: "只用你在 Claude Code 设置里已经允许的；其他操作一律拒绝，并记在运行结果里。",
-    p_edits: "允许改文件", p_editsD: "还可以改工作目录里的文件；其他需要批准的仍然拒绝。",
+    promptHelp: "每次运行时原样发给 Claude。和在终端里一样：开头写 /技能名 就调用那个技能；不写也行，Claude 会按描述自己挑。你的 MCP 服务器、插件、hooks 照常加载。",
+    cmdLbl: "命令", cmdPh: "./scripts/nightly.sh", command: "用你的登录 shell 跑，PATH 和终端里一样。",
+    modelDefault: "默认模型",
+    p_standard: "只用已允许的", p_standardD: "只用你在 Claude Code 设置里已经允许的；其他操作一律拒绝，并记在运行结果里。",
+    p_edits: "还能改文件", p_editsD: "还可以改工作目录里的文件；其他需要批准的仍然拒绝。",
     p_all: "全部允许", p_allD: "跳过所有权限检查。只给你完全信任的 prompt 用。",
-    session: "Session",
-    s_fresh: "每次新开一个 session", s_freshD: "干净、便宜，每次互不影响。",
-    s_resume: "每次接着同一个 session", s_resumeD: "每次接着上一次往下聊——适合需要记住上次的任务，比如「跟上次比有什么新的」。",
-    keep: "保留最近", keepTail: "次运行的 session（更早的删掉；填 1 就只留最新一次）",
-    compact: "上下文用到", compactTail: "% 时先压缩（0 = 不压缩）",
-    limit: "单次最长", minutes: "分钟",
+    m_model: "用 {model}，单次最长 {limit} 分钟。", m_limit: "单次最长 {limit} 分钟。",
+    m_quota: "周额度用到 {w}% 或 5 小时额度用到 {f}% 时跳过这次（0 = 不检查）。",
     quotaQ: "额度保护——每次跑之前看一眼订阅额度，用得太多就跳过这次，把剩下的留给你自己用",
-    quotaWeek: "周额度用到", quotaOr: "% 或 5 小时额度用到", quotaTail: "% 时跳过（0 = 不检查）",
     quotaNow: "现在：周 {w} · 5 小时 {f}", quotaUnknown: "现在：还不知道——等猫从状态栏读到额度，或者任务跑过一次就有了",
-    usageCol: "用掉的额度", weekUp: "周 +{n}%", fiveUp: "5 小时 +{n}%", under1: "不到周额度的 1%",
+    m_fresh: "每次 {mode}，保留最近 {n} 次运行的 session（填 1 就只留最新一次）。",
+    m_resume: "每次 {mode}，上下文用到 {n}% 时先压缩（0 = 不压缩）。",
+    s_fresh: "开新 session", s_freshD: "干净、便宜，每次互不影响。",
+    s_resume: "接着同一个 session", s_resumeD: "每次接着上一次往下聊——适合需要记住上次的任务，比如「跟上次比有什么新的」。",
+    usageCol: "用掉的额度", usageLbl: "上次用了", weekUp: "周 +{n}%", fiveUp: "5 小时 +{n}%", under1: "不到周额度的 1%",
     ctxNow: "session 上下文 {n}%",
     skipWeek: "跳过——周额度已用 {p}%（上限 {l}%）", skipFive: "跳过——5 小时额度已用 {p}%（上限 {l}%）",
     skipBusy: "跳过——上一次还没跑完",
-    when: "什么时候跑", pr_every: "每隔 N 分钟", pr_daily: "每天", pr_weekdays: "工作日", pr_weekly: "每周几", pr_cron: "cron 表达式",
-    everyLbl: "每", minutesLbl: "分钟", at: "时间", cronHelp: "分 时 日 月 周",
-    nextThree: "接下来：{list}", slept: "Mac 睡着时错过的那次，醒来后补跑一次。",
-    notify: "猫什么时候提醒你", n_failure: "失败时", n_always: "每次跑完", n_never: "不提醒",
-    enabled: "打开", cancel: "取消", save: "保存", saveRun: "保存并立即运行", saved: "已保存", deleted: "已删除",
+    when: "什么时候跑",
+    f_weekdays: "每个工作日", f_daily: "每天", f_weekly: "每周", f_hourly: "每小时", f_every: "每隔几分钟", f_cron: "按 cron 表达式",
+    w_at: "{freq} 的 {time} 跑一次", w_days: "{freq} {days} 的 {time} 跑一次", w_hourly: "{freq} 跑一次", w_every: "{freq}：每 {n} 分钟跑一次",
+    w_cron: "{freq} {cron}", cronHelp: "分 时 日 月 周",
+    nextThree: "接下来：", slept: "Mac 睡着时错过的那次，醒来后补跑一次。",
+    n_failure: "失败时", n_always: "每次跑完", n_never: "不提醒",
+    enabled: "开着", cancel: "取消", save: "保存", saveRun: "保存并立即跑一次", saved: "已保存", deleted: "已删除",
     started: "已开始", stopping: "正在停止…",
     input: "输入", output: "输出", reply: "Claude 的回复", steps: "过程（{n} 步）", log: "日志",
     noReply: "没有回复——看看日志。", tool: "工具", refusedTool: "被拒绝", copyReply: "复制回复", copied: "已复制",
@@ -135,7 +147,8 @@ function jt(key, vars) {
   return s;
 }
 
-const jui = { data: null, open: null, form: null, preview: null, previewTimer: null, armed: null, error: "" };
+// freq: the schedule menu's choice in the form; "hourly" is an every-60-minutes schedule.
+const jui = { data: null, open: null, form: null, freq: null, preview: null, previewTimer: null, armed: null, error: "" };
 
 // ------------------------------------------------------------------ data
 // Called by board.js's refresh while this view is showing; returns a signature of what it read.
@@ -180,7 +193,9 @@ function scheduleText(s) {
   if (!s) return "";
   const t = `${pad2(s.hour ?? 9)}:${pad2(s.minute ?? 0)}`;
   switch (s.kind) {
-    case "every": return s.everyMinutes % 60 === 0 && s.everyMinutes >= 60 ? jt("everyH", { n: s.everyMinutes / 60 }) : jt("every", { n: s.everyMinutes });
+    case "every":
+      if (s.everyMinutes === 60) return jt("hourly");
+      return s.everyMinutes % 60 === 0 && s.everyMinutes >= 60 ? jt("everyH", { n: s.everyMinutes / 60 }) : jt("every", { n: s.everyMinutes });
     case "daily": return jt("daily", { t });
     case "weekdays": return jt("weekdaysAt", { t });
     case "weekly": {
@@ -202,7 +217,8 @@ function statusText(r) {
   return s;
 }
 const statusClass = (r) => !r ? "none" : r.status === "running" ? "run" : isFail(r) ? "fail" : r.status === "ok" && r.denials ? "warn" : r.status === "ok" ? "ok" : "muted";
-const tookText = (r) => r.status === "skipped" ? "—" : r.ended ? jdur((new Date(r.ended) - new Date(r.started)) / 1000) : r.status === "running" ? jdur((Date.now() - new Date(r.started)) / 1000) : "—";
+const runSeconds = (r) => r.ended ? (new Date(r.ended) - new Date(r.started)) / 1000 : r.status === "running" ? (Date.now() - new Date(r.started)) / 1000 : null;
+const tookText = (r) => { const s = r.status === "skipped" ? null : runSeconds(r); return s == null ? "—" : jdur(s); };
 // What a run used of the subscription: the change in its quota between the run's first and last
 // rate-limit reports. The dollar figure (API list price) is only a tooltip — subscribers don't pay it.
 function usageText(r) {
@@ -227,29 +243,45 @@ function summaryText(r) {
 const quotaNowText = (q) => (q && (q.week != null || q.fiveHour != null))
   ? jt("quotaNow", { w: q.week != null ? q.week + "%" : "?", f: q.fiveHour != null ? q.fiveHour + "%" : "?" }) : jt("quotaUnknown");
 const costText = (r) => (r.costUSD != null ? "$" + r.costUSD.toFixed(r.costUSD < 0.1 ? 3 : 2) : "—");
+const langSeg = () => `<span class="seg jlang" role="group" aria-label="Language">${[["en", "EN"], ["zh", "中文"]].map(([l, label]) =>
+  `<button class="${jlang() === l ? "on" : ""}" aria-pressed="${jlang() === l}" data-jaction="lang" data-lang="${l}">${label}</button>`).join("")}</span>`;
+
+// The empty page's starting points: each opens the form filled in.
+function jobTemplates() {
+  const base = JOB_DEFAULTS();
+  return [
+    { ...base, name: jt("tpl1"), kind: "claude", prompt: jt("tpl1P"), schedule: { ...base.schedule, kind: "weekdays", hour: 9, minute: 0 } },
+    { ...base, name: jt("tpl2"), kind: "claude", prompt: jt("tpl2P"), schedule: { ...base.schedule, kind: "every", everyMinutes: 60 } },
+    { ...base, name: jt("tpl3"), kind: "shell", command: "find ~/Library/Caches -type f -atime +30 -delete",
+      schedule: { ...base.schedule, kind: "weekly", days: [7], hour: 3, minute: 0 } },
+  ];
+}
 
 // ------------------------------------------------------------------ the view
 function renderJobsView() {
   const d = jui.data;
   const top = $("#jobs-top");
   const box = $("#jobs-list");
+  // The form is a page of its own: while it is open, the list steps aside.
+  top.hidden = box.hidden = Boolean(jui.form);
   if (!d) { top.innerHTML = ""; box.innerHTML = `<div class="empty">${jt("loading")}</div>`; return; }
   const jobs = d.jobs || [];
   const nOn = jobs.filter((j) => j.enabled).length;
   const nRun = jobs.filter((j) => j.running).length;
   const nFail = jobs.filter((j) => isFail(lastReal(j))).length;
-  top.innerHTML = `<div class="jobs-bar">
-      <span class="jcounts"><b>${jt("count", { n: jobs.length })}</b> · ${jt("on", { n: nOn })}${nRun ? ` · <span class="jrun">${jt("runningN", { n: nRun })}</span>` : ""}${nFail ? ` · <span class="jfail">${jt("failingN", { n: nFail })}</span>` : ""}</span>
+  top.innerHTML = `<div class="jhead">
+      <h1>${jt("tab")}</h1>
+      <span class="jsub">${jobs.length ? `${jt("count", { n: jobs.length })} · ${jt("on", { n: nOn })}${nRun ? ` · <span class="jrun">${jt("runningN", { n: nRun })}</span>` : ""}${nFail ? ` · <span class="jfail">${jt("failingN", { n: nFail })}</span>` : ""}` : ""}</span>
       <span class="spacer"></span>
-      <span class="seg" role="group" aria-label="Language">
-        <button class="${jlang() === "en" ? "on" : ""}" data-jaction="lang" data-lang="en">EN</button><button class="${jlang() === "zh" ? "on" : ""}" data-jaction="lang" data-lang="zh">中文</button>
-      </span>
+      ${langSeg()}
       <button class="btn primary" data-jaction="new">${jt("newJob")}</button>
     </div>
-    <div class="meta jintro">${jt("intro")}</div>
+    <p class="jintro">${jt("intro")}</p>
     ${d.runner === false ? `<div class="jwarn">${jt("noRunner")}</div>` : ""}
     ${jui.error ? `<div class="jwarn">${esc(jui.error)}</div>` : ""}`;
-  box.innerHTML = !jobs.length ? (jui.form ? "" : `<div class="card jempty">${jt("empty")}</div>`) : jobs.map(jobCard).join("");
+  box.innerHTML = jobs.length ? jobs.map(jobRow).join("") : `<div class="jempty"><p>${jt("empty")}</p>
+    <div class="jstarter">${jobTemplates().map((t, i) => `<button data-jaction="tpl" data-i="${i}"><b>${esc(t.name)}</b>
+      <span>${t.kind === "shell" ? jt("shell") : jt("claude")} · ${esc(scheduleText(t.schedule))}</span></button>`).join("")}</div></div>`;
   // Looking at the view is seeing its failures: the pet stops counting them.
   const seen = new Date(d.seenAt || 0).getTime();
   if (jobs.some((j) => { const r = lastReal(j); return isFail(r) && new Date(r.ended || 0).getTime() > seen; })
@@ -259,39 +291,49 @@ function renderJobsView() {
   }
 }
 
-function jobCard(j) {
+// The last runs as small bars, oldest on the left: a failure is full height, a success as tall
+// as it was long next to the others, a skipped or stopped run a stub.
+function runBars(runs) {
+  const shown = runs.slice(0, 12).reverse();
+  const longest = Math.max(1, ...shown.map((r) => (r.status === "ok" ? runSeconds(r) || 0 : 0)));
+  return shown.map((r) => {
+    const c = statusClass(r);
+    const h = c === "fail" ? 100 : c === "ok" || c === "warn" ? 35 + Math.round(55 * (runSeconds(r) || 0) / longest) : c === "run" ? 70 : 30;
+    return `<i class="${c}" style="height:${h}%" title="${esc(jwhen(r.started) + " · " + statusText(r) + (r.status === "skipped" ? "" : " · " + tookText(r)))}"></i>`;
+  }).join("");
+}
+
+function jobRow(j) {
   const runs = j.runs || [];
   const running = runs[0] && runs[0].status === "running" ? runs[0] : null;
   const last = lastReal(j);
-  const dot = !j.enabled ? "off" : running ? "run" : isFail(last) ? "fail" : last ? "ok" : "none";
-  const squares = runs.slice(0, 12).reverse();
-  while (squares.length < 12) squares.unshift(null);
+  const failed = isFail(last) && !running;
   const lastLine = running ? jt("runningFor", { d: tookText(running) })
-    : last ? `${jwhen(last.started)} · ${statusText(last)} · ${tookText(last)}${j.kind === "claude" && (last.quotaAfter || last.costUSD != null) ? " · " + usageText(last) : ""}` : jt("never");
+    : last ? [`${jt("lastRun")} ${jwhen(last.started)}`, last.status === "ok" && !last.denials ? "" : statusText(last), tookText(last)].filter(Boolean).join(" · ")
+    : jt("never");
   const open = jui.open === j.id;
   const armed = jui.armed === "del:" + j.id;
-  const kind = j.kind === "shell" ? jt("shell") : jt("claude");
-  return `<section class="card job ${j.enabled ? "" : "disabled"}">
-    <div class="jrow">
-      <button class="jname" data-jaction="expand" data-id="${esc(j.id)}" aria-expanded="${open}">
-        <span class="jdot ${dot}"></span>
-        <span class="jtitle"><span class="stitle">${esc(j.name)}</span> <span class="chip">${kind}</span>
-          <span class="meta">${esc(scheduleText(j.schedule))} · ${esc(j.cwd || "~")}${j.contextPct != null ? " · " + esc(jt("ctxNow", { n: j.contextPct })) : ""}</span></span>
-      </button>
-      <div class="jlast">
-        <div class="jsquares" aria-label="recent runs">${squares.map((r) => `<span class="sq ${statusClass(r)}" title="${r ? esc(jwhen(r.started) + " · " + statusText(r)) : ""}"></span>`).join("")}</div>
-        <div class="meta ${isFail(last) && !running ? "jfail" : ""}">${esc(lastLine)}</div>
-      </div>
-      <div class="jnext"><div class="meta">${jt("next")}</div><div>${j.enabled ? esc(j.next && j.next[0] ? jwhen(j.next[0]) : "—") : jt("paused")}</div></div>
-      <div class="jbtns">
-        <button class="switch ${j.enabled ? "on" : ""}" role="switch" aria-checked="${j.enabled}" data-jaction="toggle" data-id="${esc(j.id)}" title="${j.enabled ? jt("toggleOff") : jt("toggleOn")}"><span></span></button>
-        ${running ? `<button class="btn small danger" data-jaction="stop" data-id="${esc(j.id)}">${jt("stop")}</button>`
-                  : `<button class="btn small" data-jaction="run" data-id="${esc(j.id)}">${jt("runNow")}</button>`}
-        <button class="btn small ghost" data-jaction="edit" data-id="${esc(j.id)}">${jt("edit")}</button>
-        <button class="btn small ghost ${armed ? "armed" : ""}" data-jaction="delete" data-id="${esc(j.id)}">${armed ? jt("delSure") : jt("del")}</button>
-      </div>
+  const what = (j.kind === "shell" ? j.command : j.prompt) || "";
+  const usage = j.kind === "claude" && last && (last.quotaAfter || last.costUSD != null) ? usageText(last) : "";
+  return `<section class="job ${j.enabled ? "" : "off"} ${open ? "open" : ""}">
+    <button class="jname" data-jaction="expand" data-id="${esc(j.id)}" aria-expanded="${open}" title="${jt("history")}">
+      <span class="jn"><span class="jn-t">${esc(j.name)}</span><span class="jkind ${j.kind === "shell" ? "sh" : ""}">${j.kind === "shell" ? jt("shell") : jt("claude")}</span></span>
+      <span class="jd">${esc(what.replace(/\s+/g, " ").trim())}${what.trim() ? " · " : ""}${esc(j.cwd || "~")}</span>
+    </button>
+    <div class="jsched">${esc(scheduleText(j.schedule))}<small>${j.enabled ? `${jt("next")} ${esc(j.next && j.next[0] ? jwhen(j.next[0]) : "—")}` : jt("paused")}</small></div>
+    <div class="jruns-c">
+      <div class="jruns" aria-label="recent runs">${runBars(runs)}</div>
+      <div class="jruns-l ${failed ? "bad" : running ? "live" : ""}" title="${esc(lastLine)}">${esc(lastLine)}</div>
     </div>
-    ${isFail(last) && !running && last.tail ? `<div class="jalert"><div class="meta">${jt("lastLines")}</div><pre>${esc(last.tail)}</pre></div>` : ""}
+    <div class="jusage">${usage ? `${jt("usageLbl")}<b title="${last.costUSD != null ? esc(costText(last) + " (API list price)") : ""}">${esc(usage)}</b>` : ""}${j.contextPct != null ? `<span>${esc(jt("ctxNow", { n: j.contextPct }))}</span>` : ""}</div>
+    <div class="jbtns">
+      <button class="switch ${j.enabled ? "on" : ""}" role="switch" aria-checked="${j.enabled}" data-jaction="toggle" data-id="${esc(j.id)}" title="${j.enabled ? jt("toggleOff") : jt("toggleOn")}"><span></span></button>
+      ${running ? `<button class="btn small danger" data-jaction="stop" data-id="${esc(j.id)}">${jt("stop")}</button>`
+                : `<button class="btn small" data-jaction="run" data-id="${esc(j.id)}">${jt("runNow")}</button>`}
+      <button class="btn small ghost" data-jaction="edit" data-id="${esc(j.id)}">${jt("edit")}</button>
+      <button class="btn small ghost ${armed ? "armed" : ""}" data-jaction="delete" data-id="${esc(j.id)}">${armed ? jt("delSure") : jt("del")}</button>
+    </div>
+    ${failed && last.tail ? `<div class="jtail"><b>${jt("lastLines")}</b>${esc(last.tail)}</div>` : ""}
     ${open ? historyTable(j) : ""}
   </section>`;
 }
@@ -299,13 +341,13 @@ function jobCard(j) {
 function historyTable(j) {
   const runs = j.runs || [];
   if (!runs.length) return `<div class="jhist"><div class="empty">${jt("never")}</div></div>`;
-  return `<div class="jhist"><div class="meta">${jt("history")}</div><div class="jtable-wrap"><table class="jtable">
+  return `<div class="jhist"><div class="jhist-h">${jt("history")}</div><div class="jtable-wrap"><table class="jtable">
     <thead><tr><th>${jt("hStart")}</th><th>${jt("hResult")}</th><th>${jt("hTook")}</th>${j.kind === "claude" ? `<th>${jt("usageCol")}</th>` : ""}<th>${jt("hSummary")}</th><th></th></tr></thead>
     <tbody>${runs.map((r) => `<tr>
-      <td class="nowrap">${esc(jwhen(r.started))}${r.trigger === "manual" ? ` <span class="chip">${jt("manual")}</span>` : ""}</td>
+      <td class="nowrap num">${esc(jwhen(r.started))}${r.trigger === "manual" ? ` <span class="jtag">${jt("manual")}</span>` : ""}</td>
       <td class="nowrap st-${statusClass(r)}">${esc(statusText(r))}</td>
-      <td class="nowrap">${esc(tookText(r))}</td>
-      ${j.kind === "claude" ? `<td class="nowrap" title="${r.costUSD != null ? esc(costText(r) + " (API list price)") : ""}">${r.status === "skipped" ? "—" : esc(usageText(r))}</td>` : ""}
+      <td class="nowrap num">${esc(tookText(r))}</td>
+      ${j.kind === "claude" ? `<td class="nowrap num" title="${r.costUSD != null ? esc(costText(r) + " (API list price)") : ""}">${r.status === "skipped" ? "—" : esc(usageText(r))}</td>` : ""}
       <td class="jsum">${esc(summaryText(r))}</td>
       <td class="nowrap jacts">${r.status === "skipped" ? "" : `<button class="btn small ghost" data-jaction="detail" data-id="${esc(j.id)}" data-run="${esc(r.id)}">${jt("details")}</button>`}
         ${r.sessionId ? `<button class="btn small ghost" data-jaction="convo" data-id="${esc(j.id)}" data-session="${esc(r.sessionId)}" title="${jt("convoTip")}">${jt("convo")}</button>
@@ -325,16 +367,18 @@ function openJobForm(job) {
   const f = JOB_DEFAULTS();
   if (job) {
     for (const k of Object.keys(f)) if (job[k] !== undefined) f[k] = JSON.parse(JSON.stringify(job[k]));
-    f.id = job.id;
+    if (job.id) f.id = job.id;
   }
   jui.form = f;
+  jui.freq = null;
   jui.formError = "";
   jui.preview = null;
   drawJobForm();
+  renderJobsView();
   schedulePreview();
   const n = $("#jf-name");
   if (n) n.focus();
-  $("#job-form").scrollIntoView({ block: "nearest" });
+  $(".jobs-col").scrollTop = 0;
 }
 function closeJobForm() {
   jui.form = null;
@@ -343,71 +387,78 @@ function closeJobForm() {
   renderJobsView();
 }
 
-function choice(path, value, label, desc, current) {
-  const on = current === value;
-  return `<button class="jchoice ${on ? "on" : ""}" aria-pressed="${on}" data-jaction="jf-set" data-path="${path}" data-value="${esc(value)}">
-    <b>${label}</b>${desc ? `<span class="meta">${desc}</span>` : ""}</button>`;
+const freqOf = (s) => jui.freq || (s.kind === "every" && s.everyMinutes === 60 ? "hourly" : s.kind);
+const qrow = (q, sub, body) => `<div class="q-row"><div class="q">${q}${sub ? `<small>${sub}</small>` : ""}</div><div class="a">${body}</div></div>`;
+
+// "When it runs" as one sentence with its blanks inline: [every weekday] at [09:00].
+function scheduleSentence(s) {
+  const freq = freqOf(s);
+  const dayNames = JT[jlang()].days;
+  const sel = `<select class="jchip" data-jfreq="1" aria-label="${esc(jt("when"))}">${["weekdays", "daily", "weekly", "hourly", "every", "cron"].map((k) =>
+    `<option value="${k}" ${freq === k ? "selected" : ""}>${jt("f_" + k)}</option>`).join("")}</select>`;
+  const time = `<input type="time" class="jchip" data-jf="schedule.time" value="${pad2(s.hour)}:${pad2(s.minute)}">`;
+  const days = `<span class="jdays">${[1, 2, 3, 4, 5, 6, 7].map((n) => { const on = (s.days || []).includes(n);
+    return `<button class="${on ? "on" : ""}" aria-pressed="${on}" data-jaction="jf-day" data-day="${n}">${esc(dayNames[n % 7])}</button>`; }).join("")}</span>`;
+  switch (freq) {
+    case "daily": case "weekdays": return jt("w_at", { freq: sel, time });
+    case "weekly": return jt("w_days", { freq: sel, days, time });
+    case "hourly": return jt("w_hourly", { freq: sel });
+    case "every": return jt("w_every", { freq: sel, n: `<input type="number" min="1" class="jchip num" data-jf="schedule.everyMinutes" data-num="1" value="${s.everyMinutes}">` });
+    default: return jt("w_cron", { freq: sel, cron: `<input type="text" class="jchip mono" data-jf="schedule.cron" value="${esc(s.cron)}" spellcheck="false"> <span class="jhelp-in">${jt("cronHelp")}</span>` });
+  }
 }
+
 function drawJobForm() {
   const f = jui.form;
   const box = $("#job-form");
   if (!f) { box.hidden = true; return; }
-  const s = f.schedule;
-  const presets = ["every", "daily", "weekdays", "weekly", "cron"];
-  const dayNames = JT[jlang()].days;
-  const time = `${pad2(s.hour)}:${pad2(s.minute)}`;
-  box.innerHTML = `<div class="card jform">
-    <h3>${f.id ? jt("editTitle") : jt("newTitle")}</h3>
-    <div class="jlabel">${jt("kindQ")}</div>
-    <div class="jchoices">${choice("kind", "claude", jt("kindClaude"), jt("kindClaudeD"), f.kind)}${choice("kind", "shell", jt("kindShell"), jt("kindShellD"), f.kind)}</div>
-    <div class="jgrid2">
-      <label><span class="jlabel">${jt("name")}</span><input id="jf-name" type="text" data-jf="name" value="${esc(f.name)}" placeholder="${esc(jt("namePh"))}"></label>
-      <label><span class="jlabel">${jt("cwd")}</span><span class="jinline"><input type="text" data-jf="cwd" value="${esc(f.cwd)}"><button class="btn small" data-jaction="jf-pick">${jt("choose")}</button></span></label>
-    </div>
-    ${f.kind === "claude" ? `
-      <label class="jblock"><span class="jlabel">${jt("prompt")}</span>
-        <textarea rows="4" data-jf="prompt" placeholder="${esc(jt("promptPh"))}">${esc(f.prompt)}</textarea></label>
-      <div class="meta">${jt("promptHelp")}</div>
-      <div class="jgrid2">
-        <label><span class="jlabel">${jt("model")}</span><select data-jf="model">
-          ${[["", jt("modelDefault")], ["sonnet", "Sonnet"], ["opus", "Opus"], ["haiku", "Haiku"]].map(([v, l]) => `<option value="${v}" ${f.model === v ? "selected" : ""}>${l}</option>`).join("")}
-          ${f.model && !["sonnet", "opus", "haiku"].includes(f.model) ? `<option value="${esc(f.model)}" selected>${esc(f.model)}</option>` : ""}
-        </select></label>
-        <label><span class="jlabel">${jt("limit")}</span><span class="jinline"><input type="number" min="1" max="1440" data-jf="timeoutMinutes" data-num="1" value="${f.timeoutMinutes}"> ${jt("minutes")}</span></label>
-      </div>
-      <div class="jlabel">${jt("perm")}</div>
-      <div class="jchoices">${["standard", "edits", "all"].map((p) => choice("permission", p, jt("p_" + p), jt("p_" + p + "D"), f.permission)).join("")}</div>
-      <div class="jlabel">${jt("quotaQ")}</div>
-      <div class="jinline">${jt("quotaWeek")} <input type="number" min="0" max="100" class="short" data-jf="skipWeekPct" data-num="1" value="${f.skipWeekPct}">${jt("quotaOr")} <input type="number" min="0" max="100" class="short" data-jf="skipFiveHourPct" data-num="1" value="${f.skipFiveHourPct}">${jt("quotaTail")}</div>
-      <div class="meta">${esc(quotaNowText(jui.data && jui.data.quota))}</div>
-      <div class="jlabel">${jt("session")}</div>
-      <div class="jchoices">${choice("sessionMode", "fresh", jt("s_fresh"), jt("s_freshD"), f.sessionMode)}${choice("sessionMode", "resume", jt("s_resume"), jt("s_resumeD"), f.sessionMode)}</div>
-      <div class="jinline">${f.sessionMode === "fresh"
-        ? `${jt("keep")} <input type="number" min="1" max="500" class="short" data-jf="keepSessions" data-num="1" value="${f.keepSessions}"> ${jt("keepTail")}`
-        : `${jt("compact")} <input type="number" min="0" max="100" class="short" data-jf="compactAbovePct" data-num="1" value="${f.compactAbovePct}">${jt("compactTail")}`}</div>
-    ` : `
-      <label class="jblock"><span class="jlabel">${jt("command")}</span>
-        <textarea rows="3" class="mono" data-jf="command">${esc(f.command)}</textarea></label>
-      <label class="jinline"><span class="jlabel">${jt("limit")}</span><input type="number" min="1" max="1440" class="short" data-jf="timeoutMinutes" data-num="1" value="${f.timeoutMinutes}"> ${jt("minutes")}</label>
-    `}
-    <div class="jwhen">
-      <div class="jlabel">${jt("when")}</div>
-      <div class="seg jpresets">${presets.map((p) => `<button class="${s.kind === p ? "on" : ""}" data-jaction="jf-set" data-path="schedule.kind" data-value="${p}">${jt("pr_" + p)}</button>`).join("")}</div>
-      <div class="jinline">
-        ${s.kind === "every" ? `${jt("everyLbl")} <input type="number" min="1" class="short" data-jf="schedule.everyMinutes" data-num="1" value="${s.everyMinutes}"> ${jt("minutesLbl")}` : ""}
-        ${s.kind === "weekly" ? `<span class="jdays">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<button class="${(s.days || []).includes(n) ? "on" : ""}" aria-pressed="${(s.days || []).includes(n)}" data-jaction="jf-day" data-day="${n}">${esc(dayNames[n % 7])}</button>`).join("")}</span>` : ""}
-        ${["daily", "weekdays", "weekly"].includes(s.kind) ? `${jt("at")} <input type="time" data-jf="schedule.time" value="${time}">` : ""}
-        ${s.kind === "cron" ? `<input type="text" class="mono" data-jf="schedule.cron" value="${esc(s.cron)}"> <span class="meta">${jt("cronHelp")}</span>` : ""}
-      </div>
-      <div id="jf-preview" class="meta">${previewText()}</div>
-      <div class="meta">${jt("slept")}</div>
-    </div>
-    <div class="jinline"><span class="jlabel">${jt("notify")}</span>
-      ${["failure", "always", "never"].map((n) => `<label class="jradio"><input type="radio" name="jf-notify" data-jf="notify" value="${n}" ${f.notify === n ? "checked" : ""}> ${jt("n_" + n)}</label>`).join("")}
-      <label class="jradio"><input type="checkbox" data-jf="enabled" ${f.enabled ? "checked" : ""}> ${jt("enabled")}</label>
-    </div>
+  const num = (path, value, min, max) => `<input type="number" min="${min}" max="${max}" class="jchip num" data-jf="${path}" data-num="1" value="${value}">`;
+  const limit = num("timeoutMinutes", f.timeoutMinutes, 1, 1440);
+  const claude = f.kind === "claude";
+  const model = `<select class="jchip" data-jf="model">
+    ${[["", jt("modelDefault")], ["sonnet", "Sonnet"], ["opus", "Opus"], ["haiku", "Haiku"]].map(([v, l]) => `<option value="${v}" ${f.model === v ? "selected" : ""}>${l}</option>`).join("")}
+    ${f.model && !["sonnet", "opus", "haiku"].includes(f.model) ? `<option value="${esc(f.model)}" selected>${esc(f.model)}</option>` : ""}</select>`;
+  const mode = `<select class="jchip" data-jf="sessionMode">${["fresh", "resume"].map((m) => `<option value="${m}" ${f.sessionMode === m ? "selected" : ""}>${jt("s_" + m)}</option>`).join("")}</select>`;
+
+  const what = `<div class="jkind-row"><span class="jkindsw" role="group">${["claude", "shell"].map((k) =>
+      `<button class="${f.kind === k ? "on" : ""}" aria-pressed="${f.kind === k}" data-jaction="jf-set" data-path="kind" data-value="${k}">${jt(k === "claude" ? "kindClaude" : "kindShell")}</button>`).join("")}</span>
+      <span class="jhelp-in">${jt(claude ? "kindClaudeD" : "kindShellD")}</span></div>
+    <input id="jf-name" class="jfield jname-in" type="text" data-jf="name" value="${esc(f.name)}" placeholder="${esc(jt("namePh"))}" aria-label="${esc(jt("name"))}">
+    ${claude
+      ? `<textarea class="jfield" rows="4" data-jf="prompt" placeholder="${esc(jt("promptPh"))}" aria-label="${esc(jt("prompt"))}">${esc(f.prompt)}</textarea>
+         <div class="jhelp">${jt("promptHelp")}</div>`
+      : `<textarea class="jfield mono" rows="3" data-jf="command" placeholder="${esc(jt("cmdPh"))}" aria-label="${esc(jt("cmdLbl"))}" spellcheck="false">${esc(f.command)}</textarea>
+         <div class="jhelp">${jt("command")}</div>`}`;
+  const where = `<div class="jinl"><input class="jfield" type="text" data-jf="cwd" value="${esc(f.cwd)}" aria-label="${esc(jt("cwd"))}" spellcheck="false">
+    <button class="btn" data-jaction="jf-pick">${jt("choose")}</button></div>`;
+  const when = `<div class="jsentence">${scheduleSentence(f.schedule)}</div>
+    <div id="jf-preview" class="jupcoming">${previewHTML()}</div>
+    <div class="jhelp">${jt("slept")}</div>`;
+  const can = `<div class="jopts" role="radiogroup">${["standard", "edits", "all"].map((p) => { const on = f.permission === p;
+    return `<button class="jopt ${on ? "on" : ""}" role="radio" aria-checked="${on}" data-jaction="jf-set" data-path="permission" data-value="${p}">
+      <span class="jradio"></span><span><b>${jt("p_" + p)}</b><span>${jt("p_" + p + "D")}</span></span></button>`; }).join("")}</div>`;
+  const tell = `<div class="jinl"><span class="seg jseg" role="group">${["failure", "always", "never"].map((n) =>
+      `<button class="${f.notify === n ? "on" : ""}" aria-pressed="${f.notify === n}" data-jaction="jf-set" data-path="notify" data-value="${n}">${jt("n_" + n)}</button>`).join("")}</span>
+    <label class="jon"><input type="checkbox" class="jswitch" data-jf="enabled" ${f.enabled ? "checked" : ""}> ${jt("enabled")}</label></div>`;
+  const more = `<div class="jmore">${claude ? `
+      <div>${jt("m_model", { model, limit })}</div>
+      <div title="${esc(jt("quotaQ"))}">${jt("m_quota", { w: num("skipWeekPct", f.skipWeekPct, 0, 100), f: num("skipFiveHourPct", f.skipFiveHourPct, 0, 100) })}
+        <span class="jfaint">${esc(quotaNowText(jui.data && jui.data.quota))}</span></div>
+      <div>${f.sessionMode === "fresh" ? jt("m_fresh", { mode, n: num("keepSessions", f.keepSessions, 1, 500) })
+                                       : jt("m_resume", { mode, n: num("compactAbovePct", f.compactAbovePct, 0, 100) })}
+        <span class="jfaint">${jt(f.sessionMode === "fresh" ? "s_freshD" : "s_resumeD")}</span></div>`
+    : `<div>${jt("m_limit", { limit })}</div>`}</div>`;
+
+  box.innerHTML = `<div class="jsheet">
+    <div class="jhead"><h1>${f.id ? jt("editTitle") : jt("newTitle")}</h1><span class="spacer"></span>${langSeg()}</div>
+    ${qrow(jt("q_what"), "", what)}
+    ${qrow(jt("q_where"), jt("q_whereS"), where)}
+    ${qrow(jt("when"), "", when)}
+    ${claude ? qrow(jt("q_can"), jt("q_canS"), can) : ""}
+    ${qrow(jt("q_tell"), "", tell)}
+    ${qrow(jt("q_more"), jt("q_moreS"), more)}
     ${jui.formError ? `<div class="jwarn">${esc(jui.formError)}</div>` : ""}
-    <div class="jfoot">
+    <div class="jsheet-foot">
       <button class="btn ghost" data-jaction="jf-cancel">${jt("cancel")}</button>
       <button class="btn" data-jaction="jf-save" data-run="1">${jt("saveRun")}</button>
       <button class="btn primary" data-jaction="jf-save">${jt("save")}</button>
@@ -415,11 +466,12 @@ function drawJobForm() {
   </div>`;
   box.hidden = false;
 }
-function previewText() {
+// The next three times, as chips; or what is wrong with the schedule.
+function previewHTML() {
   const p = jui.preview;
   if (!p) return "&nbsp;";
   if (p.problem) return `<span class="jfail">${esc(p.problem)}</span>`;
-  return esc(jt("nextThree", { list: (p.next || []).map(jwhen).join(" · ") }));
+  return `<span class="jfaint">${jt("nextThree")}</span>${(p.next || []).map((t) => `<span class="jup">${esc(jwhen(t))}</span>`).join("")}`;
 }
 function schedulePreview() {
   clearTimeout(jui.previewTimer);
@@ -427,7 +479,7 @@ function schedulePreview() {
     if (!jui.form) return;
     try { jui.preview = await apiObj("job-preview", { schedule: jui.form.schedule }); } catch (e) { jui.preview = { problem: String(e.message || e) }; }
     const el = $("#jf-preview");
-    if (el) el.innerHTML = previewText();
+    if (el) el.innerHTML = previewHTML();
   }, 250);
 }
 function setPath(obj, path, value) {
@@ -454,9 +506,26 @@ function formInput(el) {
     setPath(f, path, el.value);
   }
   if (path.startsWith("schedule.")) schedulePreview();
+  // The session sentence changes with its mode.
+  if (path === "sessionMode") drawJobForm();
 }
 document.addEventListener("input", (ev) => { if (ev.target.dataset && ev.target.dataset.jf) formInput(ev.target); });
-document.addEventListener("change", (ev) => { if (ev.target.dataset && ev.target.dataset.jf) formInput(ev.target); });
+document.addEventListener("change", (ev) => {
+  const el = ev.target;
+  if (!el.dataset) return;
+  if (el.dataset.jf) return formInput(el);
+  // The schedule menu: "every hour" is every 60 minutes; leaving it for "every few minutes" starts at 30.
+  if (el.dataset.jfreq && jui.form) {
+    const s = jui.form.schedule;
+    const v = el.value;
+    if (v === "hourly") { s.kind = "every"; s.everyMinutes = 60; }
+    else if (v === "every") { if (s.kind !== "every" || s.everyMinutes === 60) s.everyMinutes = 30; s.kind = "every"; }
+    else s.kind = v;
+    jui.freq = v;
+    drawJobForm();
+    schedulePreview();
+  }
+});
 
 async function saveJobForm(runAfter) {
   const f = jui.form;
@@ -527,6 +596,7 @@ document.addEventListener("click", async (ev) => {
   switch (d.jaction) {
     case "lang": savePref("hq-lang", d.lang); if (jui.form) drawJobForm(); return renderJobsView();
     case "new": return openJobForm(null);
+    case "tpl": return openJobForm(jobTemplates()[Number(d.i)]);
     case "edit": return openJobForm(job());
     case "expand": jui.open = jui.open === d.id ? null : d.id; return renderJobsView();
     case "toggle": {
