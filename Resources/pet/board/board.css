@@ -444,3 +444,6 @@ main { height: calc(100% - 46px - 30px); }
 .set-row .meta { margin-top: 2px; max-width: 520px; }
 /* the Projects / Categories panels' own Done: the Settings window has one */
 .settings-body [data-action="close-projects"], .settings-body [data-action="close-cats"] { display: none; }
+
+/* toasts sit above the status bar */
+#toast { bottom: 44px; }

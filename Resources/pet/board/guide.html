@@ -106,8 +106,8 @@
 <b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
 <b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下整个按钮填上颜色（Yes 绿、No 红、Later 黄、No context 灰、To todo 蓝；再点取消，可以改选），不会马上发出；在某条的说明框里打字会自动选上 Yes（删光文字就取消；你手动选过的不会被改）；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
-<li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
-<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
+<li>Needs you 分左右两列：左边 <b>Asks</b>，右边 <b>Your todos</b>。分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
+<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在 All 页的任务列表里定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
 <li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。勾选按待办的<b>文字</b>认准是哪一条：看板刷新前 session 在前面插了新待办也不会勾错；那条待办已被删掉或改写时会提示你刷新。</li>
 </ul>
 <h2>上下文窗口</h2>
@@ -116,7 +116,7 @@
 <li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
 <li><b>待办</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
 <li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
-<li><b>Show task</b> 在中栏定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
+<li><b>Show task</b> 在 All 页的任务列表里定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
 </ul>
 <h2>Tasks（All 的左列）</h2>
 <ul>
@@ -144,7 +144,7 @@
 </table>
 <h2>Sessions（All 的右列）</h2>
 <ul>
-<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
+<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与 All 页的任务列表一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
 <li>每张卡三行：状态点和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。<br>
 状态文字后面是 context 用了多少（如 <code>64% ctx</code>，60% 起变黄、80% 起变红），和小猫列表里的一样。<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：橙色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；橙色带黄色小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；黄色实心带竖杠 = 等你授权；黄色空心圈 = 等你回答；灰色 = 空闲；褐色空心圈 = 很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
 <li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
@@ -215,7 +215,7 @@
 <h1 id="zh-onboard">从已有 session 开始</h1>
 <p>刚装好时，本机通常已经有很多 Claude Code session 和历史对话。两步把它们变成看板：</p>
 <ol>
-<li><b>项目</b>：Projects 面板里点 <b>Suggest from sessions</b>（看板为空时中栏也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
+<li><b>项目</b>：⚙ 设置 → Projects 里点 <b>Suggest from sessions</b>（看板为空时任务列表里也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
 <li><b>任务</b>：在任意 Claude Code session 里输入 <code>/hq-onboard</code>。Claude 会读这些 session，起草任务卡（状态、下一步、你的待办、相关链接、置信度），按项目列成表给你确认，<b>确认之前不会创建任何东西</b>；创建后，正在运行的 session 会绑定到对应任务，已结束的记在任务卡上、可以在看板上查看历史。</li>
 </ol>
 <p>之后任何地方都能改：在看板上直接改，或者在 session 里让 Claude 改。从推断得来的状态在任务日志里标了"请核实"。</p>
@@ -393,8 +393,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
 <b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — a click fills the button with its colour (Yes green, No red, Later amber, No context grey, To todo blue; again to clear, or pick another), nothing is sent yet. Typing a note on one picks Yes for you (emptying the note takes it back; a pick you clicked yourself is left alone). When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
-<li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
-<li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
+<li>Needs you has two columns — <b>Asks</b> on the left, <b>Your todos</b> on the right: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
+<li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in All's task list (its folded project group opens, a search that hides it is cleared).</li>
 <li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too. A tick finds its todo by its <b>text</b>, so a todo a session inserted above it since the board last refreshed can't be ticked by mistake; if that todo was removed or reworded, you're asked to refresh.</li>
 </ul>
 <h2>Context window</h2>
@@ -403,7 +403,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>An ask</b>: the Claude reply that raised it, and which session — open that conversation directly. (Asks recorded before this feature have no reply attached; open the conversation instead.)</li>
 <li><b>A todo</b>: the task's status, next step and the whole card, log included.</li>
 <li>Both list the task's sessions: <b>live</b> ones open their conversation or jump; <b>ended</b> ones show their history (<b>History</b>).</li>
-<li><b>Show task</b> finds and opens the task in the middle column; <b>Open card</b> opens the card in your editor.</li>
+<li><b>Show task</b> finds and opens the task in All's task list; <b>Open card</b> opens the card in your editor.</li>
 </ul>
 <h2>Tasks (All, left)</h2>
 <ul>
@@ -498,7 +498,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h1 id="en-onboard">Start from existing sessions</h1>
 <p>A fresh install usually meets a machine full of Claude Code sessions and history. Two steps turn them into a board:</p>
 <ol>
-<li><b>Projects</b>: <b>Suggest from sessions</b> in the Projects panel (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
+<li><b>Projects</b>: <b>Suggest from sessions</b> in ⚙ Settings → Projects (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
 <li><b>Tasks</b>: run <code>/hq-onboard</code> in any Claude Code session. Claude reads those sessions, drafts task cards (status, next step, your todos, links, confidence), shows them per project and <b>creates nothing until you confirm</b>; then live sessions are bound to their tasks and ended ones are recorded on the cards, their history one click away.</li>
 </ol>
 <p>Change anything afterwards — on the board, or by asking Claude in any session. Inferred statuses are flagged "verify" in each task's log.</p>

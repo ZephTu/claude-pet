@@ -763,9 +763,8 @@ def slugify(s):
     return s[:40] or "task"
 
 
-# ---------------------------------------------------------------- today's focus
-# <root>/focus.json: {"days": {"2026-11-20": ["T-062", "T-003"], ...}} — the tasks picked for a day.
-# "carry" = tasks from the last day before today that had picks and are still open.
+# ---------------------------------------------------------------- focus
+# <root>/focus.json: {"focus": ["T-062", "T-003", ...]} — the tasks kept in view, in order.
 def focus_path():
     return os.path.join(hq_root(), "focus.json")
 
@@ -778,9 +777,15 @@ def load_focus():
     if isinstance(f, dict) and isinstance(f.get("focus"), list):
         return [str(i) for i in f["focus"]]
     days = f.get("days") if isinstance(f, dict) else None
-    if isinstance(days, dict) and days:
-        return list(days[max(days)])
-    return []
+    if not isinstance(days, dict):
+        return []
+    # The latest day's list, then what the day before it still had (the old board offered to
+    # carry those over, so they were meant to stay). Anything not a list of ids is skipped.
+    lists = [days[d] for d in sorted(days, reverse=True) if isinstance(days[d], list) and days[d]]
+    out = []
+    for ids in lists[:2]:
+        out += [str(i) for i in ids if isinstance(i, str) and str(i) not in out]
+    return out
 
 
 def save_focus(ids):
@@ -789,8 +794,13 @@ def save_focus(ids):
 
 def focus_state():
     ids = load_focus()
-    known = {parse_card(p).get("id") for p in card_paths()}
-    ids = [i for i in ids if i in known]          # drop tasks that no longer exist
+    status = {}
+    for p in card_paths():
+        m = parse_card(p)
+        status[m.get("id")] = m.get("status")
+    # Only open tasks show: one marked done drops out (and comes back if it's reopened); a task
+    # that no longer exists is dropped.
+    ids = [i for i in ids if status.get(i) in OPEN_STATUSES]
     # "today" / "last_day" / "carry" are kept for older readers; there is no daily list any more.
     return {"ids": ids, "today": today(), "last_day": None, "carry": []}
 

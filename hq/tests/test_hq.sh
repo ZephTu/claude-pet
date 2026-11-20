@@ -123,6 +123,13 @@ import json, sys
 json.dump({"days": {"2000-01-01": ["T-002"], "2000-01-02": ["T-001", "T-002"]}}, open(sys.argv[1], "w"))
 PY
 "$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert f["ids"]==["T-001","T-002"] and not f["carry"], f' && ok "an old per-day focus file carries its latest list into Focus"
+python3 - "$T/root/focus.json" <<'PY'
+import json, sys
+json.dump({"days": {"2000-01-01": ["T-002", "T-001"], "2000-01-02": ["T-001"], "2000-01-03": [], "x": None}}, open(sys.argv[1], "w"))
+PY
+"$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert f["ids"]==["T-001","T-002"], f' && ok "migration keeps the day before's picks too, and skips malformed days" || fail "old focus migration lost picks or crashed"
+"$HQ" set T-002 status=done >/dev/null; "$HQ" focus --json | python3 -c 'import json,sys; assert "T-002" not in json.load(sys.stdin)["ids"]' && ok "a finished task leaves Focus" || fail "a done task stayed in Focus"
+"$HQ" set T-002 status=active >/dev/null; "$HQ" focus --json | python3 -c 'import json,sys; assert "T-002" in json.load(sys.stdin)["ids"]' && ok "reopened, it is back in Focus" || fail "a reopened task did not come back to Focus"
 "$HQ" focus add T-001 >/dev/null; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d=={"focus":["T-001","T-002"]}, d' "$T/root/focus.json" && ok "Focus is saved as one list, not per day"
 "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["focus"]["ids"]==["T-001","T-002"]' && ok "board --json includes Focus"
 "$HQ" set T-001 status=waiting-on-me "next=pick a dataset"

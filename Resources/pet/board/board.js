@@ -30,7 +30,7 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
   drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
-  mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
+  mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
@@ -818,8 +818,6 @@ function renderToday() {
     ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
     : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
-  const carry = (f.carry || []).map(taskById).filter(Boolean);
-  const showCarry = carry.length && ui.carryDismissed !== f.today;
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
   return `<div class="today-h"><h2 class="big">Focus</h2><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
       <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
@@ -827,10 +825,6 @@ function renderToday() {
       <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to Focus…" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
       <button class="btn small" data-action="today-add">Add</button></div>
-    ${showCarry ? `<div class="card carry"><b>Still open from ${esc(f.last_day)}</b> — carry on with these today?
-      <div class="row" style="margin-top:6px">${carry.map((t) => `<button class="chip link" data-action="today-add-one" data-task="${esc(t.id)}" title="${esc(t.title)}">+ ${esc(t.id)} ${esc(t.title.slice(0, 24))}</button>`).join("")}</div>
-      <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="carry-all">Bring all ${carry.length}</button>
-        <button class="btn small ghost" data-action="carry-dismiss">Not today</button></div></div>` : ""}
     ${draftNew}
     ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
       <b>Nothing in Focus yet.</b>
@@ -1196,14 +1190,17 @@ function renderSettings() {
   const box = $("#settings");
   if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
   const tab = ui.settings;
+  const prev = box.querySelector(".settings-body");
+  const scroll = prev && prev.dataset.tab === tab ? prev.scrollTop : 0;
   const body = tab === "projects" ? renderProjects() : tab === "categories" ? renderCategories() : renderSessionSettings();
   // Keep the cursor if a box in here is being typed in (the window is rebuilt with the board).
   box.innerHTML = `<div class="panel" role="dialog" aria-label="Settings">
     <div class="phead"><div class="stitle">Settings</div>
       <span class="seg">${SETTINGS_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-action="settings-tab" data-tab="${k}">${label}</button>`).join("")}</span>
       <span style="flex:1"></span><button class="btn small" data-action="close-settings">Done</button></div>
-    <div class="settings-body">${body}</div></div>`;
+    <div class="settings-body" data-tab="${tab}">${body}</div></div>`;
   box.hidden = false;
+  box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
 }
 function closeSettings() { ui.settings = null; ui.projRemove = {}; ui.catRemove = {}; render(); }
 function renderSessionSettings() {
@@ -2169,7 +2166,6 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["todaypick"];
       return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to Focus`);
     }
-    case "today-add-one": return act("focus", { action: "add", tasks: [d.task] }, `${d.task} added to today`);
     case "today-remove": {
       const id = d.task;
       try {
@@ -2178,8 +2174,6 @@ document.addEventListener("click", async (ev) => {
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
-    case "carry-all": return act("focus", { action: "carry", tasks: [] }, "Carried over");
-    case "carry-dismiss": ui.carryDismissed = focusState().today; savePref("hq-carry-dismissed", ui.carryDismissed); return render();
     case "launch": {
       const t = taskById(d.task);
       const dir = t && launchDir(t);
@@ -2332,7 +2326,7 @@ document.addEventListener("keydown", async (ev) => {
 // Forgiving on purpose: anywhere in the column counts — the nearest header decides the spot —
 // and while dragging in the Tasks column every group folds to its header, so the targets sit
 // next to each other instead of being pages apart.
-function dropZone(ev) { return ev.target.closest && ev.target.closest("#tasks, #projects-panel"); }
+function dropZone(ev) { return ev.target.closest && ev.target.closest("#tasks, #settings .settings-body"); }
 function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after")); }
 function nearestTarget(zone, y) {
   let best = null, dist = Infinity;
@@ -2458,7 +2452,11 @@ function openNewTask(project) {
   const t = $("#nt-title");
   if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
 }
-$("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });
+$("#new-task").addEventListener("click", () => {
+  // The form lives on Focus and All; from Needs you, go to All for it.
+  if (ui.mode === "needs") { ui.mode = "all"; savePref("hq-mode", "all"); }
+  ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus();
+});
 
 refresh();
 setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
