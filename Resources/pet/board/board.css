@@ -332,3 +332,6 @@ select.place { max-width: 100px; }
 /* the pet's red dot on a board session row: finished, not looked at yet */
 .newtag { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px; margin-right: 6px;
   border-radius: 8px; background: var(--red); color: #fff; vertical-align: 2px; letter-spacing: .02em; }
+
+/* "▶ Do it" on an @claude todo */
+.todo .doit { flex: none; align-self: flex-start; margin-top: 1px; white-space: nowrap; }

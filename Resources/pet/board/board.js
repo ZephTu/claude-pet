@@ -26,7 +26,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -231,6 +231,53 @@ function launchDir(t) {
   const pr = projects().find((p) => p.name === t.project);
   return pr && pr.paths[0] ? pr.paths[0] : "";
 }
+// ---- "▶ Do it" on an @claude todo: hand it to the task's live session, or start one for it.
+const DO_PROMPT = (t, text) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then do this todo from it: "${text}". Tick it on the card when it's done, or say what is blocking it.`;
+const HANDED_MS = 30 * 60 * 1000;   // how long a handed-over todo says so
+function doItButton(t, x) {
+  if (x.state !== "open" || x.owner !== "claude") return "";
+  const key = `${t.id}|${x.text}`;
+  const h = ui.handed[key];
+  if (ui.handing.has(key)) return `<button class="btn small ghost doit" disabled>Handing…</button>`;
+  if (h && Date.now() - h.at < HANDED_MS) {
+    return `<button class="btn small ghost doit" title="Handed to ${esc(h.to)} ${ago(new Date(h.at).toISOString())} — click to hand it over again" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
+  }
+  const s = doTarget(t);
+  const tip = s ? `Send it to ${s.title || s.project} as a message${s.state === "busy" ? " (busy — it will queue)" : ""}`
+    : "No session on this task can take a message — start one that does this todo";
+  return `<button class="btn small doit" title="${esc(tip)}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">▶ Do it</button>`;
+}
+// The live session to hand a task's todo to: one the board can type into, most recently active first.
+function doTarget(t) {
+  return liveFor(t.id).filter((s) => SENDABLE[s.terminal && s.terminal.kind])
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
+}
+async function doTodo(taskId, text) {
+  const t = taskById(taskId);
+  const key = `${taskId}|${text}`;
+  if (!t || ui.handing.has(key)) return;
+  ui.handing.add(key);
+  render();
+  try {
+    const s = doTarget(t);
+    if (s) {
+      const busy = s.state === "busy";
+      await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy });
+      ui.handed[key] = { to: s.title || s.project, at: Date.now() };
+      toast(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`);
+    } else {
+      const dir = launchDir(t);
+      if (!dir) throw new Error("This task has no directory yet — bind a session or give the project a directory first");
+      const place = launchPlace();
+      await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text) });
+      ui.handed[key] = { to: "a new session", at: Date.now() };
+      toast(`Started a session on ${t.id} (${PLACES[place]}) to do it`);
+      setTimeout(() => refresh(), 2500);
+    }
+  } catch (e) { toast(String(e.message || e), true); }
+  finally { ui.handing.delete(key); render(); }
+}
+
 const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
 
 function render() {
@@ -645,6 +692,7 @@ function focusCard(t) {
   const box = (x) => `<div class="todo">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
+      ${doItButton(t, x)}
       <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   const sess = (s) => `<div class="bsess">
       ${dot(s)}
@@ -754,6 +802,7 @@ function renderTaskBody(t) {
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
+      ${doItButton(t, x)}
       ${x.state === "open" ? `<button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
   const todos = !t.todos.length ? `<div class="empty">No todos.</div>`
@@ -1613,6 +1662,7 @@ document.addEventListener("click", async (ev) => {
       if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
       return render();
     case "resolve-all": return resolveAll(d.task);
+    case "do-todo": return doTodo(d.task, d.text);
     case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
     case "undo-todo": return undoTodo(d.task, Number(d.i));
     case "undo-toast": {
