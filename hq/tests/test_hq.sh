@@ -98,6 +98,8 @@ rc=0; "$HQ" project remove projy 2>/dev/null || rc=$?; [ "$rc" = 3 ] && ok "remo
 "$HQ" project add projz --path "$T/proj-x" >/dev/null && "$HQ" project auto | grep -q "assigned 2" && ok "project auto assigns by workdir"
 printf -- '---\nid: T-099\nproject:                 # a comment\nstatus: active\n---\n' > /dev/null
 "$HQ" board --json | python3 -c 'import json,sys; assert all(not str(t.get("project","")).startswith("#") for t in json.load(sys.stdin)["tasks"])' && ok "a blank field followed by a comment parses as empty"
+"$HQ" project add pa >/dev/null; "$HQ" project add pb >/dev/null
+"$HQ" project order pb pa && [ "$("$HQ" project list --json | python3 -c 'import json,sys; n=[p["name"] for p in json.load(sys.stdin) if p["listed"]]; print(n.index("pb") < n.index("pa"))')" = True ] && ok "project order"
 "$HQ" set T-001 status=waiting-on-me "waiting_on_me=pick a dataset"
 "$HQ" board | grep -q "等你: pick a dataset" && ok "set + board"
 

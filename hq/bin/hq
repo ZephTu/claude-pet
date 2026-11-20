@@ -307,6 +307,15 @@ def cmd_project(args):
         if usage.get(""):
             print(f"{'(no project)':<22} {usage['']:>3} task(s)")
         return
+    if a == "order":
+        # Projects named here go first, in this order; any others keep their place after them.
+        wanted = [n for n in args.names if n in names]
+        if not wanted:
+            die("usage: hq project order NAME NAME ...")
+        rest = [pr for pr in projects if pr["name"] not in wanted]
+        by_name = {pr["name"]: pr for pr in projects}
+        save_projects([by_name[n] for n in wanted] + rest)
+        return
     if a == "auto":
         n = 0
         for p in card_paths():
@@ -1093,8 +1102,8 @@ def main():
     p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
     p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
     p = sub.add_parser("project", help="hq project list | add NAME [--path DIR] | paths NAME DIR... | "
-                                         "rename OLD NEW | remove NAME [--to OTHER] | auto")
-    p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto"])
+                                         "rename OLD NEW | remove NAME [--to OTHER] | auto | order NAME...")
+    p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto", "order"])
     p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")

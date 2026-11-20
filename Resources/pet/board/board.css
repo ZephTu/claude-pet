@@ -142,9 +142,21 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; text-transform: none; letter-spacing: 0; }
 .seg button { background: transparent; border: 0; color: var(--faint); font-size: 11px; padding: 1px 8px; cursor: pointer; }
 .seg button.on { background: var(--panel-2); color: var(--text); }
-.group-title.proj { cursor: pointer; user-select: none; font-size: 12.5px; color: var(--text); font-weight: 600; margin-top: 16px; }
-.group-title.proj:hover { color: var(--accent); }
-.caret { display: inline-block; width: 12px; color: var(--faint); }
+.group-title.proj { cursor: pointer; user-select: none; font-size: 13px; color: var(--text); font-weight: 600;
+  margin: 12px 0 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; }
+.group-title.proj:hover { background: var(--panel); border-color: var(--line); }
+.group-title.proj { display: flex; align-items: center; gap: 6px; }
+.caret { display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--dim); border-radius: 6px; flex: none; }
+.caret svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+  stroke-linejoin: round; transition: transform .12s ease; }
+.caret.open svg { transform: rotate(90deg); }
+.group-title.proj:hover .caret { color: var(--text); background: var(--panel-2); }
+.grip { margin-left: auto; color: var(--faint); cursor: grab; font-size: 14px; padding: 0 4px; opacity: 0; }
+.group-title.proj:hover .grip, .proj-row .grip { opacity: 1; }
+.proj-row .grip { margin-left: 0; }
+.dragging { opacity: .45; }
+.drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 .stag { font-size: 10.5px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
 .stag.waiting-on-me { color: var(--amber); border-color: rgba(224,166,60,.5); }
 .stag.blocked { color: #e8846e; border-color: rgba(224,83,60,.45); }

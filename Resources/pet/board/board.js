@@ -117,6 +117,7 @@ window.hqRefresh = refresh;
 // ------------------------------------------------------------------ render
 function render() {
   // Never yank an open dropdown out from under the pointer.
+  if (ui.dragging) return;
   const active = document.activeElement;
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
@@ -251,10 +252,13 @@ function renderTasks() {
       const shut = ui.collapsed.has(key);
       const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
       const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
-      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}">
-        <span class="caret">${shut ? "▸" : "▾"}</span> ${esc(name || "No project")} <span class="meta">${group.length}</span>
+      const movable = Boolean(name) && names.includes(name);
+      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}" title="Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}"
+          ${movable ? `draggable="true" data-drag-project="${esc(name)}"` : ""}>
+        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || "No project")} <span class="meta">${group.length}</span>
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
-        ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}</div>`;
+        ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}
+        ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
       if (!shut) html += group.map((t) => renderTask(t, "project")).join("");
     }
     return html;
@@ -515,8 +519,9 @@ function renderProjects() {
     }
     const nk = "projname:" + pr.name;
     const dirty = ui.drafts[nk] !== undefined && ui.drafts[nk] !== pr.name;
-    return `<div class="proj-row">
+    return `<div class="proj-row" draggable="true" data-drag-project="${esc(pr.name)}">
       <div class="row nowrap">
+        <span class="grip" title="Drag to reorder">⠿</span>
         <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="Edit to rename (tasks are updated)">
         ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">Save</button>` : ""}
         <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
@@ -531,7 +536,7 @@ function renderProjects() {
     </div>`;
   }).join("");
   return `<div class="card">
-    <div class="row"><b>Projects</b><span class="meta">group tasks; a task's directory picks its project</span>
+    <div class="row"><b>Projects</b><span class="meta">a task's directory picks its project · drag ⠿ to reorder</span>
       <span style="flex:1"></span><button class="btn small" data-action="close-projects">Done</button></div>
     <datalist id="proj-dirs">${dirs.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
     ${rows || `<div class="empty">No projects yet.</div>`}
@@ -1113,6 +1118,46 @@ document.addEventListener("keydown", async (ev) => {
   }
 });
 
+
+// ---- reorder projects by dragging a group header (Tasks) or a row (Projects panel)
+function dropTarget(ev) { return ev.target.closest && ev.target.closest("[data-drag-project]"); }
+function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after")); }
+document.addEventListener("dragstart", (ev) => {
+  const el = dropTarget(ev);
+  if (!el || (ev.target.closest && ev.target.closest("input, textarea, select"))) return;
+  ui.dragging = el.dataset.dragProject;
+  ev.dataTransfer.effectAllowed = "move";
+  ev.dataTransfer.setData("text/plain", ui.dragging);
+  el.classList.add("dragging");
+});
+document.addEventListener("dragover", (ev) => {
+  const el = dropTarget(ev);
+  if (!ui.dragging || !el || el.dataset.dragProject === ui.dragging) return;
+  ev.preventDefault();
+  clearDropMarks();
+  const r = el.getBoundingClientRect();
+  el.classList.add(ev.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
+});
+document.addEventListener("drop", (ev) => {
+  const el = dropTarget(ev);
+  const moving = ui.dragging;
+  if (!moving || !el) return;
+  ev.preventDefault();
+  const before = el.classList.contains("drop-before");
+  const order = projectNames().filter((n) => n !== moving);
+  const at = order.indexOf(el.dataset.dragProject);
+  if (at < 0) return;
+  order.splice(before ? at : at + 1, 0, moving);
+  ui.dragging = null;
+  clearDropMarks();
+  act("project", { action: "order", names: order }, "Order saved");
+});
+document.addEventListener("dragend", () => {
+  ui.dragging = null;
+  clearDropMarks();
+  document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
+  render();
+});
 
 $("#refresh").addEventListener("click", refresh);
 $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });

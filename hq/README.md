@@ -109,7 +109,8 @@ Projects are the level above tasks: `hq.json` lists them with their directories
 (`hq project add claude-pet --path ~/code/claude-pet`). A task joins the project of its directory —
 when it is created with a workdir, or when a session is bound — and the card's `project` field can
 be changed any time. The board groups tasks by project by default (or by status, a toggle away).
-`hq project list | add | paths | rename | remove --to | auto` manage them; `auto` sorts every task
+`hq project list | add | paths | rename | remove --to | auto | order` manage them (the list order
+is the board's order — drag a group header to change it); `auto` sorts every task
 that has no project by its workdirs.
 
 ## Categories

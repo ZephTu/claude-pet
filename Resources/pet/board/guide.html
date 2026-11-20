@@ -99,7 +99,7 @@
 <h2>Tasks（中栏）</h2>
 <ul>
 <li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
-  <ul><li><b>Project</b>（默认）：按项目分组，点组名折叠或展开；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
+  <ul><li><b>Project</b>（默认）：按项目分组，点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（"No project"固定在最后）；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
   <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
@@ -178,8 +178,8 @@
 <li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
 <li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
 <li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
-<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
-<li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto</code>。</li>
+<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。</li>
 </ul>
 
 <h1 id="zh-cats">分类与工作目录</h1>
@@ -339,7 +339,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <h2>Tasks (middle)</h2>
 <ul>
 <li><b>Project | Status</b> next to the title switches the grouping (remembered):
-  <ul><li><b>Project</b> (default): one group per project — click its name to fold it; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
+  <ul><li><b>Project</b> (default): one group per project — click the group bar to fold it, <b>drag it to reorder projects</b> ("No project" stays last); it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
   <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
 <li>Tick <b>show closed</b> for done and abandoned.</li>
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
@@ -414,8 +414,8 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
 <li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
 <li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
-<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
-<li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto</code>.</li>
+<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>.</li>
 </ul>
 
 <h1 id="en-cats">Categories and workdirs</h1>
