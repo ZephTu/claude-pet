@@ -26,7 +26,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -572,6 +572,16 @@ function pushMessageAll(answers) {
     answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n");
 }
 // An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
+// Writing a note on one of several asks means you're answering it: Do is picked for you. Only
+// a pick made this way is taken back when the note is emptied again; one you clicked stays.
+function autoPick(id, hasNote) {
+  const t = taskById(id.replace(/\.\d+$/, ""));
+  if (!t || openAsks(t).length < 2) return;        // a lone ask's buttons answer at once
+  if (hasNote && !ui.picks[id]) { ui.picks[id] = "do"; ui.autoPicked.add(id); render(); }
+  else if (!hasNote && ui.autoPicked.has(id) && !(ui.atts["ask:" + id] || []).length) {
+    delete ui.picks[id]; ui.autoPicked.delete(id); render();
+  }
+}
 function answerNote(id) {
   const text = (ui.drafts["note:" + id] || "").trim();
   const imgs = (ui.atts["ask:" + id] || []).map((x) => x.path);
@@ -1605,6 +1615,7 @@ async function addImages(sid, files) {
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
+  if (added && sid.startsWith("ask:")) autoPick(sid.slice(4), true);   // an image is an answer too
   if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
 }
 document.addEventListener("paste", (ev) => {
@@ -1810,6 +1821,7 @@ document.addEventListener("click", async (ev) => {
       return;
     }
     case "pick":
+      ui.autoPicked.delete(d.id);    // the user chose; typing no longer changes it
       if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
       return render();
     case "resolve-all": return resolveAll(d.task);
@@ -2158,6 +2170,8 @@ document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
+  const note = /^note:(.+)$/.exec(el.dataset.key || "");
+  if (note) autoPick(note[1], el.value.trim() !== "");
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
 });
