@@ -120,6 +120,30 @@ struct Runner {
         t.check("an idle session never counts as quiet",
                 !StateAggregator.isQuiet(mk("a", .idle, updatedAgo: 600), now: t0))
 
+        // Claude Code's own status file settles what silence alone cannot. The
+        // case that broke: a 94 KB Write streamed for four minutes with no hook,
+        // and the session read as quiet the whole time it was working.
+        let longWrite = mk("a", .busy, updatedAgo: 255)
+        t.check("silent but Claude Code says busy: still working (long tool input)",
+                !StateAggregator.isQuiet(longWrite, now: t0, reading:
+                    .init(status: "busy", at: t0.addingTimeInterval(-300))))
+        t.check("silent with no status reading falls back to the 90s rule",
+                StateAggregator.isQuiet(longWrite, now: t0, reading: nil))
+        // Esc flips the status to idle at once while no hook fires.
+        let interrupted = mk("a", .busy, updatedAgo: 20)
+        t.check("idle written after the last hook: quiet after the grace, not 90s",
+                StateAggregator.isQuiet(interrupted, now: t0, reading:
+                    .init(status: "idle", at: t0.addingTimeInterval(-15))))
+        t.check("idle within the grace is not quiet yet — Stop may still be on its way",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 5), now: t0, reading:
+                    .init(status: "idle", at: t0.addingTimeInterval(-4))))
+        t.check("idle from before the last hook is stale: 90s rule applies",
+                !StateAggregator.isQuiet(interrupted, now: t0, reading:
+                    .init(status: "idle", at: t0.addingTimeInterval(-60))))
+        t.check("a tool in flight is never quiet, whatever the status says",
+                !StateAggregator.isQuiet(mk("a", .busy, updatedAgo: 600, running: [tool]),
+                                         now: t0, reading: .init(status: "idle", at: t0)))
+
         t.check("a quiet session stops driving the busy mood",
                 StateAggregator.aggregate([mk("a", .busy, updatedAgo: 91)], now: t0).mood == .idle)
         t.check("a quiet session stays in the list",

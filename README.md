@@ -30,7 +30,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 ### What the pet can't see
 
 - **Only sessions started after the install.** Hooks load when a session starts; windows already open are invisible until restarted.
-- **An Esc interrupt sends no signal.** Claude Code emits no hook for it, so such a turn shows *No recent activity* after 90 seconds rather than "finished".
+- **An Esc interrupt sends no signal.** Claude Code emits no hook for it, so the pet reads Claude Code's own session status instead: such a turn shows *No recent activity* about 10 seconds later (90 seconds if that status is unavailable) rather than "finished".
 - **A turn waiting on a background agent isn't "finished".** It is shown as waiting, and reported done only when the agent wakes the session again.
 - **Multiple-choice questions** (`AskUserQuestion`) can't be answered from the pet — the picks are the answer, so the row takes you to the terminal.
 - **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca and iTerm2 only. Background `claude --bg` sessions have no terminal at all.

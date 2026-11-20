@@ -58,11 +58,54 @@ public enum StateAggregator {
     /// This deliberately does not decide that the session FINISHED. Nothing here
     /// knows that; all that is known is that it stopped saying anything. The
     /// panel says exactly that and no more.
+    ///
+    /// Silence alone is a guess, so Claude Code's own status file is asked
+    /// first — see `isQuiet(_:now:reading:)`. It is read only once the cheap
+    /// checks have already said "quiet", so a normal busy session costs nothing.
     public static func isQuiet(_ s: SessionState, now: Date) -> Bool {
-        guard s.state == .busy, s.running.isEmpty, s.phase.isEmpty,
-              s.backgroundAgents.isEmpty
+        guard mayGoQuiet(s), now.timeIntervalSince(s.updatedAt) > interruptGrace
         else { return false }
-        return now.timeIntervalSince(s.updatedAt) > quietAfter
+        let reading = s.pid.flatMap { ClaudeSessionStatus.read(pid: $0, sessionId: s.sessionId) }
+        return isQuiet(s, now: now, reading: reading)
+    }
+
+    /// `isQuiet` with Claude Code's status reading supplied, so tests can decide it.
+    ///
+    /// The 90-second rule mislabelled the one case it could not tell from an
+    /// interrupt: the model writing one long tool call. A Write of a 94 KB file
+    /// streamed for over four minutes with no hook at all — PreToolUse fires
+    /// only once the whole input exists — and the row said "No recent activity"
+    /// while the pet slept, on a session that was working the entire time.
+    /// Claude Code keeps `status` at "busy" for the whole turn, generation
+    /// included, and flips it to "idle" within milliseconds of an Esc (both
+    /// measured, 2026-11-21). So:
+    /// - "busy": never quiet, however long the silence.
+    /// - "idle", written after the last hook: the turn is over and no hook said
+    ///   so — an interrupt. Quiet after `interruptGrace` instead of 90 seconds.
+    /// - no reading: the 90-second rule, as before.
+    public static func isQuiet(_ s: SessionState, now: Date,
+                               reading: ClaudeSessionStatus.Reading?) -> Bool {
+        guard mayGoQuiet(s) else { return false }
+        let silent = now.timeIntervalSince(s.updatedAt)
+        switch reading?.status {
+        case "busy":
+            return false
+        case "idle" where reading!.at >= s.updatedAt.addingTimeInterval(1):
+            return silent > interruptGrace
+        default:
+            return silent > quietAfter
+        }
+    }
+
+    /// How long after Claude Code says a turn is over the pet waits for the
+    /// Stop hook before calling the session quiet. A normal turn end flips the
+    /// status a moment before Stop runs; calling that quiet would make Chatter
+    /// read the finish as an interrupt and swallow its "Done".
+    public static let interruptGrace: TimeInterval = 10
+
+    /// Busy with nothing in flight — the only state silence can mean anything in.
+    private static func mayGoQuiet(_ s: SessionState) -> Bool {
+        s.state == .busy && s.running.isEmpty && s.phase.isEmpty && s.backgroundAgents.isEmpty
     }
 
     /// Has the permission prompt this session is waiting on been approved?
