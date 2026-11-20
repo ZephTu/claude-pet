@@ -547,6 +547,8 @@ function focusCard(t) {
       </div></div>`;
   // Clicking the card opens or closes its details, like a row in All; the details themselves
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
+  // Open, the details carry the full todo and session lists, so the card's own short ones step
+  // aside — each shows once.
   return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
@@ -557,11 +559,11 @@ function focusCard(t) {
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
     ${asks.length ? `<div class="fsec">${renderAskGroup(t, asks)}</div>` : ""}
-    ${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
+    ${detail ? "" : `${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
     <div class="fsec">${live.map(sess).join("")}
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
         <span style="flex:1"></span>
-        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>
+        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>`}
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
   </div>`;
 }
