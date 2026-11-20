@@ -1098,20 +1098,26 @@ function renderNewTask() {
   const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
   const cats = categories();
   const dflt = cats.includes("other") ? "other" : cats[0];
+  // Every field keeps its draft (nt:*): the form is rebuilt with the board, every few seconds
+  // while sessions are busy, and a field without a draft came back empty.
+  const v = (k, d = "") => ui.drafts["nt:" + k] ?? d;
+  const cat = v("cat", dflt), proj = v("proj"), sess = v("session");
   return `<div class="card">
-    <div class="field"><label>title</label><input id="nt-title" placeholder="What is this task?"></div>
-    <div class="field"><label>project</label><select id="nt-proj"><option value="">(auto from the workdir)</option>${projectNames().map((c) =>
-      `<option value="${esc(c)}">${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><label>category</label><select id="nt-cat"><option value="">(none)</option>${cats.map((c) =>
-      `<option value="${esc(c)}" ${c === dflt ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><label>workdir</label><input id="nt-dir" list="nt-dirs" placeholder="optional — type a path or pick one; binding a session adds its directory">
+    <div class="field"><label>title</label><input id="nt-title" data-key="nt:title" placeholder="What is this task?" value="${esc(v("title"))}"></div>
+    <div class="field"><label>project</label><select id="nt-proj" data-key="nt:proj"><option value="">(auto from the workdir)</option>${projectNames().map((c) =>
+      `<option value="${esc(c)}" ${c === proj ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+    <div class="field"><label>category</label><select id="nt-cat" data-key="nt:cat"><option value="" ${cat ? "" : "selected"}>(none)</option>${cats.map((c) =>
+      `<option value="${esc(c)}" ${c === cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+    <div class="field"><label>workdir</label><input id="nt-dir" data-key="nt:dir" list="nt-dirs" value="${esc(v("dir"))}" placeholder="optional — type a path or pick one; binding a session adds its directory">
       <datalist id="nt-dirs">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
-    <div class="field"><label>bind session</label><select id="nt-session"><option value="">—</option>
-      ${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}">${esc(s.title || s.project)}</option>`).join("")}</select></div>
+    <div class="field"><label>bind session</label><select id="nt-session" data-key="nt:session"><option value="">—</option>
+      ${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}" ${s.sessionId === sess ? "selected" : ""}>${esc(s.title || s.project)}</option>`).join("")}</select></div>
     <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-action="cancel-new">Cancel</button>
       <button class="btn primary" data-action="create">Create</button></div>
   </div>`;
 }
+
+function clearNewTaskDrafts() { for (const k of Object.keys(ui.drafts)) if (k.startsWith("nt:")) delete ui.drafts[k]; saveDrafts(); }
 
 function renderProjects() {
   const ps = projects();
@@ -2097,7 +2103,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "cat-adopt": return act("category", { action: "add", names: [d.cat] }, `Added ${d.cat}`);
     case "cancel-new":
-      ui.newTask = false; delete $("#newtask-form").dataset.drawn; return render();
+      ui.newTask = false; delete $("#newtask-form").dataset.drawn; clearNewTaskDrafts(); return render();
     case "create": {
       const title = $("#nt-title").value.trim();
       if (!title) return toast("Give the task a title", true);
@@ -2107,6 +2113,7 @@ document.addEventListener("click", async (ev) => {
         const sid = $("#nt-session").value;
         if (sid) await api("bind", { task: id, session: sid });
         ui.newTask = false; delete $("#newtask-form").dataset.drawn;
+        clearNewTaskDrafts();
         ui.expanded.add(id);
         toast(`Created ${id}`);
       } catch (e) { toast(String(e.message || e), true); }
@@ -2258,8 +2265,8 @@ $("#refresh").addEventListener("click", refresh);
 function openNewTask(project) {
   ui.newTask = true;
   delete $("#newtask-form").dataset.drawn;
+  if (project) ui.drafts["nt:proj"] = project;
   render();
-  if (project && $("#nt-proj")) $("#nt-proj").value = project;
   const t = $("#nt-title");
   if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
 }
