@@ -810,11 +810,13 @@ function logEntries(t) {
 const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
 
-function secHead(title, t, what, tip, count) {
+function secHead(title, t, what, tip, count, extra = "") {
   const on = ui.adding.has(`${t.id}:${what}`);
   return `<div class="sec-h"><h3>${title}${count != null ? ` <span class="meta">${count}</span>` : ""}</h3>
-    <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button></div>`;
+    <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button>${extra}</div>`;
 }
+// A directory as it reads best: the home directory as ~.
+const tildePath = (p) => String(p).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
@@ -848,10 +850,11 @@ function renderTaskBody(t) {
       ${doItButton(t, x)}
       ${x.state === "open" ? `<button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
-  const todos = !t.todos.length ? `<div class="empty">No todos.</div>`
-    : (openTodos.length ? "" : `<div class="empty">All done.</div>`) + shownTodos.map(todoRow).join("") +
-      (finished.length > FINISHED_SHOWN
-        ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
+  // "All done" and the finished toggle sit on the Todos heading line, not on lines of their own.
+  const todoState = (!t.todos.length ? `<span class="meta">none</span>` : openTodos.length ? "" : `<span class="meta">all done</span>`) +
+    (finished.length > FINISHED_SHOWN
+      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
+  const todos = shownTodos.map(todoRow).join("");
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
   const logs = logEntries(t);
@@ -859,28 +862,34 @@ function renderTaskBody(t) {
   const refs = list(t.refs).map(resolveRef);
   const groups = ["ticket", "pr", "doc", "link", "none"].map((kd) => [kd, refs.filter((r) => r.kind === kd)]).filter(([, r]) => r.length);
   const resOpen = ui.resOpen.has(t.id);
+  // One line for status / project / category, one for the directories. `next` already heads the
+  // card, so here it is only an edit button (sessions read it from the card, so editing it does
+  // steer the next one).
+  const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
+  const dirs = list(t.workdirs);
   return `<div class="task-body">
-    <div class="field"><label>status</label>
-      <select data-action="set-status" data-task="${esc(t.id)}">
+    <div class="metarow">
+      <label>status <select data-action="set-status" data-task="${esc(t.id)}">
         ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
-      </select></div>
-    <div class="field"><label>project</label>
-      <select data-action="set-project" data-task="${esc(t.id)}">
+      </select></label>
+      <label>project <select data-action="set-project" data-task="${esc(t.id)}">
         <option value="" ${t.project ? "" : "selected"}>(no project)</option>
         ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
-      </select></div>
-    <div class="field"><label>category</label>
-      <select data-action="set-category" data-task="${esc(t.id)}">
+      </select></label>
+      <label>category <select data-action="set-category" data-task="${esc(t.id)}">
         <option value="" ${t.category ? "" : "selected"}>(none)</option>
         ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
-      </select></div>
-    ${field("next", "next", "the next concrete step")}
-    <div class="field"><label>workdirs</label><div class="meta">${list(t.workdirs).length
-        ? list(t.workdirs).map(esc).join("<br>") : "— added automatically when a session is bound"}</div></div>
+      </select></label>
+      <span style="flex:1"></span>
+      <button class="btn small ghost ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}" title="Edit the next step — sessions read it from the card">✎ next</button>
+    </div>
+    ${editNext ? field("next", "next", "the next concrete step") : ""}
+    <div class="meta wdirs" title="${esc(dirs.join("\n") || "Added automatically when a session is bound")}">workdirs · ${dirs.length
+        ? dirs.map((x) => esc(tildePath(x))).join(" · ") : "added automatically when a session is bound"}</div>
 
-    ${secHead("Todos", t, "todo", "Add a todo")}
+    ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
     ${adding("todo") ? `<div class="row nowrap addbox">
         <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
         <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
@@ -892,8 +901,7 @@ function renderTaskBody(t) {
       <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} — it starts bound, reads the card and reports">▶ New session</button>
       <select class="bind mini place" data-action="launch-place" title="Where new sessions open">
         ${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}
-      </select></div>
-    <div class="launchopts">${launchOptions()}</div>
+      </select>${launchOptions()}</div>
     ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
         ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
             ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
@@ -1833,9 +1841,10 @@ document.addEventListener("click", async (ev) => {
       const key = `${d.field}:${d.task}`;
       const v = ui.drafts[key] ?? "";
       delete ui.drafts[key];
+      ui.adding.delete(`${d.task}:${d.field}`);
       return act("set", { task: d.task, fields: [`${d.field}=${v}`] }, "Saved");
     }
-    case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; return render();
+    case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; ui.adding.delete(`${d.task}:${d.field}`); return render();
     case "add-todo": {
       const key = "addtodo:" + d.task;
       const text = (ui.drafts[key] || "").trim();
