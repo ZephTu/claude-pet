@@ -39,6 +39,8 @@ async function api(op, args = {}) {
   return h.postMessage(Object.assign({ op }, args));
 }
 async function apiJSON(op, args) { return JSON.parse(await api(op, args)); }
+// For ops whose reply is an object already (launch) — or JSON text, either way.
+async function apiObj(op, args) { const r = await api(op, args); return typeof r === "string" ? JSON.parse(r || "{}") : (r || {}); }
 
 async function act(op, args, ok) {
   try {
@@ -228,9 +230,20 @@ const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: "Back
 // Sessions the board starts or resumes skip Claude Code's permission prompts — the user's choice,
 // remembered; off unless ticked.
 const skipPerms = () => pref("hq-skip-perms", "0") === "1";
+// Stay on the board: a session the board starts or resumes opens its terminal tab in the
+// background, and its conversation window opens here instead — carry on from the board.
+const stayOnBoard = () => pref("hq-stay", "0") === "1";
 function launchOptions() {
   return `<label class="skipperm" title="Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files">
-    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> skip permissions</label>`;
+    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> skip permissions</label>
+    <label class="skipperm" title="Open the session's terminal tab in the background and keep working here, in its conversation window">
+    <input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}> stay on board</label>`;
+}
+// After starting or resuming a session with "stay on board": its conversation window, which
+// fills in as the session comes up.
+function stayWith(sid, title) {
+  if (!stayOnBoard() || !sid) return;
+  openPeek(sid, null, { starting: true, title });
 }
 // ---- earlier sessions of a task, to resume one (hq history). Fetched when shown, kept a minute.
 const HISTORY_MS = 60 * 1000;
@@ -316,7 +329,8 @@ async function doTodo(taskId, text) {
       const dir = launchDir(t);
       if (!dir) throw new Error("This task has no directory yet — bind a session or give the project a directory first");
       const place = launchPlace();
-      await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms() });
+      const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms(), focus: !stayOnBoard() });
+      stayWith(r && r.session, `${t.id} ${t.title}`);
       ui.handed[key] = { to: "a new session", at: Date.now() };
       toast(`Started a session on ${t.id} (${PLACES[place]}) to do it`);
       setTimeout(() => refresh(), 2500);
@@ -1228,10 +1242,12 @@ async function copyText(text, msg) {
   try { await api("copy", { text }); toast(msg); } catch (e) { toast(String(e.message || e), true); }
 }
 
-async function openPeek(sid, back) {
+async function openPeek(sid, back, opt = {}) {
   const s = ui.sessions.find((x) => x.sessionId === sid || x.sessionId.startsWith(sid));
-  ui.modal = { type: "peek", sid: s ? s.sessionId : sid, title: (s && (s.title || s.project)) || sid.slice(0, 8),
-               project: s ? s.project : "", cwd: s ? s.cwd : "", live: Boolean(s), msgs: null, sig: "", back: back || null };
+  ui.modal = { type: "peek", sid: s ? s.sessionId : sid, title: (s && (s.title || s.project)) || opt.title || sid.slice(0, 8),
+               project: s ? s.project : "", cwd: s ? s.cwd : "", live: Boolean(s), msgs: null, sig: "", back: back || null,
+               // Just started from the board: not live yet, but not ended either — it is coming up.
+               starting: Boolean(opt.starting) && !s, startedAt: Date.now() };
   drawPeek(true);
   await refreshPeek(true);
 }
@@ -1246,6 +1262,14 @@ async function refreshPeek(first) {
   let msgs;
   try { msgs = await apiJSON("peek", { session: m.sid }); } catch (e) { return toast(String(e.message || e), true); }
   if (ui.modal !== m) return;
+  // A session that has come up (or ended) since the window opened: send box on or off.
+  const s = ui.sessions.find((x) => x.sessionId === m.sid);
+  let changed = false;
+  if (Boolean(s) !== m.live) {
+    m.live = Boolean(s); changed = true;
+    if (s) { m.title = s.title || s.project || m.title; m.project = s.project; m.cwd = s.cwd; m.starting = false; }
+  }
+  if (m.starting && Date.now() - m.startedAt > 120000) { m.starting = false; changed = true; }
   if (msgs && !Array.isArray(msgs)) {          // --meta form: also says who the session is
     if (!m.live) { m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
                    m.project = m.project || (msgs.cwd || "").split("/").pop(); }
@@ -1253,7 +1277,7 @@ async function refreshPeek(first) {
     msgs = msgs.messages || [];
   }
   const sig = JSON.stringify(msgs);
-  if (sig === m.sig) return;
+  if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
   if (!first && sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode)) return;
@@ -1272,7 +1296,7 @@ function drawPeek(toBottom) {
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   const canSend = m.live && Boolean(SENDABLE[s.terminal && s.terminal.kind]);
-  const noSend = !m.live ? "This session has ended — history only" : "Not supported in this terminal";
+  const noSend = m.starting ? "Starting the session — you can type here as soon as it is up" : !m.live ? "This session has ended — history only" : "Not supported in this terminal";
   const msgs = m.msgs;
   const list = msgs === null ? `<div class="empty">Loading…</div>`
     : !msgs.length ? `<div class="empty">${m.found === false ? "No transcript found for this session on this machine." : "No messages yet."}</div>`
@@ -1285,14 +1309,14 @@ function drawPeek(toBottom) {
   box.innerHTML = `<div class="panel" role="dialog" aria-label="Conversation">
     <div class="phead">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="Back">←</button>` : ""}
-      <div><div class="stitle">${esc(m.title)}${m.live ? "" : ` <span class="chip">ended</span>`}</div><div class="meta">${esc(m.project || "")} · last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close</div></div>
+      <div><div class="stitle">${esc(m.title)}${m.live ? "" : m.starting ? ` <span class="chip">starting…</span>` : ` <span class="chip">ended</span>`}</div><div class="meta">${esc(m.project || "")} · last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close</div></div>
       <span style="flex:1"></span>
       <button class="btn small" data-action="copy-all">Copy all</button>
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
       <button class="btn small ghost" data-action="close-modal" title="Close (Esc)">✕</button>
     </div>
     <div class="peek-body">${list}</div>
-    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
+    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? "Starting the session…" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
       <textarea data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
         placeholder="${canSend ? "Reply to this session — paste or drop images too" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
       ${sendButton(m.sid, canSend)}
@@ -1796,8 +1820,9 @@ document.addEventListener("click", async (ev) => {
       const t = taskById(d.task);
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
       try {
-        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "" });
-        toast(`Resuming it in ${PLACES[place]} — bound to ${d.task}`);
+        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "", focus: !stayOnBoard() });
+        toast(stayOnBoard() ? `Resumed — bound to ${d.task}; carry on here` : `Resuming it in ${PLACES[place]} — bound to ${d.task}`);
+        stayWith(d.session, d.name);
       } catch (e) { toast(String(e.message || e), true); }
       delete ui.history[d.task];
       setTimeout(() => refresh(), 2500);
@@ -2029,8 +2054,10 @@ document.addEventListener("click", async (ev) => {
       if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
       const place = launchPlace();
       try {
-        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms() });
-        toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
+        const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms(), focus: !stayOnBoard() });
+        toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card`
+          : stayOnBoard() ? `Started on ${t.id} — it reads the card and reports here` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
+        stayWith(r && r.session, `${t.id} ${t.title}`);
       } catch (e) { toast(String(e.message || e), true); }
       setTimeout(() => refresh(), 2500);
       return;
@@ -2097,6 +2124,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
   if (["set-status", "set-project", "set-category"].includes(d.action)) {
     ui.pointerDown = false;
