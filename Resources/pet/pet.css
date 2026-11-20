@@ -653,13 +653,16 @@ html, body {
 .branch:not(:empty)::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
 .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* The HQ task a session is bound to: takes the room the line has, cut only at the edge. */
-.task { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a99f96; }
+.task { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a837d; }
 .task:empty { display: none; }
-.task.st-waiting-on-me { color: #e0a63c; }
-.task.st-blocked { color: #e8846e; }
-.task.st-active { color: #7fb3aa; }
-.task.st-done { color: #7fa6d9; }
-.task.st-abandoned { color: #6b6560; text-decoration: line-through; }
+/* The task id as a small outlined tag; its colour is the task's status. */
+.task .tid { display: inline-block; padding: 0 3px; margin-right: 2px; border-radius: 3px; line-height: 1.25;
+  border: 1px solid #4a443e; color: #a99f96; font-variant-numeric: tabular-nums; }
+.task .tid.st-waiting-on-me { color: #e0a63c; border-color: rgba(224,166,60,.55); }
+.task .tid.st-blocked { color: #e8846e; border-color: rgba(224,83,60,.5); }
+.task .tid.st-active { color: #7fb3aa; border-color: rgba(102,163,153,.5); }
+.task .tid.st-done { color: #7fa6d9; border-color: rgba(127,166,217,.45); }
+.task .tid.st-abandoned { color: #6b6560; text-decoration: line-through; }
 
 /* Dimmer than the project name on purpose: the name is the thing being
    reported and the status is what is happening to it, so they must not read as

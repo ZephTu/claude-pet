@@ -769,9 +769,17 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // never cost the row the thing it is actually reporting.
     // The bound HQ task leads the second line, coloured by its status; without HQ it is empty
     // and the line is what it always was.
+    // Only the id carries the status colour (a small tag, like the board's); the title stays quiet.
     const taskEl = rows[i].querySelector(".task");
-    taskEl.textContent = s.task || "";
-    taskEl.className = "task" + (s.taskStatus ? " st-" + s.taskStatus : "");
+    taskEl.textContent = "";
+    if (s.task) {
+      const cut = s.task.indexOf(" ");
+      const tid = document.createElement("span");
+      tid.className = "tid" + (s.taskStatus ? " st-" + s.taskStatus : "");
+      tid.textContent = cut > 0 ? s.task.slice(0, cut) : s.task;
+      taskEl.appendChild(tid);
+      if (cut > 0) taskEl.appendChild(document.createTextNode(" " + s.task.slice(cut + 1)));
+    }
     rows[i].querySelector(".branch").textContent = s.branch || "";
     const asks = rows[i].querySelector(".detail.asks");
     if (asks) asks.appendChild(decideButtons(s.sessionId, s.askId));
