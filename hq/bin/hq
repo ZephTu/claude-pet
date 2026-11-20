@@ -820,7 +820,7 @@ def cmd_focus(args):
             save_focus(days)
     elif args.action == "order":
         # Today's list in the given order (the board's drag); anything not named keeps its place after.
-        ids = [parse_card(find_card(x))["id"] for x in args.tasks]
+        ids = list(dict.fromkeys(parse_card(find_card(x))["id"] for x in args.tasks))   # no repeats
         days = load_focus()
         cur = days.get(today(), [])
         days[today()] = [i for i in ids if i in cur] + [i for i in cur if i not in ids]

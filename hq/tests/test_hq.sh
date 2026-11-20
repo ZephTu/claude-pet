@@ -230,6 +230,7 @@ OID="$("$HQ" asks "$PID" --json | python3 -c 'import json,sys; print([a["id"] fo
 "$HQ" focus add T-001 T-002 "$PID" >/dev/null
 "$HQ" focus order "$PID" T-001 >/dev/null
 "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert ids[:3]==["'"$PID"'","T-001","T-002"], ids' && ok "today's tasks can be reordered"
+"$HQ" focus order T-001 T-001 >/dev/null; "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert len(ids)==len(set(ids)), ids' && ok "focus order drops repeated ids" || fail "focus order kept a repeated id"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

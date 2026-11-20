@@ -2338,7 +2338,14 @@ function finishDrag() {
   $("#tasks").classList.remove("reordering");
   document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
 }
-document.addEventListener("dragend", () => { finishDrag(); render(); });
+document.addEventListener("dragend", () => {
+  // A drag ends without a mouseup, so the pointer would read as held and keep timed refreshes
+  // waiting until the next click.
+  ui.pointerDown = false;
+  ui.pendingRender = false;
+  finishDrag();
+  render();
+});
 
 // ---- reorder Today's task cards by their ⠿ grip (only with Active first off). The order is
 // today's list in focus.json, saved with `hq focus order`.
@@ -2348,14 +2355,15 @@ document.addEventListener("dragstart", (ev) => {
   ui.dragging = "task:" + grip.dataset.dragTask;      // holds rebuilds until the drop
   ui.dropAt = null;
   ev.dataTransfer.effectAllowed = "move";
-  ev.dataTransfer.setData("text/plain", grip.dataset.dragTask);
+  // Not text/plain: dropped on a message box, that would type the task id into it.
+  ev.dataTransfer.setData("application/x-hq-task", grip.dataset.dragTask);
   const card = grip.closest(".fcard");
   if (card) card.classList.add("dragging");
 });
 document.addEventListener("dragover", (ev) => {
   if (!String(ui.dragging || "").startsWith("task:")) return;
   const zone = ev.target.closest && ev.target.closest("#today-focus");
-  if (!zone) return;
+  if (!zone) { clearDropMarks(); ui.dropAt = null; return; }
   ev.preventDefault();
   ev.dataTransfer.dropEffect = "move";
   let best = null, dist = Infinity;
@@ -2379,9 +2387,16 @@ document.addEventListener("drop", async (ev) => {
   const i = order.indexOf(at.id);
   if (i < 0) return render();
   order.splice(at.before ? i : i + 1, 0, id);
+  const before = focusIds();
   ui.board.focus.ids = order;                    // shows at once; the save follows
   render();
-  try { await api("focus", { action: "order", tasks: order }); } catch (e) { toast(String(e.message || e), true); }
+  try { await api("focus", { action: "order", tasks: order }); }
+  catch (e) {
+    toast(String(e.message || e), true);
+    ui.board.focus.ids = before;                 // not saved: back to the order hq has
+    ui.lastSig = null;
+    refresh();
+  }
 });
 
 $("#refresh").addEventListener("click", refresh);
