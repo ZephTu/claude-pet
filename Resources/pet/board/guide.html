@@ -79,7 +79,8 @@
 <h1 id="zh-board">看板上能做什么（All）</h1>
 <h2>顶栏</h2>
 <ul>
-<li>计数：未回应的 ask、你的待办、进行中的任务、在跑的 session。</li>
+<li>计数：未回应的 ask、你的待办、进行中的任务、在跑的 session（悬停有说明）。</li>
+<li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>↻</b> 后面是多久后重置。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存成文件：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/usage.json"</code>（必须写绝对路径）。文件超过 15 分钟没更新（没有 session 在刷新状态栏）就不显示。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
 <li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
@@ -142,7 +143,7 @@
 <ul>
 <li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
 <li>每张卡三行：状态点和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。<br>
-<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：橙色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；橙色带黄色小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；黄色实心带竖杠 = 等你授权；黄色空心圈 = 等你回答；灰色 = 空闲；褐色空心圈 = 很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
+状态文字后面是 context 用了多少（如 <code>64% ctx</code>，60% 起变黄、80% 起变红），和小猫列表里的一样。<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：橙色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；橙色带黄色小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；黄色实心带竖杠 = 等你授权；黄色空心圈 = 等你回答；灰色 = 空闲；褐色空心圈 = 很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
 <li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
 <li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样。session 空闲时，按钮等到 Claude 开始处理（最多 5 秒）才恢复；session 正忙时消息会排队，终端一接收就恢复，提示"Delivered — queued…"（不会干等 5 秒）。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。<b>草稿会保留</b>：消息框、ask 说明框、待办等输入框里没发出去的文字、加进去的图片，以及多条 ask 里已经选好的回答，都存在本机，看板刷新、关掉窗口、桌宠重启后都还在；发送或回应后才清掉，对应的 ask 在别处被回应了也会自动清掉。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
@@ -363,7 +364,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">What the board does (All)</h1>
 <h2>Top bar</h2>
 <ul>
-<li>Counts: unanswered asks, your todos, open tasks, live sessions.</li>
+<li>Counts: unanswered asks, your todos, open tasks, live sessions (hover for words).</li>
+<li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>↻</b> how long until each resets. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>. Older than 15 minutes (no session drawing a statusline) and it isn't shown.</li>
 <li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
@@ -425,7 +427,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <ul>
 <li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
 <li>Each card is three lines: the state dot and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.<br>
-<b>The dot and the status word are exactly the pet list's</b> (the word: "Working", the command it is running, "1 in background", "Answered"…; hover the dot for words): orange, breathing = working; a turning arc = waiting on an agent it sent off; orange with an amber corner = working, but the last several calls failed; grey-green with a ring going out = turn over, but a command or process it started still runs in the background; solid amber with a bar = waiting for your approval; an amber ring = waiting for your answer; grey = idle; a hollow brown ring = gone quiet. With Reduce motion on nothing moves, and the shapes alone tell them apart.</li>
+After the status word comes how full the context window is (e.g. <code>64% ctx</code>; amber from 60%, red from 80%), as in the pet's list. <b>The dot and the status word are exactly the pet list's</b> (the word: "Working", the command it is running, "1 in background", "Answered"…; hover the dot for words): orange, breathing = working; a turning arc = waiting on an agent it sent off; orange with an amber corner = working, but the last several calls failed; grey-green with a ring going out = turn over, but a command or process it started still runs in the background; solid amber with a bar = waiting for your approval; an amber ring = waiting for your answer; grey = idle; a hollow brown ring = gone quiet. With Reduce motion on nothing moves, and the shapes alone tell them apart.</li>
 <li><b>Background sessions</b> (blue "background" tag) have no terminal: <b>Attach</b> (terminal icon) opens <code>claude attach</code> in your chosen terminal so you can talk to it; <b>Stop</b> (square icon, click twice) stops it — the conversation is kept and Attach resumes it. They can't be messaged from the board.</li>
 <li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
 <li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it. To an idle session the button waits (up to 5 s) until Claude starts on it; a busy session queues it, so the button is back as soon as the terminal takes it, with "Delivered — queued…" (no five-second wait). <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. <b>Drafts are kept</b>: unsent text in the message, ask-note, todo and other boxes, the images you added, and answers picked on a group of asks are stored on this machine — they survive a refresh, closing the window and the pet restarting, and clear once sent or answered (or when that ask is answered somewhere else). Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
