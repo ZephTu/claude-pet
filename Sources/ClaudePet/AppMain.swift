@@ -842,7 +842,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             bridge?.notify("\(ask.task) asks: \(text)", hold: 25, emphasis: ask.task, sessionId: ask.session,
                            jumpable: !ask.session.isEmpty)
         }
-        announcedAsks = ids
+        // Remember every ask announced, not only the ones open now: one put off with "Later"
+        // leaves the list and comes back the next day — that is not a new question.
+        announcedAsks = already.union(ids)
     }
 
     /// Once a day, the first time the pet sees work while nothing is picked for today, it

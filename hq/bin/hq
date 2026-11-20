@@ -473,8 +473,10 @@ def read_asks(task_dir):
             asks[e["id"]] = dict(e, state="open")
         elif e.get("type") == "resolve" and e.get("id") in asks:
             a = asks[e["id"]]
+            # An answer is news again: whatever was delivered before it (a "Later" typed into the
+            # session) is not this answer. The board and the hook mark delivery after resolving.
             a.update(state=e["resolution"], note=e.get("note", ""), via=e.get("via"),
-                     resolved_at=e.get("ts"), seq=e.get("seq"))
+                     resolved_at=e.get("ts"), seq=e.get("seq"), delivered=None)
         elif e.get("type") == "reopen" and e.get("id") in asks:
             asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None, snoozed_until=None)
         elif e.get("type") == "snooze" and e.get("id") in asks:
@@ -599,19 +601,27 @@ The card, not this conversation, is the source of truth. Rules:
 4. If the work drifts into a different task, say so and suggest `/task` for a new card."""
 
 
+def local_time(text):
+    """A time as naive local datetime, from ISO with or without an offset (or a bare date); None
+    if it isn't one. `snoozed_until` is kept in this form so Python, the board (JS) and the pet
+    (Swift) all read it the same way."""
+    try:
+        t = dt.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+
+
 def snoozed(a, now=None):
     """An open ask the user put off with "Later", still before the time it comes back."""
-    until = a.get("snoozed_until")
-    if not until:
-        return False
-    try:
-        return dt.datetime.fromisoformat(until) > (now or dt.datetime.now())
-    except ValueError:
-        return False
+    until = local_time(a.get("snoozed_until")) if a.get("snoozed_until") else None
+    return bool(until) and until > (now or dt.datetime.now())
 
 
 def answer_text(state, note):
     """How an answer reads to the session: yes / no / the user's own answer, not do / drop."""
+    if state == "do" and note and note.startswith("made an @me todo"):
+        return "the user made it an @me todo and will do it themselves — don't ask again" + note[len("made an @me todo"):].replace(" — the user will do it", "", 1)
     if state == "do":
         return f"answer: {note}" if note else "yes — go ahead as you suggested"
     if state == "drop":
@@ -702,7 +712,7 @@ def cmd_board(args):
                           "links": links, "tasks": out},
                          ensure_ascii=False, indent=1))
         return
-    open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
+    open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open" and not snoozed(a)]
     my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES
                 for t in m["todos"] if t["state"] == "open" and t["owner"] == "me"]
     my_todos += [(m, {"i": "-", "text": m["waiting_on_me"]}) for m in metas
@@ -1018,7 +1028,15 @@ def cmd_ask(args):
     elif args.action == "snooze":
         # The ask stays open; the board and the pet leave it out until then. --until "" clears it.
         card, _ = find_ask(args.target)
-        until = args.until if args.until is not None else (dt.date.today() + dt.timedelta(days=1)).isoformat() + "T00:00:00"
+        if args.until is None:
+            until = (dt.date.today() + dt.timedelta(days=1)).isoformat() + "T00:00:00"
+        elif args.until == "":
+            until = ""
+        else:
+            t = local_time(args.until)
+            if t is None:
+                die(f"--until must be a date or time like 2026-11-22 or 2026-11-22T09:00, not {args.until!r}")
+            until = t.strftime("%Y-%m-%dT%H:%M:%S")
         append_event(os.path.dirname(card), {"type": "snooze", "id": args.target, "until": until, "via": args.via})
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
