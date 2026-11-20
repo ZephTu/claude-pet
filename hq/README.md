@@ -99,7 +99,10 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    | `later` | need to ask someone else, revisit |
    | `archive` | I don't have the context to answer — park it |
 
-   On the board there is a fifth answer, **To todo**, for an ask that is really something you
+   On the board the answers read **Yes** (`do`; with a note, the note is the answer), **No**
+   (`drop`), **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
+   snooze`), and the session is told you'll answer later — and **⋯ → No context** (`archive`).
+   There is also **To todo**, for an ask that is really something you
    will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
    to file such things as todos in the first place — an ask is only for a question they need
    answered before going on.

@@ -108,12 +108,25 @@ final class TaskIndex {
         return v
     }
 
+    /// `2026-11-21T00:00:00` as written by `hq ask snooze` — local time, no zone.
+    private static func localTime(_ text: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ssXXXXX", "yyyy-MM-dd"] {
+            f.dateFormat = format
+            if let d = f.date(from: text) { return d }
+        }
+        return nil
+    }
+
     /// The asks ledger is an event log; fold it into the ones still open.
     private static func asks(in folder: URL, task: String) -> [Ask] {
         guard let text = try? String(contentsOf: folder.appending(path: "asks.jsonl"), encoding: .utf8) else { return [] }
         var open: [String: Ask] = [:]
         var seen: [String: Ask] = [:]
         var order: [String] = []
+        var resolved: Set<String> = []
         for line in text.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let e = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -126,8 +139,14 @@ final class TaskIndex {
                 order.append(id)
             case "resolve":
                 open[id] = nil
+                resolved.insert(id)
             case "reopen":
                 open[id] = seen[id]
+                resolved.remove(id)
+            case "snooze":
+                // "Later" on the board: still open, but out of the badge until it comes back.
+                let until = (e["until"] as? String).flatMap(Self.localTime)
+                if let until, until > Date() { open[id] = nil } else if open[id] == nil, let a = seen[id], !resolved.contains(id) { open[id] = a }
             default:
                 break
             }

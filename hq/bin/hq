@@ -476,7 +476,10 @@ def read_asks(task_dir):
             a.update(state=e["resolution"], note=e.get("note", ""), via=e.get("via"),
                      resolved_at=e.get("ts"), seq=e.get("seq"))
         elif e.get("type") == "reopen" and e.get("id") in asks:
-            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None)
+            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None, snoozed_until=None)
+        elif e.get("type") == "snooze" and e.get("id") in asks:
+            # "Later" on the board: the ask stays open, out of sight until `until` (local ISO).
+            asks[e["id"]]["snoozed_until"] = e.get("until") or None
         elif e.get("type") in ("delivered", "undelivered") and e.get("id") in asks:
             # Which session has been told the answer. Kept on the ask, not on the session, so it
             # survives that session being unbound — a second session must not be told again.
@@ -596,6 +599,26 @@ The card, not this conversation, is the source of truth. Rules:
 4. If the work drifts into a different task, say so and suggest `/task` for a new card."""
 
 
+def snoozed(a, now=None):
+    """An open ask the user put off with "Later", still before the time it comes back."""
+    until = a.get("snoozed_until")
+    if not until:
+        return False
+    try:
+        return dt.datetime.fromisoformat(until) > (now or dt.datetime.now())
+    except ValueError:
+        return False
+
+
+def answer_text(state, note):
+    """How an answer reads to the session: yes / no / the user's own answer, not do / drop."""
+    if state == "do":
+        return f"answer: {note}" if note else "yes — go ahead as you suggested"
+    if state == "drop":
+        return "no" + (f": {note}" if note else "")
+    return state + (f": {note}" if note else "")
+
+
 def session_alive(sid):
     """True / False from the pet's record of that session, None when there is no record to go by
     (the pet isn't installed, or never saw it)."""
@@ -629,7 +652,8 @@ def open_asks_text(meta, limit=10, sid=None, state=None):
     lines = [f"Open asks on {meta['id']} still waiting for the user ({len(asks)}):"]
     for a in asks[:limit]:
         theirs = sid is not None and owned_elsewhere(a, sid, meta, state or {})
-        lines.append(f"- {a['id']}{' (asked by another session on this task)' if theirs else ''}: {a['text']}")
+        later = " (the user will answer this later — carry on with what doesn't depend on it)" if snoozed(a) else ""
+        lines.append(f"- {a['id']}{' (asked by another session on this task)' if theirs else ''}{later}: {a['text']}")
     if len(asks) > limit:
         lines.append(f"- … {len(asks) - limit} more (`{HQ_BIN} asks {meta['id']}`)")
     return "\n".join(lines)
@@ -984,6 +1008,11 @@ def cmd_ask(args):
         sid = args.session or a.get("session")
         append_event(os.path.dirname(card), {"type": "undelivered" if args.undo else "delivered",
                                              "id": args.target, "session": sid})
+    elif args.action == "snooze":
+        # The ask stays open; the board and the pet leave it out until then. --until "" clears it.
+        card, _ = find_ask(args.target)
+        until = args.until if args.until is not None else (dt.date.today() + dt.timedelta(days=1)).isoformat() + "T00:00:00"
+        append_event(os.path.dirname(card), {"type": "snooze", "id": args.target, "until": until, "via": args.via})
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
         append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
@@ -1007,6 +1036,8 @@ def cmd_asks(args):
         return
     for a in out:
         st = "" if a["state"] == "open" else f"  [{a['state']}{': ' + a['note'] if a.get('note') else ''}]"
+        if a["state"] == "open" and snoozed(a):
+            st = f"  [later — until {a['snoozed_until'][:16].replace('T', ' ')}]"
         print(f"{a['id']:<8} {a['text']}{st}")
 
 
@@ -1415,7 +1446,7 @@ def hook_main():
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
-                lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {a['state']}{': ' + a['note'] if a.get('note') else ''}")
+                lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {answer_text(a['state'], a.get('note'))}")
         told = {a["id"] for a in fresh}
 
         def note_turn(entry):
@@ -1500,9 +1531,10 @@ def main():
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | resolve <ask-id> <res> [note…] | reopen <ask-id>")
-    p.add_argument("action", choices=["add", "resolve", "reopen", "delivered"]); p.add_argument("target")
+    p.add_argument("action", choices=["add", "resolve", "reopen", "delivered", "snooze"]); p.add_argument("target")
     p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.add_argument("--note")
     p.add_argument("--session"); p.add_argument("--undo", action="store_true")
+    p.add_argument("--until", help="snooze: hide the ask until this local time (default: tomorrow 00:00; \"\" clears)")
     p.set_defaults(fn=cmd_ask)
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
