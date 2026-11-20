@@ -25,13 +25,21 @@ final class JobsController {
             o["runs"] = runs.prefix(30).map { $0.json() }
             o["running"] = runs.first?.status == .running
             o["installed"] = FileManager.default.fileExists(atPath: LaunchAgent.plistURL(for: job.id).path)
+            // How full the carried-on session is, for "same session every run".
+            let state = store.state(job.id)
+            if job.sessionMode == .resume, let ctx = state["contextTokens"] as? Int,
+               let window = state["contextWindow"] as? Int, window > 0 {
+                o["contextPct"] = Int((Double(ctx) * 100 / Double(window)).rounded())
+            }
             if job.enabled {
                 o["next"] = job.schedule.nextRuns(after: now, count: 3, anchor: anchor(job, runs))
                     .map { Jobs.iso($0) }
             }
             return o
         }
-        return ["jobs": jobs, "runner": FileManager.default.isExecutableFile(atPath: program),
+        let quota = Quota.current(claudeHome: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude"),
+                                  petHome: Jobs.petHome, store: store, now: now)
+        return ["jobs": jobs, "runner": FileManager.default.isExecutableFile(atPath: program), "quota": quota.json(),
                 "seenAt": Jobs.iso(seenAt)]
     }
 

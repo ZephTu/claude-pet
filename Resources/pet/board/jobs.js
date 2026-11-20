@@ -43,8 +43,15 @@ const JT = {
     s_fresh: "New session every run", s_freshD: "Clean and cheap; runs don't see each other.",
     s_resume: "Same session every run", s_resumeD: "Each run continues the last one — for work that needs to remember, like \"what's new since last time\".",
     keep: "Keep the newest", keepTail: "runs' sessions on disk (older ones are deleted; 1 = only the latest)",
-    compact: "Compact the session first when its context passes", compactTail: "k tokens (0 = never)",
-    limit: "Time limit", minutes: "minutes", budget: "Spending limit per run", usd: "USD (0 = none)",
+    compact: "Compact the session first when its context is", compactTail: "% full (0 = never)",
+    limit: "Time limit", minutes: "minutes",
+    quotaQ: "Quota guard — before each run, look at your subscription's limits and skip the run if too much is used, leaving the rest for your own work",
+    quotaWeek: "Skip when the weekly quota is at", quotaOr: "% or the 5-hour quota at", quotaTail: "% (0 = don't check)",
+    quotaNow: "Now: week {w} · 5-hour {f}", quotaUnknown: "Now: not known yet — the pet's statusline reading or a first run will tell",
+    usageCol: "Quota used", weekUp: "week +{n}%", fiveUp: "5h +{n}%", under1: "<1% of the week",
+    ctxNow: "session context {n}%",
+    skipWeek: "Skipped — weekly quota at {p}% (limit {l}%)", skipFive: "Skipped — 5-hour quota at {p}% (limit {l}%)",
+    skipBusy: "Skipped — the previous run was still going",
     when: "When it runs", pr_every: "Every N minutes", pr_daily: "Daily", pr_weekdays: "Weekdays", pr_weekly: "Some days", pr_cron: "Cron",
     everyLbl: "Every", minutesLbl: "minutes", at: "at", cronHelp: "minute hour day month weekday",
     nextThree: "Next: {list}", slept: "Missed while the Mac slept? It runs once when it wakes.",
@@ -93,8 +100,15 @@ const JT = {
     s_fresh: "每次新开一个 session", s_freshD: "干净、便宜，每次互不影响。",
     s_resume: "每次接着同一个 session", s_resumeD: "每次接着上一次往下聊——适合需要记住上次的任务，比如「跟上次比有什么新的」。",
     keep: "保留最近", keepTail: "次运行的 session（更早的删掉；填 1 就只留最新一次）",
-    compact: "上下文超过", compactTail: "k token 时先压缩（0 = 不压缩）",
-    limit: "单次最长", minutes: "分钟", budget: "单次花费上限", usd: "美元（0 = 不限）",
+    compact: "上下文用到", compactTail: "% 时先压缩（0 = 不压缩）",
+    limit: "单次最长", minutes: "分钟",
+    quotaQ: "额度保护——每次跑之前看一眼订阅额度，用得太多就跳过这次，把剩下的留给你自己用",
+    quotaWeek: "周额度用到", quotaOr: "% 或 5 小时额度用到", quotaTail: "% 时跳过（0 = 不检查）",
+    quotaNow: "现在：周 {w} · 5 小时 {f}", quotaUnknown: "现在：还不知道——等猫从状态栏读到额度，或者任务跑过一次就有了",
+    usageCol: "用掉的额度", weekUp: "周 +{n}%", fiveUp: "5 小时 +{n}%", under1: "不到周额度的 1%",
+    ctxNow: "session 上下文 {n}%",
+    skipWeek: "跳过——周额度已用 {p}%（上限 {l}%）", skipFive: "跳过——5 小时额度已用 {p}%（上限 {l}%）",
+    skipBusy: "跳过——上一次还没跑完",
     when: "什么时候跑", pr_every: "每隔 N 分钟", pr_daily: "每天", pr_weekdays: "工作日", pr_weekly: "每周几", pr_cron: "cron 表达式",
     everyLbl: "每", minutesLbl: "分钟", at: "时间", cronHelp: "分 时 日 月 周",
     nextThree: "接下来：{list}", slept: "Mac 睡着时错过的那次，醒来后补跑一次。",
@@ -188,7 +202,30 @@ function statusText(r) {
   return s;
 }
 const statusClass = (r) => !r ? "none" : r.status === "running" ? "run" : isFail(r) ? "fail" : r.status === "ok" && r.denials ? "warn" : r.status === "ok" ? "ok" : "muted";
-const tookText = (r) => r.ended ? jdur((new Date(r.ended) - new Date(r.started)) / 1000) : r.status === "running" ? jdur((Date.now() - new Date(r.started)) / 1000) : "—";
+const tookText = (r) => r.status === "skipped" ? "—" : r.ended ? jdur((new Date(r.ended) - new Date(r.started)) / 1000) : r.status === "running" ? jdur((Date.now() - new Date(r.started)) / 1000) : "—";
+// What a run used of the subscription: the change in its quota between the run's first and last
+// rate-limit reports. The dollar figure (API list price) is only a tooltip — subscribers don't pay it.
+function usageText(r) {
+  const a = r.quotaBefore, b = r.quotaAfter;
+  if (!a || !b) return r.costUSD != null ? costText(r) : "—";
+  const same = (x, y) => x && y && x === y;
+  const dw = b.week != null && a.week != null && same(a.weekResetAt, b.weekResetAt) ? b.week - a.week : null;
+  const df = b.fiveHour != null && a.fiveHour != null && same(a.fiveHourResetAt, b.fiveHourResetAt) ? b.fiveHour - a.fiveHour : null;
+  const parts = [];
+  if (dw > 0) parts.push(jt("weekUp", { n: dw }));
+  if (df > 0) parts.push(jt("fiveUp", { n: df }));
+  return parts.length ? parts.join(" · ") : jt("under1");
+}
+function summaryText(r) {
+  const s = r.summary || "";
+  let m;
+  if ((m = s.match(/^skipped: weekly quota at (\d+)% \(limit (\d+)%\)/))) return jt("skipWeek", { p: m[1], l: m[2] });
+  if ((m = s.match(/^skipped: 5-hour quota at (\d+)% \(limit (\d+)%\)/))) return jt("skipFive", { p: m[1], l: m[2] });
+  if (/^skipped: the previous run was still going/.test(s)) return jt("skipBusy");
+  return s;
+}
+const quotaNowText = (q) => (q && (q.week != null || q.fiveHour != null))
+  ? jt("quotaNow", { w: q.week != null ? q.week + "%" : "?", f: q.fiveHour != null ? q.fiveHour + "%" : "?" }) : jt("quotaUnknown");
 const costText = (r) => (r.costUSD != null ? "$" + r.costUSD.toFixed(r.costUSD < 0.1 ? 3 : 2) : "—");
 
 // ------------------------------------------------------------------ the view
@@ -230,7 +267,7 @@ function jobCard(j) {
   const squares = runs.slice(0, 12).reverse();
   while (squares.length < 12) squares.unshift(null);
   const lastLine = running ? jt("runningFor", { d: tookText(running) })
-    : last ? `${jwhen(last.started)} · ${statusText(last)} · ${tookText(last)}${last.costUSD != null ? " · " + costText(last) : ""}` : jt("never");
+    : last ? `${jwhen(last.started)} · ${statusText(last)} · ${tookText(last)}${j.kind === "claude" && (last.quotaAfter || last.costUSD != null) ? " · " + usageText(last) : ""}` : jt("never");
   const open = jui.open === j.id;
   const armed = jui.armed === "del:" + j.id;
   const kind = j.kind === "shell" ? jt("shell") : jt("claude");
@@ -239,7 +276,7 @@ function jobCard(j) {
       <button class="jname" data-jaction="expand" data-id="${esc(j.id)}" aria-expanded="${open}">
         <span class="jdot ${dot}"></span>
         <span class="jtitle"><span class="stitle">${esc(j.name)}</span> <span class="chip">${kind}</span>
-          <span class="meta">${esc(scheduleText(j.schedule))} · ${esc(j.cwd || "~")}</span></span>
+          <span class="meta">${esc(scheduleText(j.schedule))} · ${esc(j.cwd || "~")}${j.contextPct != null ? " · " + esc(jt("ctxNow", { n: j.contextPct })) : ""}</span></span>
       </button>
       <div class="jlast">
         <div class="jsquares" aria-label="recent runs">${squares.map((r) => `<span class="sq ${statusClass(r)}" title="${r ? esc(jwhen(r.started) + " · " + statusText(r)) : ""}"></span>`).join("")}</div>
@@ -263,13 +300,13 @@ function historyTable(j) {
   const runs = j.runs || [];
   if (!runs.length) return `<div class="jhist"><div class="empty">${jt("never")}</div></div>`;
   return `<div class="jhist"><div class="meta">${jt("history")}</div><div class="jtable-wrap"><table class="jtable">
-    <thead><tr><th>${jt("hStart")}</th><th>${jt("hResult")}</th><th>${jt("hTook")}</th>${j.kind === "claude" ? `<th>${jt("hCost")}</th>` : ""}<th>${jt("hSummary")}</th><th></th></tr></thead>
+    <thead><tr><th>${jt("hStart")}</th><th>${jt("hResult")}</th><th>${jt("hTook")}</th>${j.kind === "claude" ? `<th>${jt("usageCol")}</th>` : ""}<th>${jt("hSummary")}</th><th></th></tr></thead>
     <tbody>${runs.map((r) => `<tr>
       <td class="nowrap">${esc(jwhen(r.started))}${r.trigger === "manual" ? ` <span class="chip">${jt("manual")}</span>` : ""}</td>
       <td class="nowrap st-${statusClass(r)}">${esc(statusText(r))}</td>
       <td class="nowrap">${esc(tookText(r))}</td>
-      ${j.kind === "claude" ? `<td class="nowrap">${esc(costText(r))}</td>` : ""}
-      <td class="jsum">${esc(r.summary || "")}</td>
+      ${j.kind === "claude" ? `<td class="nowrap" title="${r.costUSD != null ? esc(costText(r) + " (API list price)") : ""}">${r.status === "skipped" ? "—" : esc(usageText(r))}</td>` : ""}
+      <td class="jsum">${esc(summaryText(r))}</td>
       <td class="nowrap jacts">${r.status === "skipped" ? "" : `<button class="btn small ghost" data-jaction="detail" data-id="${esc(j.id)}" data-run="${esc(r.id)}">${jt("details")}</button>`}
         ${r.sessionId ? `<button class="btn small ghost" data-jaction="convo" data-id="${esc(j.id)}" data-session="${esc(r.sessionId)}" title="${jt("convoTip")}">${jt("convo")}</button>
         <button class="btn small ghost" data-jaction="resume" data-id="${esc(j.id)}" data-session="${esc(r.sessionId)}" title="${jt("resumeTip")}">${jt("cont")}</button>` : ""}</td>
@@ -280,8 +317,8 @@ function historyTable(j) {
 const JOB_DEFAULTS = () => ({
   name: "", kind: "claude", prompt: "", command: "", cwd: "~", enabled: true,
   schedule: { kind: "weekdays", everyMinutes: 60, hour: 9, minute: 0, days: [1], cron: "0 9 * * 1-5" },
-  model: "", permission: "standard", timeoutMinutes: 20, maxBudgetUSD: 0,
-  sessionMode: "fresh", keepSessions: 20, compactAboveK: 100, notify: "failure",
+  model: "", permission: "standard", timeoutMinutes: 20, skipWeekPct: 90, skipFiveHourPct: 90,
+  sessionMode: "fresh", keepSessions: 20, compactAbovePct: 50, notify: "failure",
 });
 
 function openJobForm(job) {
@@ -331,21 +368,23 @@ function drawJobForm() {
       <label class="jblock"><span class="jlabel">${jt("prompt")}</span>
         <textarea rows="4" data-jf="prompt" placeholder="${esc(jt("promptPh"))}">${esc(f.prompt)}</textarea></label>
       <div class="meta">${jt("promptHelp")}</div>
-      <div class="jgrid3">
+      <div class="jgrid2">
         <label><span class="jlabel">${jt("model")}</span><select data-jf="model">
           ${[["", jt("modelDefault")], ["sonnet", "Sonnet"], ["opus", "Opus"], ["haiku", "Haiku"]].map(([v, l]) => `<option value="${v}" ${f.model === v ? "selected" : ""}>${l}</option>`).join("")}
           ${f.model && !["sonnet", "opus", "haiku"].includes(f.model) ? `<option value="${esc(f.model)}" selected>${esc(f.model)}</option>` : ""}
         </select></label>
         <label><span class="jlabel">${jt("limit")}</span><span class="jinline"><input type="number" min="1" max="1440" data-jf="timeoutMinutes" data-num="1" value="${f.timeoutMinutes}"> ${jt("minutes")}</span></label>
-        <label><span class="jlabel">${jt("budget")}</span><span class="jinline"><input type="number" min="0" step="0.5" data-jf="maxBudgetUSD" data-num="1" value="${f.maxBudgetUSD}"> ${jt("usd")}</span></label>
       </div>
       <div class="jlabel">${jt("perm")}</div>
       <div class="jchoices">${["standard", "edits", "all"].map((p) => choice("permission", p, jt("p_" + p), jt("p_" + p + "D"), f.permission)).join("")}</div>
+      <div class="jlabel">${jt("quotaQ")}</div>
+      <div class="jinline">${jt("quotaWeek")} <input type="number" min="0" max="100" class="short" data-jf="skipWeekPct" data-num="1" value="${f.skipWeekPct}">${jt("quotaOr")} <input type="number" min="0" max="100" class="short" data-jf="skipFiveHourPct" data-num="1" value="${f.skipFiveHourPct}">${jt("quotaTail")}</div>
+      <div class="meta">${esc(quotaNowText(jui.data && jui.data.quota))}</div>
       <div class="jlabel">${jt("session")}</div>
       <div class="jchoices">${choice("sessionMode", "fresh", jt("s_fresh"), jt("s_freshD"), f.sessionMode)}${choice("sessionMode", "resume", jt("s_resume"), jt("s_resumeD"), f.sessionMode)}</div>
       <div class="jinline">${f.sessionMode === "fresh"
         ? `${jt("keep")} <input type="number" min="1" max="500" class="short" data-jf="keepSessions" data-num="1" value="${f.keepSessions}"> ${jt("keepTail")}`
-        : `${jt("compact")} <input type="number" min="0" class="short" data-jf="compactAboveK" data-num="1" value="${f.compactAboveK}"> ${jt("compactTail")}`}</div>
+        : `${jt("compact")} <input type="number" min="0" max="100" class="short" data-jf="compactAbovePct" data-num="1" value="${f.compactAbovePct}">${jt("compactTail")}`}</div>
     ` : `
       <label class="jblock"><span class="jlabel">${jt("command")}</span>
         <textarea rows="3" class="mono" data-jf="command">${esc(f.command)}</textarea></label>
@@ -451,7 +490,7 @@ async function openJobRun(id, run) {
   const j = d.job || {}, r = d.run || {};
   // The last text step is the reply itself, shown above already.
   const steps = (d.steps || []).filter((s, i, all) => !(i === all.length - 1 && s.kind === "text" && d.reply && d.reply.trim().startsWith(s.text.replace(/…$/, "").trim().slice(0, 200))));
-  const meta = [jwhen(r.started), tookText(r), r.turns ? jt("turns", { n: r.turns }) : "", r.costUSD != null ? costText(r) : "",
+  const meta = [jwhen(r.started), tookText(r), r.turns ? jt("turns", { n: r.turns }) : "", j.kind === "claude" && (r.quotaAfter || r.costUSD != null) ? usageText(r) : "",
                 j.kind === "claude" ? (j.model || jt("modelDefault")) : "", j.cwd || ""].filter(Boolean).join(" · ");
   const stepHTML = steps.map((s) => s.kind === "text"
     ? `<li class="jstep text"><div class="md">${markdown(s.text)}</div></li>`

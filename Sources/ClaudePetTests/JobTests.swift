@@ -13,7 +13,10 @@ enum JobTests {
         let sparse = try? JSONDecoder().decode(Job.self, from: Data(#"{"id":"j1","name":"x","prompt":"hi"}"#.utf8))
         t.check("a job with only an id, name and prompt loads with defaults",
                 sparse?.kind == .claude && sparse?.schedule.kind == .weekdays && sparse?.timeoutMinutes == 20
-                    && sparse?.sessionMode == .fresh && sparse?.keepSessions == 20 && sparse?.notify == .failure)
+                    && sparse?.sessionMode == .fresh && sparse?.keepSessions == 20 && sparse?.notify == .failure
+                    && sparse?.skipWeekPct == 90 && sparse?.skipFiveHourPct == 90 && sparse?.compactAbovePct == 50)
+        t.check("a quota percentage over 100 is refused", Job(id: "j1", name: "n", prompt: "p", skipWeekPct: 120).problem() != nil)
+        t.check("a compaction percentage over 100 is refused", Job(id: "j1", name: "n", prompt: "p", compactAbovePct: 101).problem() != nil)
         t.check("a job without an id does not load",
                 (try? JSONDecoder().decode(Job.self, from: Data(#"{"name":"x"}"#.utf8))) == nil)
         t.check("a sensible job has no problem", sparse?.problem() == nil)
@@ -122,13 +125,39 @@ enum JobTests {
         {"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":5,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200}},"session_id":"sess-1"}
         {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt"}]}}
         {"type":"assistant","message":{"content":[{"type":"text","text":"Done: one file."}],"usage":{"input_tokens":3,"cache_read_input_tokens":1300,"cache_creation_input_tokens":0}}}
-        {"type":"result","subtype":"success","is_error":false,"result":"Done: one file.","total_cost_usd":0.01,"num_turns":2,"permission_denials":[{"tool_name":"Write"}]}
+        {"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.51,"resetsAt":1795201800},"seven_day":{"utilization":0.93,"resetsAt":1795320000}}}}
+        {"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.534,"resetsAt":1795201800},"seven_day":{"utilization":0.94,"resetsAt":1795320000}}}}
+        {"type":"result","subtype":"success","is_error":false,"result":"Done: one file.","total_cost_usd":0.01,"num_turns":2,"permission_denials":[{"tool_name":"Write"}],"modelUsage":{"m1":{"contextWindow":200000},"m2":{"contextWindow":1000000}}}
         """
         let r = ClaudeStreamResult.parse(Data(stream.utf8))
         t.check("the stream gives the session", r.sessionId == "sess-1")
         t.check("…the reply, cost, turns and refusals",
                 r.finished && !r.isError && r.reply == "Done: one file." && r.costUSD == 0.01 && r.turns == 2 && r.denials == 1)
         t.check("…and the context of the last call", r.contextTokens == 1303)
+        t.check("…and the model's context window", r.contextWindow == 1_000_000)
+        t.check("the first rate-limit report is the quota before the run",
+                r.quotaFirst == Quota(fiveHour: 51, fiveHourResetAt: Date(timeIntervalSince1970: 1795201800),
+                                      week: 93, weekResetAt: Date(timeIntervalSince1970: 1795320000)))
+        t.check("…the last, after it (rounded to whole percent)", r.quotaLast?.week == 94 && r.quotaLast?.fiveHour == 53)
+        t.check("a report without windows is no reading", Quota(rateLimitInfo: ["status": "allowed"]) == nil)
+
+        // ---- quota guard
+        let soon = sat.addingTimeInterval(3600), gone = sat.addingTimeInterval(-60)
+        let high = Quota.highest([Quota(fiveHour: 40, fiveHourResetAt: soon, week: 80, weekResetAt: soon),
+                                  Quota(fiveHour: 70, fiveHourResetAt: soon, week: 99, weekResetAt: gone),
+                                  Quota(week: 85, weekResetAt: soon)], now: sat)
+        t.check("the highest reading counts, ignoring windows that have reset", high.fiveHour == 70 && high.week == 85)
+        t.check("over the weekly limit skips, saying why",
+                high.reasonToSkip(weekPct: 85, fiveHourPct: 90) == "skipped: weekly quota at 85% (limit 85%)")
+        t.check("over the 5-hour limit skips", high.reasonToSkip(weekPct: 90, fiveHourPct: 60)?.contains("5-hour") == true)
+        t.check("under both limits runs", high.reasonToSkip(weekPct: 90, fiveHourPct: 90) == nil)
+        t.check("0 means don't check", high.reasonToSkip(weekPct: 0, fiveHourPct: 0) == nil)
+        t.check("nothing known: run", Quota().reasonToSkip(weekPct: 1, fiveHourPct: 1) == nil)
+        t.check("a quota reading survives the run record",
+                JobRun.parse(Data(("{\"run\":\"q\",\"event\":\"start\",\"at\":\"2026-11-21T09:00:00Z\"}\n"
+                    + "{\"run\":\"q\",\"event\":\"end\",\"at\":\"2026-11-21T09:01:00Z\",\"status\":\"ok\",\"contextWindow\":1000,"
+                    + "\"quotaAfter\":\(String(decoding: try! JSONSerialization.data(withJSONObject: r.quotaLast!.json()), as: UTF8.self))}").utf8),
+                             alive: { _ in false }).first.map { $0.quotaAfter == r.quotaLast && $0.contextWindow == 1000 } == true)
         let steps = ClaudeStreamResult.steps(Data(stream.utf8))
         t.check("steps pair a tool call with its result",
                 steps.count == 2 && steps[0]["tool"] == "Bash" && steps[0]["result"] == "a.txt" && steps[1]["kind"] == "text")

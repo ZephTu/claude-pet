@@ -60,6 +60,13 @@ enum JobRunner {
             if r.code != 0 || r.timedOut { end["tail"] = lines.joined(separator: "\n") }
 
         case .claude:
+            // Quota guard: leave the rest of the subscription for the user's own work.
+            let quota = Quota.current(claudeHome: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude"),
+                                      petHome: Jobs.petHome, store: store)
+            if let reason = quota.reasonToSkip(weekPct: job.skipWeekPct, fiveHourPct: job.skipFiveHourPct) {
+                store.append(id, ["run": runID, "event": "skip", "at": iso(Date()), "trigger": trigger, "summary": reason])
+                return 0
+            }
             var state = store.state(id)
             var sid = UUID().uuidString.lowercased()
             var resuming = false
@@ -72,7 +79,8 @@ enum JobRunner {
             let base = claudeFlags(job)
             // A long-lived session is compacted before it gets heavy, so every run doesn't
             // re-read its whole history.
-            if resuming, job.compactAboveK > 0, let ctx = state["contextTokens"] as? Int, ctx > job.compactAboveK * 1000 {
+            if resuming, job.compactAbovePct > 0, let ctx = state["contextTokens"] as? Int,
+               let window = state["contextWindow"] as? Int, window > 0, ctx * 100 >= job.compactAbovePct * window {
                 _ = execute(shellClaude(["-p", "--output-format", "json", "--resume", sid] + base.model),
                             cwd: cwd, env: env, stdin: "/compact", out: errPath, err: errPath,
                             timeout: 15, stop: store.stopURL(id))
@@ -91,6 +99,15 @@ enum JobRunner {
             if let c = result.costUSD { end["costUSD"] = c }
             if let t = result.turns { end["turns"] = t }
             if let c = result.contextTokens { end["contextTokens"] = c }
+            if let w = result.contextWindow { end["contextWindow"] = w }
+            if let q = result.quotaFirst { end["quotaBefore"] = q.json() }
+            if let q = result.quotaLast {
+                end["quotaAfter"] = q.json()
+                // The freshest reading there is: the next run's quota guard starts from it.
+                if let data = try? JSONSerialization.data(withJSONObject: q.json()) {
+                    try? data.write(to: store.quotaURL, options: .atomic)
+                }
+            }
             let firstLine = result.reply.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
                 .first { !$0.isEmpty } ?? ""
             end["summary"] = String((ok ? firstLine : (result.errorText.isEmpty ? errLines.last ?? firstLine : result.errorText)).prefix(300))
@@ -100,6 +117,7 @@ enum JobRunner {
                 if result.sessionId != nil || transcript(of: sid) != nil {
                     state["sessionId"] = result.sessionId ?? sid
                     if let c = result.contextTokens { state["contextTokens"] = c }
+                    if let w = result.contextWindow { state["contextWindow"] = w }
                     store.setState(id) { $0 = state }
                 }
             }
@@ -126,7 +144,6 @@ enum JobRunner {
         case .edits: all += ["--permission-mode", "acceptEdits"]
         case .all: all += ["--dangerously-skip-permissions"]
         }
-        if job.maxBudgetUSD > 0 { all += ["--max-budget-usd", String(format: "%.2f", job.maxBudgetUSD)] }
         return Flags(model: model, all: all)
     }
 

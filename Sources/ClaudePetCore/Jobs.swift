@@ -76,32 +76,37 @@ public struct Job: Codable, Equatable, Sendable {
     public var model: String
     public var permission: Permission
     public var timeoutMinutes: Int
-    /// 0: no limit.
-    public var maxBudgetUSD: Double
+    /// Quota guard for Claude runs: skip a run while the subscription's weekly or five-hour
+    /// limit is already used past this percentage, leaving the rest for your own work.
+    /// 0: don't check. (A dollar limit was tried first: nobody could say what number to put in.)
+    public var skipWeekPct: Int
+    public var skipFiveHourPct: Int
     public var sessionMode: SessionMode
     /// Fresh sessions: how many of the newest runs keep their session on disk. Older ones are
     /// deleted, so a job that runs every hour doesn't leave hundreds of sessions behind.
     public var keepSessions: Int
-    /// Resumed session: compact it first once its context passes this many thousand tokens.
-    /// 0: never (Claude Code still compacts on its own when the window is full).
-    public var compactAboveK: Int
+    /// Resumed session: compact it first once its context fills this percentage of the model's
+    /// window. 0: never (Claude Code still compacts on its own when the window is full).
+    public var compactAbovePct: Int
     public var notify: Notify
 
     public init(id: String = Jobs.newID(), name: String = "", kind: Kind = .claude, prompt: String = "",
                 command: String = "", cwd: String = "~", schedule: Schedule = Schedule(),
                 enabled: Bool = true, model: String = "", permission: Permission = .standard,
-                timeoutMinutes: Int = 20, maxBudgetUSD: Double = 0, sessionMode: SessionMode = .fresh,
-                keepSessions: Int = 20, compactAboveK: Int = 100, notify: Notify = .failure) {
+                timeoutMinutes: Int = 20, skipWeekPct: Int = 90, skipFiveHourPct: Int = 90,
+                sessionMode: SessionMode = .fresh, keepSessions: Int = 20, compactAbovePct: Int = 50,
+                notify: Notify = .failure) {
         self.id = id; self.name = name; self.kind = kind; self.prompt = prompt; self.command = command
         self.cwd = cwd; self.schedule = schedule; self.enabled = enabled; self.model = model
-        self.permission = permission; self.timeoutMinutes = timeoutMinutes; self.maxBudgetUSD = maxBudgetUSD
-        self.sessionMode = sessionMode; self.keepSessions = keepSessions; self.compactAboveK = compactAboveK
+        self.permission = permission; self.timeoutMinutes = timeoutMinutes
+        self.skipWeekPct = skipWeekPct; self.skipFiveHourPct = skipFiveHourPct
+        self.sessionMode = sessionMode; self.keepSessions = keepSessions; self.compactAbovePct = compactAbovePct
         self.notify = notify
     }
 
     enum Keys: String, CodingKey {
         case id, name, kind, prompt, command, cwd, schedule, enabled, model, permission, timeoutMinutes,
-             maxBudgetUSD, sessionMode, keepSessions, compactAboveK, notify
+             skipWeekPct, skipFiveHourPct, sessionMode, keepSessions, compactAbovePct, notify
     }
 
     /// Every field but the id may be missing: a job written by an older version, or by hand,
@@ -113,9 +118,10 @@ public struct Job: Codable, Equatable, Sendable {
         self.init(id: d.id, name: v(.name, d.name), kind: v(.kind, d.kind), prompt: v(.prompt, d.prompt),
                   command: v(.command, d.command), cwd: v(.cwd, d.cwd), schedule: v(.schedule, d.schedule),
                   enabled: v(.enabled, d.enabled), model: v(.model, d.model), permission: v(.permission, d.permission),
-                  timeoutMinutes: v(.timeoutMinutes, d.timeoutMinutes), maxBudgetUSD: v(.maxBudgetUSD, d.maxBudgetUSD),
+                  timeoutMinutes: v(.timeoutMinutes, d.timeoutMinutes),
+                  skipWeekPct: v(.skipWeekPct, d.skipWeekPct), skipFiveHourPct: v(.skipFiveHourPct, d.skipFiveHourPct),
                   sessionMode: v(.sessionMode, d.sessionMode), keepSessions: v(.keepSessions, d.keepSessions),
-                  compactAboveK: v(.compactAboveK, d.compactAboveK), notify: v(.notify, d.notify))
+                  compactAbovePct: v(.compactAbovePct, d.compactAbovePct), notify: v(.notify, d.notify))
     }
 
     /// What is wrong with it, in a sentence the form can show; nil when it can be saved.
@@ -130,9 +136,9 @@ public struct Job: Codable, Equatable, Sendable {
         default: break
         }
         if !(1...24 * 60).contains(timeoutMinutes) { return "The time limit must be between 1 minute and 24 hours." }
-        if maxBudgetUSD < 0 { return "The spending limit can't be negative." }
+        if !(0...100).contains(skipWeekPct) || !(0...100).contains(skipFiveHourPct) { return "A quota percentage is between 0 and 100." }
         if !(1...500).contains(keepSessions) { return "Keep between 1 and 500 sessions." }
-        if compactAboveK < 0 { return "The compaction threshold can't be negative." }
+        if !(0...100).contains(compactAbovePct) { return "The compaction threshold is a percentage between 0 and 100." }
         if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return "That model name has odd characters." }
         return schedule.problem()
     }
@@ -398,14 +404,22 @@ public struct JobRun: Equatable, Sendable {
     public var summary: String
     /// The output's last lines, for a failure.
     public var tail: String
+    /// The subscription quota (percent used) when the run started and when it ended, from Claude's
+    /// own rate-limit reports — what the run cost, in the terms a subscriber thinks in.
+    public var quotaBefore: Quota?
+    public var quotaAfter: Quota?
+    /// The model's context window, to read `contextTokens` as a percentage.
+    public var contextWindow: Int?
 
     public init(id: String, started: Date, ended: Date?, status: Status, trigger: String, pid: Int32?,
                 exitCode: Int?, costUSD: Double?, turns: Int?, sessionId: String?, denials: Int,
-                contextTokens: Int?, summary: String, tail: String) {
+                contextTokens: Int?, summary: String, tail: String,
+                quotaBefore: Quota? = nil, quotaAfter: Quota? = nil, contextWindow: Int? = nil) {
         self.id = id; self.started = started; self.ended = ended; self.status = status; self.trigger = trigger
         self.pid = pid; self.exitCode = exitCode; self.costUSD = costUSD; self.turns = turns
         self.sessionId = sessionId; self.denials = denials; self.contextTokens = contextTokens
         self.summary = summary; self.tail = tail
+        self.quotaBefore = quotaBefore; self.quotaAfter = quotaAfter; self.contextWindow = contextWindow
     }
 
     public var durationSeconds: Double? { ended.map { $0.timeIntervalSince(started) } }
@@ -420,6 +434,9 @@ public struct JobRun: Equatable, Sendable {
         if let turns { o["turns"] = turns }
         if let sessionId { o["sessionId"] = sessionId }
         if let contextTokens { o["contextTokens"] = contextTokens }
+        if let contextWindow { o["contextWindow"] = contextWindow }
+        if let quotaBefore { o["quotaBefore"] = quotaBefore.json() }
+        if let quotaAfter { o["quotaAfter"] = quotaAfter.json() }
         return o
     }
 
@@ -450,6 +467,9 @@ public struct JobRun: Equatable, Sendable {
                 r.sessionId = (o["sessionId"] as? String) ?? r.sessionId
                 r.denials = o["denials"] as? Int ?? 0
                 r.contextTokens = o["contextTokens"] as? Int
+                r.contextWindow = o["contextWindow"] as? Int
+                r.quotaBefore = Quota(json: o["quotaBefore"])
+                r.quotaAfter = Quota(json: o["quotaAfter"])
                 r.summary = o["summary"] as? String ?? ""
                 r.tail = o["tail"] as? String ?? ""
                 byID[id] = r
@@ -488,6 +508,10 @@ public struct ClaudeStreamResult: Equatable, Sendable {
     public var denials = 0
     /// The context the last model call saw: what a resumed session carries into the next run.
     public var contextTokens: Int?
+    public var contextWindow: Int?
+    /// The first and the last rate-limit report of the run.
+    public var quotaFirst: Quota?
+    public var quotaLast: Quota?
     public var errorText = ""
 
     public init() {}
@@ -498,6 +522,11 @@ public struct ClaudeStreamResult: Equatable, Sendable {
             guard let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
             if r.sessionId == nil, let s = o["session_id"] as? String { r.sessionId = s }
             switch o["type"] as? String {
+            case "rate_limit_event":
+                if let q = Quota(rateLimitInfo: o["rate_limit_info"]) {
+                    if r.quotaFirst == nil { r.quotaFirst = q }
+                    r.quotaLast = q
+                }
             case "assistant":
                 if let u = (o["message"] as? [String: Any])?["usage"] as? [String: Any] {
                     let n = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]
@@ -511,6 +540,8 @@ public struct ClaudeStreamResult: Equatable, Sendable {
                 r.costUSD = o["total_cost_usd"] as? Double
                 r.turns = o["num_turns"] as? Int
                 r.denials = (o["permission_denials"] as? [Any])?.count ?? 0
+                r.contextWindow = (o["modelUsage"] as? [String: [String: Any]])?.values
+                    .compactMap { $0["contextWindow"] as? Int }.max()
                 if r.isError {
                     r.errorText = (o["errors"] as? [String])?.joined(separator: "; ")
                         ?? (o["subtype"] as? String ?? "error")
@@ -574,6 +605,8 @@ public struct JobStore: Sendable {
     public func logsURL(_ id: String) -> URL { folder(id).appending(path: "logs") }
     /// Present while a stop has been asked for; the runner then records the run as stopped.
     public func stopURL(_ id: String) -> URL { folder(id).appending(path: "stop") }
+    /// The last quota reading any job's run saw (see Quota.current).
+    public var quotaURL: URL { base.appending(path: "quota.json") }
 
     public func load(_ id: String) -> Job? {
         guard Jobs.isValidID(id), let data = try? Data(contentsOf: jobURL(id)) else { return nil }
@@ -653,5 +686,91 @@ public struct JobStore: Sendable {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyyMMdd-HHmmss"
         return f.string(from: now) + "-" + UUID().uuidString.lowercased().prefix(4)
+    }
+}
+
+// MARK: - Subscription quota
+
+/// How much of the subscription's five-hour and weekly limits is used, in percent, and when each
+/// window resets. Read from Claude's rate-limit reports in a run's output, or from the readings the
+/// pet already keeps (UsageSnapshot).
+public struct Quota: Equatable, Sendable {
+    public var fiveHour: Int?
+    public var fiveHourResetAt: Date?
+    public var week: Int?
+    public var weekResetAt: Date?
+
+    public init(fiveHour: Int? = nil, fiveHourResetAt: Date? = nil, week: Int? = nil, weekResetAt: Date? = nil) {
+        self.fiveHour = fiveHour; self.fiveHourResetAt = fiveHourResetAt; self.week = week; self.weekResetAt = weekResetAt
+    }
+
+    /// A stream-json `rate_limit_event`'s `rate_limit_info`.
+    public init?(rateLimitInfo raw: Any?) {
+        guard let info = raw as? [String: Any], let w = info["unifiedWindows"] as? [String: [String: Any]] else { return nil }
+        func pct(_ k: String) -> Int? { (w[k]?["utilization"] as? Double).map { Int(($0 * 100).rounded()) } }
+        func reset(_ k: String) -> Date? { (w[k]?["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) } }
+        self.init(fiveHour: pct("five_hour"), fiveHourResetAt: reset("five_hour"), week: pct("seven_day"), weekResetAt: reset("seven_day"))
+        if fiveHour == nil && week == nil { return nil }
+    }
+
+    public init?(json raw: Any?) {
+        guard let o = raw as? [String: Any] else { return nil }
+        self.init(fiveHour: o["fiveHour"] as? Int, fiveHourResetAt: Jobs.date(o["fiveHourResetAt"]),
+                  week: o["week"] as? Int, weekResetAt: Jobs.date(o["weekResetAt"]))
+    }
+
+    public init(_ u: UsageSnapshot) {
+        self.init(fiveHour: u.fiveHourPercent, fiveHourResetAt: u.fiveHourResetAt, week: u.sevenDayPercent, weekResetAt: u.sevenDayResetAt)
+    }
+
+    public func json() -> [String: Any] {
+        var o: [String: Any] = [:]
+        if let fiveHour { o["fiveHour"] = fiveHour }
+        if let fiveHourResetAt { o["fiveHourResetAt"] = Jobs.iso(fiveHourResetAt) }
+        if let week { o["week"] = week }
+        if let weekResetAt { o["weekResetAt"] = Jobs.iso(weekResetAt) }
+        return o
+    }
+
+    /// The most that is known to be used now. A reading only ever understates its window until
+    /// the window resets, so an old one still counts — as long as its window hasn't reset.
+    public static func highest(_ readings: [Quota], now: Date) -> Quota {
+        var out = Quota()
+        for q in readings {
+            if let p = q.fiveHour, let r = q.fiveHourResetAt, r > now, p >= (out.fiveHour ?? -1) {
+                out.fiveHour = p; out.fiveHourResetAt = r
+            }
+            if let p = q.week, let r = q.weekResetAt, r > now, p >= (out.week ?? -1) {
+                out.week = p; out.weekResetAt = r
+            }
+        }
+        return out
+    }
+
+    /// Why a job with these limits should not run now; nil when it may.
+    public func reasonToSkip(weekPct: Int, fiveHourPct: Int) -> String? {
+        if weekPct > 0, let w = week, w >= weekPct { return "skipped: weekly quota at \(w)% (limit \(weekPct)%)" }
+        if fiveHourPct > 0, let f = fiveHour, f >= fiveHourPct { return "skipped: 5-hour quota at \(f)% (limit \(fiveHourPct)%)" }
+        return nil
+    }
+
+    /// Everything known about the quota right now: the pet's readings (claude-hud's cache, the
+    /// statusline's) and the last rate-limit report a job run saw.
+    public static func current(claudeHome: URL, petHome: URL, store: JobStore, now: Date = Date()) -> Quota {
+        var readings: [Quota] = []
+        if let hud = (try? Data(contentsOf: UsageReader.cacheURL(claudeHome: claudeHome))).flatMap(UsageReader.parse) {
+            readings.append(Quota(hud))
+        }
+        if let saved = (try? Data(contentsOf: UsageReader.snapshotURL(petHome: petHome))).flatMap(UsageReader.parseSnapshot) {
+            readings.append(Quota(saved))
+        }
+        if let line = (try? Data(contentsOf: StatuslineUsage.cacheURL(petHome: petHome))).flatMap(StatuslineUsage.decode) {
+            readings.append(Quota(line))
+        }
+        if let data = try? Data(contentsOf: store.quotaURL),
+           let q = Quota(json: try? JSONSerialization.jsonObject(with: data)) {
+            readings.append(q)
+        }
+        return highest(readings, now: now)
     }
 }
