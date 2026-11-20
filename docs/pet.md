@@ -62,7 +62,7 @@ three times, under three first lines that already said so.
 | orange three-quarter arc, turning | Claude has stopped; an agent it sent off is doing the work |
 | amber with an exclamation bar | wants a decision (red once it has waited past a minute) |
 | amber ring | wants an answer |
-| hollow brown ring | busy on paper, nothing heard for 90s |
+| hollow brown ring | busy on paper, but the turn was interrupted (Claude Code says idle) |
 | green | finished, not looked at yet |
 | grey with a teal heartbeat | **turn over, commands still running in the background** — the row says `2 in background`, and hovering lists them (`npm run dev · 12m`), cut down by the same rule as the activity log |
 | grey | idle |
@@ -71,12 +71,16 @@ The background check reads the process table every render rather than trusting t
 
 A number counts both kinds of attention, by the cat's ear. It is not shown at zero.
 
-A running row that has said nothing for 90 seconds, with no tool call in flight,
+A running row with no tool call in flight that Claude Code itself no longer calls busy
 reads **No recent activity** on a hollow dot, and stops counting as busy — the pet will go
 to sleep over it and says nothing about it finishing. That is almost always a turn
 somebody cancelled with Esc: Claude Code emits no hook at all for an interrupt, so
-the last thing written stays "busy" and nothing ever comes to take it back. It is
-deliberately not called "done", which nothing here is in a position to know, and it
+the last thing written stays "busy" and nothing ever comes to take it back. The pet asks
+Claude Code's own status file (`~/.claude/sessions/<pid>.json`): it flips to idle the
+moment you press Esc, and the row goes quiet 10 seconds later. While that file still says
+busy the row keeps saying Working however long it is silent — the model writing one large
+file can go minutes without a hook. Without the file, 90 seconds of silence is the rule.
+It is deliberately not called "done", which nothing here is in a position to know, and it
 rights itself the moment that session does anything again.
 
 **Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / keep list open / unmute all / quit; launch at login, the global shortcut, how long the finish bubbles stay and how many stack up, and the connection report sit under **Settings**. If the install is broken — hooks missing from `settings.json`, `pet-emit` gone — the menu opens with a ⚠ line naming the problem, and the cat says so once at launch. The pet follows the system's **Reduce motion** setting rather than keeping a switch of its own. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session (an empty name goes back to the folder and tab title), pin it, or mute it.

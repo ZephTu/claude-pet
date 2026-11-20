@@ -30,7 +30,7 @@
 ### 桌宠看不到的东西
 
 - **只认安装之后新开的 session。** hook 在 session 启动时加载，装之前就开着的窗口要重开才看得到。
-- **按 Esc 打断没有任何信号。** Claude Code 打断时一个 hook 都不发，所以这种轮次 90 秒后显示成 *No recent activity*，而不是"干完了"。
+- **按 Esc 打断没有任何信号。** Claude Code 打断时一个 hook 都不发，所以宠物改看 Claude Code 自己的会话状态：这种轮次大约 10 秒后显示成 *No recent activity*（读不到状态时是 90 秒），而不是"干完了"。
 - **在等后台 agent 的那一轮不算"干完"。** 它显示成在等，等 agent 把 session 唤醒、真正结束时才报完成。
 - **多选题提问**（`AskUserQuestion`）没法在桌宠上回答——你勾的选项就是答案，所以点这一行会跳回终端。
 - **跳转和发消息取决于终端。** 跳转：Orca、iTerm2、Ghostty 1.4+；VS Code 系编辑器只能跳到对的窗口、不一定是对的终端标签；其他终端没有 ↗。从任务看板发消息：只支持 Orca 和 iTerm2。后台 `claude --bg` session 根本没有终端。
