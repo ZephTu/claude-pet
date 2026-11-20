@@ -155,8 +155,7 @@ function render() {
   $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
     `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? "List" : "Project"}</button>`).join("");
   // One button: by project it folds / unfolds every group; by status it closes open task cards.
-  const groupKeys = [...new Set(tasks().map((t) => t.project || "(none)"))];
-  const anyOpen = ui.groupBy === "project" ? groupKeys.some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
+  const anyOpen = ui.groupBy === "project" ? projectGroupKeys().some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
   $("#foldall").textContent = anyOpen ? "Collapse all" : "Expand all";
   $("#foldall").title = ui.groupBy === "project" ? "Fold or unfold every project group" : "Close every open task";
   $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
@@ -293,6 +292,12 @@ function renderWaitingUnused() {
 // then the rest; ties go to open asks, then the most recently updated.
 // Latest activity of a live session in a project: bound to one of its tasks, or working in
 // one of its directories.
+// Every group the Tasks column can show by project — listed projects (even empty ones), any
+// project named only on a card, and "No project".
+function projectGroupKeys() {
+  return [...new Set([...projectNames(), ...tasks().map((t) => t.project || "(none)")])];
+}
+
 function projectActivity(name) {
   if (!name) return 0;
   const pr = projects().find((p) => p.name === name);
@@ -1195,7 +1200,7 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "fold-all": {
       if (ui.groupBy === "project") {
-        const keys = [...new Set(tasks().map((t) => t.project || "(none)"))];
+        const keys = projectGroupKeys();
         const anyOpen = keys.some((k) => !ui.collapsed.has(k));
         ui.collapsed = new Set(anyOpen ? keys : []);
         if (anyOpen) ui.expanded.clear();
