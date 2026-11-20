@@ -106,11 +106,14 @@ session 一多、分散在好几个仓库里，难的就变成了记住每个 se
 - **Tasks**：每件事一张卡——状态、下一步、可勾选的待办、日志。绑定到任务的 session 会先读卡、再把进展写回去，所以 session 随时可以关，下一个接着干。
 - **Sessions**：所有在跑的 session 和它的最后一条消息：绑定到任务、看对话、跳到终端，或者**直接在这里给它发消息**（支持 Orca 和 iTerm2，效果和你亲手输入一样）。
 
-HQ 是可选的、单独安装——会加三个 hook 和一个小的 Python 命令行工具（只用 `python3` 标准库）：
+HQ 是可选的，在桌宠之后单独安装，需要 `python3`（只用标准库）：
 
 ```bash
-hq/install.sh --root ~/claude-hq     # 任务卡放在哪个目录都行
+hq/install.sh --root ~/claude-hq                # 先列出要做的每一项改动，确认后才执行
+hq/install.sh --root ~/claude-hq --no-hooks     # 只装看板和命令行，不碰 settings.json
 ```
+
+它会加的东西：自己的目录 `~/.claude/hq/`、你的任务根目录、`/task` 和 `/board` 两个斜杠命令（`--no-commands` 可跳过），以及——除非加了 `--no-hooks`——往 `~/.claude/settings.json` 追加三个 hook（先备份），它们只在你绑定了任务的 session 里起作用。它不会改任何全局 CLAUDE.md。看板的 Sessions 栏会读取本机对话记录来显示最近的消息，不会发到任何地方。
 
 原理和任务卡格式见 [hq/README.md](hq/README.md)。
 
@@ -160,7 +163,7 @@ WebGL 跑不起来、或者贴图解不开，页面改成显示每个姿势的�
 
 别名、置顶、静音、延后和各项设置在 `UserDefaults` 里，不在这儿。
 
-**对话内容它只留一行，也不发任何网络请求。** 这一行是每轮结束时 Claude 最后那条回复的第一行，由 `Stop` hook 给出，去掉格式、截到 140 个字，用在「干完了」那一行和完成气泡里，七天后随那一行一起清掉。你的提问一个字都不存。 活动记录里的命令是**故意不完整**的摘要：程序名，后面的词只放行到第一个可能带值的东西为止。`npm test` 原样保留，`curl -H Authorization:Bearer …` 变成 `curl …`。这是按结构放行，不是按「token」「password」这种词去黑名单——没人想到要命名的 secret 一样拦得住。
+**对话内容它只留一行，也不发任何网络请求。**（可选的任务看板 HQ 会读得更多，见下文。） 这一行是每轮结束时 Claude 最后那条回复的第一行，由 `Stop` hook 给出，去掉格式、截到 140 个字，用在「干完了」那一行和完成气泡里，七天后随那一行一起清掉。你的提问一个字都不存。 活动记录里的命令是**故意不完整**的摘要：程序名，后面的词只放行到第一个可能带值的东西为止。`npm test` 原样保留，`curl -H Authorization:Bearer …` 变成 `curl …`。这是按结构放行，不是按「token」「password」这种词去黑名单——没人想到要命名的 secret 一样拦得住。
 
 ## 可选：从你的 statusline 读额度
 

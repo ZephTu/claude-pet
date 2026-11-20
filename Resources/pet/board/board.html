@@ -12,6 +12,7 @@
   <div id="counts"></div>
   <div class="spacer"></div>
   <input id="search" type="search" placeholder="Filter tasks…" autocomplete="off">
+  <button class="btn ghost" data-action="open-cats" title="Add, rename or remove categories">Categories</button>
   <button id="new-task" class="btn">+ New task</button>
   <button id="refresh" class="btn ghost" title="Refresh">↻</button>
   <a id="guide" class="btn ghost" href="guide.html" title="How to use HQ">Guide</a>
@@ -26,6 +27,7 @@
   </section>
   <section class="col" id="col-tasks">
     <h2>Tasks <label class="toggle"><input type="checkbox" id="show-closed"> show closed</label></h2>
+    <div id="cats-panel" hidden></div>
     <div id="newtask-form" hidden></div>
     <div id="tasks"></div>
   </section>

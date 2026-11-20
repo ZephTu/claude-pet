@@ -13,11 +13,15 @@ const RESOLUTIONS = [
   ["later", "Ask later", "Need to ask someone else — revisit"],
   ["archive", "No context", "I can't answer this — park it"],
 ];
-const CATEGORIES = ["rca", "test-followup", "benchmark", "process", "dev", "side"];
+// Categories live in <root>/hq.json and are edited from the Categories panel.
+const categories = () => (ui.board && Array.isArray(ui.board.categories) ? ui.board.categories : []);
+// Terminals the board can type into; anything else gets Jump only.
+const SENDABLE = { orca: "Orca", iterm2: "iTerm2" };
+const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2" };
 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false,
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {},
 };
 
 // ------------------------------------------------------------------ bridge
@@ -104,6 +108,8 @@ function render() {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
+  $("#cats-panel").hidden = !ui.catsOpen;
+  if (ui.catsOpen) $("#cats-panel").innerHTML = renderCategories();
   $("#tasks").innerHTML = renderTasks();
   $("#sessions").innerHTML = renderSessions();
 
@@ -226,10 +232,18 @@ function renderTaskBody(t) {
       <select data-action="set-status" data-task="${esc(t.id)}">
         ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
       </select></div>
+    <div class="field"><label>category</label>
+      <select data-action="set-category" data-task="${esc(t.id)}">
+        <option value="" ${t.category ? "" : "selected"}>(none)</option>
+        ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
+        ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
+      </select></div>
     <div class="field"><label>next</label>
       <input data-key="${k("next")}" data-field="next" data-task="${esc(t.id)}" value="${esc(val("next", t.next))}" placeholder="next concrete step — Enter to save"></div>
     <div class="field"><label>waiting on you</label>
       <input data-key="${k("waiting_on_me")}" data-field="waiting_on_me" data-task="${esc(t.id)}" value="${esc(val("waiting_on_me", t.waiting_on_me))}" placeholder="empty = nothing — Enter to save"></div>
+    <div class="field"><label>workdirs</label><div class="meta">${list(t.workdirs).length
+        ? list(t.workdirs).map(esc).join("<br>") : "— added automatically when a session is bound"}</div></div>
     <h3>Todos</h3>${todos}
     <div class="row" style="margin-top:6px">
       <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="add todo, e.g. @me send reply to …" value="${esc(draft(k("addtodo")))}">
@@ -266,6 +280,10 @@ function renderSessions() {
            ${sorted.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(x.title)}</option>`).join("")}
          </select>`;
     const busy = s.state === "busy";
+    const kind = s.terminal && s.terminal.kind;
+    const canSend = Boolean(SENDABLE[kind]);
+    const why = canSend ? "" : `Messaging from the Task Board isn't supported for ${
+      kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
     const peek = ui.peekOpen.has(sid)
       ? `<div class="peek" data-sid="${esc(sid)}">${(ui.peeks[sid] || []).map((m) =>
           `<div class="msg ${m.role}"><span class="who">${m.role === "user" ? "you" : "claude"} · ${ago(m.ts)}</span>${esc(m.text)}</div>`).join("") || `<div class="empty">Loading…</div>`}</div>`
@@ -281,9 +299,10 @@ function renderSessions() {
           <button class="btn small ghost" data-action="peek" data-session="${esc(sid)}">${ui.peekOpen.has(sid) ? "Hide" : "Peek"}</button>
           <button class="btn small ghost" data-action="jump" data-session="${esc(sid)}">Jump</button>
         </div>
-        <div class="send">
-          <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}" placeholder="${busy ? "Busy — your message will queue" : "Message this session — Enter to send"}">${esc(draft("msg:" + sid))}</textarea>
-          <button class="btn small primary" data-action="send" data-session="${esc(sid)}">Send</button>
+        <div class="send ${canSend ? "" : "disabled"}" title="${esc(why)}">
+          <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}
+            placeholder="${!canSend ? "Not supported in this terminal" : busy ? "Busy — your message will queue" : "Message this session — Enter to send"}">${esc(draft("msg:" + sid))}</textarea>
+          <button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>Send</button>
         </div>
         ${peek}
       </div>
@@ -292,15 +311,59 @@ function renderSessions() {
 }
 
 function renderNewTask() {
-  const dirs = [...new Set(ui.sessions.map((s) => s.cwd).filter(Boolean))];
+  const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
+  const cats = categories();
+  const dflt = cats.includes("other") ? "other" : cats[0];
   return `<div class="card">
     <div class="field"><label>title</label><input id="nt-title" placeholder="What is this task?"></div>
-    <div class="field"><label>category</label><select id="nt-cat">${CATEGORIES.map((c) => `<option>${c}</option>`).join("")}</select></div>
-    <div class="field"><label>workdir</label><select id="nt-dir"><option value="">—</option>${dirs.map((d) => `<option>${esc(d)}</option>`).join("")}</select></div>
+    <div class="field"><label>category</label><select id="nt-cat"><option value="">(none)</option>${cats.map((c) =>
+      `<option value="${esc(c)}" ${c === dflt ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+    <div class="field"><label>workdir</label><input id="nt-dir" list="nt-dirs" placeholder="optional — type a path or pick one; binding a session adds its directory">
+      <datalist id="nt-dirs">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
     <div class="field"><label>bind session</label><select id="nt-session"><option value="">—</option>
       ${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}">${esc(s.title || s.project)}</option>`).join("")}</select></div>
     <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-action="cancel-new">Cancel</button>
       <button class="btn primary" data-action="create">Create</button></div>
+  </div>`;
+}
+
+function categoryCount(name) { return tasks().filter((t) => (t.category || "") === name).length; }
+
+function renderCategories() {
+  const cats = categories();
+  const used = [...new Set(tasks().map((t) => t.category).filter((c) => c && !cats.includes(c)))];
+  const rows = cats.map((c) => {
+    const n = categoryCount(c);
+    if (ui.catRemove[c]) {
+      const key = "catto:" + c;
+      const others = cats.filter((x) => x !== c);
+      return `<div class="cat-row removing">
+        <span>Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(c)}</b> to</span>
+        <select class="bind" data-key="${esc(key)}">
+          <option value="" ${!ui.drafts[key] ? "selected" : ""}>(none)</option>
+          ${others.map((x) => `<option value="${esc(x)}" ${ui.drafts[key] === x ? "selected" : ""}>${esc(x)}</option>`).join("")}
+        </select>
+        <button class="btn small res-drop" data-action="cat-remove-confirm" data-cat="${esc(c)}">Move &amp; remove</button>
+        <button class="btn small ghost" data-action="cat-remove-cancel" data-cat="${esc(c)}">Cancel</button>
+      </div>`;
+    }
+    return `<div class="cat-row">
+      <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="Edit and press Enter to rename (tasks are updated)">
+      <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
+      <button class="btn small ghost" data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
+    </div>`;
+  }).join("");
+  const unlisted = used.map((c) => `<div class="cat-row"><span class="chip">${esc(c)}</span>
+      <span class="meta">on ${categoryCount(c)} card(s) but not in the list</span>
+      <button class="btn small" data-action="cat-adopt" data-cat="${esc(c)}">Add to list</button></div>`).join("");
+  return `<div class="card">
+    <div class="row"><b>Categories</b><span class="meta">this board's list, saved in hq.json</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-cats">Done</button></div>
+    <div class="meta" style="margin:4px 0 8px">Rename: edit a name and press Enter — every task using it is updated.
+      Removing a category that tasks use asks where to move them.</div>
+    ${rows || `<div class="empty">No categories yet.</div>`}
+    ${unlisted}
+    <div class="cat-row"><input class="note" data-key="catnew" data-enter="addcat" placeholder="new category — Enter to add" value="${esc(draft("catnew"))}"></div>
   </div>`;
 }
 
@@ -364,6 +427,22 @@ document.addEventListener("click", async (ev) => {
       render();
       try { ui.peeks[d.session] = await apiJSON("peek", { session: d.session }); } catch (e) { toast(String(e.message || e), true); }
       return render();
+    case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
+    case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
+    case "cat-remove": {
+      const n = categoryCount(d.cat);
+      if (!n) return act("category", { action: "remove", names: [d.cat] }, `Removed ${d.cat}`);
+      ui.catRemove[d.cat] = true;
+      return render();
+    }
+    case "cat-remove-cancel": delete ui.catRemove[d.cat]; return render();
+    case "cat-remove-confirm": {
+      const to = ui.drafts["catto:" + d.cat] ?? "";
+      delete ui.catRemove[d.cat];
+      delete ui.drafts["catto:" + d.cat];
+      return act("category", { action: "remove", names: [d.cat], to }, `Removed ${d.cat}; tasks moved to ${to || "(none)"}`);
+    }
+    case "cat-adopt": return act("category", { action: "add", names: [d.cat] }, `Added ${d.cat}`);
     case "cancel-new":
       ui.newTask = false; delete $("#newtask-form").dataset.drawn; return render();
     case "create": {
@@ -387,6 +466,8 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
+  if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
+  if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
   if (d.action === "set-status") return act("set", { task: d.task, fields: [`status=${el.value}`] }, "Status saved");
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, "Bound — the session learns the task on its next message");
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, "Bound — the session learns the task on its next message");
@@ -411,6 +492,11 @@ document.addEventListener("keydown", async (ev) => {
     if (!text) return;
     delete ui.drafts[el.dataset.key];
     if (el.dataset.enter === "log") return act("log", { task: el.dataset.task, message: text }, "Logged");
+    if (el.dataset.enter === "addcat") return act("category", { action: "add", names: [text] }, `Added ${text}`);
+    if (el.dataset.enter === "renamecat") {
+      if (text === el.dataset.cat) return render();
+      return act("category", { action: "rename", names: [el.dataset.cat, text] }, `Renamed ${el.dataset.cat} → ${text}`);
+    }
     if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, "Todo added");
   }
 });

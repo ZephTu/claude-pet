@@ -119,6 +119,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard !fields.isEmpty else { return (nil, "no fields") }
             return await hq(["set", str("task")] + fields)
         case "log": return await hq(["log", str("task"), "--", str("message")])
+        case "category":
+            var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
+            if let to = body["to"] as? String { args.append("--to=\(to)") }
+            return await hq(args)
         case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])

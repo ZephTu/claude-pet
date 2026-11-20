@@ -22,11 +22,23 @@ Requires macOS or Linux, Claude Code, and `python3` (3.9+, standard library only
 hq/install.sh --root ~/claude-hq      # where your task cards will live (any directory)
 ```
 
-This installs the `hq` CLI to `~/.claude/hq/bin/hq`, the `/task` and `/board` slash commands
-to `~/.claude/commands/`, and three hooks (SessionStart, UserPromptSubmit, Stop) in
-`~/.claude/settings.json` — backed up first, existing hooks untouched. Hooks are user-level
-because your sessions live in many directories; for a session that is not bound to a task
-they read one small JSON file and exit.
+The installer first prints every change it is about to make and asks before doing anything
+(`--yes` skips the question for scripts). What it can add:
+
+| Where | What | Skip with |
+|---|---|---|
+| `~/.claude/hq/` | the `hq` CLI, templates, config, session bindings | — |
+| your task root | `tasks/`, `templates/`, `hq.json`, a `CLAUDE.md` for that folder — only missing files | — |
+| `~/.claude/commands/` | `/task` and `/board` (not if you already have commands by those names) | `--no-commands` |
+| `~/.claude/settings.json` | three hooks (SessionStart, UserPromptSubmit, Stop), appended after a backup | `--no-hooks` |
+
+It never edits a global CLAUDE.md. The hooks are user-level because your sessions live in many
+directories, but they only act in sessions bound to a task; anywhere else they read one small
+JSON file and exit. With `--no-hooks` the board, cards and CLI all work — questions just aren't
+captured automatically and sessions don't get the task rules.
+
+**Reading:** `hq sessions` / `hq peek` (and the board's Sessions column) read live sessions'
+recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
 
 Re-run `hq/install.sh` to upgrade. `hq/uninstall.sh` removes hooks, commands and CLI and
 leaves your cards alone.
@@ -44,6 +56,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
+`hq category list|add|rename|remove`,
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
@@ -89,6 +102,20 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 - [ ] @Wenbing restart the qebot pod     ← waiting on someone else
 - [x] done   ·   - [-] dropped
 ```
+
+## Categories
+
+Each task root keeps its own category list in `hq.json` (new roots start with feature, bug,
+investigation, review, ops, docs, other). Manage it from the board's **Categories** button or
+`hq category add|rename|remove`. A category is just a label on each card: renaming rewrites
+every card that uses it; removing one that cards use requires saying where they go
+(`hq category remove X --to Y`, or `--to ''` for none), and each moved card logs the change. A
+card whose category is not in the list (e.g. hand-edited) still shows, marked "not in list".
+
+## Workdirs
+
+A task's `workdirs` fill themselves: binding a session to a task adds that session's directory
+(not your home folder or the task root). You can also type one when creating a task.
 
 ## Leads
 

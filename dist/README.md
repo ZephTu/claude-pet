@@ -60,7 +60,7 @@ Three places, all reversible with `./uninstall.sh`:
 
 The third is the one to pay attention to: that file governs the behaviour of every Claude Code session you run. The installer **only appends** — not one of your existing hooks is touched. It backs the file up to `~/.claude/settings.json.bak-claudepet-<timestamp>` first, parses the result immediately after writing, and restores the backup on any doubt. Running the installer twice is idempotent; the hooks are not added again.
 
-The pet reads the state files under `~/.claude/pet/sessions/`, which record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, makes no network requests, and uploads nothing.**
+The pet reads the state files under `~/.claude/pet/sessions/`, which record a project name, the current state, a tool name, a process id and timestamps. **It does not read your conversations, makes no network requests, and uploads nothing.** The optional task board (HQ) is the exception: when installed, its Sessions column shows each live session's recent messages by reading the transcript on this machine — still nothing leaves it.
 
 ## Optional: task board (HQ)
 

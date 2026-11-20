@@ -29,6 +29,9 @@ RESOLUTIONS = {
     "later": "need to ask someone / revisit later",
     "archive": "no context to answer — parked",
 }
+DEFAULT_CATEGORIES = ["feature", "bug", "investigation", "review", "ops", "docs", "other"]
+# A category is written unquoted into card frontmatter, so keep it to a plain label.
+CATEGORY_RE = re.compile(r"^[^\s#\"'\n:,\[\]][^#\"'\n:,\[\]]{0,39}$")
 TODO_RE = re.compile(r"^(\s*)- \[([ xX\-])\] (.*)$")
 FENCE_RE = re.compile(r"```(hq-asks|hq-resolved)[^\n]*\n(.*?)```", re.S)
 WRITEBACK_MIN_TURN_SECONDS = 120
@@ -157,11 +160,115 @@ def set_fields(path, fields):
     atomic_write(path, text)
 
 
-def append_log(path, msg):
+def append_log(path, msg, touch=True):
     text = open(path, encoding="utf-8").read().rstrip("\n")
     text += f"\n- {today()}: {msg}\n"
     atomic_write(path, text)
-    set_fields(path, {})
+    if touch:
+        set_fields(path, {})
+
+
+# ---------------------------------------------------------------- categories
+def root_config_path():
+    return os.path.join(hq_root(), "hq.json")
+
+
+def load_categories():
+    cfg = load_json(root_config_path(), None)
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("categories"), list):
+        return list(DEFAULT_CATEGORIES)
+    return [c for c in cfg["categories"] if isinstance(c, str) and c]
+
+
+def save_categories(cats):
+    cfg = load_json(root_config_path(), {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["categories"] = cats
+    atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+
+
+def check_category(name):
+    name = (name or "").strip()
+    if not CATEGORY_RE.match(name):
+        die(f"invalid category {name!r}: 1-40 characters, no # quotes : , [ ]")
+    return name
+
+
+def ensure_listed(name):
+    """A category used on a card joins the list, so the board can offer it."""
+    if name and name not in load_categories():
+        save_categories(load_categories() + [name])
+        print(f"hq: added category {name!r}", file=sys.stderr)
+
+
+def recategorize(old, new):
+    """Rewrite every card (open or closed) whose category is `old`. Returns how many."""
+    n = 0
+    for p in card_paths():
+        meta = parse_card(p)
+        if (meta.get("category") or "") == old:
+            set_fields(p, {"category": new, "updated": meta.get("updated", today())})
+            append_log(p, f"category {old!r} → {new or '(none)'!r} (category list changed)", touch=False)
+            n += 1
+    return n
+
+
+def category_usage():
+    usage = {}
+    for p in card_paths():
+        c = parse_card(p).get("category") or ""
+        usage[c] = usage.get(c, 0) + 1
+    return usage
+
+
+def cmd_category(args):
+    cats = load_categories()
+    usage = category_usage()
+    if args.action == "list":
+        rows = [{"name": c, "count": usage.get(c, 0), "listed": True} for c in cats]
+        rows += [{"name": c, "count": n, "listed": False} for c, n in usage.items() if c and c not in cats]
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return
+        for r in rows:
+            print(f"{r['name']:<24} {r['count']:>3} task(s){'' if r['listed'] else '   (not in list — used on cards)'}")
+        if usage.get(""):
+            print(f"{'(none)':<24} {usage['']:>3} task(s)")
+        return
+    if not args.names:
+        die(f"usage: hq category {args.action} NAME" + (" NEW" if args.action == "rename" else ""))
+    name = check_category(args.names[0])
+    if args.action == "add":
+        if name in cats:
+            die(f"category {name!r} already exists")
+        save_categories(cats + [name])
+    elif args.action == "rename":
+        if len(args.names) < 2:
+            die("usage: hq category rename OLD NEW")
+        new = check_category(args.names[1])
+        if new in cats and new != name:
+            die(f"{new!r} already exists — to merge, use: hq category remove {name!r} --to {new!r}")
+        if name not in cats and not usage.get(name):
+            die(f"no category {name!r}")
+        save_categories([new if c == name else c for c in cats] if name in cats else cats + [new])
+        n = recategorize(name, new)
+        print(f"renamed {name!r} → {new!r} ({n} task(s) updated)")
+    elif args.action == "remove":
+        n_used = usage.get(name, 0)
+        if n_used and args.to is None:
+            print(f"hq: {n_used} task(s) use {name!r}. Re-run with --to <category> to move them, "
+                  f"or --to '' to leave them uncategorized.", file=sys.stderr)
+            sys.exit(3)
+        to = ""
+        if args.to:
+            to = check_category(args.to)
+            if to == name:
+                die("--to must be a different category")
+            ensure_listed(to)
+        save_categories([c for c in load_categories() if c != name])
+        n = recategorize(name, to) if n_used else 0
+        print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else ""))
 
 
 def age_days(meta):
@@ -294,7 +401,8 @@ def cmd_board(args):
         for m in metas:
             d = {k: v for k, v in m.items() if k not in ("dir",)}
             out.append(d)
-        print(json.dumps({"root": hq_root(), "tasks": out}, ensure_ascii=False, indent=1))
+        print(json.dumps({"root": hq_root(), "categories": load_categories(), "tasks": out},
+                         ensure_ascii=False, indent=1))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
     my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES
@@ -351,10 +459,14 @@ def cmd_new(args):
     if not os.path.exists(tpl):
         tpl = os.path.join(HOME_DIR, "template", "TASK.md")
     text = open(tpl, encoding="utf-8").read()
+    cats = load_categories()
+    category = check_category(args.category) if args.category else (
+        "other" if "other" in cats else (cats[0] if cats else ""))
+    ensure_listed(category)
     os.makedirs(d)
     p = os.path.join(d, "TASK.md")
     atomic_write(p, text)
-    set_fields(p, {"id": tid, "title": args.title, "category": args.category, "status": "active",
+    set_fields(p, {"id": tid, "title": args.title, "category": category, "status": "active",
                    "lead": args.lead or "-", "updated": today(),
                    "workdirs": [os.path.abspath(w) for w in (args.workdir or [])]})
     print(tid)
@@ -375,9 +487,18 @@ def cmd_bind(args):
     state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
                   "delivered": state.get(sid, {}).get("delivered", [])}
     save_state(state)
+    fields = {}
     sessions = meta.get("sessions") if isinstance(meta.get("sessions"), list) else []
     if sid[:8] not in sessions:
-        set_fields(card, {"sessions": sessions + [sid[:8]]})
+        fields["sessions"] = sessions + [sid[:8]]
+    # The session's directory is where this task's work happens: remember it on the card.
+    cwd = os.getcwd() if from_inside else (pet_session(sid) or {}).get("cwd")
+    workdirs = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
+    if (cwd and os.path.isdir(cwd) and cwd not in workdirs
+            and os.path.realpath(cwd) not in (os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~")))):
+        fields["workdirs"] = workdirs + [cwd]
+    if fields:
+        set_fields(card, fields)
     if prev and prev != meta["id"]:
         print(f"(re-bound from {prev})")
     print(protocol(meta))
@@ -416,6 +537,9 @@ def cmd_set(args):
         k, v = kv.split("=", 1)
         if k == "status" and v not in STATUSES:
             die(f"status must be one of {', '.join(STATUSES)}")
+        if k == "category" and v:
+            v = check_category(v)
+            ensure_listed(v)
         fields[k] = v
     set_fields(find_card(args.task), fields)
 
@@ -556,6 +680,10 @@ def session_title(entries):
         if o.get("type") == "custom-title" and o.get("customTitle"):
             return o["customTitle"]
     return None
+
+
+def pet_session(sid):
+    return load_json(os.path.join(PET_SESSIONS, f"{sid}.json"), None) if sid and "/" not in sid else None
 
 
 def live_sessions():
@@ -743,7 +871,7 @@ def main():
     p = sub.add_parser("show", help="print a task card and its open asks"); p.add_argument("task")
     p.set_defaults(fn=cmd_show)
     p = sub.add_parser("new", help="create a task card")
-    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category", default="dev")
+    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category")
     p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
     p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
     p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
@@ -760,6 +888,9 @@ def main():
     p.add_argument("task"); p.add_argument("index", type=int)
     p.add_argument("state", choices=["done", "drop", "open"]); p.add_argument("--via", default="cli")
     p.set_defaults(fn=cmd_todo)
+    p = sub.add_parser("category", help="hq category list | add NAME | rename OLD NEW | remove NAME [--to OTHER]")
+    p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
+    p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | hq ask resolve <ask-id> <res> [note…]")

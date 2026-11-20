@@ -33,10 +33,11 @@
   <a href="#zh-board">看板上能做什么</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
+  <a href="#zh-cats">分类与工作目录</a>
   <a href="#zh-card">任务卡格式</a>
   <a href="#zh-leads">负责人（lead）</a>
   <a href="#zh-limits">注意事项</a>
-  <a href="#zh-files">文件与卸载</a>
+  <a href="#zh-files">安装会改什么 · 卸载</a>
 </aside>
 <div class="content">
 
@@ -53,7 +54,7 @@
 
 <h1 id="zh-start">开始使用</h1>
 <ol>
-<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。需要 <code>python3</code>。</li>
+<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。它会先列出要做的每一项改动，确认后才执行；只想要看板、不想动 Claude 的设置，加 <code>--no-hooks</code>。需要 <code>python3</code>。详见<a href="#zh-files">安装会改什么</a>。</li>
 <li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。</li>
 <li>在 Sessions 栏给正在跑的 session 选一个任务绑定，或点 <b>+ New task</b> 新建任务并顺手绑定。</li>
 <li>之后就在看板上处理 <b>Needs you</b> 里的事情，在 Sessions 栏直接给 session 发消息。</li>
@@ -65,7 +66,8 @@
 <ul>
 <li>计数：未回应的 ask、你的待办、等你处理的任务、进行中的任务、在跑的 session。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
-<li><b>+ New task</b>：新建任务，可选分类、工作目录，并立即绑定一个 session。</li>
+<li><b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
+<li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
 </ul>
 <h2>Needs you（左栏）</h2>
@@ -88,7 +90,7 @@
 <li>行尾的黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
 <li>点开一个任务可以：
   <ul>
-  <li>改 <b>status</b>（下拉）、<b>next</b>、<b>waiting on you</b>（回车保存）；</li>
+  <li>改 <b>status</b>、<b>category</b>（下拉）、<b>next</b>、<b>waiting on you</b>（回车保存）；查看 <b>workdirs</b>；</li>
   <li>点待办前的方框切换：未做 → 做完 → 不做 → 未做；</li>
   <li>在 "add todo" 框里加待办，开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做；</li>
   <li>查看、跳转、解绑正在为它工作的 session，或从下拉框绑定一个新的；</li>
@@ -100,7 +102,7 @@
 <li>每个在跑的 session：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）、标题、项目、最后一条回复。</li>
 <li><b>Bind to task…</b>：绑定到任务。session 会在下一条消息时收到任务规则。</li>
 <li><b>Peek</b>：看最近的对话。<b>Jump</b>：跳到它所在的终端。</li>
-<li>输入框：直接给它发消息，<b>Enter</b> 发送，<b>Shift+Enter</b> 换行。效果和你在终端里亲手输入完全一样。session 正忙时消息会排队。</li>
+<li>输入框：直接给它发消息，<b>Enter</b> 发送，<b>Shift+Enter</b> 换行。效果和你在终端里亲手输入完全一样。session 正忙时消息会排队。只支持 Orca 和 iTerm2 里的 session；其他终端里的 session 输入框是灰的，鼠标悬停会提示原因，用 Jump 过去就行。</li>
 </ul>
 
 <h1 id="zh-link">session 和看板怎么联动</h1>
@@ -139,9 +141,25 @@
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
+<tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话</td></tr>
 </table>
 <p>在 Claude Code 里还可以用两个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）。</p>
+
+<h1 id="zh-cats">分类与工作目录</h1>
+<h2>分类</h2>
+<ul>
+<li>每个任务根目录有自己的分类列表，存在 <code>hq.json</code> 里。新装的默认是一组通用分类：feature、bug、investigation、review、ops、docs、other，可以随意改。</li>
+<li>在看板上点 <b>Categories</b>：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
+<li>分类只是写在每张任务卡上的一个标签，所以：
+  <ul>
+  <li><b>改名</b>会同时改写所有用到它的任务卡；</li>
+  <li><b>删除没人用的分类</b>直接删；<b>删除有任务在用的分类</b>，必须先选这些任务移到哪个分类（或"不分类"），每张被改的卡都会在日志里记一笔；</li>
+  <li>手动编辑任务卡写了不在列表里的分类，看板照样显示，并标成"not in list"，可以在 Categories 里一键"Add to list"。</li>
+  </ul></li>
+</ul>
+<h2>工作目录（workdirs）</h2>
+<p>不需要手动维护：把 session 绑定到任务时，会自动把这个 session 所在的目录记到任务卡上（不记你的主目录和任务根目录）。新建任务时也可以手填。看板据此在 session 的"Bind to task…"下拉里把相关任务排在前面。</p>
 
 <h1 id="zh-card">任务卡格式</h1>
 <pre>---
@@ -171,18 +189,32 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <ul>
 <li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
 <li>看板上的回应在 session <b>下一轮</b>才送达，不会唤醒空闲的 session；要它立刻处理，就在 Sessions 栏给它发一句。</li>
-<li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 目前只能 Jump。</li>
+<li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。</li>
 <li>Sessions 栏依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
 </ul>
 
-<h1 id="zh-files">文件与卸载</h1>
+<h1 id="zh-files">安装会改什么 · 卸载</h1>
+<p>桌宠和 HQ 是分开装的两步：</p>
+<table>
+<tr><th>步骤</th><th>改动</th></tr>
+<tr><td><b>1. 桌宠</b>（<code>scripts/install.sh</code> 或发行包里的 <code>install.sh</code>）</td><td>安装 App；<code>~/.claude/pet/</code>；往 <code>~/.claude/settings.json</code> 追加 11 个 hook（先备份），用来感知 session 状态。</td></tr>
+<tr><td><b>2. HQ</b>（<code>hq/install.sh</code>，可选）</td><td>先列出所有改动、确认后才执行：<code>~/.claude/hq/</code>；你的任务根目录（只补缺失的文件）；<code>/task</code>、<code>/board</code> 斜杠命令（<code>--no-commands</code> 跳过）；往 <code>settings.json</code> 追加 3 个 hook（<code>--no-hooks</code> 跳过）。</td></tr>
+</table>
+<ul>
+<li>HQ 的 hook 只在<b>绑定了任务的 session</b> 里起作用（注入任务规则、记录问题、提醒更新任务卡）；其他 session 里只读一个小文件就退出。</li>
+<li>HQ <b>不会改任何全局 CLAUDE.md</b>，只在任务根目录里放一个给这个目录用的 CLAUDE.md。</li>
+<li>看板的 Sessions 栏会读取本机的对话记录（<code>~/.claude/projects</code>）来显示最近的消息。数据不出本机。</li>
+<li>用 <code>--no-hooks</code> 安装时：看板、任务卡、命令行都能用，只是问题不会被自动记录、session 不会自动遵守任务规则。</li>
+</ul>
+<h2>文件</h2>
 <pre>&lt;任务根目录&gt;/tasks/T-012-xxx/TASK.md     任务卡
 &lt;任务根目录&gt;/tasks/T-012-xxx/asks.jsonl   待回应事项
 &lt;任务根目录&gt;/templates/                   新任务模板、lead 模板
 ~/.claude/hq/bin/hq                       命令行工具 + hook 入口
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
-~/.claude/hq/state/sessions.json          session → 任务的绑定</pre>
-<p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。</p>
+~/.claude/hq/state/sessions.json          session → 任务的绑定
+&lt;任务根目录&gt;/hq.json                       分类列表</pre>
+<p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
 </div>
 </article>
 
@@ -194,10 +226,11 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-board">What the board does</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
+  <a href="#en-cats">Categories and workdirs</a>
   <a href="#en-card">Task card format</a>
   <a href="#en-leads">Leads</a>
   <a href="#en-limits">Good to know</a>
-  <a href="#en-files">Files and uninstall</a>
+  <a href="#en-files">What install changes · uninstall</a>
 </aside>
 <div class="content">
 
@@ -214,7 +247,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 
 <h1 id="en-start">Getting started</h1>
 <ol>
-<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). Needs <code>python3</code>.</li>
+<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). It lists every change first and asks before doing anything; add <code>--no-hooks</code> to get the board without touching Claude's settings. Needs <code>python3</code>. See <a href="#en-files">What install changes</a>.</li>
 <li>Open the board: <b>double-click the pet</b> (double-click again to hide it), or right-click → <b>Task Board…</b>.</li>
 <li>In the Sessions column, bind a running session to a task — or click <b>+ New task</b> to create one and bind it.</li>
 <li>From then on, work through <b>Needs you</b> and message sessions straight from the board.</li>
@@ -225,7 +258,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h2>Top bar</h2>
 <ul>
 <li>Counts: unanswered asks, your todos, tasks waiting on you, open tasks, live sessions.</li>
-<li><b>Filter tasks…</b> by id, title or refs. <b>+ New task</b> with category, workdir and a session to bind.</li>
+<li><b>Filter tasks…</b> by id, title or refs. <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
+<li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
 </ul>
 <h2>Needs you (left)</h2>
@@ -245,13 +279,13 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <h2>Tasks (middle)</h2>
 <ul>
 <li>Grouped by status; tick <b>show closed</b> for done and abandoned. Amber number = open asks, green = live sessions on it.</li>
-<li>Open a task to change <b>status</b>, <b>next</b> and <b>waiting on you</b> (Enter saves); click a todo's box to cycle open → done → dropped; add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
+<li>Open a task to change <b>status</b>, <b>category</b>, <b>next</b> and <b>waiting on you</b> (Enter saves), see its <b>workdirs</b>; click a todo's box to cycle open → done → dropped; add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
 </ul>
 <h2>Sessions (right)</h2>
 <ul>
 <li>Every live session: state dot (green working, grey idle, amber waiting on you), title, project, last reply.</li>
 <li><b>Bind to task…</b> — the session learns the task's rules with its next message.</li>
-<li><b>Peek</b> at recent messages, <b>Jump</b> to its terminal, or type a message: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it.</li>
+<li><b>Peek</b> at recent messages, <b>Jump</b> to its terminal, or type a message: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it. Only sessions in Orca or iTerm2 can be messaged; for other terminals the box is greyed out — hover it for why, and use Jump instead.</li>
 </ul>
 
 <h1 id="en-link">How sessions and the board connect</h1>
@@ -286,9 +320,25 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
+<tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages</td></tr>
 </table>
 <p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board.</p>
+
+<h1 id="en-cats">Categories and workdirs</h1>
+<h2>Categories</h2>
+<ul>
+<li>Each task root keeps its own list in <code>hq.json</code>. New roots start with a generic set — feature, bug, investigation, review, ops, docs, other — change it freely.</li>
+<li>On the board, <b>Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
+<li>A category is just a label on each card, so:
+  <ul>
+  <li><b>renaming</b> rewrites every card that uses it;</li>
+  <li><b>removing an unused one</b> just removes it; <b>removing one that tasks use</b> first asks where those tasks go (another category or none), and every moved card logs the change;</li>
+  <li>a card with a category that is not in the list (say, hand-edited) still shows, marked "not in list" — "Add to list" in Categories adopts it.</li>
+  </ul></li>
+</ul>
+<h2>Workdirs</h2>
+<p>They maintain themselves: binding a session to a task records the session's directory on the card (never your home folder or the task root). You can also type one when creating a task. The board uses them to list matching tasks first in a session's "Bind to task…" menu.</p>
 
 <h1 id="en-card">Task card format</h1>
 <pre>---
@@ -318,18 +368,32 @@ next: "run baseline on clusters A/C"
 <ul>
 <li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
 <li>Board answers reach a session on its <b>next turn</b>; they don't wake an idle session. Send it a message from the Sessions column if it should act now.</li>
-<li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). Ghostty and VS Code: Jump only.</li>
+<li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only.</li>
 <li>The Sessions column relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>
 </ul>
 
-<h1 id="en-files">Files and uninstall</h1>
+<h1 id="en-files">What install changes · uninstall</h1>
+<p>The pet and HQ are two separate installs:</p>
+<table>
+<tr><th>Step</th><th>Changes</th></tr>
+<tr><td><b>1. The pet</b> (<code>scripts/install.sh</code>, or <code>install.sh</code> in the release)</td><td>the app; <code>~/.claude/pet/</code>; 11 hooks appended to <code>~/.claude/settings.json</code> (backed up first) so it can see session state.</td></tr>
+<tr><td><b>2. HQ</b> (<code>hq/install.sh</code>, optional)</td><td>lists every change and asks first: <code>~/.claude/hq/</code>; your task root (missing files only); the <code>/task</code> and <code>/board</code> commands (<code>--no-commands</code> skips); 3 hooks appended to <code>settings.json</code> (<code>--no-hooks</code> skips).</td></tr>
+</table>
+<ul>
+<li>HQ's hooks only act in sessions <b>bound to a task</b> (add the task's rules, record questions, remind it to update the card); elsewhere they read one small file and exit.</li>
+<li>HQ <b>never edits a global CLAUDE.md</b> — it only puts one in your task root, for that folder.</li>
+<li>The board's Sessions column reads the transcripts on this machine (<code>~/.claude/projects</code>) to show recent messages. Nothing leaves the machine.</li>
+<li>Installed with <code>--no-hooks</code>, the board, cards and CLI all work; questions just aren't captured automatically and sessions don't get the task rules.</li>
+</ul>
+<h2>Files</h2>
 <pre>&lt;root&gt;/tasks/T-012-slug/TASK.md       task card
 &lt;root&gt;/tasks/T-012-slug/asks.jsonl     asks ledger
 &lt;root&gt;/templates/                      new-task and lead templates
 ~/.claude/hq/bin/hq                    CLI and hook entry point
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
-~/.claude/hq/state/sessions.json       session → task bindings</pre>
-<p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay.</p>
+~/.claude/hq/state/sessions.json       session → task bindings
+&lt;root&gt;/hq.json                         category list</pre>
+<p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
 </div>
 </article>
 
