@@ -30,7 +30,7 @@ function savePref(key, value) { try { localStorage.setItem(key, value); } catch 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
   drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
-  mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
+  mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
@@ -383,10 +383,15 @@ function render() {
   });
 
   renderCounts();
-  $("#mode").innerHTML = ["today", "all"].map((m) =>
-    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}">${m === "today" ? "Today" : "All"}</button>`).join("");
+  // Three pages, each two columns: Focus (the tasks you keep in view), All, and Needs you
+  // (every unanswered ask and your todos) with its count on the tab.
+  if (!["today", "all", "needs"].includes(ui.mode)) ui.mode = "today";
+  const need = needCount();
+  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"]].map(([m, label]) =>
+    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${m === "needs" && need ? `<span class="n">${need}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
-  $("#all").hidden = ui.mode === "today";
+  $("#all").hidden = ui.mode !== "all";
+  $("#needs").hidden = ui.mode !== "needs";
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
     $("#today-sessions").innerHTML = renderTodaySessions();
@@ -410,10 +415,7 @@ function render() {
   $("#foldall").title = ui.groupBy === "project" ? "Fold or unfold every project group" : "Close every open task";
   $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
   $("#activefirst input").checked = ui.activeFirst;
-  $("#projects-panel").hidden = !ui.projOpen;
-  if (ui.projOpen) $("#projects-panel").innerHTML = renderProjects();
-  $("#cats-panel").hidden = !ui.catsOpen;
-  if (ui.catsOpen) $("#cats-panel").innerHTML = renderCategories();
+  renderSettings();
   $("#tasks").innerHTML = renderTasks();
   $("#sessions").innerHTML = renderSessions();
 
@@ -451,16 +453,29 @@ function paintTaskIds() {
   });
 }
 
+// What Needs you holds: unanswered asks (not the ones put off till later) and your open todos.
+function needCount() {
+  const open = tasks().filter(isOpen);
+  return tasks().reduce((n, t) => n + openAsks(t).length, 0) +
+    open.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
+}
+// The status bar at the bottom: where things stand, at a glance — sessions by state, tasks by
+// status, what is waiting on you (click → Needs you), and the quota on the right.
 function renderCounts() {
-  const all = tasks();
-  const asks = all.reduce((n, t) => n + openAsks(t).length, 0);
-  const mine = all.filter(isOpen).reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length, 0);
-  const legacy = all.filter((t) => isOpen(t) && t.waiting_on_me).length;
-  const activeN = all.filter(isOpen).length;
+  const all = tasks().filter(isOpen);
+  const by = (st) => ui.sessions.filter((x) => x.state === st).length;
+  const tby = (st) => all.filter((t) => t.status === st).length;
+  const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
+  const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
+  const mine = all.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
+  const part = (n, label, cls = "") => n ? `<span class="sp ${cls}"><b>${n}</b> ${label}</span>` : "";
   $("#counts").innerHTML =
-    `<span title="Unanswered asks"><b>${asks}</b> asks</span><span title="Your todos"><b>${mine + legacy}</b> todos</span>` +
-    `<span title="Open tasks"><b>${activeN}</b> tasks</span>` +
-    `<span title="Live sessions"><b>${ui.sessions.length}</b> live</span>`;
+    `<span class="sgroup" title="Live Claude Code sessions"><span class="dot busy"></span><b>${ui.sessions.length}</b> sessions` +
+      `${part(by("busy"), "working")}${part(by("waiting"), "waiting on you", "warn")}</span>` +
+    `<span class="sgroup" title="Open tasks by status"><b>${all.length}</b> tasks` +
+      `${part(focusIds().length, "in Focus")}${part(tby("blocked"), "blocked", "bad")}${part(tby("waiting-on-me"), "waiting", "warn")}</span>` +
+    `<span class="sgroup jump" data-action="mode" data-m="needs" title="Open Needs you"><b>${asks}</b> asks · <b>${mine}</b> todos` +
+      `${later ? `<span class="sp">${later} for later</span>` : ""}</span>`;
   $("#quota").innerHTML = usageChips();
 }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
@@ -773,7 +788,7 @@ function renderTask(t, mode) {
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
-            title="${focusIds().includes(t.id) ? "On today's list — click to remove" : "Add to today"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
+            title="${focusIds().includes(t.id) ? "In Focus — click to take it off" : "Add to Focus"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
         ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
         ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
@@ -803,24 +818,17 @@ function renderToday() {
     ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
     : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
-  const day = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
-  const carry = (f.carry || []).map(taskById).filter(Boolean);
-  const showCarry = carry.length && ui.carryDismissed !== f.today;
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
-  return `<div class="today-h"><h2 class="big">Today</h2><span class="meta">${esc(day)} · ${picked.length} task${picked.length === 1 ? "" : "s"}</span>
+  return `<div class="today-h"><h2 class="big">Focus</h2><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
       <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
       <span style="flex:1"></span>
-      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to today…" value="${esc(draft("todaypick"))}">
+      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to Focus…" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
       <button class="btn small" data-action="today-add">Add</button></div>
-    ${showCarry ? `<div class="card carry"><b>Still open from ${esc(f.last_day)}</b> — carry on with these today?
-      <div class="row" style="margin-top:6px">${carry.map((t) => `<button class="chip link" data-action="today-add-one" data-task="${esc(t.id)}" title="${esc(t.title)}">+ ${esc(t.id)} ${esc(t.title.slice(0, 24))}</button>`).join("")}</div>
-      <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="carry-all">Bring all ${carry.length}</button>
-        <button class="btn small ghost" data-action="carry-dismiss">Not today</button></div></div>` : ""}
     ${draftNew}
     ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
-      <b>Nothing picked for today.</b>
-      <div class="meta" style="margin-top:4px">Add tasks with the box above${showCarry ? ", bring yesterday's over," : ""} or star ☆ them in All. Tasks you create today join automatically.</div></div>`}`;
+      <b>Nothing in Focus yet.</b>
+      <div class="meta" style="margin-top:4px">Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.</div></div>`}`;
 }
 
 function focusCard(t) {
@@ -848,12 +856,12 @@ function focusCard(t) {
   // aside — each shows once.
   return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
-      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder today's tasks">⠿</span>`}
+      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder your Focus">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="icon" title="Not today — take it off today's list (the task stays)" data-confirm="Not today?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      <button class="icon" title="Take it off Focus (the task stays)" data-confirm="Unfocus?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
     ${asks.length || laterAsks(t).length ? `<div class="fsec">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
@@ -872,7 +880,7 @@ function renderTodaySessions() {
   const ids = focusIds();
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
-  return `<h2>Sessions on today's tasks</h2>
+  return `<h2>Sessions on these tasks</h2>
     ${onToday.length ? renderSessions(onToday, true) : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
     ${loose.length ? `<h2 style="margin-top:18px">Not on a task</h2>${renderSessions(loose, true)}` : ""}`;
 }
@@ -1175,6 +1183,40 @@ function renderNewTask() {
 
 function clearNewTaskDrafts() { for (const k of Object.keys(ui.drafts)) if (k.startsWith("nt:")) delete ui.drafts[k]; saveDrafts(); }
 
+// ---- Settings: one window for what used to crowd the top bar — projects, categories, and how
+// the board starts sessions. Open on any page (⚙); Esc, Done or a click outside closes it.
+const SETTINGS_TABS = [["projects", "Projects"], ["categories", "Categories"], ["sessions", "Sessions"]];
+function renderSettings() {
+  const box = $("#settings");
+  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
+  const tab = ui.settings;
+  const prev = box.querySelector(".settings-body");
+  const scroll = prev && prev.dataset.tab === tab ? prev.scrollTop : 0;
+  const body = tab === "projects" ? renderProjects() : tab === "categories" ? renderCategories() : renderSessionSettings();
+  // Keep the cursor if a box in here is being typed in (the window is rebuilt with the board).
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="Settings">
+    <div class="phead"><div class="stitle">Settings</div>
+      <span class="seg">${SETTINGS_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-action="settings-tab" data-tab="${k}">${label}</button>`).join("")}</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-settings">Done</button></div>
+    <div class="settings-body" data-tab="${tab}">${body}</div></div>`;
+  box.hidden = false;
+  box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
+}
+function closeSettings() { ui.settings = null; ui.projRemove = {}; ui.catRemove = {}; render(); }
+function renderSessionSettings() {
+  const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
+  return `<div class="set-list">
+    ${row("New sessions open in", "Where ▶ New session, ↻ Resume and ▶ Do it open a session",
+      `<select class="bind" data-action="launch-place">${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
+    ${row("Skip permissions", "Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files",
+      `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
+    ${row("Stay on board", "Open the session's terminal tab in the background and carry on here, in its conversation window",
+      `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
+    ${row("Active first", "Tasks (and project groups) with a live session come first, most recently active first. Off: your own order",
+      `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
+  </div>`;
+}
+
 function renderProjects() {
   const ps = projects();
   const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
@@ -1393,6 +1435,7 @@ function drawPeek(toBottom) {
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
   if (ui.modal && ev.target === $("#modal")) closePeek();
+  if (ui.settings && ev.target === $("#settings")) closeSettings();
 });
 
 // ------------------------------------------------------------------ context window
@@ -1573,8 +1616,8 @@ function revealTask(id) {
   if (!t) return toast(`${id} not found`, true);
   // In Today, a task on today's list is its card there: bring that card's top edge to the top
   // of the column, without opening its details. Anything else is shown in All.
-  if (ui.mode === "today") {
-    if (focusIds().includes(id)) return scrollToCard("ftask-" + id);
+  if (ui.mode !== "all") {
+    if (ui.mode === "today" && focusIds().includes(id)) return scrollToCard("ftask-" + id);
     ui.mode = "all";
     savePref("hq-mode", "all");
   }
@@ -2055,8 +2098,11 @@ document.addEventListener("click", async (ev) => {
       ui.collapsed.has(d.key) ? ui.collapsed.delete(d.key) : ui.collapsed.add(d.key);
       savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       return render();
-    case "open-projects": ui.projOpen = !ui.projOpen; return render();
-    case "close-projects": ui.projOpen = false; ui.projRemove = {}; return render();
+    case "open-settings": ui.settings = ui.settings || "projects"; return render();
+    case "settings-tab": ui.settings = d.tab; return render();
+    case "close-settings": closeSettings(); return;
+    case "open-projects": ui.settings = "projects"; return render();
+    case "close-projects": closeSettings(); return;
     case "proj-rename": {
       const v = (ui.drafts["projname:" + d.p] || "").trim();
       delete ui.drafts["projname:" + d.p];
@@ -2093,7 +2139,7 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
       return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, `Added ${name}`);
     }
-    case "scan-open": ui.projOpen = true; // fall through to scan
+    case "scan-open": ui.settings = "projects"; // fall through to scan
     case "scan":
       ui.scan = "loading"; ui.scanPick = new Set(); render();
       try {
@@ -2111,26 +2157,23 @@ document.addEventListener("click", async (ev) => {
     case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
-      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off today's list` : `${d.task} added to today`);
+      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off Focus` : `${d.task} added to Focus`);
     }
     case "today-add": {
       const v = (ui.drafts["todaypick"] || "").trim();
       const id = (v.match(/T-\d+/i) || [])[0];
       if (!id || !taskById(id.toUpperCase())) return toast("Pick a task from the list (type its id or title)", true);
       delete ui.drafts["todaypick"];
-      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to today`);
+      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to Focus`);
     }
-    case "today-add-one": return act("focus", { action: "add", tasks: [d.task] }, `${d.task} added to today`);
     case "today-remove": {
       const id = d.task;
       try {
         await api("focus", { action: "remove", tasks: [id] });
-        toast(`${id} off today's list`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back on today's list`));
+        toast(`${id} off Focus`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back in Focus`));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
-    case "carry-all": return act("focus", { action: "carry", tasks: [] }, "Carried over");
-    case "carry-dismiss": ui.carryDismissed = focusState().today; savePref("hq-carry-dismissed", ui.carryDismissed); return render();
     case "launch": {
       const t = taskById(d.task);
       const dir = t && launchDir(t);
@@ -2163,8 +2206,8 @@ document.addEventListener("click", async (ev) => {
       ui.stopArmed = null;
       return act("stop", { session: d.session }, "Stopped");
     case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
-    case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
-    case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
+    case "open-cats": ui.settings = "categories"; return render();
+    case "close-cats": closeSettings(); return;
     case "cat-remove": {
       const n = categoryCount(d.cat);
       if (!n) return act("category", { action: "remove", names: [d.cat] }, `Removed ${d.cat}`);
@@ -2255,6 +2298,7 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
+  if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
@@ -2282,7 +2326,7 @@ document.addEventListener("keydown", async (ev) => {
 // Forgiving on purpose: anywhere in the column counts — the nearest header decides the spot —
 // and while dragging in the Tasks column every group folds to its header, so the targets sit
 // next to each other instead of being pages apart.
-function dropZone(ev) { return ev.target.closest && ev.target.closest("#tasks, #projects-panel"); }
+function dropZone(ev) { return ev.target.closest && ev.target.closest("#tasks, #settings .settings-body"); }
 function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after")); }
 function nearestTarget(zone, y) {
   let best = null, dist = Infinity;
@@ -2408,7 +2452,11 @@ function openNewTask(project) {
   const t = $("#nt-title");
   if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
 }
-$("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });
+$("#new-task").addEventListener("click", () => {
+  // The form lives on Focus and All; from Needs you, go to All for it.
+  if (ui.mode === "needs") { ui.mode = "all"; savePref("hq-mode", "all"); }
+  ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus();
+});
 
 refresh();
 setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);

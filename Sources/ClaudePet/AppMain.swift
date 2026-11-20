@@ -355,7 +355,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         blockedOn: state.waitingOn, motion: motion,
                                         struggling: state.sessions.contains(where: Struggle.isStruggling)))
         announceFinishes(state, now: now)
-        if !paused { announceAsks(hq); promptForToday(hq, state: state, now: now) }
+        // (No daily "pick today's tasks" prompt any more: Focus stays until you change it.)
+        if !paused { announceAsks(hq) }
         noticeReturn(state, now: now)
         maybeSpeak(state: state, now: now)
         lastState = state
@@ -835,7 +836,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// Asks already announced, so each new one is said once (nil until the first read, which
     /// only records what is there — a restart must not replay old questions).
     private var announcedAsks: Set<String>?
-    private static let dailyPromptKey = "hq.dailyPromptDay"
 
     /// A new question on the HQ board gets a notice, like a finished turn does; clicking it goes
     /// to the session that asked.
@@ -852,18 +852,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         announcedAsks = already.union(ids)
     }
 
-    /// Once a day, the first time the pet sees work while nothing is picked for today, it
-    /// suggests picking — mentioning yesterday's unfinished ones.
-    private func promptForToday(_ hq: TaskIndex.Snapshot, state: GlobalState, now: Date) {
-        guard hq.installed, hq.focusToday.isEmpty, !state.sessions.isEmpty else { return }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let day = fmt.string(from: now)
-        guard UserDefaults.standard.string(forKey: Self.dailyPromptKey) != day else { return }
-        UserDefaults.standard.set(day, forKey: Self.dailyPromptKey)
-        let carry = hq.carry.isEmpty ? "" : " — \(hq.carry.count) still open from last time"
-        bridge?.say("Pick today's tasks\(carry). Double-click me.", hold: 12)
-    }
 
     /// The HQ task board. One window, reused: closing hides it, reopening
     /// refreshes it.

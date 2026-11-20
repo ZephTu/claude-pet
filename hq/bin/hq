@@ -763,48 +763,51 @@ def slugify(s):
     return s[:40] or "task"
 
 
-# ---------------------------------------------------------------- today's focus
-# <root>/focus.json: {"days": {"2026-11-20": ["T-062", "T-003"], ...}} — the tasks picked for a day.
-# "carry" = tasks from the last day before today that had picks and are still open.
+# ---------------------------------------------------------------- focus
+# <root>/focus.json: {"focus": ["T-062", "T-003", ...]} — the tasks kept in view, in order.
 def focus_path():
     return os.path.join(hq_root(), "focus.json")
 
 
 def load_focus():
+    """The Focus list: the tasks you keep in view, in your order, until you take them off.
+    focus.json used to hold one list per day ({"days": {date: [ids]}}); that reads as the most
+    recent day's list, and the next save writes the new form ({"focus": [ids]})."""
     f = load_json(focus_path(), {})
+    if isinstance(f, dict) and isinstance(f.get("focus"), list):
+        return [str(i) for i in f["focus"]]
     days = f.get("days") if isinstance(f, dict) else None
-    return days if isinstance(days, dict) else {}
+    if not isinstance(days, dict):
+        return []
+    # The latest day's list, then what the day before it still had (the old board offered to
+    # carry those over, so they were meant to stay). Anything not a list of ids is skipped.
+    lists = [days[d] for d in sorted(days, reverse=True) if isinstance(days[d], list) and days[d]]
+    out = []
+    for ids in lists[:2]:
+        out += [str(i) for i in ids if isinstance(i, str) and str(i) not in out]
+    return out
 
 
-def save_focus(days):
-    # keep the last 90 days; older history is not needed for carry-over
-    keep = dict(sorted(days.items())[-90:])
-    atomic_write(focus_path(), json.dumps({"days": keep}, ensure_ascii=False, indent=1) + "\n")
+def save_focus(ids):
+    atomic_write(focus_path(), json.dumps({"focus": list(dict.fromkeys(ids))}, ensure_ascii=False, indent=1) + "\n")
 
 
 def focus_state():
-    days = load_focus()
-    t = today()
-    ids = list(days.get(t, []))
-    earlier = sorted(d for d in days if d < t and days[d])
-    last = earlier[-1] if earlier else None
+    ids = load_focus()
     status = {}
-    for path in card_paths():
-        m = parse_card(path)
+    for p in card_paths():
+        m = parse_card(p)
         status[m.get("id")] = m.get("status")
-    carry = [i for i in (days.get(last, []) if last else [])
-             if i not in ids and status.get(i) in OPEN_STATUSES]
-    ids = [i for i in ids if i in status]          # drop tasks that no longer exist
-    return {"today": t, "ids": ids, "last_day": last, "carry": carry}
+    # Only open tasks show: one marked done drops out (and comes back if it's reopened); a task
+    # that no longer exists is dropped.
+    ids = [i for i in ids if status.get(i) in OPEN_STATUSES]
+    # "today" / "last_day" / "carry" are kept for older readers; there is no daily list any more.
+    return {"ids": ids, "today": today(), "last_day": None, "carry": []}
 
 
 def focus_add(ids):
-    days = load_focus()
-    cur = days.setdefault(today(), [])
-    for i in ids:
-        if i not in cur:
-            cur.append(i)
-    save_focus(days)
+    cur = load_focus()
+    save_focus(cur + [i for i in ids if i not in cur])
 
 
 def cmd_focus(args):
@@ -815,25 +818,19 @@ def cmd_focus(args):
         if args.action == "add":
             focus_add(ids)
         else:
-            days = load_focus()
-            days[today()] = [i for i in days.get(today(), []) if i not in ids]
-            save_focus(days)
+            save_focus([i for i in load_focus() if i not in ids])
     elif args.action == "order":
-        # Today's list in the given order (the board's drag); anything not named keeps its place after.
+        # Focus in the given order (the board's drag); anything not named keeps its place after.
         ids = list(dict.fromkeys(parse_card(find_card(x))["id"] for x in args.tasks))   # no repeats
-        days = load_focus()
-        cur = days.get(today(), [])
-        days[today()] = [i for i in ids if i in cur] + [i for i in cur if i not in ids]
-        save_focus(days)
+        cur = load_focus()
+        save_focus([i for i in ids if i in cur] + [i for i in cur if i not in ids])
     elif args.action == "carry":
-        focus_add(focus_state()["carry"])
+        pass                        # nothing to carry: Focus no longer resets each day
     st = focus_state()
     if args.json:
         print(json.dumps(st, ensure_ascii=False))
         return
-    print(f"Today ({st['today']}): {', '.join(st['ids']) or '— nothing picked yet'}")
-    if st["carry"]:
-        print(f"Unfinished from {st['last_day']}: {', '.join(st['carry'])}   (hq focus carry)")
+    print(f"Focus: {', '.join(st['ids']) or '— nothing in Focus yet'}")
 
 
 def cmd_new(args):
@@ -858,7 +855,7 @@ def cmd_new(args):
     set_fields(p, {"id": tid, "title": args.title, "project": project, "category": category,
                    "status": "active", "lead": args.lead or "-", "updated": today(), "workdirs": workdirs})
     if not args.no_focus:
-        focus_add([tid])            # a task made today is on today's list
+        focus_add([tid])            # a new task joins Focus
     print(tid)
     print(p)
 
@@ -1521,7 +1518,7 @@ def main():
     p.set_defaults(fn=cmd_show)
     p = sub.add_parser("new", help="create a task card")
     p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category"); p.add_argument("--project")
-    p.add_argument("--no-focus", action="store_true", help="don't add it to today's focus")
+    p.add_argument("--no-focus", action="store_true", help="don't add it to Focus")
     p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
     p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
     p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
@@ -1547,7 +1544,7 @@ def main():
     p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto", "order"])
     p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
-    p = sub.add_parser("focus", help="today's focus: hq focus [add|remove|order T-012 ...|carry] [--json]")
+    p = sub.add_parser("focus", help="the Focus list: hq focus [add|remove|order T-012 ...] [--json]")
     p.add_argument("action", nargs="?", choices=["show", "add", "remove", "order", "carry"], default="show")
     p.add_argument("tasks", nargs="*"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_focus)
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")

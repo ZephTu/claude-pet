@@ -80,19 +80,16 @@ final class TaskIndex {
             }
         }
 
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let today = fmt.string(from: now)
-        if let focus = json(URL(fileURLWithPath: rootPath).appending(path: "focus.json")) as? [String: Any],
-           let days = focus["days"] as? [String: [String]] {
-            snap.focusToday = days[today] ?? []
-            if let last = days.keys.filter({ $0 < today && !(days[$0] ?? []).isEmpty }).max() {
-                let open: Set<String> = ["active", "blocked", "waiting-on-me"]
-                snap.carry = (days[last] ?? []).filter {
-                    !snap.focusToday.contains($0) && open.contains(statuses[$0] ?? "")
-                }
+        // The Focus list (hq keeps it until you take a task off). An older per-day file reads as
+        // its latest day's list, as hq reads it.
+        if let focus = json(URL(fileURLWithPath: rootPath).appending(path: "focus.json")) as? [String: Any] {
+            if let list = focus["focus"] as? [String] {
+                snap.focusToday = list
+            } else if let days = focus["days"] as? [String: [String]], let last = days.keys.max() {
+                snap.focusToday = days[last] ?? []
             }
         }
+
         return snap
     }
 

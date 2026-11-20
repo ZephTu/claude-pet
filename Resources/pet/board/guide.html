@@ -30,8 +30,8 @@
 <aside class="toc">
   <a href="#zh-what">HQ 是什么</a>
   <a href="#zh-start">开始使用</a>
-  <a href="#zh-today">Today：今天的任务</a>
-  <a href="#zh-board">看板上能做什么（All）</a>
+  <a href="#zh-today">三个页面 · Focus</a>
+  <a href="#zh-board">All 与 Needs you</a>
   <a href="#zh-pet">和小猫的联动</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
@@ -66,29 +66,31 @@
 </ol>
 <p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
 
-<h1 id="zh-today">Today：今天的任务</h1>
-<p>顶栏左边的 <b>Today | All</b> 切换两个视图（会记住）。<b>Today</b> 是工作台，只放今天挑出来的任务；<b>All</b> 是全局视图，什么都有。</p>
+<h1 id="zh-today">三个页面 · Focus：正在关注的任务</h1>
+<p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每页都是两列。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是所有还没回答的问题（左）和你的 <code>@me</code> 待办（右），标签上的数字就是这两样加起来。</p>
 <ul>
-<li><b>挑任务</b>：顶部搜索框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。今天新建的任务自动加入今天。</li>
-<li><b>排序</b>：日期旁的 <b>active first</b>（和 All 里的是同一个设置，在哪边勾都一样，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序（存在今天的列表里）。右边的 session 一直按最近活动排。</li>
-<li><b>接着昨天的</b>：上一个有挑任务的日子里还没完成的任务，会在顶部提示，可以逐个 + 或 <b>Bring all</b>；<b>Not today</b> 今天不再提示。</li>
-<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后，待办和 session 只在详情里显示一份（详情里的更全：可以新增、看已完成的、绑定 session），卡片上方的简要列表会暂时隐去；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
-<li>右栏只列今天任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
-<li>今天的列表存在任务根目录的 <code>focus.json</code>，按日期保存。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus order T-3 T-1 …</code>（排序）、<code>hq focus carry</code>。</li>
+<li><b>加进 Focus</b>：顶部输入框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。新建的任务自动加入 Focus。卡片右上角的 ✕（点两下）把它从 Focus 拿掉，任务本身不变。</li>
+<li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 一直按最近活动排。</li>
+
+<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后，待办和 session 只在详情里显示一份（详情里的更全：可以新增、看已完成的、绑定 session），卡片上方的简要列表会暂时隐去；<b>✕</b> 把它移出 Focus（任务本身不变，可以 Undo）。</li>
+<li>右栏只列 Focus 里任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
+<li>Focus 列表存在任务根目录的 <code>focus.json</code>（以前按天存的旧文件会自动沿用最近一天的列表）。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus order T-3 T-1 …</code>（排序）。</li>
 </ul>
 
-<h1 id="zh-board">看板上能做什么（All）</h1>
+<h1 id="zh-board">All 与 Needs you</h1>
 <h2>顶栏</h2>
 <ul>
-<li>计数：未回应的 ask、你的待办、进行中的任务、在跑的 session（悬停有说明）。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you</b>，右边是搜索框、<b>+ New task</b>、<b>↻</b> 刷新、<b>⚙</b> 设置、<b>Guide</b>。</li>
+<li><b>底部状态栏</b>：session 有几个（在干活的、等你的），任务有几个（在 Focus 里的、阻塞的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。</li>
+<li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、active first。</li>
 <li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>↻</b> 后面是多久后重置。和悬停在小猫身上看到的是同一份数据。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存下来：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/hud-usage.json"</code>（必须写绝对路径）；或者用 <code>pet-emit --statusline</code> 包一层你的状态栏命令（见仓库的 docs/pet.zh-CN.md）。没有新鲜的数据就不显示。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
-<li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
+
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
-<li><b>删除 / 解绑都要点两下</b>：解绑 session、从任务移除以前的 session、删关联链接、待办的 ✕（不做）、今天列表的 ✕、删项目目录、删空的项目或分类——第一下按钮变成红色的"Unbind?""Remove?"等，4 秒内再点一下才执行，不点就恢复原样。</li>
+<li><b>删除 / 解绑都要点两下</b>：解绑 session、从任务移除以前的 session、删关联链接、待办的 ✕（不做）、Focus 卡片的 ✕、删项目目录、删空的项目或分类——第一下按钮变成红色的"Unbind?""Remove?"等，4 秒内再点一下才执行，不点就恢复原样。</li>
 </ul>
-<h2>Needs you（左栏）</h2>
+<h2>Needs you（第三个标签页）</h2>
 <ul>
 <li><b>Asks</b>：所有还没回应的问题，最早的排在最上面。session 把同一个还没回应的问题再问一遍时，不会多出一条。每条可以先在说明框里写几句（多行也行，最多显示 5 行，超出滚动），再选回答：
 <table>
@@ -104,8 +106,8 @@
 <b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
 <b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下整个按钮填上颜色（Yes 绿、No 红、Later 黄、No context 灰、To todo 蓝；再点取消，可以改选），不会马上发出；在某条的说明框里打字会自动选上 Yes（删光文字就取消；你手动选过的不会被改）；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
-<li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
-<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
+<li>Needs you 分左右两列：左边 <b>Asks</b>，右边 <b>Your todos</b>。分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
+<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在 All 页的任务列表里定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
 <li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。勾选按待办的<b>文字</b>认准是哪一条：看板刷新前 session 在前面插了新待办也不会勾错；那条待办已被删掉或改写时会提示你刷新。</li>
 </ul>
 <h2>上下文窗口</h2>
@@ -114,9 +116,9 @@
 <li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
 <li><b>待办</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
 <li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
-<li><b>Show task</b> 在中栏定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
+<li><b>Show task</b> 在 All 页的任务列表里定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
 </ul>
-<h2>Tasks（中栏）</h2>
+<h2>Tasks（All 的左列）</h2>
 <ul>
 <li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
   <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"No open tasks"和 <b>+ New task</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
@@ -134,15 +136,15 @@
 <tr><td><b>next</b></td><td>任务卡片顶部已经显示它，详情里点 <b>✎ Edit</b> 才出现它的输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
 <tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。<code>@claude</code> 的待办有 <b>▶ Do it</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队）；没有就按 ▶ New session 的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
-<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕。下面的 <b>Earlier sessions</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Today 卡片上没有 session 在跑时，也有一个 ↻ Resume 续上最近那个。<b>skip permissions</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ Do it 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问。<b>stay on board</b>（同样记住选择，默认不勾）：勾上后，新开、续上、▶ Do it 时终端标签页在后台打开、不切过去，看板直接弹出这个 session 的对话窗口——先显示 starting…，session 起来后就能在里面看回复、发消息（发消息仍限 Orca / iTerm2）。要授权的操作在小猫的列表里 Allow / Deny，或者配合 skip permissions 一起用</td><td>你</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕。下面的 <b>Earlier sessions</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Focus 卡片上没有 session 在跑时，也有一个 ↻ Resume 续上最近那个。<b>skip permissions</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ Do it 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问。<b>stay on board</b>（同样记住选择，默认不勾）：勾上后，新开、续上、▶ Do it 时终端标签页在后台打开、不切过去，看板直接弹出这个 session 的对话窗口——先显示 starting…，session 起来后就能在里面看回复、发消息（发消息仍限 Orca / iTerm2）。要授权的操作在小猫的列表里 Allow / Deny，或者配合 skip permissions 一起用</td><td>你</td></tr>
 <tr><td><b>▶ New session</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。任务卡还是空的（没有 next、待办和日志）时不会根据标题猜，只提一条问题——接下来要做什么——你在这条问题里回复就行。旁边的下拉框选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>Background</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
 <tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
 <tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
 <tr><td><b>Open card</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
 </table>
-<h2>Sessions（右栏）</h2>
+<h2>Sessions（All 的右列）</h2>
 <ul>
-<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
+<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与 All 页的任务列表一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
 <li>每张卡三行：状态点和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。<br>
 状态文字后面是 context 用了多少（如 <code>64% ctx</code>，60% 起变黄、80% 起变红），和小猫列表里的一样。<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：橙色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；橙色带黄色小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；黄色实心带竖杠 = 等你授权；黄色空心圈 = 等你回答；灰色 = 空闲；褐色空心圈 = 很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
 <li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
@@ -162,7 +164,7 @@
 <ul>
 <li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
 <li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
-<li><b>每天挑任务</b>：每天第一次看到 session 活动、而今天还没挑任务时，小猫提醒一次"挑一下今天的任务"（会提到上次没完成的有几个）；双击小猫打开看板的 Today。</li>
+
 </ul>
 
 <h1 id="zh-link">session 和看板怎么联动</h1>
@@ -204,7 +206,7 @@
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
 <tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
-<tr><td><code>hq focus [add|remove|order T-012 …|carry]</code></td><td>今天的任务列表（order 按给出的顺序排）</td></tr>
+<tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>Focus 列表（order 按给出的顺序排）</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录）</td></tr>
 </table>
@@ -213,7 +215,7 @@
 <h1 id="zh-onboard">从已有 session 开始</h1>
 <p>刚装好时，本机通常已经有很多 Claude Code session 和历史对话。两步把它们变成看板：</p>
 <ol>
-<li><b>项目</b>：Projects 面板里点 <b>Suggest from sessions</b>（看板为空时中栏也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
+<li><b>项目</b>：⚙ 设置 → Projects 里点 <b>Suggest from sessions</b>（看板为空时任务列表里也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
 <li><b>任务</b>：在任意 Claude Code session 里输入 <code>/hq-onboard</code>。Claude 会读这些 session，起草任务卡（状态、下一步、你的待办、相关链接、置信度），按项目列成表给你确认，<b>确认之前不会创建任何东西</b>；创建后，正在运行的 session 会绑定到对应任务，已结束的记在任务卡上、可以在看板上查看历史。</li>
 </ol>
 <p>之后任何地方都能改：在看板上直接改，或者在 session 里让 Claude 改。从推断得来的状态在任务日志里标了"请核实"。</p>
@@ -223,7 +225,7 @@
 <li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
 <li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
 <li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
-<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li><b>⚙ 设置 → Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
 <li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。</li>
 </ul>
 
@@ -231,7 +233,7 @@
 <h2>分类</h2>
 <ul>
 <li>每个任务根目录有自己的分类列表，存在 <code>hq.json</code> 里。新装的默认是一组通用分类：feature、bug、investigation、review、ops、docs、other，可以随意改。</li>
-<li>在看板上点 <b>Categories</b>：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
+<li>在 <b>⚙ 设置 → Categories</b> 里：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
 <li>分类只是写在每张任务卡上的一个标签，所以：
   <ul>
   <li><b>改名</b>会同时改写所有用到它的任务卡；</li>
@@ -316,8 +318,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <aside class="toc">
   <a href="#en-what">What HQ is</a>
   <a href="#en-start">Getting started</a>
-  <a href="#en-today">Today</a>
-  <a href="#en-board">What the board does (All)</a>
+  <a href="#en-today">Three pages · Focus</a>
+  <a href="#en-board">All and Needs you</a>
   <a href="#en-pet">With the cat</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
@@ -352,28 +354,30 @@ next: "fix 分支跑 Jenkins 并提 PR"
 </ol>
 <p class="tip">Sessions that were already running when HQ was installed should be restarted once so the hooks load.</p>
 
-<h1 id="en-today">Today</h1>
-<p><b>Today | All</b> at the top left switches views (remembered). <b>Today</b> is a workbench with only the tasks you picked for today; <b>All</b> is the full board.</p>
+<h1 id="en-today">Three pages · Focus</h1>
+<p><b>Focus | All | Needs you</b> at the top left switches pages (remembered); each is two columns. <b>Focus</b> is the workbench: only the tasks you keep in view — it doesn't reset each day; a task stays until you take it off. <b>All</b> is every task (left) and every session (right). <b>Needs you</b> is every unanswered ask (left) and your <code>@me</code> todos (right); the number on its tab counts both.</p>
 <ul>
-<li><b>Pick</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. Tasks created today join automatically.</li>
-<li><b>Order</b>: <b>active first</b> by the date (the same setting as in All — tick it on either page; remembered) puts tasks with a live session first, most recently active first. Untick it for your own order: a <b>⠿</b> appears at each card's top left — drag it to move the card (saved in today's list). The sessions on the right are always most recently active first.</li>
-<li><b>Carry on</b>: open tasks from the last day you picked any are offered at the top — add them one by one or <b>Bring all</b>; <b>Not today</b> hides the offer for today.</li>
-<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click a blank part of the card</b> to open the full task, again to fold it (clicks in a text box, checkbox, button, ask or session row don't fold it, nor does selecting text). Opened, the todos and sessions show once, in the details (which can add todos, show finished ones and bind sessions) — the card's short lists step aside; <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
-<li>The right column lists only the sessions on today's tasks, plus sessions not on any task yet (to bind them).</li>
-<li>Today's list lives in <code>focus.json</code> in your task root, one entry per day. From a shell: <code>hq focus</code>, <code>hq focus add|remove T-012</code>, <code>hq focus order T-3 T-1 …</code> (set the order), <code>hq focus carry</code>.</li>
+<li><b>Add to Focus</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. New tasks join automatically. ✕ at a card's top right (two clicks) takes it off Focus; the task stays.</li>
+<li><b>Order</b>: <b>active first</b> by the title (the same setting as in All; remembered) puts tasks with a live session first, most recently active first. Untick it for your own order: a <b>⠿</b> appears at each card's top left — drag it to move the card. The sessions on the right are always most recently active first.</li>
+
+<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click a blank part of the card</b> to open the full task, again to fold it (clicks in a text box, checkbox, button, ask or session row don't fold it, nor does selecting text). Opened, the todos and sessions show once, in the details (which can add todos, show finished ones and bind sessions) — the card's short lists step aside; <b>✕</b> takes it off Focus (the task stays; Undo brings it back).</li>
+<li>The right column lists only the sessions on the tasks in Focus, plus sessions not on any task yet (to bind them).</li>
+<li>Focus lives in <code>focus.json</code> in your task root (an older per-day file carries its latest day's list over). From a shell: <code>hq focus</code>, <code>hq focus add|remove T-012</code>, <code>hq focus order T-3 T-1 …</code> (set the order).</li>
 </ul>
 
-<h1 id="en-board">What the board does (All)</h1>
+<h1 id="en-board">All and Needs you</h1>
 <h2>Top bar</h2>
 <ul>
-<li>Counts: unanswered asks, your todos, open tasks, live sessions (hover for words).</li>
+<li>The top bar holds only things you click: <b>Focus · All · Needs you</b> on the left; the filter box, <b>+ New task</b>, <b>↻</b> refresh, <b>⚙</b> settings and <b>Guide</b> on the right.</li>
+<li><b>The status bar</b> at the bottom: sessions (working, waiting on you), tasks (in Focus, blocked, waiting), asks and todos (click → Needs you), and the quota on the right.</li>
+<li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, active first.</li>
 <li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>↻</b> how long until each resets. It is the same reading the pet shows when you hover it. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/hud-usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>; or wrap your statusline command in <code>pet-emit --statusline</code> (see docs/pet.md in the repo). With no fresh reading, nothing is shown.</li>
-<li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
+<li><b>Filter tasks…</b> by id, title or refs.</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
-<li><b>Removing or unbinding takes two clicks</b>: unbinding a session, removing an earlier session from a task, removing a link, a todo's ✕ (won't do), ✕ on today's list, removing a project directory, an empty project or category — the first click turns the button into a red "Unbind?", "Remove?"…; click again within 4 s to do it, or leave it and it goes back.</li>
+<li><b>Removing or unbinding takes two clicks</b>: unbinding a session, removing an earlier session from a task, removing a link, a todo's ✕ (won't do), ✕ on a Focus card, removing a project directory, an empty project or category — the first click turns the button into a red "Unbind?", "Remove?"…; click again within 4 s to do it, or leave it and it goes back.</li>
 </ul>
-<h2>Needs you (left)</h2>
+<h2>Needs you (the third tab)</h2>
 <ul>
 <li><b>Asks</b> — every unanswered question, oldest first. A session asking the same still-open question again doesn't add a second one. Type an optional note (several lines if you like — it shows up to five, then scrolls), then answer:
 <table>
@@ -389,8 +393,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
 <b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — a click fills the button with its colour (Yes green, No red, Later amber, No context grey, To todo blue; again to clear, or pick another), nothing is sent yet. Typing a note on one picks Yes for you (emptying the note takes it back; a pick you clicked yourself is left alone). When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
-<li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
-<li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
+<li>Needs you has two columns — <b>Asks</b> on the left, <b>Your todos</b> on the right: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
+<li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in All's task list (its folded project group opens, a search that hides it is cleared).</li>
 <li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too. A tick finds its todo by its <b>text</b>, so a todo a session inserted above it since the board last refreshed can't be ticked by mistake; if that todo was removed or reworded, you're asked to refresh.</li>
 </ul>
 <h2>Context window</h2>
@@ -399,9 +403,9 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>An ask</b>: the Claude reply that raised it, and which session — open that conversation directly. (Asks recorded before this feature have no reply attached; open the conversation instead.)</li>
 <li><b>A todo</b>: the task's status, next step and the whole card, log included.</li>
 <li>Both list the task's sessions: <b>live</b> ones open their conversation or jump; <b>ended</b> ones show their history (<b>History</b>).</li>
-<li><b>Show task</b> finds and opens the task in the middle column; <b>Open card</b> opens the card in your editor.</li>
+<li><b>Show task</b> finds and opens the task in All's task list; <b>Open card</b> opens the card in your editor.</li>
 </ul>
-<h2>Tasks (middle)</h2>
+<h2>Tasks (All, left)</h2>
 <ul>
 <li><b>Project | Status</b> next to the title switches the grouping (remembered):
   <ul><li><b>Project</b> (default): one group per project — every project shows, even one with no open tasks (it offers <b>+ New task</b> right there) — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
@@ -419,13 +423,13 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>next</b></td><td>the card's header already shows it, so in the details its box only appears under <b>✎ Edit</b> (sessions read it from the card, so editing it steers the next one); edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
 <tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo). An <code>@claude</code> todo has <b>▶ Do it</b>: with a live session on the task that the board can message, it sends "please do this todo on the card, tick it when done" to the most recently active one (queued if busy); with none, it starts a session the way ▶ New session does, told to read the card and do that todo. Afterwards the button says who has it (for 30 minutes); clicking again hands it over again</td><td>you and sessions</td></tr>
-<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕. <b>Earlier sessions</b> below lists the task's ended sessions (name, how long ago, last words): 👁 reads the conversation, <b>↻ Resume</b> picks it up with <code>claude --resume</code> in the directory it ran in and binds it to the task again (the terminal tab keeps its name); <b>✕</b> (two clicks) takes it off the task's sessions — the conversation itself is kept. A Today card with nothing live offers ↻ Resume for the latest one. <b>skip permissions</b> (remembered, off by default): sessions the board starts, resumes or hands a todo to run with <code>--dangerously-skip-permissions</code>, so Claude doesn't stop to ask before running commands or editing files. <b>stay on board</b> (remembered, off by default): starting, resuming or ▶ Do it opens the terminal tab in the background without switching to it, and the session's conversation window opens on the board instead — it says starting… until the session is up, then you read and reply there (replying still needs Orca or iTerm2). Approve prompts from the pet's list (Allow / Deny), or use it together with skip permissions</td><td>you</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕. <b>Earlier sessions</b> below lists the task's ended sessions (name, how long ago, last words): 👁 reads the conversation, <b>↻ Resume</b> picks it up with <code>claude --resume</code> in the directory it ran in and binds it to the task again (the terminal tab keeps its name); <b>✕</b> (two clicks) takes it off the task's sessions — the conversation itself is kept. A Focus card with nothing live offers ↻ Resume for the latest one. <b>skip permissions</b> (remembered, off by default): sessions the board starts, resumes or hands a todo to run with <code>--dangerously-skip-permissions</code>, so Claude doesn't stop to ask before running commands or editing files. <b>stay on board</b> (remembered, off by default): starting, resuming or ▶ Do it opens the terminal tab in the background without switching to it, and the session's conversation window opens on the board instead — it says starting… until the session is up, then you read and reply there (replying still needs Orca or iTerm2). Approve prompts from the pet's list (Allow / Deny), or use it together with skip permissions</td><td>you</td></tr>
 <tr><td><b>▶ New session</b></td><td>starts a Claude Code session in the task's workdir (or its project's directory), named "id title", <b>bound to the task from the start</b>; it reads the card, reports where it stands, the next step and what needs you in three lines, then waits. On a card that is still empty (no next step, todos or log) it doesn't guess from the title: it raises one ask — what should we work on first — and you answer there. The menu beside it picks where (remembered): <b>Orca / iTerm2 / Terminal</b> open a new tab; <b>Background</b> opens no window. The default is the terminal most of your sessions run in</td><td>you</td></tr>
 <tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
 <tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
 <tr><td><b>Open card</b></td><td>opens the card file in your editor</td><td></td></tr>
 </table>
-<h2>Sessions (right)</h2>
+<h2>Sessions (All, right)</h2>
 <ul>
 <li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
 <li>Each card is three lines: the state dot and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.<br>
@@ -447,7 +451,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <ul>
 <li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
 <li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
-<li><b>Pick today's tasks</b>: once a day, the first time the cat sees sessions at work while nothing is picked for today, it suggests picking (mentioning how many are still open from last time); double-click the cat to open Today.</li>
+
 </ul>
 
 <h1 id="en-link">How sessions and the board connect</h1>
@@ -485,7 +489,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
 <tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
-<tr><td><code>hq focus [add|remove|order T-012 …|carry]</code></td><td>today's list (order: in the order given)</td></tr>
+<tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>the Focus list (order: in the order given)</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts)</td></tr>
 </table>
@@ -494,7 +498,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h1 id="en-onboard">Start from existing sessions</h1>
 <p>A fresh install usually meets a machine full of Claude Code sessions and history. Two steps turn them into a board:</p>
 <ol>
-<li><b>Projects</b>: <b>Suggest from sessions</b> in the Projects panel (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
+<li><b>Projects</b>: <b>Suggest from sessions</b> in ⚙ Settings → Projects (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
 <li><b>Tasks</b>: run <code>/hq-onboard</code> in any Claude Code session. Claude reads those sessions, drafts task cards (status, next step, your todos, links, confidence), shows them per project and <b>creates nothing until you confirm</b>; then live sessions are bound to their tasks and ended ones are recorded on the cards, their history one click away.</li>
 </ol>
 <p>Change anything afterwards — on the board, or by asking Claude in any session. Inferred statuses are flagged "verify" in each task's log.</p>
@@ -504,7 +508,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
 <li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
 <li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
-<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li><b>⚙ Settings → Projects</b>: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
 <li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>.</li>
 </ul>
 
@@ -512,7 +516,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h2>Categories</h2>
 <ul>
 <li>Each task root keeps its own list in <code>hq.json</code>. New roots start with a generic set — feature, bug, investigation, review, ops, docs, other — change it freely.</li>
-<li>On the board, <b>Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
+<li>In <b>⚙ Settings → Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
 <li>A category is just a label on each card, so:
   <ul>
   <li><b>renaming</b> rewrites every card that uses it;</li>

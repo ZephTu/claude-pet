@@ -43,9 +43,9 @@ session 一多、分散在好几个仓库里，难的就不再是干活本身，
 
 **双击猫**打开它（或者右键 → **Task Board…**）。
 
-<img src="docs/images/board-today.png" width="900" alt="Today 视图：今天挑出来的任务，每个任务带着它未回答的问题、待办和 session；右边是在跑的 session">
+<img src="docs/images/board-today.png" width="900" alt="Focus 页：你正在关注的任务，每个任务带着它未回答的问题、待办和 session；右边是它们的 session">
 
-**Today** 只显示你今天挑出来的任务，每个任务带着它需要你做的一切：没回答的问题、你的待办、在为它干活的 session。顶栏是各类待处理的计数和额度。
+看板有三个页面，每页两列。**Focus** 只显示你正在关注的任务（不按天清空），每个任务带着它需要你做的一切：没回答的问题、你的待办、在为它干活的 session。**All** 是所有任务和所有 session；**Needs you** 汇总所有没回答的问题和你的待办，标签上有数量。底部状态栏显示各类计数和额度；项目、分类和 session 的启动方式都在 ⚙ 设置里。
 
 ### 一次回答多个问题
 
@@ -57,9 +57,9 @@ session 在回复末尾列出需要你回答的问题，它们变成看板上的
 
 ### 所有任务、所有 session
 
-<img src="docs/images/board-all.png" width="900" alt="All 视图：左边是没回答的问题和你的待办，中间按项目分组的任务，右边是所有在跑的 session">
+<img src="docs/images/board-all.png" width="900" alt="All 页：左边按项目分组的任务，右边是所有在跑的 session">
 
-**All** 是完整的看板：左边是需要你的，中间是按项目或状态分组的任务，右边是所有在跑的 session——圆点和小猫列表一致，带 context 用量；干完了你还没看的那一轮有个红色 **new** 标记。
+**All** 是完整的看板：左边是按项目或状态分组的任务，右边是所有在跑的 session——圆点和小猫列表一致，带 context 用量；干完了你还没看的那一轮有个红色 **new** 标记。
 
 <img src="docs/images/board-task.png" width="900" alt="展开一个任务：状态行、待办（Claude 的待办有 Do it 按钮）、在跑的 session、可以 Resume 的以前的 session、日志">
 

@@ -43,9 +43,9 @@ With a dozen sessions open across several repos, the hard part stops being the w
 
 **Double-click the cat** to open it (or right-click → **Task Board…**).
 
-<img src="docs/images/board-today.png" width="900" alt="The Today view: the tasks picked for today, each with its open questions, todos and sessions; the live sessions on the right">
+<img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view, each with its open questions, todos and sessions; their sessions on the right">
 
-**Today** shows only the tasks you picked for today, each with everything it needs from you: its open questions, your todos, and the sessions working on it. The top bar keeps count of what is waiting and shows your quota.
+The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
 
 ### Questions, answered in one go
 
@@ -57,9 +57,9 @@ The answer goes straight into the session that asked (Orca and iTerm2), or reach
 
 ### Every task and every session
 
-<img src="docs/images/board-all.png" width="900" alt="The All view: unanswered asks and your todos on the left, tasks grouped by project in the middle, every live session on the right">
+<img src="docs/images/board-all.png" width="900" alt="The All page: tasks grouped by project on the left, every live session on the right">
 
-**All** is the whole board: what needs you on the left, tasks by project or by status in the middle, every live session on the right — with the same status dots as the cat's list, its context use, and a **new** tag on a finished turn you haven't looked at.
+**All** is the whole board: tasks by project or by status on the left, every live session on the right — with the same status dots as the cat's list, its context use, and a **new** tag on a finished turn you haven't looked at.
 
 <img src="docs/images/board-task.png" width="900" alt="A task opened: its status line, todos with a Do it button on Claude's, the live session, an earlier session with Resume, and the log">
 
