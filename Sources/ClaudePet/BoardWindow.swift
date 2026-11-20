@@ -142,7 +142,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return r
         case "pet":
             var pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
-            if let usage = Self.usageSnapshot() { pet["usage"] = usage }
+            if let usage = Self.usage?() { pet["usage"] = usage }
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
         case "resolve":
@@ -292,27 +292,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
     /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
     /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
-    /// The subscription's rate-limit windows (5-hour and weekly: percent used, when each resets), as
-    /// a statusline last saw them. Claude Code hands them only to the statusline command, so one has
-    /// to save them: claude-hud does with `display.externalUsageWritePath` set to this file. Older
-    /// than 15 minutes means no session has drawn a statusline since — not shown.
-    static let usagePath = ("~/.claude/pet/usage.json" as NSString).expandingTildeInPath
-    private static func usageSnapshot() -> [String: Any]? {
-        guard let data = FileManager.default.contents(atPath: usagePath),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let at = (obj["updated_at"] as? String).flatMap({ ISO8601DateFormatter.flexible($0) }),
-              Date().timeIntervalSince(at) < 15 * 60
-        else { return nil }
-        var out: [String: Any] = ["updated_at": obj["updated_at"] as Any]
-        for key in ["five_hour", "seven_day"] {
-            guard let w = obj[key] as? [String: Any] else { continue }
-            var win: [String: Any] = [:]
-            if let p = w["used_percentage"] as? Double { win["used"] = p }
-            if let r = w["resets_at"] as? String { win["resets_at"] = r }
-            out[key] = win
-        }
-        return out
-    }
+    /// The quota reading the pet uses (5-hour and weekly: percent used, when each resets), from the
+    /// app; nil when there is no fresh one — see AppMain.currentUsage.
+    static var usage: (() -> [String: Any]?)?
 
     /// The user's choice on the board: sessions it starts or resumes skip Claude Code's permission prompts.
     private static let skipFlag = "--dangerously-skip-permissions"
@@ -599,17 +581,5 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
             }
         }
-    }
-}
-
-
-extension ISO8601DateFormatter {
-    /// Parses an ISO 8601 time with or without fractional seconds.
-    static func flexible(_ text: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: text) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: text)
     }
 }

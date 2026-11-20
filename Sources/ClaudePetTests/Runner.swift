@@ -1134,6 +1134,14 @@ struct Runner {
                 CompletionQueue.unread([ev("a", "T1", 0), ev("a", "T2", 1)], read: read)
                     .map(\.turnKey) == ["T2"])
 
+        // claude-hud's saved snapshot (display.externalUsageWritePath) is a quota source.
+        let hud = Data(#"{"updated_at":"2026-11-20T11:54:38.974Z","five_hour":{"used_percentage":27,"resets_at":"2026-11-20T14:10:00.000Z"},"seven_day":{"used_percentage":81.4,"resets_at":"2026-11-22T04:00:00.000Z"}}"#.utf8)
+        let hudSnap = UsageReader.parseSnapshot(hud)
+        t.check("claude-hud's saved snapshot reads as a quota reading",
+                hudSnap?.fiveHourPercent == 27 && hudSnap?.sevenDayPercent == 81 && hudSnap?.source == "claude-hud")
+        t.check("a snapshot missing a window is not a reading",
+                UsageReader.parseSnapshot(Data(#"{"updated_at":"2026-11-20T11:54:38Z","five_hour":{"used_percentage":27,"resets_at":"2026-11-20T14:10:00Z"}}"#.utf8)) == nil)
+
         // Typing into a session after it finished means its result was read.
         func typedInto(_ sid: String, _ at: TimeInterval?) -> SessionState {
             SessionState(sessionId: sid, project: "api", cwd: "/tmp/api", state: .busy, tool: "", detail: "",
