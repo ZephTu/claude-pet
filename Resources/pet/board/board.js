@@ -383,10 +383,15 @@ function render() {
   });
 
   renderCounts();
-  $("#mode").innerHTML = ["today", "all"].map((m) =>
-    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}">${m === "today" ? "Today" : "All"}</button>`).join("");
+  // Three pages, each two columns: Focus (the tasks you keep in view), All, and Needs you
+  // (every unanswered ask and your todos) with its count on the tab.
+  if (!["today", "all", "needs"].includes(ui.mode)) ui.mode = "today";
+  const need = needCount();
+  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"]].map(([m, label]) =>
+    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${m === "needs" && need ? `<span class="n">${need}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
-  $("#all").hidden = ui.mode === "today";
+  $("#all").hidden = ui.mode !== "all";
+  $("#needs").hidden = ui.mode !== "needs";
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
     $("#today-sessions").innerHTML = renderTodaySessions();
@@ -451,14 +456,17 @@ function paintTaskIds() {
   });
 }
 
+// What Needs you holds: unanswered asks (not the ones put off till later) and your open todos.
+function needCount() {
+  const open = tasks().filter(isOpen);
+  return tasks().reduce((n, t) => n + openAsks(t).length, 0) +
+    open.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
+}
 function renderCounts() {
   const all = tasks();
-  const asks = all.reduce((n, t) => n + openAsks(t).length, 0);
-  const mine = all.filter(isOpen).reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length, 0);
-  const legacy = all.filter((t) => isOpen(t) && t.waiting_on_me).length;
   const activeN = all.filter(isOpen).length;
   $("#counts").innerHTML =
-    `<span title="Unanswered asks"><b>${asks}</b> asks</span><span title="Your todos"><b>${mine + legacy}</b> todos</span>` +
+    // Asks and your todos are counted on the Needs you tab.
     `<span title="Open tasks"><b>${activeN}</b> tasks</span>` +
     `<span title="Live sessions"><b>${ui.sessions.length}</b> live</span>`;
   $("#quota").innerHTML = usageChips();
@@ -773,7 +781,7 @@ function renderTask(t, mode) {
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
-            title="${focusIds().includes(t.id) ? "On today's list — click to remove" : "Add to today"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
+            title="${focusIds().includes(t.id) ? "In Focus — click to take it off" : "Add to Focus"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
         ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
         ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
@@ -803,14 +811,13 @@ function renderToday() {
     ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
     : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
-  const day = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
   const carry = (f.carry || []).map(taskById).filter(Boolean);
   const showCarry = carry.length && ui.carryDismissed !== f.today;
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
-  return `<div class="today-h"><h2 class="big">Today</h2><span class="meta">${esc(day)} · ${picked.length} task${picked.length === 1 ? "" : "s"}</span>
+  return `<div class="today-h"><h2 class="big">Focus</h2><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
       <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
       <span style="flex:1"></span>
-      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to today…" value="${esc(draft("todaypick"))}">
+      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to Focus…" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
       <button class="btn small" data-action="today-add">Add</button></div>
     ${showCarry ? `<div class="card carry"><b>Still open from ${esc(f.last_day)}</b> — carry on with these today?
@@ -819,8 +826,8 @@ function renderToday() {
         <button class="btn small ghost" data-action="carry-dismiss">Not today</button></div></div>` : ""}
     ${draftNew}
     ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
-      <b>Nothing picked for today.</b>
-      <div class="meta" style="margin-top:4px">Add tasks with the box above${showCarry ? ", bring yesterday's over," : ""} or star ☆ them in All. Tasks you create today join automatically.</div></div>`}`;
+      <b>Nothing in Focus yet.</b>
+      <div class="meta" style="margin-top:4px">Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.</div></div>`}`;
 }
 
 function focusCard(t) {
@@ -848,12 +855,12 @@ function focusCard(t) {
   // aside — each shows once.
   return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
-      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder today's tasks">⠿</span>`}
+      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder your Focus">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="icon" title="Not today — take it off today's list (the task stays)" data-confirm="Not today?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      <button class="icon" title="Take it off Focus (the task stays)" data-confirm="Unfocus?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
     ${asks.length || laterAsks(t).length ? `<div class="fsec">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
@@ -872,7 +879,7 @@ function renderTodaySessions() {
   const ids = focusIds();
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
-  return `<h2>Sessions on today's tasks</h2>
+  return `<h2>Sessions on these tasks</h2>
     ${onToday.length ? renderSessions(onToday, true) : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
     ${loose.length ? `<h2 style="margin-top:18px">Not on a task</h2>${renderSessions(loose, true)}` : ""}`;
 }
@@ -1573,8 +1580,8 @@ function revealTask(id) {
   if (!t) return toast(`${id} not found`, true);
   // In Today, a task on today's list is its card there: bring that card's top edge to the top
   // of the column, without opening its details. Anything else is shown in All.
-  if (ui.mode === "today") {
-    if (focusIds().includes(id)) return scrollToCard("ftask-" + id);
+  if (ui.mode !== "all") {
+    if (ui.mode === "today" && focusIds().includes(id)) return scrollToCard("ftask-" + id);
     ui.mode = "all";
     savePref("hq-mode", "all");
   }
@@ -2111,21 +2118,21 @@ document.addEventListener("click", async (ev) => {
     case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
-      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off today's list` : `${d.task} added to today`);
+      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off Focus` : `${d.task} added to Focus`);
     }
     case "today-add": {
       const v = (ui.drafts["todaypick"] || "").trim();
       const id = (v.match(/T-\d+/i) || [])[0];
       if (!id || !taskById(id.toUpperCase())) return toast("Pick a task from the list (type its id or title)", true);
       delete ui.drafts["todaypick"];
-      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to today`);
+      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to Focus`);
     }
     case "today-add-one": return act("focus", { action: "add", tasks: [d.task] }, `${d.task} added to today`);
     case "today-remove": {
       const id = d.task;
       try {
         await api("focus", { action: "remove", tasks: [id] });
-        toast(`${id} off today's list`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back on today's list`));
+        toast(`${id} off Focus`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back in Focus`));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }

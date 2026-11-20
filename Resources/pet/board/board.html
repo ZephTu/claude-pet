@@ -25,12 +25,7 @@
   <section class="col" id="today-focus"></section>
   <section class="col" id="today-sessions"></section>
 </main>
-<main id="all">
-  <section class="col" id="col-you">
-    <h2>Needs you</h2>
-    <div id="asks"></div>
-    <div id="mytodos"></div>
-  </section>
+<main id="all" hidden>
   <section class="col" id="col-tasks">
     <h2>Tasks <span class="seg" id="groupby"></span><label class="toggle af" id="activefirst" title="Projects with a live session come first, most recent activity first"><input type="checkbox" id="activefirst-cb"> active first</label><button class="btn small ghost foldall" id="foldall" data-action="fold-all"></button><label class="toggle"><input type="checkbox" id="show-closed"> show closed</label></h2>
     <div id="projects-panel" hidden></div>
@@ -42,6 +37,10 @@
     <h2>Sessions <span class="seg" id="sgroupby"></span></h2>
     <div id="sessions"></div>
   </section>
+</main>
+<main id="needs" hidden>
+  <section class="col" id="col-asks"><div id="asks"></div></section>
+  <section class="col" id="col-mytodos"><div id="mytodos"></div></section>
 </main>
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>

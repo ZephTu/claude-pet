@@ -39,9 +39,12 @@ a.btn { color: var(--text); text-decoration: none; }
 .btn:disabled { opacity: .45; cursor: default; }
 
 #error { margin: 10px 16px 0; padding: 8px 12px; border-radius: 8px; background: #4a2620; color: #ffd9cf; }
-main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.35fr) minmax(300px, 1.1fr);
+/* Every page is two columns: the work on the left, sessions (or your todos) on the right. */
+main { display: grid; grid-template-columns: minmax(420px, 1.7fr) minmax(300px, 1fr);
   gap: 0; height: calc(100% - 46px); }
-@media (max-width: 1000px) { main { grid-template-columns: 1fr 1fr; } #col-sessions { grid-column: 1 / -1; } }
+main[hidden] { display: none; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+#col-tasks, #col-asks { padding: 14px 18px 40px; }
 .col { overflow-y: auto; padding: 12px 14px 40px; border-right: 1px solid var(--line); }
 .col:last-child { border-right: 0; }
 h2 { margin: 2px 0 10px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint);
@@ -177,8 +180,7 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .hqblock ul { margin: 0; padding-left: 18px; }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }
 /* Today */
-#today { display: grid; grid-template-columns: minmax(420px, 1.7fr) minmax(300px, 1fr); height: calc(100% - 46px); }
-#today[hidden], #all[hidden] { display: none; }
+/* Focus (#today) */
 #today-focus { padding: 14px 18px 40px; }
 .seg.mode { margin-left: 6px; }
 .seg.mode button { font-size: 12px; padding: 2px 12px; }
@@ -406,3 +408,9 @@ textarea.grow:placeholder-shown { white-space: nowrap; overflow: hidden; text-ov
 /* The grip sits in the card's left margin, so the id and title don't move when it appears. */
 .fcard { position: relative; }
 .fcard .tgrip { position: absolute; left: 1px; top: 13px; font-size: 12px; }
+
+/* Needs you: a count on its tab */
+.seg.mode .n { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px;
+  background: var(--amber); color: #2a1d08; font-size: 11px; font-weight: 700; line-height: 16px; }
+#counts .jump { cursor: pointer; }
+#counts .jump:hover { color: var(--text); text-decoration: underline; }

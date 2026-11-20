@@ -168,13 +168,16 @@ grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tr
 A task's `workdirs` fill themselves: binding a session to a task adds that session's directory
 (not your home folder or the task root). You can also type one when creating a task.
 
-## Today
+## Focus, All, Needs you
 
-The board opens on **Today**: only the tasks picked for today (`<root>/focus.json`, one list per
-day), each with its asks, open todos and sessions, plus a one-click carry-over of what was left
-open the last time. Tasks created today join automatically. `hq focus [add|remove|order|carry]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does).
-The cat shows each session's task in its list, counts open asks in its badge, announces new
-ones, and once a day suggests picking today's tasks.
+The board has three pages, two columns each. It opens on **Focus**: the tasks you keep in view
+(`<root>/focus.json`, one list — it doesn't reset each day; a task stays until you take it off),
+each with its asks, open todos and sessions. New tasks join automatically. `hq focus
+[add|remove|order]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does);
+an older per-day `focus.json` carries its latest day's list over. **All** is every task and every
+session; **Needs you** is every unanswered ask and your `@me` todos, counted on its tab.
+The cat shows each session's task in its list, counts open asks in its badge and announces new
+ones.
 
 ## Starting sessions from the board
 
