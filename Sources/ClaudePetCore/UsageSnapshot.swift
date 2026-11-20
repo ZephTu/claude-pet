@@ -148,6 +148,32 @@ public enum UsageReader {
 
     /// The cache writes fractional seconds ("…:00.039Z"), which the plain
     /// ISO8601 formatter rejects, so both spellings are tried.
+    /// Where claude-hud saves the statusline's rate limits for other tools, when the user sets
+    /// `display.externalUsageWritePath` to it. Newer claude-hud no longer keeps `.usage-cache.json`
+    /// (it reads the limits from the statusline input instead), so this is how its numbers reach
+    /// the pet. Not `usage.json`: that name belongs to `pet-emit --statusline`.
+    public static func snapshotURL(petHome: URL) -> URL {
+        petHome.appending(path: "hud-usage.json")
+    }
+
+    /// Parses that snapshot: `updated_at`, and `five_hour` / `seven_day` each with
+    /// `used_percentage` and `resets_at`. Nil for anything else, as with the cache.
+    public static func parseSnapshot(_ data: Data) -> UsageSnapshot? {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let captured = (root["updated_at"] as? String).flatMap(iso8601),
+            let five = root["five_hour"] as? [String: Any],
+            let week = root["seven_day"] as? [String: Any],
+            let fivePct = (five["used_percentage"] as? NSNumber)?.doubleValue,
+            let weekPct = (week["used_percentage"] as? NSNumber)?.doubleValue,
+            let fiveReset = (five["resets_at"] as? String).flatMap(iso8601),
+            let weekReset = (week["resets_at"] as? String).flatMap(iso8601)
+        else { return nil }
+        return UsageSnapshot(planName: "", fiveHourPercent: Int(fivePct.rounded()), sevenDayPercent: Int(weekPct.rounded()),
+                             fiveHourResetAt: fiveReset, sevenDayResetAt: weekReset,
+                             capturedAt: captured, source: "claude-hud")
+    }
+
     private static func iso8601(_ text: String) -> Date? {
         let withFraction = ISO8601DateFormatter()
         withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

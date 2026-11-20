@@ -203,6 +203,14 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
         BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
+        // The board shows the same quota reading the pet does — one pick from the same sources.
+        BoardBridge.usage = { [weak self] in
+            guard let u = self?.currentUsage(), u.percentagesUsable(now: Date()) else { return nil }
+            let iso = ISO8601DateFormatter()
+            return ["five_hour": ["used": u.fiveHourPercent, "resets_at": iso.string(from: u.fiveHourResetAt)],
+                    "seven_day": ["used": u.sevenDayPercent, "resets_at": iso.string(from: u.sevenDayResetAt)],
+                    "source": u.source]
+        }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
         panel.showOnDesktop()
         panel.updateLayoutSide()
@@ -465,6 +473,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if let hud = (try? Data(contentsOf: UsageReader.cacheURL(claudeHome: claudeHome)))
             .flatMap(UsageReader.parse) {
             candidates.append(hud)
+        }
+        if let saved = (try? Data(contentsOf: UsageReader.snapshotURL(petHome: petHome)))
+            .flatMap(UsageReader.parseSnapshot) {
+            candidates.append(saved)
         }
         if let line = (try? Data(contentsOf: StatuslineUsage.cacheURL(petHome: petHome)))
             .flatMap(StatuslineUsage.decode) {

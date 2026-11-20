@@ -4,288 +4,106 @@
 
 [![CI](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml/badge.svg)](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml)
 
-A cat that sits on your macOS desktop and shows, at a glance, what every Claude Code session on your machine is doing.
+Two things for people who run many Claude Code sessions at once on a Mac:
+
+- **The pet** — a cat on your desktop that shows, at a glance, what every session is doing: working, finished, or waiting for you.
+- **The Task Board** — a window behind the cat that keeps track of the *work*: what each session is for, what it asked you, what you still owe it — so any session can be closed and the next one picks up where it left off.
 
 <img src="docs/images/cat.gif" width="300" alt="One turn as the cat lives it: asleep, starting work, raising a paw for approval, shouting when ignored, back to work, cheering the finished turn, and dozing off again">
 
-You stop tabbing through terminal windows to find out which session finished and which one is stuck waiting for you. It never makes a sound and never posts a system notification — it just changes in the corner of your eye.
+## The pet: every session at a glance
 
-## The picture is the signal
+The cat's posture is the state of all your sessions together — asleep when everything has stopped, typing while something works, a raised paw when a session needs your approval or an answer, on its hind legs shouting when you have ignored it for a minute. It never makes a sound and never posts a system notification; it changes in the corner of your eye.
 
-The cat has a drawing for nearly every state the pet knows, which is the whole
-point of it — you read a posture across the room without focusing on it.
+![Every state the cat can show](docs/images/cat-states.png)
 
-![Every state](docs/images/cat-states.png)
+- **Click the cat** for the session list, grouped by what wants you first: *Needs you* (approvals, questions), *Finished* (turns you have not looked at, each with the first line of Claude's last reply), *Running*.
+- **Allow or Deny** a permission prompt from the list without going back to the terminal — whichever answer comes first, there or here, counts.
+- **Jump to the terminal tab** a session runs in (↗): Orca, iTerm2, Ghostty 1.4+, and VS Code / Cursor (to the window).
+- **Finish bubbles** name the session that just finished and what it said; a count by the cat's ear says how many are unread.
+- **Hover the cat** for your 5-hour and weekly quota; **hover a row** for its path, context use, model and the last tool call.
+- **Mute, postpone, rename or pin** a session from its row. A muted one comes back the next time you type into it.
+- It notices a session **going round in circles** (four failed tool calls in a row) and work **left running in the background** after a turn ended.
 
-Ordered by how much it wants from you, starting from asleep:
+**The full tour** — every state, every button, and why each works the way it does: [docs/pet.md](docs/pet.md).
 
-| Meaning | What you see |
-| --- | --- |
-| everything is done | curled up asleep with z's drifting up |
-| a turn ended and nobody has looked | awake and on its feet, the count still by its ear |
-| a session is working | hunched over the laptop, typing. **Editing and running a command are the same drawing** |
-| reading | a book up in both paws, nose almost in it |
-| compacting its context | sorting a stack of paper. Still work — just not work you asked for |
-| waiting on a background agent | chin on a paw, laptop pushed aside. Claude parked an agent and ended its turn; it will speak again by itself. **No finish notice for that turn** — nothing finished, and walking over to it would find a session that has not started |
-| a tool call was interrupted | a warning triangle over a cat that carries on working. A failed call is usually not a failed task |
-| a session needs your approval | a raised paw and a warning triangle, pulsing twice every five seconds so a request does not sit there unnoticed |
-| a session needs an answer | the same raised paw, a question mark instead. This one wants typing, not a decision |
-| ignored for 60s+ | up on its hind legs, shouting, its own red alarm beside it; the bubble names the project **and the command it is blocked on** |
-| a turn just finished | both paws up, a short cheer. Deliberately short: a turn ending means Claude stopped talking, not that the work was right |
+### What the pet can't see
 
-## What you can do with it
+- **Only sessions started after the install.** Hooks load when a session starts; windows already open are invisible until restarted.
+- **An Esc interrupt sends no signal.** Claude Code emits no hook for it, so such a turn shows *No recent activity* after 90 seconds rather than "finished".
+- **A turn waiting on a background agent isn't "finished".** It is shown as waiting, and reported done only when the agent wakes the session again.
+- **Multiple-choice questions** (`AskUserQuestion`) can't be answered from the pet — the picks are the answer, so the row takes you to the terminal.
+- **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca and iTerm2 only. Background `claude --bg` sessions have no terminal at all.
+- **Quota, context and model need your statusline.** Claude Code hands them only to the statusline command; [claude-hud](https://github.com/jarrodwatts/claude-hud) or `pet-emit --statusline` has to save them ([how](docs/pet.md#optional-reading-quota-from-your-statusline)). Without that, everything else works.
+- **macOS 14+ only**, and not signed by an Apple Developer ID (the installer strips the quarantine flag; Gatekeeper may still ask). Click-through is a rectangle, not the cat's outline. Animating costs about 7% of one core and 310 MB.
 
-**Click it** to expand the panel. It has three groups, in the order they want your attention:
+## The Task Board
 
-- **Needs you** — sessions blocked on an approval or a question, longest wait first
-- **Finished** — turns that ended while you were not looking, folded to one row per session, each with the first line of what Claude said last — "all 12 tests pass" and "which of these do you want?" are the difference between needing to look and not. The "done" bubble says the same line
-- **Running** — everything else that is alive
+With a dozen sessions open across several repos, the hard part stops being the work. It is remembering what each session was for, what it asked you, and whether you ever answered. The Task Board (HQ) moves that out of the conversations and into **task cards**: one per piece of work, with a status, a next step, todos and a log. A session bound to a task reads the card before it starts and writes progress back, so the card — not any one conversation — is the record.
 
-Each heading carries its own count, and a lone **Running** heading is left off: one
-group with nothing to tell it apart from is not a group.
+**Double-click the cat** to open it (or right-click → **Task Board…**).
 
-A row in **Needs you** says which kind of interruption it is — **Needs approval**
-against **Awaiting reply** — and carries a warm bar down its left edge, which goes
-red once it has waited past the point that turns the pet's own badge red. Its
-second line is what you would be approving (`rm -rf build/`), never the hook's own
-"Claude is waiting for your input": three blocked rows used to print that sentence
-three times, under three first lines that already said so.
+<img src="docs/images/board-today.png" width="900" alt="The Today view: the tasks picked for today, each with its open questions, todos and sessions; the live sessions on the right">
 
-**Approve or deny without leaving your desk.** A row that is waiting on a permission carries **Allow** and **Deny**, and so does the alarm once it goes up. Claude Code shows its own prompt at the same moment and takes whichever answer comes first, so the terminal prompt is never delayed — answer there and the pet's buttons simply go away. The pet holds the `PermissionRequest` hook open while it waits (which is why that one hook is installed with a 600s timeout instead of 5s), only while the app is running, and only for the prompt it is showing: each prompt carries its own id, and a click on one that has since been replaced approves nothing. Neither button has a keyboard shortcut.
+**Today** shows only the tasks you picked for today, each with everything it needs from you: its open questions, your todos, and the sessions working on it. The top bar keeps count of what is waiting and shows your quota.
 
-**Multiple-choice questions get no buttons.** When Claude asks with options to pick and a Submit (`AskUserQuestion`), Claude Code routes it through the same permission hook — but the picks are the answer, and an Allow from outside would hand Claude none of them. So that session shows as waiting for a reply ("2 questions to answer"), and clicking it takes you to the terminal to choose.
+### Questions, answered in one go
 
-**Going round in circles.** A session whose last four tool calls all failed — the same test, the same build, again — looks exactly like steady work from across the room. The pet counts consecutive failures from Claude Code's own `PostToolUseFailure` events (an interrupt is not a failure, and any success resets the count), and at four the cat keeps typing under a warning glyph, the bubble names the session and what keeps failing, and the row's second line says "4 failed in a row · Bash npm test". Only the call's short target is kept, never the error text.
+A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer each with **Do** (plus a note, and pasted screenshots if you like), **Drop**, **Ask later**, **No context**, or **To todo** when it is really something you will do yourself. When a task has several, pick an answer for each and send them together as one message:
 
-**While you were away.** After ten minutes with no keyboard or mouse input, the pet notes the time and your quota; the first input after that gets one line — `While you were away (42m): 3 finished · tg-server waiting 12m · quota +18%` — and nothing at all if nothing happened.
+<img src="docs/images/board-asks.gif" width="700" alt="Three questions from one session: an answer is picked for each, with a note on the first and the third turned into a todo, then all three are sent at once">
 
-**The dot at the start of a row** says two things at once: its colour says whether the session wants you, and its shape and motion say what it is doing — so rows of one colour still read apart, including for someone who cannot tell the colours apart.
+The answer goes straight into the session that asked (Orca and iTerm2), or reaches it at the start of its next turn. With several sessions on one task, only the one that asked is told.
 
-| Dot | Means |
-| --- | --- |
-| orange, breathing | working |
-| orange with a small amber corner | working, but the last four tool calls all failed |
-| orange three-quarter arc, turning | Claude has stopped; an agent it sent off is doing the work |
-| amber with an exclamation bar | wants a decision (red once it has waited past a minute) |
-| amber ring | wants an answer |
-| hollow brown ring | busy on paper, nothing heard for 90s |
-| green | finished, not looked at yet |
-| grey with a teal heartbeat | **turn over, commands still running in the background** — the row says `2 in background`, and hovering lists them (`npm run dev · 12m`), cut down by the same rule as the activity log |
-| grey | idle |
+### Every task and every session
 
-The background check reads the process table every render rather than trusting the Stop payload, which is a snapshot of the moment the turn ended — a command that exits drops off within one tick. Only idle sessions are checked: while a turn runs, its own Bash call looks exactly like a background one. The cat does not wake up for background work; a dev server parked for the afternoon would keep it up all day. With the system's Reduce motion on, every animation stops and the shapes carry it alone.
+<img src="docs/images/board-all.png" width="900" alt="The All view: unanswered asks and your todos on the left, tasks grouped by project in the middle, every live session on the right">
 
-A number counts both kinds of attention, by the cat's ear. It is not shown at zero.
+**All** is the whole board: what needs you on the left, tasks by project or by status in the middle, every live session on the right — with the same status dots as the cat's list, its context use, and a **new** tag on a finished turn you haven't looked at.
 
-A running row that has said nothing for 90 seconds, with no tool call in flight,
-reads **No recent activity** on a hollow dot, and stops counting as busy — the pet will go
-to sleep over it and says nothing about it finishing. That is almost always a turn
-somebody cancelled with Esc: Claude Code emits no hook at all for an interrupt, so
-the last thing written stays "busy" and nothing ever comes to take it back. It is
-deliberately not called "done", which nothing here is in a position to know, and it
-rights itself the moment that session does anything again.
+<img src="docs/images/board-task.png" width="900" alt="A task opened: its status line, todos with a Do it button on Claude's, the live session, an earlier session with Resume, and the log">
 
-**Drag** to move it; it remembers where you put it. Drag it near the left edge of a display and the whole layout flips — pet on the left, panel opening to its right — so the panel never runs off-screen. **Right-click the pet** for pause / keep list open / unmute all / quit; launch at login, the global shortcut, how long the finish bubbles stay and how many stack up, and the connection report sit under **Settings**. If the install is broken — hooks missing from `settings.json`, `pet-emit` gone — the menu opens with a ⚠ line naming the problem, and the cat says so once at launch. The pet follows the system's **Reduce motion** setting rather than keeping a switch of its own. **Keep List Open** pins the session list up: while it is on, neither a click on the pet nor a jump to a terminal closes it, and the panel keeps its rectangle whether or not there are sessions to list — which also means clicks land on it rather than on whatever is underneath. Turning it back off is what closes it. **Right-click a row** to name that session (an empty name goes back to the folder and tab title), pin it, or mute it.
+Open a task for the rest of its card:
 
-**Click a row marked ↗** to jump straight to the terminal tab that session is running in.
+- **Todos** — `@me` for you, `@claude` for a session. **▶ Do it** hands a Claude todo to the task's session, or starts one to do it.
+- **Sessions** — bind a live one, start a new one in the task's directory, or **↻ Resume** an earlier one where it left off.
+- **Log** — decisions and findings, timestamped to the second; sessions read it.
 
-- **Orca** goes through its own CLI (`orca terminal switch`) and needs no system permission at all
-- **iTerm2** goes through AppleScript, so the **first jump raises a macOS Automation prompt**; deny it and jumps fail silently afterwards
-- **Ghostty** goes through AppleScript too — its scripting interface arrived in **Ghostty 1.4.0**, so older versions have no ↗ — and raises the same Automation prompt on the first jump. The tab is addressed by its tty: `GHOSTTY_SURFACE_ID` is an address rather than the id the scripting interface answers to, and tty is the one field a shell's environment and that interface both carry
-- **VS Code, Cursor and other VS Code forks** have no way to address one terminal from outside, so the jump asks the editor to open the session's project folder — which raises the window that already has it open. You land in the right window, not necessarily on the right terminal tab. No permission needed. The folder is the workspace Claude Code's IDE integration reports (`~/.claude/ide/*.lock`), else the enclosing git repository, else the session's directory
-- Other terminals cannot be addressed — those rows have no ↗ and clicking them just closes the list
+### Talk to a session from the board
 
-**Hover a row** for 0.45s and the bubble answers what the row has no space for: the full path and worktree, how full the context window is and on which model (with the statusline wired up), how long this turn has been going versus how long since anything happened at all, and the last tool call with its result. It used to show the session's name — which stopped being worth a hover once the first column started showing it.
+<img src="docs/images/board-peek.png" width="900" alt="The conversation window: the last messages of a session, rendered, with a reply box at the bottom">
 
-**Hover the pet itself** for a second and it reports your quota as two meters — the five-hour and weekly windows side by side, each with a countdown. The bar turns amber past 60% and red past 85%, the same warning ramp everything else here uses.
+👁 opens a session's recent conversation; reply from the box at the bottom (paste or drop images too). It arrives exactly as if you had typed it in the terminal — queued if the session is busy.
 
-**A finished row** can be clicked to jump to that session — and only then is it marked read, because a jump that did not happen must not clear the one record that it happened at all. If its session has closed there is no jump left to protect the record from, so clicking the row clears it and says why nothing opened. `clear` on the group heading marks them all. Typing your next message into that session after it finished — in its terminal or from the Task Board — also counts as having seen it, and clears the dot; so do 👁 and ↗ on the Task Board. A session woken by its own background agent does not.
+**And the small things:** drafts you were typing survive a restart; removing or unbinding anything takes two clicks; the board has a built-in **Guide** in English and Chinese.
 
-**Finishes are recorded on disk, not inferred.** Claude Code's `Stop` hook writes one file per finished turn, so a turn that began and ended between two refreshes still shows up, and so does one that finished while the pet was keeping quiet. They are kept for 7 days or 500 rows, read ones discarded first; if unread ones ever have to go, the panel says how many.
-
-**A turn that ended is not always a turn that finished.** Dispatch a background agent and Claude ends its turn immediately — the terminal says `Waiting for 1 background agent to finish`, and the pet used to put a red dot on it nine minutes before there was anything to see. `Stop` carries `background_tasks`, so a turn still holding an agent or a workflow is recorded as a pause: the session still counts as running and its row says what it is waiting for. The turn the agent eventually wakes is the one that counts as finished. A backgrounded **shell** does not hold a turn open — Claude Code's own "waiting for" count excludes it, and a dev server parked for the afternoon would otherwise silence that session for the rest of the day.
-
-**⏱ on a blocked row** postpones it for 5, 15 or 30 minutes. The row stays visible and says how much longer — this is not muting. The delay belongs to that one approval: if the session resolves it and blocks on a different one, the new one is not postponed. Sleeping through a delay replays nothing.
-
-**Click the × at the end of a row** to mute that session. A muted session is not in the list and cannot affect the pet's mood — it can sit blocked on a permission prompt without making the pet wave. It comes back on its own **the next time you type into it**; there is nothing to remember to undo. The panel footer says how many are muted, and the right-click menu can unmute them all at once.
-
-When a session finishes a round of work the pet says so immediately, naming that session — so you learn it came to rest without watching for it. Each finish gets **its own small bubble for 30 seconds**, stacked above the pet with the newest nearest it, so several sessions finishing together no longer replace one another. At most three are up at once — both numbers are under **right-click → Settings → Bubble Duration** (10 / 30 / 60s) and **Bubbles at Once** (1–3); when one more arrives the oldest leaves early, and it is still in the Finished list. The stack sits above any other bubble that is showing and stays out of the way while the list is open. **Click a notice to go to that session** — the same as clicking its row in Finished: it jumps to the terminal tab (a ↗ says it can) and marks that finish read; a session whose terminal cannot be addressed opens the list instead.
-
-**The pet makes no network requests.**
-
-A session stays listed for as long as its process is alive, however long it sits idle. Liveness is a kernel query, not a timestamp heuristic — an open session that nobody has touched in an hour is still an open session.
-
-**A row says what is running right now**, from the tool calls that have started and not reported back — `Bash npm test`, `Read PetLayout.swift`, or `3 tools running`. The age beside it is how long *that call* has been going, which is the number that answers "is this stuck?". Inside `busy` the figure's pose follows: reading leans at the screen, editing types, anything else sits back and waits.
-
-**Optional: a global shortcut.** Off by default. Turn on ⌃⌥⌘J under right-click → Settings to jump to whatever has been waiting longest. Claiming a system-wide chord uninvited is taking something that was not offered, so you have to ask for it — and if another app already owns it, the menu says so instead of quietly failing.
-
-**Right-click → Settings → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
-
-## Task board (HQ)
-
-Once a dozen sessions are open across several repos, the hard part is remembering what each
-one was doing, what it asked you, and whether you ever answered. **HQ** moves that state out
-of the conversations into task cards, and the pet gives you a window onto it.
-
-**Double-click the pet** to show or hide the board (or right-click → **Task Board…**):
-
-- **Needs you** — every question a session put to you that you have not answered yet, each
-  with four answers: **Do** (with a note), **Drop**, **Ask later**, **No context**. Plus your
-  `@me` todos and anything a task is waiting on you for. Nothing you skipped is silently
-  treated as "no".
-- **Tasks** — one card per piece of work: status, next step, todos you can tick, a log. A
-  session bound to a task reads the card first and writes progress back, so any session can be
-  closed and the next one picks up where it left off.
-- **Sessions** — every live session with its last message: bind it to a task, peek at the
-  conversation, jump to its terminal, or **type a message to it** right there (Orca and
-  iTerm2; it arrives exactly as if you typed it).
-
-HQ is optional and installed separately, after the pet. It needs `python3` (standard library
-only):
-
-```bash
-hq/install.sh --root ~/claude-hq                # shows every change it will make, asks first
-hq/install.sh --root ~/claude-hq --no-hooks     # board + CLI only; settings.json untouched
-```
-
-What it adds: its own folder `~/.claude/hq/`, your task root, the `/task` and `/board` slash
-commands (skip with `--no-commands`), and — unless `--no-hooks` — three hooks appended to
-`~/.claude/settings.json` (backed up first) that only act in sessions you bind to a task. It
-never edits a global CLAUDE.md. Its Sessions column reads live sessions' recent messages from
-their local transcripts; nothing is sent anywhere.
-
-See [hq/README.md](hq/README.md) for how it works and the card format.
-
-## The cat
-
-<img src="docs/images/cat-moves.gif" width="480" alt="Eight poses side by side, each playing its own small move: a yawn, thinking at the laptop, a sigh over paperwork, dozing while an agent runs, tapping for attention, jumping when ignored, a dance after a finished turn, and reading">
-
-The cat is animated frame by frame: every pose is a loop cut out of a generated video, and after a while in one pose it slips in a small move of its own — a yawn, a scratch of the head, a page turned, a hop. Common state changes have their own transition clips; the rest are a short dissolve. `docs/seedance.md` says how the videos are made and cut. It has nine poses against the pet's eleven states — reading, compacting and waiting on a background agent each have their own, and a finished turn gets a celebration. What still collapses is the rest of busy: editing a file and waiting on a command are the same cat at the same laptop. The raised paw plus a `?` means "answer me" and plus a warning triangle means "decide this", and that glyph pulses twice every five seconds so a request does not sit unnoticed; being ignored has its own alarm painted in; an interrupted tool puts a warning over a cat that carries on working. The unread count sits by its ear.
-
-If WebGL is unavailable or a texture will not decode, the page shows each pose's still picture instead and tells the app why.
-
-`ClaudePet --demo` cycles the pet through everything it can show, writing nothing to disk.
-
-## Requirements
-
-- macOS 14 or newer
-- [Claude Code](https://claude.com/claude-code) installed
-- A Swift toolchain (Xcode Command Line Tools) to build from source
-
-Optional: the [claude-hud](https://github.com/jarrodwatts/claude-hud) statusline plugin. The pet reads the usage cache that plugin maintains rather than calling Anthropic's usage API itself — no OAuth token handling, no rate limit of its own. Without it, everything works except the quota readout.
+HQ is optional and installed after the pet — see [hq/README.md](hq/README.md) for how it works, the `hq` CLI and the card format.
 
 ## Install
 
-```bash
-./scripts/install.sh
-```
-
-Builds the working copy and installs it. No jq, no Python — just the Swift toolchain.
-
-**This edits `~/.claude/settings.json`**, appending eleven hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `PermissionRequest`, `PreCompact`, `Stop`, `StopFailure`, `SessionEnd`). Your existing hooks are not touched — not one byte. The file is backed up first, written atomically, parsed back to verify, and restored from the backup on any doubt. That file drives every Claude Code session on the machine, so it is the highest-risk thing here; keep the backups.
-
-Hooks only take effect in **newly started** sessions. Windows already open are unaffected.
-
-## What it touches
-
-Three places, all reversible by `./scripts/uninstall.sh`:
-
-1. `~/Applications/ClaudePet.app` — the pet itself
-2. `~/.claude/pet/` — the hook binary and the data below
-3. `~/.claude/settings.json` — ten appended hooks
-
-Inside `~/.claude/pet/`:
-
-| Path | What it holds | Cleared |
-| --- | --- | --- |
-| `sessions/<id>.json` | the CURRENT state of one session: project, directory, state, running tool calls, pid, timestamps | when the session ends |
-| `events/<id>~<turn>.json` | one record per finished turn | 7 days, or 500 rows |
-| `activity/<id>.jsonl` | that session's last finished tool call only — tool, short target, duration, result — for the row hover; each call replaces the one before | when the session ends |
-| `read.json` | which finished turns you have acknowledged | with the events they refer to |
-| `usage.json` | quota numbers, only if you wired up the statusline below | overwritten each time |
-
-Aliases, pins, mutes, snoozes and settings live in `UserDefaults`, not here.
-
-**It keeps one line of each conversation and nothing else, and it makes no network requests of any kind.** (The optional task board, HQ, reads more — see below.) That line is the first line of Claude's last message in a finished turn, handed over by the `Stop` hook, stripped of formatting and cut to 140 characters; it is what a finished row and the "done" bubble show, and it ages out with the row after seven days. Your prompts are never stored. The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
-
-## Optional: reading quota from your statusline
-
-The pet reads [claude-hud](https://github.com/jarrodwatts/claude-hud)'s cache if you have it. If you do not, and you are on Claude Code 2.1.251 or newer, it can capture the numbers from whatever statusline you already run:
-
-```jsonc
-// ~/.claude/settings.json — edit this by hand
-"statusLine": {
-  "type": "command",
-  "command": "$HOME/.claude/pet/pet-emit --statusline -- <your existing command>"
-}
-```
-
-`pet-emit --statusline` passes the input through byte for byte and forwards your command's output and exit code unchanged; a parse failure costs a quota reading and nothing else.
-
-**The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. It also means uninstalling the pet cannot break a statusline it never touched.
-
-Wiring this up also gives each row a **context-window percentage**, the model's name and the session's `/rename` name — none of which reaches a hook. Hover a row to see them, along with the full path, the turn's age and the last tool call.
-
-Two sources are never blended. Whichever reading is fresh wins; a stale reading from a better source still describes a window that may have rolled over.
-
-## Uninstall
+Requirements: macOS 14+, [Claude Code](https://claude.com/claude-code), and a Swift toolchain (Xcode Command Line Tools) to build from source. HQ also needs `python3` (standard library only).
 
 ```bash
-./scripts/uninstall.sh
+./scripts/install.sh                              # the pet
+hq/install.sh --root ~/claude-hq                  # optional: the Task Board; lists every change and asks first
+hq/install.sh --root ~/claude-hq --no-hooks       # the board and CLI only, settings.json untouched
 ```
 
-Removes the hooks, the app and the launch agent. `settings.json` returns to exactly what it was.
+**The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
 
-## Sending it to someone else
+What it keeps: each session's current state, one record per finished turn (7 days), and **one line of each conversation** — the first line of Claude's last reply. Your prompts are never stored, and the pet makes **no network requests**. The Task Board reads live sessions' recent messages from their local transcripts to show them; nothing is sent anywhere. Details: [docs/pet.md](docs/pet.md#what-it-touches).
 
 ```bash
-./scripts/package.sh
+./scripts/uninstall.sh      # hooks, app and launch agent removed; settings.json back to what it was
+hq/uninstall.sh             # HQ's hooks and commands removed; your task cards are kept
+./scripts/package.sh        # a tarball with a prebuilt binary and a one-click installer, to send to someone
 ```
 
-Produces two tarballs: one with a precompiled universal binary and a one-click installer, needing no developer tools on the receiving end, and one with just the source.
+## More
 
-## Development
-
-```bash
-swift run ClaudePetTests     # unit tests — not `swift test`, see below
-./hooks/test-pet-emit.sh     # hook behaviour tests
-./hooks/test-settings-patch.sh  # settings.json round trip — see below
-./scripts/build-app.sh       # build ClaudePet.app without installing
-```
-
-`PET_DUMP=/tmp/hooks.jsonl claude` makes the hook binary append every payload it receives to
-that file, and does nothing at all when the variable is unset. It is a debugging tool, not a
-feature — a payload carries the prompt text — but it is the only honest way to learn what a
-hook actually sends. Guessing has been wrong more than once here: an earlier quota parser
-listed five plausible spellings of the field it needed and missed the real one, so it read
-nothing while the README called it unverified.
-
-Tests run through a small hand-written harness as an executable target rather than XCTest: with only the Command Line Tools installed (no full Xcode), **neither XCTest nor swift-testing is available**, so `swift test` cannot run at all.
-
-To watch every state animate, serve the repo (`python3 -m http.server 8777`) and open
-`http://127.0.0.1:8777/docs/previews/`; `docs/previews/cat-cycle.js` is what the README's
-animation is captured from. Both drive the real `Resources/pet/index.html` rather than keeping
-a copy, and both are also what the two pictures above are generated from — one artifact per
-job is what stops the documentation drifting a state behind the app, which is exactly how the
-last contact sheet ended up short.
-
-The design document in `docs/superpowers/specs/` explains the architecture and, more usefully, why each piece is the way it is. **It is written in Chinese** — the code, comments and this README are English, but that document has not been translated.
-
-### Three things worth knowing before you change anything
-
-**The hit region is a rectangle in `Sources/ClaudePetCore/PetLayout.swift`, and it must agree with the drawing in `Resources/pet/pet.css`.** Change the art and you must change `PetLayout`, and the other way round. No test can catch a mismatch — they can only lock the Swift half — so this is a convention, not a guardrail.
-
-This is not hypothetical. The mirrored layout was first written as a reflection (`x → width - maxX`), every test passed, and the body box still looked right in a screenshot — because it happens to be symmetric inside the pet. A figure that is not symmetric ended up partly outside its own hit region. What caught it was drawing the rectangles over the rendered page and looking. Do that after any change here.
-
-**The `settings.json` patch is tested against real files, not in process.** It is the only thing here that can break someone else's machine, and the parts that make it safe — the backup, the atomic write, the parse-back, the rollback — exist only on disk; testing them in memory tests nothing. The assertion that matters is the round trip: install then uninstall, and not one field of the user's own hooks may differ.
-
-**Terminal jumping is split in two on purpose.** Everything testable — identifying the terminal, parsing session ids, rejecting AppleScript injection — lives in `Sources/ClaudePetCore/TerminalTarget.swift`. The part that actually spawns processes is in `Sources/ClaudePet/TerminalJump.swift`.
-
-## Known limitations
-
-- No Apple Developer signature. The installer strips the quarantine attribute and says so; Gatekeeper may still need a manual allow.
-- Click-through is computed from a rectangle, not the figure's outline, so a few transparent pixels near the figure still swallow clicks.
-- Roughly **7% of one core and 310MB** while the cat animates, counting the app together with the WebKit content and GPU processes that draw it — measured on an M-series Mac by CPU-time delta over 30s. That is the price of 12fps video frames. The system's Reduce motion setting stops the animation.
+- [docs/pet.md](docs/pet.md) — the pet in full
+- [hq/README.md](hq/README.md) — the Task Board: how it works, the `hq` CLI, the card format
+- [docs/development.md](docs/development.md) — tests, debugging hooks, and three things to know before changing anything
 
 ## License
 
