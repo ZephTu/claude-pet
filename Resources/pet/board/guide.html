@@ -71,7 +71,7 @@
 <ul>
 <li><b>挑任务</b>：顶部搜索框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。今天新建的任务自动加入今天。</li>
 <li><b>接着昨天的</b>：上一个有挑任务的日子里还没完成的任务，会在顶部提示，可以逐个 + 或 <b>Bring all</b>；<b>Not today</b> 今天不再提示。</li>
-<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片</b>展开完整的任务详情，再点收起；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
+<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
 <li>右栏只列今天任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
 <li>今天的列表存在任务根目录的 <code>focus.json</code>，按日期保存。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus carry</code>。</li>
 </ul>
@@ -95,7 +95,9 @@
 <tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
 </table>
-<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。</li>
+<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
+<b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
+<b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下高亮（再点取消，可以改选），不会马上发出；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
@@ -348,7 +350,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <ul>
 <li><b>Pick</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. Tasks created today join automatically.</li>
 <li><b>Carry on</b>: open tasks from the last day you picked any are offered at the top — add them one by one or <b>Bring all</b>; <b>Not today</b> hides the offer for today.</li>
-<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click the card</b> to open the full task, again to fold it; <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
+<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click a blank part of the card</b> to open the full task, again to fold it (clicks in a text box, checkbox, button, ask or session row don't fold it, nor does selecting text); <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
 <li>The right column lists only the sessions on today's tasks, plus sessions not on any task yet (to bind them).</li>
 <li>Today's list lives in <code>focus.json</code> in your task root, one entry per day. From a shell: <code>hq focus</code>, <code>hq focus add|remove T-012</code>, <code>hq focus carry</code>.</li>
 </ul>
@@ -371,7 +373,9 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
 </table>
-<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.</li>
+<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.<br>
+<b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
+<b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — click to highlight (again to clear, or pick another), nothing is sent yet. When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
 <li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>

@@ -25,7 +25,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -253,20 +253,50 @@ function renderAsks() {
   for (const t of tasks()) for (const a of openAsks(t)) items.push([t, a]);
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>`;
-  return `<h3>Asks · ${items.length}</h3>` + items.map(([t, a]) => askCard(t, a)).join("");
+  const byTask = new Map();
+  for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
+  return `<h3>Asks · ${items.length}</h3>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("");
 }
 
-function askCard(t, a) {
+// A task with several open asks answers them together: each answer button only picks, and one
+// Send at the bottom records them all and types a single message into the session.
+function renderAskGroup(t, asks) {
+  if (asks.length < 2) return asks.map((a) => askCard(t, a)).join("");
+  const target = groupTarget(asks);
+  const picked = asks.filter((a) => ui.picks[a.id]).length;
+  const sending = asks.some((a) => ui.resolving.has(a.id));
+  const allPush = target && asks.every((a) => wantPush(a));
+  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { group: true, sharedTarget: Boolean(target) })).join("")}
+    <div class="askbar">
+      <span class="meta">${picked} of ${asks.length} answered</span>
+      ${target ? `<label class="push" title="Type all the answers into that session as one message, so it carries on now">
+        <input type="checkbox" data-action="push-group" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${allPush ? "checked" : ""}>
+        send to <b>${esc(target.title || target.project)}</b> now${target.state === "busy" ? " (busy — it will queue)" : ""}</label>` : `<span style="flex:1"></span>`}
+      <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" ${picked && !sending ? "" : "disabled"}
+        title="Record every answer you picked${target ? " and send them in one message" : ""}">${sending ? "Sending…" : picked ? `Send ${picked} answer${picked === 1 ? "" : "s"}` : "Send answers"}</button>
+    </div></div>`;
+}
+// The one live session every ask in a group came from, if the board can type into it.
+function groupTarget(asks) {
+  const ts = asks.map(pushTarget);
+  return ts[0] && ts.every((x) => x && x.sessionId === ts[0].sessionId) ? ts[0] : null;
+}
+
+function askCard(t, a, opt = {}) {
+  const pick = ui.picks[a.id];
+  const attKey = "ask:" + a.id;
   return `
-    <div class="card ask">
+    <div class="card ask ${pick ? "picked" : ""}">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
       <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       <div class="row">
-        <input class="note" data-key="note:${esc(a.id)}" placeholder="note (optional)" value="${esc(draft("note:" + a.id))}">
-        ${RESOLUTIONS.map(([r, label, tip]) =>
-          `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
+        <input class="note" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="note (optional) · paste or drop images" value="${esc(draft("note:" + a.id))}">
+        ${RESOLUTIONS.map(([r, label, tip]) => opt.group
+          ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)} — pick, then Send below" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
+          : `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
       </div>
-      ${pushTarget(a) ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
+      ${attachStrip(attKey)}
+      ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         send to <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b> now${pushTarget(a).state === "busy" ? " (busy — it will queue)" : ""}</label>` : ""}
     </div>`;
@@ -288,6 +318,17 @@ const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — ne
 function pushMessage(a, res, note) {
   return `[HQ board] You asked "${a.text}" (${a.id}). The user answered: ${RES_TEXT[res] || res}` +
     (note ? ` — ${note}` : "") + ". Carry on accordingly.";
+}
+function pushMessageAll(answers) {
+  return "[HQ board] The user answered your questions:\n" +
+    answers.map(({ a, res, note }) => `- "${a.text}" (${a.id}): ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n") +
+    "\nCarry on accordingly.";
+}
+// An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
+function answerNote(id) {
+  const text = (ui.drafts["note:" + id] || "").trim();
+  const imgs = (ui.atts["ask:" + id] || []).map((x) => x.path);
+  return [text, ...imgs].filter(Boolean).join(" ");
 }
 
 function renderMyTodos() {
@@ -515,7 +556,7 @@ function focusCard(t) {
       <button class="icon" title="Not today — take it off today's list (the task stays)" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
-    ${asks.length ? `<div class="fsec">${asks.map((a) => askCard(t, a)).join("")}</div>` : ""}
+    ${asks.length ? `<div class="fsec">${renderAskGroup(t, asks)}</div>` : ""}
     ${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
     <div class="fsec">${live.map(sess).join("")}
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
@@ -1221,8 +1262,9 @@ function scrollToCard(elementId) {
 }
 
 // ------------------------------------------------------------------ actions
-// ---- images in a message: pasted or dropped, saved to a file, sent as their paths (Claude Code
-// reads an image from a path in the prompt).
+// ---- images in a message or an ask's note: pasted or dropped, saved to a file, sent as their
+// paths (Claude Code reads an image from a path in the prompt). Keyed by session id, or
+// "ask:<id>" for an ask's note.
 function attachStrip(sid) {
   const list = ui.atts[sid] || [];
   if (!list.length) return "";
@@ -1244,33 +1286,33 @@ async function addImages(sid, files) {
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
-  if (added) { ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
+  if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
 }
 document.addEventListener("paste", (ev) => {
-  const box = ev.target.closest && ev.target.closest("textarea[data-session]");
+  const box = ev.target.closest && ev.target.closest("textarea[data-session], input[data-att]");
   if (!box || !ev.clipboardData) return;
   const files = [...ev.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile());
   if (!files.length) return;     // plain text pastes as usual
   ev.preventDefault();
-  addImages(box.dataset.session, files);
+  addImages(box.dataset.session || box.dataset.att, files);
 });
 document.addEventListener("dragover", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
   ev.preventDefault();
   zone.classList.add("dropping");
 });
 document.addEventListener("dragleave", (ev) => {
-  const zone = ev.target.closest && ev.target.closest(".send");
+  const zone = ev.target.closest && ev.target.closest(".send, .card.ask");
   if (zone) zone.classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
-  const box = zone.querySelector("textarea[data-session]");
-  if (box) addImages(box.dataset.session, [...ev.dataTransfer.files]);
+  const box = zone.querySelector("textarea[data-session], input[data-att]");
+  if (box) addImages(box.dataset.session || box.dataset.att, [...ev.dataTransfer.files]);
 });
 
 // While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
@@ -1315,6 +1357,62 @@ async function saveField(el) {
   await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, "Saved");
 }
 
+const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts";
+
+// Record every answer picked on a task's asks, then type them into their session as one message.
+async function resolveAll(taskId) {
+  const t = taskById(taskId);
+  const asks = t ? openAsks(t).filter((a) => ui.picks[a.id] && !ui.resolving.has(a.id)) : [];
+  if (!asks.length) return;
+  const answers = asks.map((a) => ({ a, res: ui.picks[a.id], note: answerNote(a.id),
+    draft: ui.drafts["note:" + a.id], imgs: ui.atts["ask:" + a.id], push: Boolean(pushTarget(a)) && wantPush(a) }));
+  for (const x of answers) ui.resolving.add(x.a.id);
+  render();
+  const done = [];
+  try {
+    for (const x of answers) {
+      try {
+        await api("resolve", { id: x.a.id, resolution: x.res, note: x.note });
+        done.push(x);
+        delete ui.picks[x.a.id]; delete ui.drafts["note:" + x.a.id]; delete ui.drafts["push:" + x.a.id]; delete ui.atts["ask:" + x.a.id];
+      } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
+    }
+    if (!done.length) return;
+    let msg = `${done.length} answer${done.length === 1 ? "" : "s"} recorded`;
+    // One message per session (normally the one that asked them all).
+    const bySession = new Map();
+    for (const x of done.filter((x) => x.push)) {
+      const sid = pushTarget(x.a).sessionId;
+      bySession.set(sid, (bySession.get(sid) || []).concat([x]));
+    }
+    const sent = [];
+    for (const [sid, xs] of bySession) {
+      const s = ui.sessions.find((y) => y.sessionId === sid);
+      try {
+        for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
+        await api("send", { session: sid, text: pushMessageAll(xs) });
+        sent.push(...xs);
+        msg += ` · sent to ${s ? s.title || s.project : sid}`;
+      } catch (e) {
+        for (const x of xs) { try { await api("delivered", { id: x.a.id, session: sid, undo: true }); } catch (e2) { /* best effort */ } }
+        msg += ` · couldn't reach the session (${e.message || e}); it gets the answers with your next message there`;
+      }
+    }
+    toast(msg, false, async () => {
+      for (const x of done) {
+        ui.drafts["note:" + x.a.id] = x.draft || "";
+        if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
+        ui.picks[x.a.id] = x.res;
+        try { await api("reopen", { id: x.a.id }); } catch (e) { toast(String(e.message || e), true); }
+      }
+      toast(sent.length ? "Reopened — the message already sent stays in the session" : "Reopened");
+      refresh();
+    });
+  } finally {
+    try { await refresh(); } finally { for (const x of answers) ui.resolving.delete(x.a.id); render(); }
+  }
+}
+
 document.addEventListener("click", async (ev) => {
   const el = ev.target.closest("[data-action]");
   if (!el || el.tagName === "SELECT") return;
@@ -1324,8 +1422,10 @@ document.addEventListener("click", async (ev) => {
       // one answer per ask, even if the button is clicked again while it's being sent
       if (ui.resolving.has(d.id)) return;
       ui.resolving.add(d.id);
-      const note = ui.drafts["note:" + d.id] || "";
+      const note = answerNote(d.id);
+      const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
       delete ui.drafts["note:" + d.id];
+      delete ui.atts["ask:" + d.id];
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
       const target = a && pushTarget(a);
       const push = Boolean(target) && wantPush(a);
@@ -1347,13 +1447,18 @@ document.addEventListener("click", async (ev) => {
         }
         // Undo reopens the ask; an answer already typed into a session cannot be taken back.
         toast(msg, false, async () => {
-          ui.drafts["note:" + d.id] = note;
+          ui.drafts["note:" + d.id] = draftNote || "";
+          if (imgs) ui.atts["ask:" + d.id] = imgs;
           await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
         });
       } catch (e) { toast(String(e.message || e), true); }
       try { await refresh(); } finally { ui.resolving.delete(d.id); }
       return;
     }
+    case "pick":
+      if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
+      return render();
+    case "resolve-all": return resolveAll(d.task);
     case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
     case "undo-todo": return undoTodo(d.task, Number(d.i));
     case "undo-toast": {
@@ -1371,6 +1476,10 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "expand":
+      // Only a click on the card itself folds it — not one in a box, on a label or ask, or one
+      // that ends a text selection.
+      if (ev.target !== el && ev.target.closest(NO_EXPAND)) return;
+      if (String(window.getSelection() || "").trim()) return;
       ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
       return render();
     case "goto": return revealTask(d.task);
@@ -1638,6 +1747,7 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
+  if (d.action === "push-group") { for (const id of d.ids.split(" ")) ui.drafts["push:" + id] = el.checked; return; }
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
