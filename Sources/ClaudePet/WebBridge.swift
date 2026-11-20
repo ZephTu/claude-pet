@@ -99,13 +99,17 @@ final class WebBridge {
 
     /// A double-click on the pet: put the list back the way the first click
     /// found it, then toggle the board.
-    func handleDoubleClick() {
+    /// True if this was the pet's double-click; false (a second click on a row) lets the caller
+    /// treat it as an ordinary click.
+    @discardableResult
+    func handleDoubleClick() -> Bool {
         guard let t = lastToggle,
               Date().timeIntervalSince(t.at) <= NSEvent.doubleClickInterval + 0.2
-        else { return }
+        else { return false }
         lastToggle = nil
         setPanelOpen(t.wasOpen || panelPinned)
         onDoubleClickPet?()
+        return true
     }
 
     /// The user asked for the list to stay up — AppMain's "Keep List Open".

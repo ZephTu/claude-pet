@@ -81,7 +81,7 @@ const TODO_STATE = { open: "open", done: "done", dropped: "drop", drop: "drop" }
 async function changeTodo(task, i, to, from, text) {
   const label = { done: "Done", drop: "Won't do", open: "Reopened" }[to] || to;
   try {
-    await api("todo", { task, index: i, state: to });
+    await api("todo", { task, index: i, state: to, text });
     if (to !== "open") ui.recent = ui.recent.filter((r) => !(r.task === task && r.i === i))
       .concat([{ task, i, text, to, from: TODO_STATE[from] || "open", at: Date.now() }]);
     else ui.recent = ui.recent.filter((r) => !(r.task === task && r.i === i));
@@ -92,7 +92,7 @@ async function changeTodo(task, i, to, from, text) {
 async function undoTodo(task, i) {
   const r = ui.recent.find((x) => x.task === task && x.i === i);
   ui.recent = ui.recent.filter((x) => x !== r);
-  await act("todo", { task, index: i, state: r ? r.from : "open" }, "Undone");
+  await act("todo", { task, index: i, state: r ? r.from : "open", text: r ? r.text : "" }, "Undone");
 }
 const tasks = () => (ui.board ? ui.board.tasks : []);
 const taskById = (id) => tasks().find((t) => t.id === id);

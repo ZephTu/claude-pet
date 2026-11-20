@@ -8,7 +8,9 @@ session — carries the state. See hq/README.md.
 Python 3.9+ standard library only (macOS /usr/bin/python3 works).
 """
 import argparse
+import contextlib
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -199,6 +201,13 @@ def check_category(name):
     if not CATEGORY_RE.match(name):
         die(f"invalid category {name!r}: 1-40 characters, no # quotes : , [ ]")
     return name
+
+
+def safe_name(raw, fallback="project"):
+    """A folder name made into a valid project/category name: bad characters become '-', at
+    most 40 characters."""
+    name = re.sub(r"[#\"'\n:,\[\]]+", "-", raw or "").strip(" -")[:40].rstrip(" -")
+    return name if CATEGORY_RE.match(name) else fallback
 
 
 def ensure_listed(name):
@@ -468,6 +477,12 @@ def append_event(task_dir, event):
 def add_ask(card, text, session=None, context=None):
     meta = parse_card(card)
     existing = read_asks(meta["dir"])
+    # Sessions are reminded of their open asks every turn and tend to repeat them: the same
+    # question still open on this task is the same ask, not a new one.
+    key = " ".join(text.split()).casefold()
+    for a in existing:
+        if a.get("state") == "open" and " ".join(a.get("text", "").split()).casefold() == key:
+            return a["id"]
     n = max([int(a["id"].rsplit(".", 1)[1]) for a in existing] or [0]) + 1
     aid = f"{meta['id']}.{n}"
     event = {"type": "open", "id": aid, "task": meta["id"], "text": text.strip(), "session": session}
@@ -502,6 +517,28 @@ def load_state():
 
 def save_state(state):
     atomic_write(STATE, json.dumps(state, ensure_ascii=False, indent=1))
+
+
+@contextlib.contextmanager
+def state_lock():
+    """Every session's hooks and the board write sessions.json; each read-change-write holds
+    this lock so one writer can't put back an old copy over another's change."""
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE + ".lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def update_session(sid, change):
+    """Apply change(entry) to this session's entry as it is now on disk (skipped if unbound)."""
+    with state_lock():
+        state = load_state()
+        if sid in state:
+            change(state[sid])
+            save_state(state)
 
 
 def bound_task(session):
@@ -725,7 +762,7 @@ def cmd_new(args):
     category = check_category(args.category) if args.category else (
         "other" if "other" in cats else (cats[0] if cats else ""))
     ensure_listed(category)
-    workdirs = [os.path.abspath(w) for w in (args.workdir or [])]
+    workdirs = [os.path.abspath(os.path.expanduser(w)) for w in (args.workdir or [])]
     project = check_category(args.project) if args.project else project_for_dirs(workdirs)
     ensure_project(project)
     os.makedirs(d)
@@ -745,14 +782,15 @@ def cmd_bind(args):
         die("no session id (run inside Claude Code or pass --session)")
     card = find_card(args.task)
     meta = parse_card(card)
-    state = load_state()
-    prev = state.get(sid, {}).get("task")
     # Bound from inside the session (its own Bash tool) the session reads this output now;
     # bound from outside (the board) it learns the rules on its next prompt.
     from_inside = sid == os.environ.get("CLAUDE_CODE_SESSION_ID")
-    state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
-                  "delivered": state.get(sid, {}).get("delivered", [])}
-    save_state(state)
+    with state_lock():
+        state = load_state()
+        prev = state.get(sid, {}).get("task")
+        state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
+                      "delivered": state.get(sid, {}).get("delivered", [])}
+        save_state(state)
     fields = {}
     sessions = meta.get("sessions") if isinstance(meta.get("sessions"), list) else []
     if sid[:8] not in sessions:
@@ -779,10 +817,11 @@ def cmd_bind(args):
 
 def cmd_unbind(args):
     sid = session_id(args.session)
-    state = load_state()
-    if state.pop(sid, None) is None:
-        print("this session was not bound")
-    save_state(state)
+    with state_lock():
+        state = load_state()
+        if state.pop(sid, None) is None:
+            print("this session was not bound")
+        save_state(state)
 
 
 def cmd_whoami(args):
@@ -822,16 +861,34 @@ def cmd_todo(args):
     lines = open(card, encoding="utf-8").read().split("\n")
     n = 0
     mark = {"done": "x", "drop": "-", "open": " "}[args.state]
+    todos = []                      # (line index, todo number, match, plain text)
     for i, line in enumerate(lines):
         t = TODO_RE.match(line)
         if t:
             n += 1
-            if n == args.index:
-                lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
-                atomic_write(card, "\n".join(lines))
-                append_log(card, f"todo #{n} → {args.state} ({args.via}): {TODO_TIME_RE.sub('', t.group(3))}")
-                return
-    die(f"{args.task} has no todo #{args.index}")
+            todos.append((i, n, t, todo_plain(t.group(3))))
+    pick = next((x for x in todos if x[1] == args.index), None)
+    if args.text is not None:
+        # The caller saw this text at #index; the card may have changed since (a session added
+        # or removed a todo). Trust the text, not the position.
+        want = " ".join(args.text.split())
+        if not pick or pick[3] != want:
+            pick = next((x for x in todos if x[3] == want), None)
+            if not pick:
+                die(f"{args.task} no longer has the todo {args.text!r} — refresh and try again")
+    if not pick:
+        die(f"{args.task} has no todo #{args.index}")
+    i, num, t, _ = pick
+    lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
+    atomic_write(card, "\n".join(lines))
+    append_log(card, f"todo #{num} → {args.state} ({args.via}): {TODO_TIME_RE.sub('', t.group(3))}")
+
+
+def todo_plain(raw):
+    """A todo line's text as the board shows it: no time stamp, no @owner, spaces collapsed."""
+    txt = TODO_TIME_RE.sub("", raw.strip()).rstrip()
+    o = re.match(r"@(\S+)\s+(.*)$", txt)
+    return " ".join((o.group(2) if o else txt).split())
 
 
 def cmd_ref(args):
@@ -879,12 +936,11 @@ def cmd_ask(args):
         # The board typed this answer straight into the session: don't inject it again next turn.
         _, a = find_ask(args.target)
         sid = args.session or a.get("session")
-        state = load_state()
-        if sid in state:
-            have = set(state[sid].get("delivered", []))
+        def mark(entry):
+            have = set(entry.get("delivered", []))
             have = have - {args.target} if args.undo else have | {args.target}
-            state[sid]["delivered"] = sorted(have)
-            save_state(state)
+            entry["delivered"] = sorted(have)
+        update_session(sid, mark)
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
         append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
@@ -1106,7 +1162,7 @@ def scan_projects(sessions):
         root = git_root(r["cwd"]) or os.path.realpath(r["cwd"])
         if root in skip or not os.path.isdir(root):
             continue
-        g = groups.setdefault(root, {"path": root, "name": os.path.basename(root), "sessions": [], "last": ""})
+        g = groups.setdefault(root, {"path": root, "name": safe_name(os.path.basename(root)), "sessions": [], "last": ""})
         g["sessions"].append(r["sessionId"])
         g["last"] = max(g["last"], r["last"])
         r["root"] = root
@@ -1127,10 +1183,10 @@ def cmd_scan(args):
         for g in projects:
             if g["existing"] or (only and g["name"] not in only and g["path"] not in only):
                 continue
-            name, n = g["name"], 2
+            name, n = safe_name(g["name"]), 2
             while name in taken:
-                name, n = f"{g['name']}-{n}", n + 1
-            check_category(name)
+                suffix = f"-{n}"
+                name, n = safe_name(g["name"])[:40 - len(suffix)] + suffix, n + 1
             save_projects(load_projects() + [{"name": name, "paths": [g["path"]]}])
             taken.add(name)
             added.append(name)
@@ -1264,18 +1320,16 @@ def hook_main():
     meta = parse_card(card)
 
     if event == "SessionStart":
-        s["announced"] = True
-        save_state(state)
+        update_session(sid, lambda e: e.update(announced=True))
         ctx = protocol(meta)
         t = open_asks_text(meta)
         emit(event, ctx + ("\n\n" + t if t else ""))
 
     elif event == "UserPromptSubmit":
-        s["turn_start"] = time.time()
+        turn_start = time.time()
         lines = []
         if not s.get("announced", True):
             lines.append("The user bound this session to an HQ task from the board.\n" + protocol(meta))
-            s["announced"] = True
         delivered = set(s.get("delivered", []))
         fresh = [a for a in read_asks(meta["dir"])
                  if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered]
@@ -1283,11 +1337,15 @@ def hook_main():
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
                 lines.append(f"- {a['id']} → {a['state']}{': ' + a['note'] if a.get('note') else ''} ({a['text']})")
-            s["delivered"] = sorted(delivered | {a["id"] for a in fresh})
+        told = {a["id"] for a in fresh}
+
+        def note_turn(entry):
+            entry.update(turn_start=turn_start, announced=True)
+            entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
+        update_session(sid, note_turn)
         t = open_asks_text(meta)
         if t:
             lines.append(t)
-        save_state(state)
         emit(event, "\n".join(lines))
 
     elif event == "Stop":
@@ -1344,6 +1402,7 @@ def main():
     p = sub.add_parser("todo", help="mark todo #n: hq todo T-1 2 done|drop|open")
     p.add_argument("task"); p.add_argument("index", type=int)
     p.add_argument("state", choices=["done", "drop", "open"]); p.add_argument("--via", default="cli")
+    p.add_argument("--text", help="the todo's text as last seen; used if #n no longer matches")
     p.set_defaults(fn=cmd_todo)
     p = sub.add_parser("category", help="hq category list | add NAME | rename OLD NEW | remove NAME [--to OTHER]")
     p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")

@@ -194,7 +194,8 @@ small and reports in a fixed shape. Small tasks don't need one — the bound ses
 ```
 
 `hq board --json` is the read API for UIs (the Claude Pet panel uses it); `hq ask resolve`,
-`hq todo` and `hq set` are the write API. Everything is plain files, so cards can also live
+`hq todo` and `hq set` are the write API (`hq todo T-012 2 done --text "…"` matches the todo
+by its text when #2 has moved, and refuses if it is gone). Everything is plain files, so cards can also live
 in git.
 
 ## Tests

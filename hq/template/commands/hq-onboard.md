@@ -13,7 +13,7 @@ Help the user turn their existing Claude Code sessions into an HQ board. Nothing
 **4. Tasks — ask.** Show the drafts as a compact table per project. Say plainly that statuses were inferred from the conversations and low-confidence ones need checking. Ask the user to confirm, edit, merge, or drop items before anything is written.
 
 **5. Create.** For each confirmed task:
-- `hq new "<title>" --project <project> --category <category> --workdir <dir>` (prints the id)
+- `hq new "<title>" --project <project> --category <category> --workdir <dir> --no-focus` (prints the id)
 - `hq set <id> status=<status> "next=<next step>"`
 - `hq addtodo <id> "@me …"` / `"@claude …"` per open todo, then `hq todo <id> <n> done` for any listed as already done
 - `hq ref add <id> "<title> <url>"` per resource

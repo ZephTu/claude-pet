@@ -138,7 +138,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(["ask", "delivered", str("id"), "--session=\(str("session"))"] + (body["undo"] as? Bool == true ? ["--undo"] : []))
         case "todo":
             let index = (body["index"] as? Int).map(String.init) ?? str("index")
-            return await hq(["todo", str("task"), index, str("state"), "--via=board"])
+            // The text guards against the card having changed since the board read it.
+            let text = str("text").isEmpty ? [] : ["--text=\(str("text"))"]
+            return await hq(["todo", str("task"), index, str("state"), "--via=board"] + text)
         case "set":
             let fields = (body["fields"] as? [String]) ?? []
             guard !fields.isEmpty else { return (nil, "no fields") }
@@ -166,7 +168,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])
         case "new":
-            var args = ["new", "--category=\(str("category").isEmpty ? "dev" : str("category"))"]
+            // No category picked: let hq choose its default rather than inventing one.
+            var args = ["new"]
+            if !str("category").isEmpty { args.append("--category=\(str("category"))") }
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
@@ -176,16 +180,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
                                 place: str("where"), prompt: str("prompt"))
         case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
-                                                    command: [claudePath() ?? "claude", "attach", str("session")],
+                                                    command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
         case "stop":
-            guard let claude = claudePath() else { return (nil, "can't find the claude command") }
+            guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
             let r = await Self.run(claude, ["stop", str("session")])
             return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
         case "agents":
             // Background sessions have no terminal, so the pet's records can't say what they are;
             // `claude agents --json` can.
-            guard let claude = claudePath() else { return ("[]", nil) }
+            guard let claude = await claudePath() else { return ("[]", nil) }
             let r = await Self.run(claude, ["agents", "--json"])
             return (r.status == 0 ? r.out : "[]", nil)
         case "jump":
@@ -242,22 +246,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The claude CLI. The pet runs outside any shell, so PATH doesn't know about it: look in the
     /// usual install places, then ask a login shell once.
     private var cachedClaude: String??
-    private func claudePath() -> String? {
+    private func claudePath() async -> String? {
         if let c = cachedClaude { return c }
         let home = NSHomeDirectory()
         let candidates = ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
                           "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
         var found = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
         if found == nil {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            p.arguments = ["-lic", "command -v claude"]
-            let out = Pipe()
-            p.standardOutput = out
-            p.standardError = Pipe()
-            try? p.run()
-            p.waitUntilExit()
-            let path = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            // Off the main thread: a slow shell profile must not freeze the pet.
+            let r = await Self.run("/bin/zsh", ["-lic", "command -v claude"])
+            let path = r.out.split(separator: "\n").last.map(String.init)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if path.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: path) { found = path }
         }
@@ -271,12 +269,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
     /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
     /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
-    private func launch(task: String, title: String, dir: String, place: String, prompt: String) async -> (Any?, String?) {
+    private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String) async -> (Any?, String?) {
+        let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
             return (nil, "no such directory: \(dir)")
         }
-        guard let claude = claudePath() else { return (nil, "can't find the claude command") }
+        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
         let name = String("\(task) \(title)".prefix(60))
         if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt) }
         let sid = UUID().uuidString.lowercased()
@@ -381,12 +380,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
             return (nil, "not found: \(url.path)")
         }
-        let risky: Set<String> = ["app", "command", "tool", "sh", "zsh", "bash", "terminal", "pkg",
-                                  "dmg", "workflow", "scpt", "applescript", "jar", "py", "rb", "pl"]
+        // A path from a conversation is shown in Finder, not opened, if opening it could run
+        // something: apps, installers, scripts, executables, link files, and any bundle.
+        let risky: Set<String> = ["app", "command", "tool", "sh", "zsh", "bash", "terminal", "pkg", "mpkg",
+                                  "dmg", "workflow", "scpt", "scptd", "applescript", "jar", "jnlp", "py", "rb",
+                                  "pl", "prefpane", "action", "fileloc", "webloc", "inetloc", "url", "mobileconfig"]
         let ext = url.pathExtension.lowercased()
-        if isDir.boolValue && ext != "app" {
-            NSWorkspace.shared.open(url)
-        } else if risky.contains(ext) || (!isDir.boolValue && FileManager.default.isExecutableFile(atPath: url.path)) {
+        let bundle = isDir.boolValue && NSWorkspace.shared.isFilePackage(atPath: url.path)
+        if risky.contains(ext) || bundle || (!isDir.boolValue && FileManager.default.isExecutableFile(atPath: url.path)) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
             return (["ok": true, "revealed": true], nil)
         } else {
@@ -478,6 +479,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     // MARK: - Process
 
     private struct Result: Sendable { let status: Int32; let out: String; let err: String }
+    private final class DataBox: @unchecked Sendable { var value = Data() }
 
     private nonisolated static func run(_ tool: String, _ args: [String], cwd: String? = nil) async -> Result {
         await withCheckedContinuation { continuation in
@@ -496,13 +498,22 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "")
                 p.environment = env
                 let out = Pipe(), err = Pipe()
+                p.standardInput = FileHandle.nullDevice
                 p.standardOutput = out
                 p.standardError = err
                 do {
                     try p.run()
-                    // Read before waiting, or a full pipe blocks the child forever.
+                    // Drain both pipes while the child runs, or a full one blocks it forever.
+                    let errData = DataBox()
+                    let drained = DispatchGroup()
+                    drained.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        errData.value = err.fileHandleForReading.readDataToEndOfFile()
+                        drained.leave()
+                    }
                     let o = out.fileHandleForReading.readDataToEndOfFile()
-                    let e = err.fileHandleForReading.readDataToEndOfFile()
+                    drained.wait()
+                    let e = errData.value
                     p.waitUntilExit()
                     continuation.resume(returning: Result(
                         status: p.terminationStatus,
