@@ -339,7 +339,13 @@ async function doTodo(taskId, text) {
   finally { ui.handing.delete(key); render(); }
 }
 
-const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
+// A card with nothing on it yet (no next step, todos or log) gets a different opening: the
+// title alone is not a brief, and a session left to guess raised several asks about what it
+// imagined the task to be. It asks one thing — what to work on — and waits.
+const emptyCard = (t) => !t.next && !t.todos.length && !logEntries(t).length && !openAsks(t).length;
+const LAUNCH_PROMPT = (t) => emptyCard(t)
+  ? `This session works on HQ task ${t.id}: ${t.title}. The task card is new and empty. Don't guess what the task is from its title and don't plan anything yet. Reply in one short line, ending with an hq-asks block holding exactly one ask — what should we work on first in ${t.id}? (in the language the task card is written in) — and wait for my answer.`
+  : `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
 
 function render() {
   saveDrafts();
