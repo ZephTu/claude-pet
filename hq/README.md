@@ -56,7 +56,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq peek <session-id-prefix>` (live or ended),
+`hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
@@ -111,6 +111,22 @@ investigation, review, ops, docs, other). Manage it from the board's **Categorie
 every card that uses it; removing one that cards use requires saying where they go
 (`hq category remove X --to Y`, or `--to ''` for none), and each moved card logs the change. A
 card whose category is not in the list (e.g. hand-edited) still shows, marked "not in list".
+
+## Resources and link rules
+
+`refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
+ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
+board shows the title (cut to a few words). The board shows them under **Resources**,
+grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tried in order:
+
+```json
+"links": [
+  {"match": "^([\\w.-]+)#(\\d+)", "url": "https://github.com/your-org/$1/pull/$2", "kind": "pr"},
+  {"match": "\\b([A-Z][A-Z0-9]+-\\d+)\\b", "url": "https://your-site.atlassian.net/browse/$1", "kind": "ticket"}
+]
+```
+
+`kind` is `ticket`, `pr`, `doc` or `link`. Works for any tracker — Linear, GitHub Issues, Jira.
 
 ## Workdirs
 

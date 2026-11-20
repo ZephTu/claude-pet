@@ -97,16 +97,21 @@
 <h2>Tasks（中栏）</h2>
 <ul>
 <li>按状态分组：Waiting on you / Blocked / Active；勾 <b>show closed</b> 显示已完成和已放弃。</li>
-<li>行尾的黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
-<li>点开一个任务可以：
-  <ul>
-  <li>改 <b>status</b>、<b>category</b>（下拉）、<b>next</b>、<b>waiting on you</b>（回车保存）；查看 <b>workdirs</b>；</li>
-  <li>点待办前的方框在"未做 ↔ 做完"之间切换，✕ 表示不做；</li>
-  <li>在 "add todo" 框里加待办，开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做；</li>
-  <li>查看、跳转、解绑正在为它工作的 session，或从下拉框绑定一个新的；</li>
-  <li>在 Log 框里写一句话追加到日志；<b>Open card</b> 用默认编辑器打开任务卡文件。</li>
-  </ul></li>
+<li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
+<li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
 </ul>
+<p>点开一个任务：</p>
+<table>
+<tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
+<tr><td><b>status / category</b></td><td>下拉框，选了就保存</td><td>你；绑定的 session 也会改 status</td></tr>
+<tr><td><b>next / waiting on you</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
+<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完（划线保留），✕ = 不做</td><td>你和 session</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕</td><td>你</td></tr>
+<tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
+<tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
+<tr><td><b>Open card</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
+</table>
 <h2>Sessions（右栏）</h2>
 <ul>
 <li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
@@ -150,6 +155,7 @@
 <tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>解绑 · 查看当前 session 绑定的任务</td></tr>
 <tr><td><code>hq set T-012 status=blocked "next=等 token"</code></td><td>改任务卡字段（status / next / waiting_on_me / title …）</td></tr>
 <tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
+<tr><td><code>hq ref add|remove T-012 &lt;网址或 QA-123&gt;</code></td><td>增删关联资源</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
 <tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
@@ -176,6 +182,17 @@
 </ul>
 <h2>工作目录（workdirs）</h2>
 <p>不需要手动维护：把 session 绑定到任务时，会自动把这个 session 所在的目录记到任务卡上（不记你的主目录和任务根目录）。新建任务时也可以手填。看板据此在 session 的"Bind to task…"下拉里把相关任务排在前面。</p>
+
+<h2>关联资源的链接规则</h2>
+<p>Resources 里的完整网址直接可点。像 <code>QA-9519</code>、<code>bigtest#3248</code> 这样的简写，在任务根目录的 <code>hq.json</code> 里加 <code>links</code> 规则就能变成链接，适用于任何工单系统（Jira、Linear、GitHub Issues……）。按顺序匹配，第一条命中的生效；<code>$1</code>、<code>$2</code> 是正则里的分组：</p>
+<pre>"links": [
+  {"match": "^([\\w.-]+/[\\w.-]+)#(\\d+)", "url": "https://github.com/$1/pull/$2", "kind": "pr"},
+  {"match": "^([\\w.-]+)#(\\d+)",            "url": "https://github.com/your-org/$1/pull/$2", "kind": "pr"},
+  {"match": "\\b([A-Z][A-Z0-9]+-\\d+)\\b",      "url": "https://your-site.atlassian.net/browse/$1", "kind": "ticket"},
+  {"match": "^(ENG-\\d+)$",                   "url": "https://linear.app/your-team/issue/$1", "kind": "ticket"}
+]</pre>
+<p>添加资源时推荐写成"标题 + 网址"，比如 <code>2026-11 QA AWS key leak – action items https://…</code>：看板只显示标题（截断到两三个词），悬停可看完整标题和网址。绑定的 session 也会按这个格式记录。</p>
+<p><code>kind</code> 决定分组：<code>ticket</code>（工单）、<code>pr</code>、<code>doc</code>（文档）、<code>link</code>（其他）。完整网址会按域名自动分类。</p>
 
 <h1 id="zh-card">任务卡格式</h1>
 <pre>---
@@ -304,9 +321,22 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 </ul>
 <h2>Tasks (middle)</h2>
 <ul>
-<li>Grouped by status; tick <b>show closed</b> for done and abandoned. Amber number = open asks, green = live sessions on it.</li>
-<li>Open a task to change <b>status</b>, <b>category</b>, <b>next</b> and <b>waiting on you</b> (Enter saves), see its <b>workdirs</b>; click a todo's box to toggle open ↔ done (✕ = won't do); add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
+<li>Grouped by status — Waiting on you / Blocked / Active; tick <b>show closed</b> for done and abandoned.</li>
+<li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
+<li>Amber number = open asks, green = live sessions working on it.</li>
 </ul>
+<p>Open a task:</p>
+<table>
+<tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
+<tr><td><b>status / category</b></td><td>menus; picking saves</td><td>you; a bound session also sets status</td></tr>
+<tr><td><b>next / waiting on you</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
+<tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
+<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done (stays, struck through), ✕ = won't do</td><td>you and sessions</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕</td><td>you</td></tr>
+<tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
+<tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
+<tr><td><b>Open card</b></td><td>opens the card file in your editor</td><td></td></tr>
+</table>
 <h2>Sessions (right)</h2>
 <ul>
 <li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
@@ -346,6 +376,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>unbind · which task this session is bound to</td></tr>
 <tr><td><code>hq set T-012 status=blocked "next=wait for token"</code></td><td>set card fields (status / next / waiting_on_me / title …)</td></tr>
 <tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
+<tr><td><code>hq ref add|remove T-012 &lt;url or QA-123&gt;</code></td><td>add / remove a related resource</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
 <tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
@@ -372,6 +403,17 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 </ul>
 <h2>Workdirs</h2>
 <p>They maintain themselves: binding a session to a task records the session's directory on the card (never your home folder or the task root). You can also type one when creating a task. The board uses them to list matching tasks first in a session's "Bind to task…" menu.</p>
+
+<h2>Link rules for resources</h2>
+<p>Full URLs in Resources are clickable as they are. Shorthand like <code>QA-9519</code> or <code>bigtest#3248</code> becomes a link once you add <code>links</code> rules to <code>hq.json</code> in your task root — for any tracker (Jira, Linear, GitHub Issues, …). Rules are tried in order and the first match wins; <code>$1</code>, <code>$2</code> are the regex groups:</p>
+<pre>"links": [
+  {"match": "^([\\w.-]+/[\\w.-]+)#(\\d+)", "url": "https://github.com/$1/pull/$2", "kind": "pr"},
+  {"match": "^([\\w.-]+)#(\\d+)",            "url": "https://github.com/your-org/$1/pull/$2", "kind": "pr"},
+  {"match": "\\b([A-Z][A-Z0-9]+-\\d+)\\b",      "url": "https://your-site.atlassian.net/browse/$1", "kind": "ticket"},
+  {"match": "^(ENG-\\d+)$",                   "url": "https://linear.app/your-team/issue/$1", "kind": "ticket"}
+]</pre>
+<p>When adding a resource, prefer "title + URL", e.g. <code>2026-11 QA AWS key leak – action items https://…</code>: the board shows the title, cut to a few words, with the full title and URL on hover. Bound sessions record resources the same way.</p>
+<p><code>kind</code> picks the group: <code>ticket</code>, <code>pr</code>, <code>doc</code> or <code>link</code>. Full URLs are grouped by their host automatically.</p>
 
 <h1 id="en-card">Task card format</h1>
 <pre>---

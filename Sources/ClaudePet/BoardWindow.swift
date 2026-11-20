@@ -140,6 +140,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
             if let to = body["to"] as? String { args.append("--to=\(to)") }
             return await hq(args)
+        case "ref": return await hq(["ref", str("action"), str("task"), "--", str("ref")])
         case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])

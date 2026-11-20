@@ -21,7 +21,7 @@ const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", ite
 
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -217,6 +217,14 @@ function renderWaiting() {
     </div>`).join("");
 }
 
+// Within a status group: tasks with a live session first, then ones that had a session,
+// then the rest; ties go to open asks, then the most recently updated.
+function taskRank(t) { return liveFor(t.id).length ? 2 : list(t.sessions).length ? 1 : 0; }
+function compareTasks(a, b) {
+  return taskRank(b) - taskRank(a) || openAsks(b).length - openAsks(a).length ||
+    String(b.updated).localeCompare(String(a.updated)) || String(a.id).localeCompare(String(b.id));
+}
+
 function renderTasks() {
   const f = ui.filter.toLowerCase();
   const visible = tasks().filter((t) => (ui.showClosed || isOpen(t)) &&
@@ -224,8 +232,7 @@ function renderTasks() {
   if (!visible.length) return `<div class="empty">No tasks${f ? " match" : ""}.</div>`;
   let html = "";
   for (const st of ORDER) {
-    const group = visible.filter((t) => t.status === st)
-      .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+    const group = visible.filter((t) => t.status === st).sort(compareTasks);
     if (!group.length) continue;
     html += `<div class="group-title">${LABEL[st]} <span class="meta">${group.length}</span></div>`;
     html += group.map(renderTask).join("");
@@ -244,16 +251,65 @@ function renderTask(t) {
       <span class="tid">${esc(t.id)}</span>
       <div class="ttitle">${esc(t.title)}${sub}</div>
       ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
-      ${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
+      ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
       <span class="meta">${esc(t.category || "")} · ${t.age_days ?? "?"}d</span>
     </div>
     ${open ? renderTaskBody(t) : ""}
   </div>`;
 }
 
+// ---- related resources: URLs as-is, shorthand (QA-123, repo#45) through hq.json "links" rules
+// Titles are cut to a few words; the full title and the URL are in the tooltip.
+const REF_LABEL_MAX = 36;
+const shortLabel = (t) => (t.length > REF_LABEL_MAX ? t.slice(0, REF_LABEL_MAX).replace(/[\s\-–:,，]+\S*$/, "") + "…" : t);
+const KIND_LABEL = { ticket: "Tickets", pr: "Pull requests", doc: "Docs", link: "Links", none: "Not linked" };
+function kindOfUrl(u) {
+  if (/github\.com\/[^/]+\/[^/]+\/(pull|merge_requests)\/|gitlab\.[^/]+\/.+\/merge_requests\//.test(u)) return "pr";
+  if (/\/browse\/[A-Z][A-Z0-9]+-\d+|linear\.app\/|\/issues\/\d+|\/jira\//i.test(u)) return "ticket";
+  if (/\/wiki\/|confluence|docs\.google|notion\.(so|site)|\.md(\b|$)|claude\.ai\/artifact/i.test(u)) return "doc";
+  return "link";
+}
+function resolveRef(ref) {
+  const url = (String(ref).match(/https?:\/\/[^\s<>"')]+/) || [])[0];
+  if (url) {
+    const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
+    return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
+  }
+  for (const rule of (ui.board && Array.isArray(ui.board.links) ? ui.board.links : [])) {
+    let re;
+    try { re = new RegExp(rule.match); } catch (e) { continue; }
+    const m = String(ref).match(re);
+    if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: ref };
+  }
+  return { ref, url: "", kind: "none", label: ref };
+}
+function logEntries(t) {
+  return String(t.body || "").split("\n").map((l) => l.match(/^\s*-\s+(\d{4}-\d{2}-\d{2}):\s+(.*)$/))
+    .filter(Boolean).map((m) => ({ date: m[1], text: m[2] }));
+}
+const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
+const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
+
+function secHead(title, t, what, tip, count) {
+  const on = ui.adding.has(`${t.id}:${what}`);
+  return `<div class="sec-h"><h3>${title}${count != null ? ` <span class="meta">${count}</span>` : ""}</h3>
+    <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button></div>`;
+}
+
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
-  const val = (f, v) => (ui.drafts[k(f)] ?? v ?? "");
+  const adding = (what) => ui.adding.has(`${t.id}:${what}`);
+  // next / waiting on you: edit, then Save or Cancel — nothing saves on Enter or on blur.
+  const field = (name, label, placeholder) => {
+    const v = t[name] || "";
+    const d = ui.drafts[k(name)];
+    const dirty = d !== undefined && d !== v;
+    return `<div class="field"><label>${label}</label><div class="row nowrap">
+      <input data-key="${k(name)}" data-field="${name}" data-task="${esc(t.id)}" value="${esc(d ?? v)}" placeholder="${esc(placeholder)}">
+      ${dirty ? `<button class="btn small primary" data-action="save-field" data-field="${name}" data-task="${esc(t.id)}">Save</button>
+        <button class="btn small ghost" data-action="cancel-field" data-field="${name}" data-task="${esc(t.id)}">Cancel</button>` : ""}
+    </div></div>`;
+  };
   const todos = t.todos.length ? t.todos.map((x) => {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
@@ -261,10 +317,15 @@ function renderTaskBody(t) {
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
-      ${x.state === "open" ? `<button class="btn small ghost" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
+      ${x.state === "open" ? `<button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   }).join("") : `<div class="empty">No todos.</div>`;
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
+  const logs = logEntries(t);
+  const showLogs = ui.logAll.has(t.id) ? logs : logs.slice(-3);
+  const refs = list(t.refs).map(resolveRef);
+  const groups = ["ticket", "pr", "doc", "link", "none"].map((kd) => [kd, refs.filter((r) => r.kind === kd)]).filter(([, r]) => r.length);
+  const resOpen = ui.resOpen.has(t.id);
   return `<div class="task-body">
     <div class="field"><label>status</label>
       <select data-action="set-status" data-task="${esc(t.id)}">
@@ -276,29 +337,54 @@ function renderTaskBody(t) {
         ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
         ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
       </select></div>
-    <div class="field"><label>next</label>
-      <input data-key="${k("next")}" data-field="next" data-task="${esc(t.id)}" value="${esc(val("next", t.next))}" placeholder="next concrete step — Enter to save"></div>
-    <div class="field"><label>waiting on you</label>
-      <input data-key="${k("waiting_on_me")}" data-field="waiting_on_me" data-task="${esc(t.id)}" value="${esc(val("waiting_on_me", t.waiting_on_me))}" placeholder="empty = nothing — Enter to save"></div>
+    ${field("next", "next", "the next concrete step")}
+    ${field("waiting_on_me", "waiting on you", "empty = nothing")}
     <div class="field"><label>workdirs</label><div class="meta">${list(t.workdirs).length
         ? list(t.workdirs).map(esc).join("<br>") : "— added automatically when a session is bound"}</div></div>
-    <h3>Todos</h3>${todos}
-    <div class="row" style="margin-top:6px">
-      <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="add todo, e.g. @me send reply to …" value="${esc(draft(k("addtodo")))}">
+
+    ${secHead("Todos", t, "todo", "Add a todo")}
+    ${adding("todo") ? `<div class="row nowrap addbox">
+        <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
+        <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
+    ${todos}
+
+    ${secHead("Sessions", t, "bind", "Bind a live session")}
+    ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
+        ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
+            ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
+           <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
+        : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
+    ${live.length ? live.map((s) => `<div class="bsess">
+        <span class="dot ${esc(s.state || "")}"></span>
+        <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
+          <div class="meta">${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
+        <div class="icons">
+          <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
+          <button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>
+          <button class="icon" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
+        </div></div>`).join("")
+      : `<div class="empty">No live session is working on this.${list(t.sessions).length ? " Earlier sessions: click an item in Needs you, or use the context view." : ""}</div>`}
+
+    ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
+    ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
+        <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">Save note</button></div></div>` : ""}
+    ${showLogs.length ? `<div class="logs">${showLogs.map((l) => `<div class="logline"><span class="meta">${esc(l.date)}</span> ${inline(l.text)}</div>`).join("")}</div>` : `<div class="empty">Nothing logged yet.</div>`}
+    ${logs.length > 3 ? `<button class="btn small ghost" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? "Show latest 3" : `Show all ${logs.length}`}</button>` : ""}
+
+    <div class="row foot">
+      <button class="btn small ${resOpen ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${LINK.replace("<svg", '<svg class="ic"')} Resources${refs.length ? ` · ${refs.length}` : ""}</button>
+      <span style="flex:1"></span>
+      <button class="btn small ghost" data-action="open" data-path="${esc(t.path)}">Open card</button>
     </div>
-    <h3>Sessions</h3>
-    ${live.length ? live.map((s) => `<div class="row"><span class="dot ${esc(s.state)}"></span>${esc(s.title || s.project)}
-        <button class="btn small ghost" data-action="jump" data-session="${esc(s.sessionId)}">Jump</button>
-        <button class="btn small ghost" data-action="unbind" data-session="${esc(s.sessionId)}">Unbind</button></div>`).join("")
-      : `<div class="empty">No live session is working on this.</div>`}
-    ${unbound.length ? `<div class="row" style="margin-top:4px"><select class="bind" data-action="bind" data-task="${esc(t.id)}">
-        <option value="">Bind a live session…</option>
-        ${unbound.map((s) => `<option value="${esc(s.sessionId)}">${esc(s.title || s.project)} (${esc(s.project)})</option>`).join("")}
-      </select></div>` : ""}
-    <h3>Log</h3>
-    <div class="row"><input class="note" data-key="${k("log")}" data-task="${esc(t.id)}" data-enter="log" placeholder="add a note to the log — Enter" value="${esc(draft(k("log")))}">
-      <button class="btn small" data-action="open" data-path="${esc(t.path)}">Open card</button></div>
-    ${list(t.refs).length ? `<div class="meta" style="margin-top:8px">${list(t.refs).map(esc).join(" · ")}</div>` : ""}
+    ${resOpen ? `<div class="res">
+      ${groups.map(([kd, rs]) => `<div class="res-g"><div class="meta">${KIND_LABEL[kd]}</div>${rs.map((r) => `<div class="res-i">
+          ${r.url ? `<a href="#" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+          <button class="icon" title="Remove" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
+        || `<div class="empty">No related tickets, PRs or docs yet.</div>`}
+      <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="Add a URL, or a ticket / PR like QA-123, repo#45" value="${esc(draft(k("addref")))}">
+        <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
+      ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">Tip: shorthand like QA-123 becomes a link once you add a rule under "links" in hq.json (see Guide).</div>` : ""}
+    </div>` : ""}
   </div>`;
 }
 
@@ -763,6 +849,61 @@ document.addEventListener("click", async (ev) => {
       if (d.url) return act2("openURL", { url: d.url });
       if (d.path) return act2("openPath", { path: d.path, cwd: (ui.modal && ui.modal.cwd) || "" });
       return;
+    case "toggle-add": {
+      const key = `${d.task}:${d.what}`;
+      ui.adding.has(key) ? ui.adding.delete(key) : ui.adding.add(key);
+      render();
+      const focus = { todo: "addtodo", log: "log" }[d.what];
+      const el = focus && document.querySelector(`[data-key="${CSS.escape(focus + ":" + d.task)}"]`);
+      if (el) el.focus();
+      return;
+    }
+    case "save-field": {
+      const key = `${d.field}:${d.task}`;
+      const v = ui.drafts[key] ?? "";
+      delete ui.drafts[key];
+      return act("set", { task: d.task, fields: [`${d.field}=${v}`] }, "Saved");
+    }
+    case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; return render();
+    case "add-todo": {
+      const key = "addtodo:" + d.task;
+      const text = (ui.drafts[key] || "").trim();
+      if (!text) return;
+      delete ui.drafts[key];
+      return act("addtodo", { task: d.task, text }, "Todo added");
+    }
+    case "bind-pick": {
+      const sid = ui.drafts["bindpick:" + d.task];
+      if (!sid) return toast("Choose a session first", true);
+      delete ui.drafts["bindpick:" + d.task];
+      ui.adding.delete(`${d.task}:bind`);
+      return act("bind", { task: d.task, session: sid }, "Bound — the session learns the task on its next message");
+    }
+    case "add-log": {
+      const key = "log:" + d.task;
+      const text = (ui.drafts[key] || "").trim().replace(/\s*\n+\s*/g, " ");
+      if (!text) return;
+      delete ui.drafts[key];
+      ui.adding.delete(`${d.task}:log`);
+      return act("log", { task: d.task, message: text }, "Note saved");
+    }
+    case "log-all": ui.logAll.has(d.task) ? ui.logAll.delete(d.task) : ui.logAll.add(d.task); return render();
+    case "toggle-res": ui.resOpen.has(d.task) ? ui.resOpen.delete(d.task) : ui.resOpen.add(d.task); return render();
+    case "add-ref": {
+      const key = "addref:" + d.task;
+      const text = (ui.drafts[key] || "").trim();
+      if (!text) return;
+      delete ui.drafts[key];
+      return act("ref", { action: "add", task: d.task, ref: text }, "Added");
+    }
+    case "ref-remove": {
+      const ref = d.ref;
+      try {
+        await api("ref", { action: "remove", task: d.task, ref });
+        toast("Removed", false, () => act("ref", { action: "add", task: d.task, ref }, "Restored"));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
     case "cat-remove": {
@@ -814,6 +955,7 @@ document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) ui.drafts[el.dataset.key] = el.value;
+  if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
 });
 
@@ -825,7 +967,7 @@ document.addEventListener("keydown", async (ev) => {
   }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
   if (el.tagName === "TEXTAREA" && el.dataset.session && !ev.shiftKey) { ev.preventDefault(); return send(el.dataset.session); }
-  if (el.dataset.field) { ev.preventDefault(); el.blur(); return; }
+  if (el.dataset.field) { ev.preventDefault(); return; }   // fields save with their Save button
   if (el.dataset.enter) {
     ev.preventDefault();
     const text = (ui.drafts[el.dataset.key] || "").trim();
@@ -838,9 +980,10 @@ document.addEventListener("keydown", async (ev) => {
       return act("category", { action: "rename", names: [el.dataset.cat, text] }, `Renamed ${el.dataset.cat} → ${text}`);
     }
     if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, "Todo added");
+    if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, "Added");
   }
 });
-document.addEventListener("focusout", (ev) => { if (ev.target.dataset && ev.target.dataset.field) saveField(ev.target); });
+
 
 $("#refresh").addEventListener("click", refresh);
 $("#new-task").addEventListener("click", () => { ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus(); });

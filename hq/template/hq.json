@@ -1,3 +1,12 @@
 {
- "categories": ["feature", "bug", "investigation", "review", "ops", "docs", "other"]
+ "categories": [
+  "feature",
+  "bug",
+  "investigation",
+  "review",
+  "ops",
+  "docs",
+  "other"
+ ],
+ "links": []
 }

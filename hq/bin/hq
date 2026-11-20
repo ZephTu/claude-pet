@@ -370,6 +370,9 @@ The card, not this conversation, is the source of truth. Rules:
    frontmatter, todos as `- [ ] @owner text` (owner: me = the user, claude, or a person's
    name); mark `[x]` done, `[-]` dropped. Append decisions with `{HQ_BIN} log {meta['id']} "..."`.
    If you changed nothing worth recording, run `{HQ_BIN} touch {meta['id']}`.
+   Record related tickets, PRs and docs as a short title plus the full URL:
+   `{HQ_BIN} ref add {meta['id']} "<title> <url>"` (the board shows the title, not the URL).
+   If you start working in another directory, add it: `{HQ_BIN} set {meta['id']} 'workdirs=[...]'`.
 2. When you need the user to decide, confirm, answer or do something, end your reply with
    one self-contained item per line in this block (they are tracked until answered):
 ```hq-asks
@@ -407,7 +410,9 @@ def cmd_board(args):
         for m in metas:
             d = {k: v for k, v in m.items() if k not in ("dir",)}
             out.append(d)
-        print(json.dumps({"root": hq_root(), "categories": load_categories(), "tasks": out},
+        cfg = load_json(root_config_path(), {})
+        links = cfg.get("links", []) if isinstance(cfg, dict) else []
+        print(json.dumps({"root": hq_root(), "categories": load_categories(), "links": links, "tasks": out},
                          ensure_ascii=False, indent=1))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
@@ -565,6 +570,22 @@ def cmd_todo(args):
                 append_log(card, f"todo #{n} → {args.state} ({args.via}): {t.group(3)}")
                 return
     die(f"{args.task} has no todo #{args.index}")
+
+
+def cmd_ref(args):
+    card = find_card(args.task)
+    meta = parse_card(card)
+    refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
+    if args.action == "add":
+        ref = args.ref.strip()
+        if not ref or "\n" in ref:
+            die("empty ref")
+        if ref not in refs:
+            set_fields(card, {"refs": refs + [ref]})
+    else:
+        if args.ref not in refs:
+            die(f"{args.task} has no ref {args.ref!r}")
+        set_fields(card, {"refs": [r for r in refs if r != args.ref]})
 
 
 def cmd_addtodo(args):
@@ -923,6 +944,9 @@ def main():
     p = sub.add_parser("category", help="hq category list | add NAME | rename OLD NEW | remove NAME [--to OTHER]")
     p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
     p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
+    p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")
+    p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("ref")
+    p.set_defaults(fn=cmd_ref)
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | resolve <ask-id> <res> [note…] | reopen <ask-id>")
