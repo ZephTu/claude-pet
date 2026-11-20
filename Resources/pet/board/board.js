@@ -103,6 +103,21 @@ const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
 // a reply (from here or its terminal) clears it, same as in the pet's list.
 const newTag = (sid) => (ui.unread && ui.unread[sid]
   ? `<span class="newtag" title="Finished — not looked at yet. Peek, Jump or reply to clear it.">new</span>` : "");
+// A session's dot, drawn exactly as in the pet's list (pet.js dotClass — keep the two in step):
+// colour says whether it wants you, shape and motion what it is doing. Sessions the pet doesn't
+// list (a `claude --bg` one, say) fall back to their plain state.
+function dotClass(s) {
+  const p = (ui.dots || {})[s.sessionId];
+  if (!p) return s.state === "busy" || s.state === "waiting" ? s.state : "idle";
+  if (p.quiet) return "quiet";
+  if (p.state === "waiting") return p.asks === "permission" ? "waiting approve" : "waiting reply";
+  if (p.state === "busy") return p.agent ? "busy agent" : p.struggle ? "busy struggling" : "busy";
+  return p.background ? "idle bg" : "idle";
+}
+const DOT_TIP = { quiet: "Gone quiet — nothing heard for a while", "waiting approve": "Waiting for your approval",
+  "waiting reply": "Waiting for your answer", "busy agent": "Waiting on an agent it sent off",
+  "busy struggling": "Working — the last several calls failed", busy: "Working", "idle bg": "Turn over — something it started is still running in the background", idle: "Idle" };
+const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -115,10 +130,12 @@ async function refresh(force) {
   let sig = null;
   try {
     const [boardText, sessionsText, agentsText, unreadText] = await Promise.all([api("board"), api("sessions"), api("agents"),
-      api("unread").catch(() => "{}")]);
+      api("pet").catch(() => "{}")]);
     sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText;
     ui.board = JSON.parse(boardText);
-    ui.unread = JSON.parse(unreadText || "{}");
+    const pet = JSON.parse(unreadText || "{}");
+    ui.unread = pet.unread || {};
+    ui.dots = pet.dots || {};
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
@@ -548,7 +565,7 @@ function focusCard(t) {
       <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
       <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   const sess = (s) => `<div class="bsess">
-      <span class="dot ${esc(s.state || "")}"></span>
+      ${dot(s)}
       <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
         <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
       <div class="icons">
@@ -708,7 +725,7 @@ function renderTaskBody(t) {
            <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
         : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
     ${live.length ? live.map((s) => `<div class="bsess">
-        <span class="dot ${esc(s.state || "")}"></span>
+        ${dot(s)}
         <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
@@ -776,7 +793,7 @@ function renderSessions(items = ui.sessions, plain = false) {
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
     return `<div class="card session">
-      <span class="dot ${esc(s.state || "")}" title="${esc(s.state || "")}"></span>
+      ${dot(s)}
       <div class="body">
         <div class="shead">
           <div class="stitle" title="${esc(s.title || s.project || "")}">${newTag(sid)}${esc(s.title || s.project || sid.slice(0, 8))}</div>
@@ -1116,7 +1133,7 @@ function drawContext() {
       </section>
       <section class="ctx-sec">
         <h4>Sessions on this task</h4>
-        ${live.map((s) => `<div class="row ctx-s"><span class="dot ${esc(s.state || "")}"></span><span>${esc(s.title || s.project)}</span><span class="meta">${esc(s.state || "")}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(s.state || "")}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
         ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
         ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
       </section>

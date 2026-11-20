@@ -122,9 +122,31 @@ select.bind.mini { max-width: 92px; padding: 0 2px; font-size: 11.5px; color: va
 .icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .session .last { margin: 3px 0 0; }
 .card.session { padding: 8px 10px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); margin-top: 5px; }
-.dot.busy { background: var(--teal); box-shadow: 0 0 0 3px rgba(102,163,153,.18); }
-.dot.waiting { background: var(--amber); box-shadow: 0 0 0 3px rgba(224,166,60,.2); }
+/* Session dots: the same colours, shapes and motion as the pet's list (pet.css) — keep in step.
+   Colour = does it want you; shape and motion = what it is doing. */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #6b6560; margin-top: 5px;
+  position: relative; box-sizing: border-box; }
+.dot.waiting { background: #e0a63c; }
+.dot.busy { background: #d97757; animation: dot-breathe 2.4s ease-in-out infinite; }
+.dot.idle { background: #6b6560; }
+.dot.quiet { background: none; box-shadow: inset 0 0 0 1.5px #8a6a52; }
+@keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes dot-turn { to { transform: rotate(360deg); } }
+.dot.busy.agent { background: conic-gradient(#d97757 0 270deg, transparent 270deg);
+  -webkit-mask: radial-gradient(circle, transparent 2.3px, #000 2.6px); animation: dot-turn 1.6s linear infinite; }
+.dot.busy.struggling::after { content: ""; position: absolute; right: -3px; top: -3px; width: 4px; height: 4px;
+  border-radius: 50%; background: #e0a63c; box-shadow: 0 0 0 1px #2a2623; }
+@keyframes dot-beat { 0% { transform: scale(1); opacity: 0.9; } 70%, 100% { transform: scale(1.9); opacity: 0; } }
+.dot.idle.bg { background: #8fa7a2; }
+.dot.idle.bg::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-sizing: border-box;
+  border: 1px solid #6fb8ad; animation: dot-beat 1.8s ease-out infinite; }
+.dot.waiting.approve::after { content: ""; position: absolute; left: 3.25px; top: 1.5px; width: 1.5px; height: 3.2px;
+  border-radius: 1px; background: #2a2623; }
+.dot.waiting.reply { background: none; box-shadow: inset 0 0 0 1.75px #e0a63c; }
+@media (prefers-reduced-motion: reduce) {
+  .dot, .dot::after { animation: none !important; }
+  .dot.idle.bg::after { transform: scale(1.7); opacity: 0.7; }
+}
 .session { display: flex; gap: 9px; }
 .session .body { flex: 1; min-width: 0; }
 .stitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

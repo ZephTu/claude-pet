@@ -202,6 +202,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             Dictionary(grouping: self?.completions?.unread ?? [], by: \.sessionId).mapValues(\.count)
         }
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
+        BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
         panel.showOnDesktop()
         panel.updateLayoutSide()

@@ -121,6 +121,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The pet's unread finishes per session, and how the board marks one session's read.
     /// Set by the app; nil when the board is rendered on its own (`--render-board`).
     static var unreadBySession: (() -> [String: Int])?
+    /// What the pet's list draws each session's dot from — the board draws the same dot.
+    static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
 
     func userContentController(
@@ -138,9 +140,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
             if r.1 == nil { Self.onSeen?(str("session")) }
             return r
-        case "unread":
-            let counts = Self.unreadBySession?() ?? [:]
-            let data = (try? JSONSerialization.data(withJSONObject: counts, options: [.sortedKeys])) ?? Data("{}".utf8)
+        case "pet":
+            let pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
+            let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
         case "resolve":
             return await hq(["ask", "resolve", str("id"), str("resolution"),
