@@ -114,6 +114,19 @@ public enum CompletionQueue {
         events.filter { !read.contains($0.eventId) }
     }
 
+    /// Finishes the user has plainly seen: they typed into that session after
+    /// it finished, so they read the result first. `lastPromptAt` moves only
+    /// when a person speaks — a session woken by its own background agent
+    /// does not count (see `HookEmit.isHuman`).
+    public static func answered(_ unread: [CompletionEvent], sessions: [SessionState]) -> [String] {
+        var spoke: [String: Date] = [:]
+        for s in sessions {
+            guard let at = s.lastPromptAt else { continue }
+            spoke[s.sessionId] = max(spoke[s.sessionId] ?? at, at)
+        }
+        return unread.filter { e in spoke[e.sessionId].map { $0 > e.finishedAt } ?? false }.map(\.eventId)
+    }
+
     /// Ages the queue out: past the retention window first, then down to the
     /// hard cap, spending read rows before unread ones.
     public static func prune(_ events: [CompletionEvent], read: Set<String>, now: Date) -> Pruned {

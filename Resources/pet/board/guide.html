@@ -141,7 +141,8 @@
 <li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
 <li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
-<li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样，session 正忙时会排队。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
+<li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样。session 空闲时，按钮等到 Claude 开始处理（最多 5 秒）才恢复；session 正忙时消息会排队，终端一接收就恢复，提示"Delivered — queued…"（不会干等 5 秒）。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
+<li><b>红色 new 标记</b> = 小猫的红点：这个 session 干完了一轮，你还没看过结果。下面这些都算"看过"，标记和小猫的红点一起消失：👁 打开对话、↗ 跳到终端、从看板给它发消息（包括回应 ask 时勾了 send to … now）、在终端里直接给它发下一条。只是打开看板、扫到摘要、展开任务卡片不算。</li>
 </ul>
 <h2>对话窗口（Peek）</h2>
 <ul>
@@ -419,7 +420,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
 <li><b>Background sessions</b> (blue "background" tag) have no terminal: <b>Attach</b> (terminal icon) opens <code>claude attach</code> in your chosen terminal so you can talk to it; <b>Stop</b> (square icon, click twice) stops it — the conversation is kept and Attach resumes it. They can't be messaged from the board.</li>
 <li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
-<li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it; a busy session queues it. <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
+<li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it. To an idle session the button waits (up to 5 s) until Claude starts on it; a busy session queues it, so the button is back as soon as the terminal takes it, with "Delivered — queued…" (no five-second wait). <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
+<li><b>A red new tag</b> is the pet's red dot: the session finished a turn and you haven't looked at it yet. Any of these counts as looking, and clears it here and on the pet: 👁 opening the conversation, ↗ jumping to the terminal, messaging it from the board (an ask answer with send to … now included), or typing your next message in its terminal. Just having the board open, reading the one-line summary or opening the task card does not.</li>
 </ul>
 <h2>Conversation window (Peek)</h2>
 <ul>

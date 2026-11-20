@@ -99,6 +99,10 @@ const taskById = (id) => tasks().find((t) => t.id === id);
 const isOpen = (t) => ["waiting-on-me", "blocked", "active"].includes(t.status);
 const openAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
+// The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
+// a reply (from here or its terminal) clears it, same as in the pet's list.
+const newTag = (sid) => (ui.unread && ui.unread[sid]
+  ? `<span class="newtag" title="Finished — not looked at yet. Peek, Jump or reply to clear it.">new</span>` : "");
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -110,9 +114,11 @@ const list = (v) => (Array.isArray(v) ? v : []);
 async function refresh(force) {
   let sig = null;
   try {
-    const [boardText, sessionsText, agentsText] = await Promise.all([api("board"), api("sessions"), api("agents")]);
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText;
+    const [boardText, sessionsText, agentsText, unreadText] = await Promise.all([api("board"), api("sessions"), api("agents"),
+      api("unread").catch(() => "{}")]);
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText;
     ui.board = JSON.parse(boardText);
+    ui.unread = JSON.parse(unreadText || "{}");
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
@@ -541,7 +547,7 @@ function focusCard(t) {
       <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   const sess = (s) => `<div class="bsess">
       <span class="dot ${esc(s.state || "")}"></span>
-      <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
+      <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
         <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.state || "?")} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
@@ -701,7 +707,7 @@ function renderTaskBody(t) {
         : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
     ${live.length ? live.map((s) => `<div class="bsess">
         <span class="dot ${esc(s.state || "")}"></span>
-        <div style="flex:1;min-width:0"><div class="stitle">${esc(s.title || s.project)}</div>
+        <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(s.state || "?")} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
@@ -771,7 +777,7 @@ function renderSessions(items = ui.sessions, plain = false) {
       <span class="dot ${esc(s.state || "")}" title="${esc(s.state || "")}"></span>
       <div class="body">
         <div class="shead">
-          <div class="stitle" title="${esc(s.title || s.project || "")}">${esc(s.title || s.project || sid.slice(0, 8))}</div>
+          <div class="stitle" title="${esc(s.title || s.project || "")}">${newTag(sid)}${esc(s.title || s.project || sid.slice(0, 8))}</div>
           ${taskCtl}
         </div>
         <div class="shead">
@@ -1325,6 +1331,9 @@ document.addEventListener("drop", (ev) => {
   if (box) addImages(box.dataset.session || box.dataset.att, [...ev.dataTransfer.files]);
 });
 
+// A busy session queues what it is sent; there is no new turn to wait for.
+const isBusy = (sid) => (ui.sessions.find((x) => x.sessionId === sid) || {}).state === "busy";
+
 // While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
 // so a second click can't type the same message into the session again.
 function sendButton(sid, enabled) {
@@ -1339,14 +1348,16 @@ async function send(sid) {
   const images = ui.atts[sid] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  const queued = isBusy(sid);
   ui.sending.add(sid);
   render();
   if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
   try {
-    await api("send", { session: sid, text: message });
+    await api("send", { session: sid, text: message, queue: queued });
     delete ui.drafts[key];
     delete ui.atts[sid];
-    toast(images.length ? `Sent with ${images.length} image${images.length === 1 ? "" : "s"}` : "Sent");
+    const withImgs = images.length ? ` with ${images.length} image${images.length === 1 ? "" : "s"}` : "";
+    toast(queued ? `Delivered${withImgs} — queued until the session finishes its turn` : `Sent${withImgs}`);
   } catch (e) {
     toast(String(e.message || e), true);
   } finally {
@@ -1400,9 +1411,9 @@ async function resolveAll(taskId) {
       const s = ui.sessions.find((y) => y.sessionId === sid);
       try {
         for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
-        await api("send", { session: sid, text: pushMessageAll(xs) });
+        await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
         sent.push(...xs);
-        msg += ` · sent to ${s ? s.title || s.project : sid}`;
+        msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
       } catch (e) {
         for (const x of xs) { try { await api("delivered", { id: x.a.id, session: sid, undo: true }); } catch (e2) { /* best effort */ } }
         msg += ` · couldn't reach the session (${e.message || e}); it gets the answers with your next message there`;
@@ -1448,8 +1459,8 @@ document.addEventListener("click", async (ev) => {
           // the same answer again. Unmark if the message never got there.
           try {
             await api("delivered", { id: d.id, session: target.sessionId });
-            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note) });
-            msg += ` · sent to ${target.title || target.project}`;
+            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy" });
+            msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
           } catch (e) {
             try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
             msg += ` · couldn't reach the session (${e.message || e}); it gets the answer with your next message there`;

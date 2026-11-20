@@ -304,3 +304,7 @@ select.place { max-width: 100px; }
 #toast.bad { border-color: var(--red); }
 #toast { display: flex; gap: 10px; align-items: center; z-index: 30; }
 #toast[hidden] { display: none; }
+
+/* the pet's red dot on a board session row: finished, not looked at yet */
+.newtag { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px; margin-right: 6px;
+  border-radius: 8px; background: var(--red); color: #fff; vertical-align: 2px; letter-spacing: .02em; }

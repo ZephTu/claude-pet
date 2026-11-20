@@ -118,6 +118,10 @@ final class BoardWindow: NSWindow {
 @MainActor
 final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static let orcaBundleID = "com.stablyai.orca"
+    /// The pet's unread finishes per session, and how the board marks one session's read.
+    /// Set by the app; nil when the board is rendered on its own (`--render-board`).
+    static var unreadBySession: (() -> [String: Int])?
+    static var onSeen: ((String) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -129,7 +133,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch body["op"] as? String ?? "" {
         case "board": return await hq(["board", "--json"])
         case "sessions": return await hq(["sessions", "--json"])
-        case "peek": return await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
+        case "peek":
+            // An open conversation shows the newest reply: that is reading it.
+            let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
+            if r.1 == nil { Self.onSeen?(str("session")) }
+            return r
+        case "unread":
+            let counts = Self.unreadBySession?() ?? [:]
+            let data = (try? JSONSerialization.data(withJSONObject: counts, options: [.sortedKeys])) ?? Data("{}".utf8)
+            return (String(decoding: data, as: UTF8.self), nil)
         case "resolve":
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"])
@@ -174,7 +186,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
-        case "send": return await send(session: str("session"), text: str("text"))
+        case "send":
+            let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false)
+            if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
+            return r
         case "saveImage": return saveImage(dataURL: str("data"))
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
@@ -195,6 +210,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
+            Self.onSeen?(str("session"))
             return (["ok": true], nil)
         case "copy":
             NSPasteboard.general.clearContents()
@@ -432,7 +448,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// Types the message into the session's terminal and presses Enter — to
     /// Claude it is indistinguishable from the user typing it.
-    private func send(session: String, text: String) async -> (Any?, String?) {
+    /// `queue`: the session is busy, so the message waits in Claude Code's queue until the turn
+    /// ends — no turn will start within seconds, so don't sit watching for one.
+    private func send(session: String, text: String, queue: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, "empty message") }
         guard let t = terminal(of: session) else { return (nil, "no terminal recorded for this session") }
@@ -443,8 +461,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
-                                         "--enter", "--wait-submit", "5", "--json"])
-            return r.status == 0 ? (["ok": true, "detail": r.out], nil)
+                                         "--enter", "--json"] + (queue ? [] : ["--wait-submit", "5"]))
+            return r.status == 0 ? (["ok": true, "queued": queue, "detail": r.out], nil)
                                  : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)
