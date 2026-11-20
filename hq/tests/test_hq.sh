@@ -51,11 +51,14 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-echo "$ctx" | grep -q "T-001.1 → do: go with v2" && ok "board answer injected on next prompt"
+echo "$ctx" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "- T-001.1 \"Approve plan v2?\" → do: go with v2" in c, c' && ok "board answer injected on next prompt"
 echo "$ctx" | grep -q "T-001.2: Ask Chengjie" && ok "still-open asks re-injected"
 hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.1 → do" && fail "board answer delivered twice" || ok "board answer delivered once"
 "$HQ" ask add T-001 "Deploy now?" >/dev/null; "$HQ" ask resolve T-001.3 do --via board --note "yes"; "$HQ" ask delivered T-001.3 --session sess-1
-hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "T-001.3 → do" && fail "pushed answer injected again" || ok "an answer already sent to the session is not injected again"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert not any(x.startswith("- T-001.3 ") for x in c.splitlines()), c' && ok "an answer already sent to the session is not injected again" || fail "pushed answer injected again"
+"$HQ" ask add T-001 "$(printf 'x%.0s' {1..80}) long question" >/dev/null
+"$HQ" ask resolve T-001.4 drop --via board >/dev/null
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; l=[x for x in c.splitlines() if x.startswith("- T-001.4 ")][0]; assert l == "- T-001.4 \"" + "x"*30 + "…\" → drop", l' && ok "an injected answer quotes only the question's opening words"
 
 MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
@@ -66,7 +69,7 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/root/tasks/T-001-*/TASK.md
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
-"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==3' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==4' && ok "board --json exposes todos and asks"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and isinstance(t["workdirs"], list), t' && ok "list fields with template comments parse as lists"
 
 "$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"

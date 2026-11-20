@@ -45,6 +45,13 @@ def now_iso():
     return dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def gist(text, n=30):
+    """The opening words of an ask — enough to match an answer to its question without
+    repeating the whole question back into the session's prompt."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    return t if len(t) <= n else t[:n] + "…"
+
+
 def today():
     return dt.date.today().isoformat()
 
@@ -1336,7 +1343,7 @@ def hook_main():
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
-                lines.append(f"- {a['id']} → {a['state']}{': ' + a['note'] if a.get('note') else ''} ({a['text']})")
+                lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {a['state']}{': ' + a['note'] if a.get('note') else ''}")
         told = {a["id"] for a in fresh}
 
         def note_turn(entry):

@@ -376,14 +376,19 @@ function wantPush(a) {
   return Boolean(s) && s.state !== "busy";
 }
 const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked" };
+// An answer names its ask by id plus the question's opening words — enough for the session to
+// match it to what it asked (it never saw the id: hq assigns it after the turn), without
+// repeating the whole question back into the prompt.
+function gist(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t.length > 30 ? t.slice(0, 30) + "…" : t;
+}
 function pushMessage(a, res, note) {
-  return `[HQ board] You asked "${a.text}" (${a.id}). The user answered: ${RES_TEXT[res] || res}` +
-    (note ? ` — ${note}` : "") + ". Carry on accordingly.";
+  return `[HQ board] ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}` + (note ? ` — ${note}` : "");
 }
 function pushMessageAll(answers) {
-  return "[HQ board] The user answered your questions:\n" +
-    answers.map(({ a, res, note }) => `- "${a.text}" (${a.id}): ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n") +
-    "\nCarry on accordingly.";
+  return "[HQ board] Answers:\n" +
+    answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n");
 }
 // An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
 function answerNote(id) {
