@@ -64,6 +64,28 @@ public struct UsageSnapshot: Sendable, Equatable {
 }
 
 /// Choosing between readings when more than one source is available.
+/// Several sessions feed one quota file, each with the numbers from its own last API call — an
+/// idle session keeps writing an old, lower reading over a fresh one (the file flips between them
+/// every few seconds). Within one window usage only goes up, so a reading for the same window
+/// that is lower than one already seen is stale.
+public enum UsageHighWater {
+    /// `next`, unless `previous` describes the same window with more used — then the higher
+    /// figure, per window (5-hour and weekly are judged separately). A later reset time is a new
+    /// window and replaces the old one; an earlier one is an old window and is ignored.
+    public static func merge(previous: UsageSnapshot?, next: UsageSnapshot) -> UsageSnapshot {
+        guard let prev = previous else { return next }
+        func pick(_ p: Int, _ pAt: Date, _ n: Int, _ nAt: Date) -> (Int, Date) {
+            if abs(nAt.timeIntervalSince(pAt)) < 120 { return (max(p, n), nAt) }   // same window
+            return nAt > pAt ? (n, nAt) : (p, pAt)
+        }
+        let five = pick(prev.fiveHourPercent, prev.fiveHourResetAt, next.fiveHourPercent, next.fiveHourResetAt)
+        let week = pick(prev.sevenDayPercent, prev.sevenDayResetAt, next.sevenDayPercent, next.sevenDayResetAt)
+        return UsageSnapshot(planName: next.planName, fiveHourPercent: five.0, sevenDayPercent: week.0,
+                             fiveHourResetAt: five.1, sevenDayResetAt: week.1,
+                             capturedAt: max(prev.capturedAt, next.capturedAt), source: next.source)
+    }
+}
+
 public enum UsageSources {
     /// Ranked by how directly each one knows: Claude Code's own statusline is
     /// fed the numbers, claude-hud caches what it was given.
