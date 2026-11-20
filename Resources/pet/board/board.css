@@ -335,3 +335,12 @@ select.place { max-width: 100px; }
 
 /* "▶ Do it" on an @claude todo */
 .todo .doit { flex: none; align-self: flex-start; margin-top: 1px; white-space: nowrap; }
+
+/* skip-permissions choice next to "where new sessions open" */
+.launchopts { display: flex; justify-content: flex-end; margin: -2px 0 6px; }
+.skipperm { font-size: 11.5px; color: var(--dim); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+/* earlier (ended) sessions of a task, to resume */
+.past-h { margin: 8px 0 4px; }
+.bsess.past { opacity: .85; }
+.bsess.past .btn { white-space: nowrap; }
+.bsess.past .meta { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

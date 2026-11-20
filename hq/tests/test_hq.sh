@@ -190,6 +190,13 @@ rm "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → do" && ok "once the asker has ended, the next session on the task takes the answer"
 rm -rf "$HOME/.claude/pet"
 
+# history: the sessions that worked on a task, with what resuming one needs.
+HSID=0a1b2c3d-1111-2222-3333-444455556666
+mkdir -p "$HOME/.claude/projects/-tmp-repo"
+printf '%s\n' '{"type":"custom-title","customTitle":"perf run"}' '{"type":"assistant","cwd":"/tmp/repo","message":{"content":[{"type":"text","text":"All done."}]}}' > "$HOME/.claude/projects/-tmp-repo/$HSID.jsonl"
+"$HQ" bind "$SID" --session "$HSID" >/dev/null
+"$HQ" history "$SID" --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["sessionId"]=="'"$HSID"'"][0]; assert r["cwd"]=="/tmp/repo" and r["title"]=="perf run" and r["lastText"]=="All done." and r["live"] is False, r' && ok "history lists a task's sessions with id, directory, name and last words"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

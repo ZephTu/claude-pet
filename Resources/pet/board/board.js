@@ -26,7 +26,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -218,6 +218,45 @@ function mergeBackground(sessions, agents) {
 
 // Where "New session" opens: the user's choice, else the terminal most sessions run in.
 const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: "Background" };
+// Sessions the board starts or resumes skip Claude Code's permission prompts — the user's choice,
+// remembered; off unless ticked.
+const skipPerms = () => pref("hq-skip-perms", "0") === "1";
+function launchOptions() {
+  return `<label class="skipperm" title="Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files">
+    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> skip permissions</label>`;
+}
+// ---- earlier sessions of a task, to resume one (hq history). Fetched when shown, kept a minute.
+const HISTORY_MS = 60 * 1000;
+function ensureHistory(taskId) {
+  const h = ui.history[taskId];
+  if ((h && Date.now() - h.at < HISTORY_MS) || ui.historyLoading.has(taskId)) return;
+  ui.historyLoading.add(taskId);
+  apiJSON("history", { task: taskId })
+    .then((rows) => { ui.history[taskId] = { at: Date.now(), rows: Array.isArray(rows) ? rows : [] }; })
+    .catch(() => { ui.history[taskId] = { at: Date.now(), rows: [] }; })
+    .finally(() => { ui.historyLoading.delete(taskId); render(); });
+}
+// Ended sessions of a task, newest first (a live one is listed with the live sessions instead).
+function earlierSessions(t) {
+  ensureHistory(t.id);
+  const live = new Set(ui.sessions.map((s) => s.sessionId));
+  return ((ui.history[t.id] || {}).rows || []).filter((r) => !r.live && !live.has(r.sessionId));
+}
+const resumeTip = (r) => `Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`;
+function earlierList(t) {
+  const rows = earlierSessions(t);
+  if (!rows.length) return "";
+  const shown = ui.histAll.has(t.id) ? rows : rows.slice(0, 3);
+  return `<div class="meta past-h">Earlier sessions</div>` + shown.map((r) => `<div class="bsess past">
+      <span class="dot idle"></span>
+      <div style="flex:1;min-width:0"><div class="stitle">${esc(r.title || r.sessionId.slice(0, 8))}</div>
+        <div class="meta">ended · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
+      <div class="icons">
+        <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="Read its conversation">${ICON.peek}</button>
+        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
+      </div></div>`).join("") +
+    (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? "Show fewer" : `Show all ${rows.length}`}</button>` : "");
+}
 function launchPlace() {
   const saved = pref("hq-launch", "");
   if (PLACES[saved]) return saved;
@@ -269,7 +308,7 @@ async function doTodo(taskId, text) {
       const dir = launchDir(t);
       if (!dir) throw new Error("This task has no directory yet — bind a session or give the project a directory first");
       const place = launchPlace();
-      await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text) });
+      await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms() });
       ui.handed[key] = { to: "a new session", at: Date.now() };
       toast(`Started a session on ${t.id} (${PLACES[place]}) to do it`);
       setTimeout(() => refresh(), 2500);
@@ -721,6 +760,8 @@ function focusCard(t) {
     <div class="fsec">${live.map(sess).join("")}
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
         <span style="flex:1"></span>
+        ${live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
+          ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">↻ Resume</button>` : ""; })()}
         <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>`}
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
   </div>`;
@@ -850,6 +891,7 @@ function renderTaskBody(t) {
       <select class="bind mini place" data-action="launch-place" title="Where new sessions open">
         ${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}
       </select></div>
+    <div class="launchopts">${launchOptions()}</div>
     ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
         ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
             ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
@@ -867,7 +909,8 @@ function renderTaskBody(t) {
             : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
           <button class="icon" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
         </div></div>`).join("")
-      : `<div class="empty">No live session is working on this.${list(t.sessions).length ? " Earlier sessions: click an item in Needs you, or use the context view." : ""}</div>`}
+      : `<div class="empty">No live session is working on this.</div>`}
+    ${earlierList(t)}
 
     ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
     ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
@@ -1663,6 +1706,18 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "resolve-all": return resolveAll(d.task);
     case "do-todo": return doTodo(d.task, d.text);
+    case "hist-all": ui.histAll.has(d.task) ? ui.histAll.delete(d.task) : ui.histAll.add(d.task); return render();
+    case "resume": {
+      const t = taskById(d.task);
+      const place = launchPlace() === "bg" ? "terminal" : launchPlace();
+      try {
+        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms() });
+        toast(`Resuming it in ${PLACES[place]} — bound to ${d.task}`);
+      } catch (e) { toast(String(e.message || e), true); }
+      delete ui.history[d.task];
+      setTimeout(() => refresh(), 2500);
+      return;
+    }
     case "todo": return changeTodo(d.task, Number(d.i), d.state, d.from, d.text || "");
     case "undo-todo": return undoTodo(d.task, Number(d.i));
     case "undo-toast": {
@@ -1888,7 +1943,7 @@ document.addEventListener("click", async (ev) => {
       if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
       const place = launchPlace();
       try {
-        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t) });
+        await api("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms() });
         toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
       } catch (e) { toast(String(e.message || e), true); }
       setTimeout(() => refresh(), 2500);
@@ -1955,6 +2010,7 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
+  if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
   if (["set-status", "set-project", "set-category"].includes(d.action)) {
     ui.pointerDown = false;

@@ -195,7 +195,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "saveImage": return saveImage(dataURL: str("data"))
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
-                                place: str("where"), prompt: str("prompt"))
+                                place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false)
+        case "history": return await hq(["history", str("task"), "--json"])
+        case "resume":
+            return await resume(task: str("task"), session: str("session"), dir: str("dir"),
+                                place: str("where"), skip: body["skip"] as? Bool ?? false)
         case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
                                                     command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
@@ -287,7 +291,31 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
     /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
     /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
-    private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String) async -> (Any?, String?) {
+    /// The user's choice on the board: sessions it starts or resumes skip Claude Code's permission prompts.
+    private static let skipFlag = "--dangerously-skip-permissions"
+
+    /// Picks up an earlier session of a task where it left off: `claude --resume <id>` in the
+    /// directory it ran in (Claude Code keeps a conversation under that directory), bound to the
+    /// task again. A background place opens a terminal instead — there is nothing to attach to.
+    private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool) async -> (Any?, String?) {
+        guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+        let dir = (rawDir as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
+            return (nil, "no such directory: \(dir)")
+        }
+        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        let bound = await hq(["bind", task, "--session=\(session)"])
+        if let err = bound.1 { return (nil, err) }
+        let into = place == "bg" ? "terminal" : place
+        let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
+        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: "\(task) resume")
+        return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
+    }
+
+    private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String,
+                        skip: Bool = false) async -> (Any?, String?) {
         let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
@@ -295,11 +323,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
         let name = String("\(task) \(title)".prefix(60))
-        if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt) }
+        if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt, skip: skip) }
         let sid = UUID().uuidString.lowercased()
         let bound = await hq(["bind", task, "--session=\(sid)"])
         if let err = bound.1 { return (nil, err) }
-        var cmd = [claude, "--session-id", sid, "--name", name]
+        var cmd = [claude, "--session-id", sid, "--name", name] + (skip ? [Self.skipFlag] : [])
         cmd.append(prompt)
         let opened = await openInTerminal(place: place, dir: dir, command: cmd, title: name)
         if opened.1 != nil { _ = await hq(["unbind", "--session=\(sid)"]) }
@@ -309,9 +337,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// `claude --bg` picks its own session id (it ignores --session-id), so a background session
     /// can't be bound before it starts. It is told to bind itself first — that also hands it the
     /// task's rules — and the board binds it too as soon as `claude agents` reports its id.
-    private func launchBackground(claude: String, task: String, name: String, dir: String, prompt: String) async -> (Any?, String?) {
+    private func launchBackground(claude: String, task: String, name: String, dir: String, prompt: String,
+                                  skip: Bool = false) async -> (Any?, String?) {
         let first = "Start by running `\(hqPath) bind \(task)` — it binds this background session to the task and prints its rules. Then: "
-        let r = await Self.run(claude, ["--bg", "--name", name, first + prompt], cwd: dir)
+        let r = await Self.run(claude, ["--bg", "--name", name] + (skip ? [Self.skipFlag] : []) + [first + prompt], cwd: dir)
         // An untrusted folder can't show its trust prompt in the background; claude says so.
         if r.status != 0 || (r.out + r.err).localizedCaseInsensitiveContains("not trusted") {
             return (nil, "claude --bg: " + (r.err.isEmpty ? r.out : r.err).prefix(300))

@@ -1299,6 +1299,35 @@ def cmd_peek(args):
         print(f"[{m['role']}] {m['text']}\n")
 
 
+def cmd_history(args):
+    """The sessions that have worked on a task (newest first), with what's needed to resume one:
+    full id, the directory it ran in, its name, when it was last active, its last words."""
+    meta = parse_card(find_card(args.task))
+    seen, rows = set(), []
+    for short in reversed(list(meta.get("sessions") or [])):
+        path, live = find_transcript(str(short))
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        entries = transcript_tail(path, 300_000)
+        last = next((message_text(o) for o in reversed(entries)
+                     if o.get("type") == "assistant" and message_text(o)), "")
+        rows.append({
+            "sessionId": os.path.basename(path)[:-6],
+            "cwd": next((o.get("cwd") for o in reversed(entries) if o.get("cwd")), None),
+            "title": session_title(entries),
+            "lastAt": dt.datetime.fromtimestamp(os.path.getmtime(path)).astimezone().isoformat(timespec="seconds"),
+            "live": live,
+            "lastText": " ".join(last.split())[:160],
+        })
+    rows.sort(key=lambda r: r["lastAt"], reverse=True)
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return
+    for r in rows:
+        print(f"{r['sessionId'][:8]}  {r['lastAt'][:16]}  {'live ' if r['live'] else ''}{r['title'] or ''}  {r['cwd'] or ''}")
+
+
 # ---------------------------------------------------------------- hooks
 def last_assistant_text(payload):
     t = payload.get("last_assistant_message")
@@ -1482,6 +1511,8 @@ def main():
     p.add_argument("-n", type=int, default=8); p.add_argument("--json", action="store_true")
     p.add_argument("--meta", action="store_true", help="with --json: an object with title, cwd, live")
     p.set_defaults(fn=cmd_peek)
+    p = sub.add_parser("history", help="sessions that worked on a task, newest first (to resume one)")
+    p.add_argument("task"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")
     p.set_defaults(fn=lambda a: hook_main())
 
