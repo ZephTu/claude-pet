@@ -129,8 +129,8 @@
 <p>点开一个任务：</p>
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
-<tr><td><b>project / status / category</b></td><td>同一行的三个下拉框，选了就保存；下面一行是工作目录（主目录显示成 ~，悬停看全路径）</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
-<tr><td><b>next</b></td><td>任务卡片顶部已经显示它，详情里只有一行末尾的 <b>✎ next</b> 按钮，点开才出现输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>project / status / category</b></td><td>平时是一行文字；点同一行末尾的 <b>✎ Edit</b> 才变成三个下拉框（选了就保存），同时出现 next 输入框，改完点 <b>Done</b> 收起。下面一行是工作目录（主目录显示成 ~，悬停看全路径）</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
+<tr><td><b>next</b></td><td>任务卡片顶部已经显示它，详情里点 <b>✎ Edit</b> 才出现它的输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
 <tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。<code>@claude</code> 的待办有 <b>▶ Do it</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队）；没有就按 ▶ New session 的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕。下面的 <b>Earlier sessions</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Today 卡片上没有 session 在跑时，也有一个 ↻ Resume 续上最近那个。<b>skip permissions</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ Do it 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问</td><td>你</td></tr>
@@ -196,7 +196,7 @@
 <tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;网址或 QA-123&gt;</code></td><td>增删关联资源</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
-<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行</td></tr>
+<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行，带本地日期和时间（精确到秒）</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
@@ -413,8 +413,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p>Open a task:</p>
 <table>
 <tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
-<tr><td><b>project / status / category</b></td><td>three menus on one line; picking saves. The line below lists the workdirs (home shown as ~; hover for full paths)</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
-<tr><td><b>next</b></td><td>the card's header already shows it, so the details only have <b>✎ next</b> at the end of the first line, which opens the box (sessions read it from the card, so editing it steers the next one); edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
+<tr><td><b>project / status / category</b></td><td>a line of text; <b>✎ Edit</b> at its end turns it into three menus (picking saves) and opens next; <b>Done</b> folds it back. The line below lists the workdirs (home shown as ~; hover for full paths)</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
+<tr><td><b>next</b></td><td>the card's header already shows it, so in the details its box only appears under <b>✎ Edit</b> (sessions read it from the card, so editing it steers the next one); edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
 <tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo). An <code>@claude</code> todo has <b>▶ Do it</b>: with a live session on the task that the board can message, it sends "please do this todo on the card, tick it when done" to the most recently active one (queued if busy); with none, it starts a session the way ▶ New session does, told to read the card and do that todo. Afterwards the button says who has it (for 30 minutes); clicking again hands it over again</td><td>you and sessions</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕. <b>Earlier sessions</b> below lists the task's ended sessions (name, how long ago, last words): 👁 reads the conversation, <b>↻ Resume</b> picks it up with <code>claude --resume</code> in the directory it ran in and binds it to the task again (the terminal tab keeps its name); <b>✕</b> (two clicks) takes it off the task's sessions — the conversation itself is kept. A Today card with nothing live offers ↻ Resume for the latest one. <b>skip permissions</b> (remembered, off by default): sessions the board starts, resumes or hands a todo to run with <code>--dangerously-skip-permissions</code>, so Claude doesn't stop to ask before running commands or editing files</td><td>you</td></tr>
@@ -476,7 +476,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;url or QA-123&gt;</code></td><td>add / remove a related resource</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
-<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log</td></tr>
+<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log, stamped with the local date and time to the second</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>

@@ -374,3 +374,7 @@ select.place { max-width: 100px; }
 .qbar { width: 34px; }
 #quota { gap: 10px; }
 #search { min-width: 80px; }
+
+/* status / project / category as plain text until "✎ Edit" */
+.metarow .kv { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+.metarow .kv b { color: var(--dim); font-weight: 500; margin-left: 3px; }
