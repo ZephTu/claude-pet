@@ -68,6 +68,8 @@ h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
 .res-drop:hover { background: #4a2620; }
 .res-later:hover { background: #4a3d22; }
 .res-archive:hover { background: #333; }
+.res-todo { border-color: #4a5f7a; } .res-todo:hover { background: #2b3747; }
+.res-todo.on { background: #2b3747; border-color: #7fa6d9; }
 /* several asks on one task: answers are picked, then sent together */
 .res-do.on { background: #2f4641; border-color: #5f9488; }
 .res-drop.on { background: #4a2620; border-color: #b0634f; }

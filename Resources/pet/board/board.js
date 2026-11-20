@@ -12,6 +12,7 @@ const RESOLUTIONS = [
   ["drop", "Drop", "Won't do — stop tracking it"],
   ["later", "Ask later", "Need to ask someone else — revisit"],
   ["archive", "No context", "I can't answer this — park it"],
+  ["todo", "To todo", "Something I'll do myself — make it an @me todo on this task and close the ask"],
 ];
 // Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
@@ -375,7 +376,26 @@ function wantPush(a) {
   const s = pushTarget(a);
   return Boolean(s) && s.state !== "busy";
 }
-const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked" };
+const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked",
+  todo: "Made it an @me todo — the user will do it themselves; don't ask again" };
+// "To todo" is the board's own answer: the ask becomes an @me todo on its task, and is closed as
+// "do" with a note saying so. Returns what an Undo needs.
+async function answerAsk(a, res, note) {
+  if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
+  const task = a.id.replace(/\.\d+$/, "");
+  const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
+  await api("addtodo", { task, text });
+  await api("resolve", { id: a.id, resolution: "do", note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
+  return { task, text };
+}
+// Undo of "To todo": the todo it added goes too (marked dropped, so the card keeps the trace).
+async function dropMadeTodo(made) {
+  if (!made) return;
+  await refresh();
+  const t = taskById(made.task);
+  const x = t && t.todos.find((y) => y.state === "open" && (y.owner ? `@${y.owner} ${y.text}` : y.text) === made.text);
+  if (x) await api("todo", { task: made.task, index: x.i, state: "drop", text: x.text });
+}
 // An answer names its ask by id plus the question's opening words — enough for the session to
 // match it to what it asked (it never saw the id: hq assigns it after the turn), without
 // repeating the whole question back into the prompt.
@@ -1465,7 +1485,7 @@ async function resolveAll(taskId) {
   try {
     for (const x of answers) {
       try {
-        await api("resolve", { id: x.a.id, resolution: x.res, note: x.note });
+        x.made = await answerAsk(x.a, x.res, x.note);
         done.push(x);
         delete ui.picks[x.a.id]; delete ui.drafts["note:" + x.a.id]; delete ui.drafts["push:" + x.a.id]; delete ui.atts["ask:" + x.a.id];
       } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
@@ -1496,7 +1516,7 @@ async function resolveAll(taskId) {
         ui.drafts["note:" + x.a.id] = x.draft || "";
         if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
         ui.picks[x.a.id] = x.res;
-        try { await api("reopen", { id: x.a.id }); } catch (e) { toast(String(e.message || e), true); }
+        try { await dropMadeTodo(x.made); await api("reopen", { id: x.a.id }); } catch (e) { toast(String(e.message || e), true); }
       }
       toast(sent.length ? "Reopened — the message already sent stays in the session" : "Reopened");
       refresh();
@@ -1524,8 +1544,8 @@ document.addEventListener("click", async (ev) => {
       const push = Boolean(target) && wantPush(a);
       delete ui.drafts["push:" + d.id];
       try {
-        await api("resolve", { id: d.id, resolution: d.res, note });
-        let msg = `${d.id} → ${d.res}`;
+        const made = await answerAsk(a, d.res, note);
+        let msg = `${d.id} → ${d.res === "todo" ? "@me todo" : d.res}`;
         if (push) {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
@@ -1542,6 +1562,7 @@ document.addEventListener("click", async (ev) => {
         toast(msg, false, async () => {
           ui.drafts["note:" + d.id] = draftNote || "";
           if (imgs) ui.atts["ask:" + d.id] = imgs;
+          await dropMadeTodo(made);
           await act("reopen", { id: d.id }, push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
         });
       } catch (e) { toast(String(e.message || e), true); }

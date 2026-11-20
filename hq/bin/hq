@@ -570,8 +570,10 @@ The card, not this conversation, is the source of truth. Rules:
    Record related tickets, PRs and docs as a short title plus the full URL:
    `{HQ_BIN} ref add {meta['id']} "<title> <url>"` (the board shows the title, not the URL).
    If you start working in another directory, add it: `{HQ_BIN} set {meta['id']} 'workdirs=[...]'`.
-2. When you need the user to decide, confirm, answer or do something, end your reply with
-   one self-contained item per line in this block (they are tracked until answered):
+2. When you need the user to decide, confirm or answer something before you can go on, end
+   your reply with one self-contained question per line in this block (tracked until answered).
+   Something the user has to DO — now, or after something else ("once the PRs merge, send the
+   draft to Ping") — is not a question: add it as an `@me` todo on the card instead.
 ```hq-asks
 - <question or request>
 ```

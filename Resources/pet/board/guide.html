@@ -92,8 +92,9 @@
 <tr><th>按钮</th><th>含义</th></tr>
 <tr><td><b>Do</b></td><td>要做 / 同意，说明里写怎么做</td></tr>
 <tr><td><b>Drop</b></td><td>不做了，不再跟踪</td></tr>
-<tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
+<tr><td><b>Ask later</b></td><td>要先问别人，之后再说（问题关掉、不再算进红点，也不会给你留提醒——适合"球在别人手上"）</td></tr>
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
+<tr><td><b>To todo</b></td><td>这不是要回答的问题，是我自己要去做的事（比如"PR 合并后把消息发给 Ping"）：在这个任务里加一条 <code>@me</code> 待办（说明会接在后面），问题关掉，并告诉 session 我会自己做、别再问。Undo 会把这条待办标成已放弃并重新打开问题</td></tr>
 </table>
 <b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。消息里只带问题编号和问题开头的几个字（如 <code>T-012.3 "再跑一次 release_test 验证删机器吗？参…": Do — 不用了</code>），不把整条问题再发一遍，省 token 也好读；只发编号不行，因为 session 自己并不知道编号。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
 <b>一个任务有好几个 session 时</b>：回应只送给提问的那个 session，同一任务下的其他 session 收不到，不会两边做同一件事；它们看到的"未回应的问题"里，别人问的会标注 "asked by another session on this task"。只有提问的 session 已经结束或者解绑了，回应才交给这个任务下一个开始新一轮的 session（只交给一个）。<br>
@@ -373,8 +374,9 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><th>Button</th><th>Meaning</th></tr>
 <tr><td><b>Do</b></td><td>yes / will do — the note says how</td></tr>
 <tr><td><b>Drop</b></td><td>won't do, stop tracking</td></tr>
-<tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
+<tr><td><b>Ask later</b></td><td>need to ask someone else first (the ask closes and leaves the badge, with no reminder for you — for when the ball is in someone else's court)</td></tr>
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
+<tr><td><b>To todo</b></td><td>not a question but something I'll do myself (e.g. "after the PRs merge, send the note to Ping"): adds an <code>@me</code> todo on the task (with your note), closes the ask and tells the session you'll do it — don't ask again. Undo drops that todo and reopens the ask</td></tr>
 </table>
 <b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. The message names the ask by its id and the question's opening words (e.g. <code>T-012.3 "Re-run release_test to verify th…": Do — no need</code>) rather than repeating the whole question — shorter and easier to read; the id alone isn't enough, since the session never sees it. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.<br>
 <b>Several sessions on one task</b>: an answer goes only to the session that asked, never to the others on the task, so two of them don't do the same work; in their list of open asks, the ones another session raised are marked "asked by another session on this task". Only when the asker has ended or left the task does its answer go to the next session on the task to start a turn — to one of them.<br>

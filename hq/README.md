@@ -99,6 +99,11 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    | `later` | need to ask someone else, revisit |
    | `archive` | I don't have the context to answer — park it |
 
+   On the board there is a fifth answer, **To todo**, for an ask that is really something you
+   will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
+   to file such things as todos in the first place — an ask is only for a question they need
+   answered before going on.
+
    Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board
    answer is typed straight into the asking session when it is live in Orca or iTerm2 ("send
    now"); otherwise it is delivered at the start of that session's next turn. With several
