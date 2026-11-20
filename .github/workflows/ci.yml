@@ -34,3 +34,6 @@ jobs:
       # The one thing here that can break someone else's machine.
       - name: settings.json patch tests
         run: ./hooks/test-settings-patch.sh
+
+      - name: HQ tests
+        run: ./hq/tests/test_hq.sh

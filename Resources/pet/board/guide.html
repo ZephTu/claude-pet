@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQ Guide</title>
+<link rel="stylesheet" href="board.css">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body class="guide">
+<!--
+  Keep this guide in step with the code: any change to the board (board.js / BoardWindow.swift),
+  the hq CLI (hq/bin/hq) or the hooks updates BOTH language sections below in the same commit.
+  See CLAUDE.md at the repo root.
+-->
+<header id="top">
+  <a class="btn" href="board.html">← Board</a>
+  <div class="brand">HQ Guide</div>
+  <div class="spacer"></div>
+  <nav class="lang">
+    <button class="btn small" data-lang="zh">中文</button>
+    <button class="btn small" data-lang="en">English</button>
+  </nav>
+</header>
+
+<div class="doc">
+
+<!-- ======================================================================= 中文 -->
+<article lang="zh" hidden>
+<aside class="toc">
+  <a href="#zh-what">HQ 是什么</a>
+  <a href="#zh-start">开始使用</a>
+  <a href="#zh-today">Today：今天的任务</a>
+  <a href="#zh-board">看板上能做什么（All）</a>
+  <a href="#zh-pet">和小猫的联动</a>
+  <a href="#zh-link">session 和看板怎么联动</a>
+  <a href="#zh-cli">命令行用法</a>
+  <a href="#zh-onboard">从已有 session 开始</a>
+  <a href="#zh-proj">项目</a>
+  <a href="#zh-cats">分类与工作目录</a>
+  <a href="#zh-card">任务卡格式</a>
+  <a href="#zh-leads">负责人（lead）</a>
+  <a href="#zh-limits">注意事项</a>
+  <a href="#zh-files">安装会改什么 · 卸载</a>
+</aside>
+<div class="content">
+
+<h1 id="zh-what">HQ 是什么</h1>
+<p>同时开着十几个 Claude Code session 时，难的不再是干活本身，而是记住每个 session 在做什么、它问过你什么、你有没有回答。HQ 把这些状态从对话里搬到文件里：</p>
+<table>
+<tr><th>概念</th><th>是什么</th><th>存在多久</th></tr>
+<tr><td><b>项目（project）</b></td><td>一组相关任务，比如 claude-pet 下的几个功能。在 <code>hq.json</code> 里定义名字和对应的目录</td><td>长期</td></tr>
+<tr><td><b>任务卡</b></td><td><code>tasks/T-012-xxx/TASK.md</code>：目标、状态、下一步、待办、日志</td><td>到任务完成</td></tr>
+<tr><td><b>待回应事项（ask）</b></td><td>session 问过你、需要你决定或去做的事，记在 <code>asks.jsonl</code>，直到你回应</td><td>跟随任务</td></tr>
+<tr><td><b>session</b></td><td>绑定到某个任务的一条工作线程，随时可以关</td><td>随你</td></tr>
+<tr><td><b>负责人（lead）</b></td><td>可选。负责某一类任务的 agent 角色</td><td>长期</td></tr>
+</table>
+<p>核心原则：<b>任务卡才是真实状态，对话不是</b>。session 关了没关系，下一个 session 绑定到同一个任务、读卡就能接着做。</p>
+
+<h1 id="zh-start">开始使用</h1>
+<ol>
+<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。它会先列出要做的每一项改动，确认后才执行；只想要看板、不想动 Claude 的设置，加 <code>--no-hooks</code>。需要 <code>python3</code>。详见<a href="#zh-files">安装会改什么</a>。</li>
+<li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。</li>
+<li>在 Sessions 栏给正在跑的 session 选一个任务绑定，或点 <b>+ New task</b> 新建任务并顺手绑定。</li>
+<li>之后就在看板上处理 <b>Needs you</b> 里的事情，在 Sessions 栏直接给 session 发消息。</li>
+</ol>
+<p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
+
+<h1 id="zh-today">Today：今天的任务</h1>
+<p>顶栏左边的 <b>Today | All</b> 切换两个视图（会记住）。<b>Today</b> 是工作台，只放今天挑出来的任务；<b>All</b> 是全局视图，什么都有。</p>
+<ul>
+<li><b>挑任务</b>：顶部搜索框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。今天新建的任务自动加入今天。</li>
+<li><b>接着昨天的</b>：上一个有挑任务的日子里还没完成的任务，会在顶部提示，可以逐个 + 或 <b>Bring all</b>；<b>Not today</b> 今天不再提示。</li>
+<li><b>任务卡片</b>直接带着：下一步、这个任务未回应的问题（可直接回应、送达）、未完成的待办（可直接勾）、正在为它工作的 session（👁 看对话、↗ 跳转、后台的 Attach）、<b>▶ New session</b>。<b>点卡片</b>展开完整的任务详情，再点收起；<b>✕</b> 把它移出今天（任务本身不变，可以 Undo）。</li>
+<li>右栏只列今天任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
+<li>今天的列表存在任务根目录的 <code>focus.json</code>，按日期保存。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus carry</code>。</li>
+</ul>
+
+<h1 id="zh-board">看板上能做什么（All）</h1>
+<h2>顶栏</h2>
+<ul>
+<li>计数：未回应的 ask、你的待办、进行中的任务、在跑的 session。</li>
+<li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
+<li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
+<li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
+<li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
+</ul>
+<h2>Needs you（左栏）</h2>
+<ul>
+<li><b>Asks</b>：所有还没回应的问题，最早的排在最上面。session 把同一个还没回应的问题再问一遍时，不会多出一条。每条四种回应，可以先在输入框写一句说明：
+<table>
+<tr><th>按钮</th><th>含义</th></tr>
+<tr><td><b>Do</b></td><td>要做 / 同意，说明里写怎么做</td></tr>
+<tr><td><b>Drop</b></td><td>不做了，不再跟踪</td></tr>
+<tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
+<tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
+</table>
+<b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。</li>
+<li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
+<li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
+<li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
+<li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。勾选按待办的<b>文字</b>认准是哪一条：看板刷新前 session 在前面插了新待办也不会勾错；那条待办已被删掉或改写时会提示你刷新。</li>
+</ul>
+<h2>上下文窗口</h2>
+<p>回答"这一项到底是什么、从哪来、去哪看"：</p>
+<ul>
+<li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
+<li><b>待办</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
+<li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
+<li><b>Show task</b> 在中栏定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
+</ul>
+<h2>Tasks（中栏）</h2>
+<ul>
+<li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
+  <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"No open tasks"和 <b>+ New task</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
+  <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
+<li><b>Collapse all / Expand all</b>：按项目分组时一键收起或展开所有项目组；按状态分组时一键收起所有点开的任务。</li>
+<li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
+<li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
+<li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
+<li><b>任务编号的颜色 = 状态</b>（看板上和小猫列表里都一样）：<span style="color:var(--amber)">黄 = 等你处理</span>、<span style="color:#e8846e">红 = 阻塞</span>、<span style="color:#7fb3aa">青绿 = 进行中</span>、<span style="color:var(--blue)">蓝 = 已完成</span>、<span style="color:var(--faint);text-decoration:line-through">灰 = 已放弃</span>；悬停显示状态名。</li>
+</ul>
+<p>点开一个任务：</p>
+<table>
+<tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
+<tr><td><b>project / status / category</b></td><td>下拉框，选了就保存</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
+<tr><td><b>next</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
+<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）</td><td>你和 session</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕</td><td>你</td></tr>
+<tr><td><b>▶ New session</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。旁边的下拉框选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>Background</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
+<tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
+<tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
+<tr><td><b>Open card</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
+</table>
+<h2>Sessions（右栏）</h2>
+<ul>
+<li>标题旁 <b>List | Project</b> 切换视角（会记住）：<b>List</b> 平铺所有 session，每张卡带项目名（蓝色）；<b>Project</b> 按项目分组、可折叠，顺序与中栏一致。session 的项目：绑定了任务的跟随任务的项目，没绑定的按所在目录匹配。</li>
+<li>每张卡三行：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。</li>
+<li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。它不能从看板直接发消息。</li>
+<li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
+<li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样，session 正忙时会排队。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。只支持 Orca 和 iTerm2 里的 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
+</ul>
+<h2>对话窗口（Peek）</h2>
+<ul>
+<li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
+<li><b>复制</b>：选中文字 Cmd+C；每条消息悬停有 <b>Copy</b>；顶部 <b>Copy all</b> 复制整段对话。</li>
+<li><b>链接</b>：网页链接点击用浏览器打开；文件路径（<code>.md</code>、<code>.html</code>、代码文件、目录……）点击用默认程序打开，相对路径按该 session 的目录解析。脚本、可执行文件和 App 只会在访达里定位，不会直接运行。</li>
+<li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> 块显示成"Asked you"/"Answers recorded"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
+<li>底部可以直接回复。已经结束的 session 只能看历史。</li>
+</ul>
+<h1 id="zh-pet">和小猫的联动</h1>
+<ul>
+<li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
+<li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
+<li><b>每天挑任务</b>：每天第一次看到 session 活动、而今天还没挑任务时，小猫提醒一次"挑一下今天的任务"（会提到上次没完成的有几个）；双击小猫打开看板的 Today。</li>
+</ul>
+
+<h1 id="zh-link">session 和看板怎么联动</h1>
+<p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
+<ol>
+<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。</li>
+<li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。
+<pre>```hq-asks
+- 方案 v2 可以吗？
+- 要不要找 Chengjie 要数据集？
+```</pre></li>
+<li><b>没回应的问题不会被当成"不做"</b>：每一轮都会把还没回应的 ask 重新提醒给 session。</li>
+<li><b>两边都能回应</b>：
+  <ul>
+  <li>在看板上点按钮 → session 下一轮收到"用户在看板上回应了 …"；</li>
+  <li>在 session 里直接回答 → session 用 <code>hq-resolved</code> 块记下来，看板上那条随之关闭。</li>
+  </ul></li>
+<li><b>草稿不等于完成</b>：session 替你起草、需要你去发的东西，会变成一条 <code>@me</code> 待办，直到你勾掉。</li>
+</ol>
+<p>什么时候用哪边：要看全局、批量处理问题、改状态，用看板；跟某个 session 深入讨论，在它的终端里直接聊，绑定之后它说的、问的同样会出现在看板上。</p>
+
+<h1 id="zh-cli">命令行用法</h1>
+<p>命令在 <code>~/.claude/hq/bin/hq</code>。看板上的每个操作背后都是这些命令，所以在终端里或让 Claude 调用，效果完全相同。</p>
+<table class="cmds">
+<tr><th>命令</th><th>作用</th></tr>
+<tr><td><code>hq board [--all] [--json]</code></td><td>打印看板；<code>--all</code> 含已完成；<code>--json</code> 给程序读</td></tr>
+<tr><td><code>hq show T-012</code></td><td>打印任务卡和它未回应的 ask</td></tr>
+<tr><td><code>hq new "标题" [--category rca] [--workdir DIR]</code></td><td>新建任务，输出编号</td></tr>
+<tr><td><code>hq bind T-012 [--session ID]</code></td><td>把当前（或指定）session 绑定到任务</td></tr>
+<tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>解绑 · 查看当前 session 绑定的任务</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=等 token"</code></td><td>改任务卡字段（status / next / project / category / title …）</td></tr>
+<tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
+<tr><td><code>hq ref add|remove T-012 &lt;网址或 QA-123&gt;</code></td><td>增删关联资源</td></tr>
+<tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
+<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行</td></tr>
+<tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
+<tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
+<tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
+<tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
+<tr><td><code>hq focus [add|remove T-012 …|carry]</code></td><td>今天的任务列表</td></tr>
+<tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录）</td></tr>
+</table>
+<p>在 Claude Code 里还可以用三个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）、<code>/hq-onboard</code>（从已有 session 初始化）。</p>
+
+<h1 id="zh-onboard">从已有 session 开始</h1>
+<p>刚装好时，本机通常已经有很多 Claude Code session 和历史对话。两步把它们变成看板：</p>
+<ol>
+<li><b>项目</b>：Projects 面板里点 <b>Suggest from sessions</b>（看板为空时中栏也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
+<li><b>任务</b>：在任意 Claude Code session 里输入 <code>/hq-onboard</code>。Claude 会读这些 session，起草任务卡（状态、下一步、你的待办、相关链接、置信度），按项目列成表给你确认，<b>确认之前不会创建任何东西</b>；创建后，正在运行的 session 会绑定到对应任务，已结束的记在任务卡上、可以在看板上查看历史。</li>
+</ol>
+<p>之后任何地方都能改：在看板上直接改，或者在 session 里让 Claude 改。从推断得来的状态在任务日志里标了"请核实"。</p>
+
+<h1 id="zh-proj">项目</h1>
+<ul>
+<li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
+<li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
+<li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
+<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。</li>
+</ul>
+
+<h1 id="zh-cats">分类与工作目录</h1>
+<h2>分类</h2>
+<ul>
+<li>每个任务根目录有自己的分类列表，存在 <code>hq.json</code> 里。新装的默认是一组通用分类：feature、bug、investigation、review、ops、docs、other，可以随意改。</li>
+<li>在看板上点 <b>Categories</b>：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
+<li>分类只是写在每张任务卡上的一个标签，所以：
+  <ul>
+  <li><b>改名</b>会同时改写所有用到它的任务卡；</li>
+  <li><b>删除没人用的分类</b>直接删；<b>删除有任务在用的分类</b>，必须先选这些任务移到哪个分类（或"不分类"），每张被改的卡都会在日志里记一笔；</li>
+  <li>手动编辑任务卡写了不在列表里的分类，看板照样显示，并标成"not in list"，可以在 Categories 里一键"Add to list"。</li>
+  </ul></li>
+</ul>
+<h2>工作目录（workdirs）</h2>
+<p>不需要手动维护：把 session 绑定到任务时，会自动把这个 session 所在的目录记到任务卡上（不记你的主目录和任务根目录）。新建任务时也可以手填。看板据此在 session 的"Bind to task…"下拉里把相关任务排在前面。</p>
+
+<h2>关联资源的链接规则</h2>
+<p>Resources 里的完整网址直接可点。像 <code>QA-9519</code>、<code>bigtest#3248</code> 这样的简写，在任务根目录的 <code>hq.json</code> 里加 <code>links</code> 规则就能变成链接，适用于任何工单系统（Jira、Linear、GitHub Issues……）。按顺序匹配，第一条命中的生效；<code>$1</code>、<code>$2</code> 是正则里的分组：</p>
+<pre>"links": [
+  {"match": "^([\\w.-]+/[\\w.-]+)#(\\d+)", "url": "https://github.com/$1/pull/$2", "kind": "pr"},
+  {"match": "^([\\w.-]+)#(\\d+)",            "url": "https://github.com/your-org/$1/pull/$2", "kind": "pr"},
+  {"match": "\\b([A-Z][A-Z0-9]+-\\d+)\\b",      "url": "https://your-site.atlassian.net/browse/$1", "kind": "ticket"},
+  {"match": "^(ENG-\\d+)$",                   "url": "https://linear.app/your-team/issue/$1", "kind": "ticket"}
+]</pre>
+<p>添加资源时推荐写成"标题 + 网址"，比如 <code>2026-11 QA AWS key leak – action items https://…</code>：看板只显示标题（截断到两三个词），悬停可看完整标题和网址。绑定的 session 也会按这个格式记录。</p>
+<p><code>kind</code> 决定分组：<code>ticket</code>（工单）、<code>pr</code>、<code>doc</code>（文档）、<code>link</code>（其他）。完整网址会按域名自动分类。</p>
+
+<h1 id="zh-card">任务卡格式</h1>
+<pre>---
+id: T-012
+title: "release_test_all 排障"
+project: bigtest             # 所属项目；按工作目录自动设置
+category: test-followup      # 自由填写
+status: active               # active | waiting-on-me | blocked | done | abandoned
+lead: test-lead
+updated: 2026-11-20
+workdirs: ["/path/to/bigtest"]
+refs: ["QA-9519", "bigtest#3248"]
+sessions: ["48f4f564"]
+next: "fix 分支跑 Jenkins 并提 PR"
+---
+## Goal / Status / Todo / Log（标题用中文也行）
+- [ ] @me 未做，你来做
+- [ ] @claude 未做，Claude 来做
+- [ ] @Wenbing 在等别人
+- [x] 做完   ·   - [-] 不做了</pre>
+<p>任务卡是普通 Markdown，可以直接手改，也可以放进 git。<code>asks.jsonl</code> 是只追加的事件日志，不要手改，用命令或看板操作。</p>
+
+<h1 id="zh-leads">负责人（lead）</h1>
+<p>把任务根目录下的 <code>templates/lead.md</code> 复制到 <code>.claude/agents/bench-lead.md</code>，写清楚它负责的范围，然后在任务根目录运行 <code>claude --agent bench-lead</code>，跟它说"继续 T-020"。负责人会绑定任务、把重活交给后台 subagent、保持自己的上下文精简，并按固定格式汇报。小任务不需要负责人，绑定的 session 自己就是负责人。</p>
+
+<h1 id="zh-limits">注意事项</h1>
+<ul>
+<li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
+<li>后台 session 只能在<b>信任过</b>的目录里启动（在那个目录里正常打开过一次 Claude Code 并同意信任即可）；否则看板会提示原因。</li>
+<li>看板上的回应：勾选 send now 时立刻送达（Orca / iTerm2）；否则在 session <b>下一轮</b>送达。</li>
+<li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。</li>
+<li>Sessions 栏依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
+</ul>
+
+<h1 id="zh-files">安装会改什么 · 卸载</h1>
+<p>桌宠和 HQ 是分开装的两步：</p>
+<table>
+<tr><th>步骤</th><th>改动</th></tr>
+<tr><td><b>1. 桌宠</b>（<code>scripts/install.sh</code> 或发行包里的 <code>install.sh</code>）</td><td>安装 App；<code>~/.claude/pet/</code>；往 <code>~/.claude/settings.json</code> 追加 11 个 hook（先备份），用来感知 session 状态。</td></tr>
+<tr><td><b>2. HQ</b>（<code>hq/install.sh</code>，可选）</td><td>先列出所有改动、确认后才执行：<code>~/.claude/hq/</code>；你的任务根目录（只补缺失的文件）；<code>/task</code>、<code>/board</code> 斜杠命令（<code>--no-commands</code> 跳过）；往 <code>settings.json</code> 追加 3 个 hook（<code>--no-hooks</code> 跳过）。</td></tr>
+</table>
+<ul>
+<li>HQ 的 hook 只在<b>绑定了任务的 session</b> 里起作用（注入任务规则、记录问题、提醒更新任务卡）；其他 session 里只读一个小文件就退出。</li>
+<li>HQ <b>不会改任何全局 CLAUDE.md</b>，只在任务根目录里放一个给这个目录用的 CLAUDE.md。</li>
+<li>看板的 Sessions 栏会读取本机的对话记录（<code>~/.claude/projects</code>）来显示最近的消息。数据不出本机。</li>
+<li>用 <code>--no-hooks</code> 安装时：看板、任务卡、命令行都能用，只是问题不会被自动记录、session 不会自动遵守任务规则。</li>
+</ul>
+<h2>文件</h2>
+<pre>&lt;任务根目录&gt;/tasks/T-012-xxx/TASK.md     任务卡
+&lt;任务根目录&gt;/tasks/T-012-xxx/asks.jsonl   待回应事项
+&lt;任务根目录&gt;/templates/                   新任务模板、lead 模板
+~/.claude/hq/bin/hq                       命令行工具 + hook 入口
+~/.claude/hq/config.json                  {"root": "任务根目录"}
+~/.claude/hq/state/sessions.json          session → 任务的绑定
+&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则</pre>
+<p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
+</div>
+</article>
+
+<!-- ======================================================================= English -->
+<article lang="en" hidden>
+<aside class="toc">
+  <a href="#en-what">What HQ is</a>
+  <a href="#en-start">Getting started</a>
+  <a href="#en-today">Today</a>
+  <a href="#en-board">What the board does (All)</a>
+  <a href="#en-pet">With the cat</a>
+  <a href="#en-link">How sessions and the board connect</a>
+  <a href="#en-cli">Command line</a>
+  <a href="#en-onboard">Start from existing sessions</a>
+  <a href="#en-proj">Projects</a>
+  <a href="#en-cats">Categories and workdirs</a>
+  <a href="#en-card">Task card format</a>
+  <a href="#en-leads">Leads</a>
+  <a href="#en-limits">Good to know</a>
+  <a href="#en-files">What install changes · uninstall</a>
+</aside>
+<div class="content">
+
+<h1 id="en-what">What HQ is</h1>
+<p>With a dozen Claude Code sessions open, the hard part is no longer the work — it is remembering what each session was doing, what it asked you, and whether you ever answered. HQ moves that state out of the conversations and into files:</p>
+<table>
+<tr><th>Concept</th><th>What it is</th><th>Lives</th></tr>
+<tr><td><b>Project</b></td><td>a group of related tasks — say, the features of claude-pet. Defined in <code>hq.json</code> with a name and its directories</td><td>long-term</td></tr>
+<tr><td><b>Task card</b></td><td><code>tasks/T-012-slug/TASK.md</code>: goal, status, next step, todos, log</td><td>until the task is done</td></tr>
+<tr><td><b>Ask</b></td><td>something a session needs you to decide or do, kept in <code>asks.jsonl</code> until you answer</td><td>with the task</td></tr>
+<tr><td><b>Session</b></td><td>a working thread bound to one task; close it any time</td><td>as long as you like</td></tr>
+<tr><td><b>Lead</b></td><td>optional agent role that owns a category of tasks</td><td>long-term</td></tr>
+</table>
+<p>The one rule: <b>the card is the truth, not the conversation.</b> When a session is closed, the next one binds to the same task, reads the card and carries on.</p>
+
+<h1 id="en-start">Getting started</h1>
+<ol>
+<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). It lists every change first and asks before doing anything; add <code>--no-hooks</code> to get the board without touching Claude's settings. Needs <code>python3</code>. See <a href="#en-files">What install changes</a>.</li>
+<li>Open the board: <b>double-click the pet</b> (double-click again to hide it), or right-click → <b>Task Board…</b>.</li>
+<li>In the Sessions column, bind a running session to a task — or click <b>+ New task</b> to create one and bind it.</li>
+<li>From then on, work through <b>Needs you</b> and message sessions straight from the board.</li>
+</ol>
+<p class="tip">Sessions that were already running when HQ was installed should be restarted once so the hooks load.</p>
+
+<h1 id="en-today">Today</h1>
+<p><b>Today | All</b> at the top left switches views (remembered). <b>Today</b> is a workbench with only the tasks you picked for today; <b>All</b> is the full board.</p>
+<ul>
+<li><b>Pick</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. Tasks created today join automatically.</li>
+<li><b>Carry on</b>: open tasks from the last day you picked any are offered at the top — add them one by one or <b>Bring all</b>; <b>Not today</b> hides the offer for today.</li>
+<li><b>Each task card</b> carries its next step, its unanswered asks (answer and deliver right there), its open todos (tick them), the sessions working on it (👁 conversation, ↗ jump, Attach for background ones) and <b>▶ New session</b>. <b>click the card</b> to open the full task, again to fold it; <b>✕</b> takes it off today (the task stays; Undo brings it back).</li>
+<li>The right column lists only the sessions on today's tasks, plus sessions not on any task yet (to bind them).</li>
+<li>Today's list lives in <code>focus.json</code> in your task root, one entry per day. From a shell: <code>hq focus</code>, <code>hq focus add|remove T-012</code>, <code>hq focus carry</code>.</li>
+</ul>
+
+<h1 id="en-board">What the board does (All)</h1>
+<h2>Top bar</h2>
+<ul>
+<li>Counts: unanswered asks, your todos, open tasks, live sessions.</li>
+<li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
+<li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
+<li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
+</ul>
+<h2>Needs you (left)</h2>
+<ul>
+<li><b>Asks</b> — every unanswered question, oldest first. A session asking the same still-open question again doesn't add a second one. Type an optional note, then answer:
+<table>
+<tr><th>Button</th><th>Meaning</th></tr>
+<tr><td><b>Do</b></td><td>yes / will do — the note says how</td></tr>
+<tr><td><b>Drop</b></td><td>won't do, stop tracking</td></tr>
+<tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
+<tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
+</table>
+<b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.</li>
+<li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
+<li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
+<li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
+<li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too. A tick finds its todo by its <b>text</b>, so a todo a session inserted above it since the board last refreshed can't be ticked by mistake; if that todo was removed or reworded, you're asked to refresh.</li>
+</ul>
+<h2>Context window</h2>
+<p>Answers "what is this item, where did it come from, where do I look":</p>
+<ul>
+<li><b>An ask</b>: the Claude reply that raised it, and which session — open that conversation directly. (Asks recorded before this feature have no reply attached; open the conversation instead.)</li>
+<li><b>A todo</b>: the task's status, next step and the whole card, log included.</li>
+<li>Both list the task's sessions: <b>live</b> ones open their conversation or jump; <b>ended</b> ones show their history (<b>History</b>).</li>
+<li><b>Show task</b> finds and opens the task in the middle column; <b>Open card</b> opens the card in your editor.</li>
+</ul>
+<h2>Tasks (middle)</h2>
+<ul>
+<li><b>Project | Status</b> next to the title switches the grouping (remembered):
+  <ul><li><b>Project</b> (default): one group per project — every project shows, even one with no open tasks (it offers <b>+ New task</b> right there) — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
+  <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
+<li><b>Collapse all / Expand all</b>: by project it folds or unfolds every group; by status it closes every open task.</li>
+<li>Tick <b>show closed</b> for done and abandoned.</li>
+<li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
+<li>Amber number = open asks, green = live sessions working on it.</li>
+<li><b>A task id's colour is its status</b> (on the board and in the cat's list alike): <span style="color:var(--amber)">amber = waiting on you</span>, <span style="color:#e8846e">red = blocked</span>, <span style="color:#7fb3aa">teal = active</span>, <span style="color:var(--blue)">blue = done</span>, <span style="color:var(--faint);text-decoration:line-through">grey = abandoned</span>; hover for the name.</li>
+</ul>
+<p>Open a task:</p>
+<table>
+<tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
+<tr><td><b>project / status / category</b></td><td>menus; picking saves</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
+<tr><td><b>next</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
+<tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
+<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo)</td><td>you and sessions</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕</td><td>you</td></tr>
+<tr><td><b>▶ New session</b></td><td>starts a Claude Code session in the task's workdir (or its project's directory), named "id title", <b>bound to the task from the start</b>; it reads the card, reports where it stands, the next step and what needs you in three lines, then waits. The menu beside it picks where (remembered): <b>Orca / iTerm2 / Terminal</b> open a new tab; <b>Background</b> opens no window. The default is the terminal most of your sessions run in</td><td>you</td></tr>
+<tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
+<tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
+<tr><td><b>Open card</b></td><td>opens the card file in your editor</td><td></td></tr>
+</table>
+<h2>Sessions (right)</h2>
+<ul>
+<li><b>List | Project</b> next to the title switches the view (remembered): <b>List</b> shows every session, each with its project (blue); <b>Project</b> groups them by project, foldable, in the same order as the Tasks column. A session's project is its task's project if bound, otherwise the project that owns its directory.</li>
+<li>Each card is three lines: the state dot (green working, grey idle, amber waiting on you) and name, with <b>Bind…</b> on the right (bind to a task; once bound it shows the task id — click it to find the task); project and state, with three icons; the last reply.</li>
+<li><b>Background sessions</b> (blue "background" tag) have no terminal: <b>Attach</b> (terminal icon) opens <code>claude attach</code> in your chosen terminal so you can talk to it; <b>Stop</b> (square icon, click twice) stops it — the conversation is kept and Attach resumes it. They can't be messaged from the board.</li>
+<li>Icons: <b>👁 Peek</b> opens the conversation window; <b>↗ Jump</b> goes to its terminal; <b>💬 Message</b> shows the message box (hidden by default; it stays open while it holds a draft; Esc hides an empty one).</li>
+<li>Messages: only <b>Send</b> sends — Enter is a new line. While it is on its way the button reads <b>Sending…</b> and is locked, so a message never goes twice. It arrives exactly as if you typed it; a busy session queues it. <b>Images</b>: paste a screenshot (Cmd+V) or drop an image into the box (PNG / JPEG / GIF / WebP, up to 20 MB); thumbnails show (✕ removes). On send each image is saved as a file and its path goes at the end of the message, and Claude reads it. Only sessions in Orca or iTerm2; elsewhere 💬 is greyed out and its tooltip says why.</li>
+</ul>
+<h2>Conversation window (Peek)</h2>
+<ul>
+<li>The session's last 30 messages, Claude's replies rendered as Markdown. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
+<li><b>Copy</b>: select and Cmd+C; hover a message for <b>Copy</b>; <b>Copy all</b> for the whole conversation.</li>
+<li><b>Links</b>: web links open in your browser; file paths (<code>.md</code>, <code>.html</code>, source files, folders, …) open in their default app, relative paths resolved against the session's directory. Scripts, executables and apps are only shown in Finder, never run.</li>
+<li>The <code>hq-asks</code> / <code>hq-resolved</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
+<li>Reply from the box at the bottom. Ended sessions are history-only.</li>
+</ul>
+<h1 id="en-pet">With the cat</h1>
+<ul>
+<li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
+<li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
+<li><b>Pick today's tasks</b>: once a day, the first time the cat sees sessions at work while nothing is picked for today, it suggests picking (mentioning how many are still open from last time); double-click the cat to open Today.</li>
+</ul>
+
+<h1 id="en-link">How sessions and the board connect</h1>
+<p>Once bound, three hooks make the session follow these rules:</p>
+<ol>
+<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. A turn longer than two minutes that never touched the card is sent back once to update it.</li>
+<li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …).
+<pre>```hq-asks
+- Approve plan v2?
+- Ask Chengjie for the dataset?
+```</pre></li>
+<li><b>An unanswered ask is never a "no"</b> — open asks are reminded to the session every turn.</li>
+<li><b>Answer on either side</b> — on the board (delivered next turn), or in the chat (the session records it with an <code>hq-resolved</code> block and the board updates).</li>
+<li><b>Drafts are not done</b> — anything the session drafted for you to send becomes an <code>@me</code> todo until you tick it.</li>
+</ol>
+<p>Use the board for the overview, batches of answers and status changes; talk in the session's terminal for a deep discussion — once bound, what it asks there shows up here too.</p>
+
+<h1 id="en-cli">Command line</h1>
+<p>The CLI is <code>~/.claude/hq/bin/hq</code>. Every board action is one of these commands, so running them yourself (or letting Claude run them) has exactly the same effect.</p>
+<table class="cmds">
+<tr><th>Command</th><th>Does</th></tr>
+<tr><td><code>hq board [--all] [--json]</code></td><td>print the board; <code>--all</code> includes closed; <code>--json</code> for tools</td></tr>
+<tr><td><code>hq show T-012</code></td><td>print a card and its open asks</td></tr>
+<tr><td><code>hq new "title" [--category rca] [--workdir DIR]</code></td><td>create a task, prints its id</td></tr>
+<tr><td><code>hq bind T-012 [--session ID]</code></td><td>bind this (or the given) session to a task</td></tr>
+<tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>unbind · which task this session is bound to</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=wait for token"</code></td><td>set card fields (status / next / project / category / title …)</td></tr>
+<tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
+<tr><td><code>hq ref add|remove T-012 &lt;url or QA-123&gt;</code></td><td>add / remove a related resource</td></tr>
+<tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
+<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log</td></tr>
+<tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
+<tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
+<tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
+<tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
+<tr><td><code>hq focus [add|remove T-012 …|carry]</code></td><td>today's list</td></tr>
+<tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts)</td></tr>
+</table>
+<p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board, <code>/hq-onboard</code> sets HQ up from your existing sessions.</p>
+
+<h1 id="en-onboard">Start from existing sessions</h1>
+<p>A fresh install usually meets a machine full of Claude Code sessions and history. Two steps turn them into a board:</p>
+<ol>
+<li><b>Projects</b>: <b>Suggest from sessions</b> in the Projects panel (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
+<li><b>Tasks</b>: run <code>/hq-onboard</code> in any Claude Code session. Claude reads those sessions, drafts task cards (status, next step, your todos, links, confidence), shows them per project and <b>creates nothing until you confirm</b>; then live sessions are bound to their tasks and ended ones are recorded on the cards, their history one click away.</li>
+</ol>
+<p>Change anything afterwards — on the board, or by asking Claude in any session. Inferred statuses are flagged "verify" in each task's log.</p>
+
+<h1 id="en-proj">Projects</h1>
+<ul>
+<li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
+<li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
+<li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
+<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>.</li>
+</ul>
+
+<h1 id="en-cats">Categories and workdirs</h1>
+<h2>Categories</h2>
+<ul>
+<li>Each task root keeps its own list in <code>hq.json</code>. New roots start with a generic set — feature, bug, investigation, review, ops, docs, other — change it freely.</li>
+<li>On the board, <b>Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
+<li>A category is just a label on each card, so:
+  <ul>
+  <li><b>renaming</b> rewrites every card that uses it;</li>
+  <li><b>removing an unused one</b> just removes it; <b>removing one that tasks use</b> first asks where those tasks go (another category or none), and every moved card logs the change;</li>
+  <li>a card with a category that is not in the list (say, hand-edited) still shows, marked "not in list" — "Add to list" in Categories adopts it.</li>
+  </ul></li>
+</ul>
+<h2>Workdirs</h2>
+<p>They maintain themselves: binding a session to a task records the session's directory on the card (never your home folder or the task root). You can also type one when creating a task. The board uses them to list matching tasks first in a session's "Bind to task…" menu.</p>
+
+<h2>Link rules for resources</h2>
+<p>Full URLs in Resources are clickable as they are. Shorthand like <code>QA-9519</code> or <code>bigtest#3248</code> becomes a link once you add <code>links</code> rules to <code>hq.json</code> in your task root — for any tracker (Jira, Linear, GitHub Issues, …). Rules are tried in order and the first match wins; <code>$1</code>, <code>$2</code> are the regex groups:</p>
+<pre>"links": [
+  {"match": "^([\\w.-]+/[\\w.-]+)#(\\d+)", "url": "https://github.com/$1/pull/$2", "kind": "pr"},
+  {"match": "^([\\w.-]+)#(\\d+)",            "url": "https://github.com/your-org/$1/pull/$2", "kind": "pr"},
+  {"match": "\\b([A-Z][A-Z0-9]+-\\d+)\\b",      "url": "https://your-site.atlassian.net/browse/$1", "kind": "ticket"},
+  {"match": "^(ENG-\\d+)$",                   "url": "https://linear.app/your-team/issue/$1", "kind": "ticket"}
+]</pre>
+<p>When adding a resource, prefer "title + URL", e.g. <code>2026-11 QA AWS key leak – action items https://…</code>: the board shows the title, cut to a few words, with the full title and URL on hover. Bound sessions record resources the same way.</p>
+<p><code>kind</code> picks the group: <code>ticket</code>, <code>pr</code>, <code>doc</code> or <code>link</code>. Full URLs are grouped by their host automatically.</p>
+
+<h1 id="en-card">Task card format</h1>
+<pre>---
+id: T-012
+title: "Rerun perf baseline"
+project: bigtest             # set from the workdir automatically
+category: benchmark          # free text
+status: active               # active | waiting-on-me | blocked | done | abandoned
+lead: bench-lead
+updated: 2026-11-20
+workdirs: ["/path/to/bigtest"]
+refs: ["QA-9519", "bigtest#3248"]
+sessions: ["48f4f564"]
+next: "run baseline on clusters A/C"
+---
+## Goal / Status / Todo / Log
+- [ ] @me open, yours
+- [ ] @claude open, Claude's
+- [ ] @Wenbing waiting on someone
+- [x] done   ·   - [-] dropped</pre>
+<p>Cards are plain Markdown — edit them by hand or keep them in git. <code>asks.jsonl</code> is an append-only event log; change it through the board or the CLI only.</p>
+
+<h1 id="en-leads">Leads</h1>
+<p>Copy <code>templates/lead.md</code> from your task root to <code>.claude/agents/bench-lead.md</code>, describe its scope, then run <code>claude --agent bench-lead</code> in the task root and say "continue T-020". A lead binds to the task, delegates heavy work to background subagents, keeps its own context small and reports in a fixed shape. Small tasks don't need one — the bound session is the lead.</p>
+
+<h1 id="en-limits">Good to know</h1>
+<ul>
+<li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
+<li>A background session can only start in a folder you have <b>trusted</b> (open Claude Code there once and accept); otherwise the board says so.</li>
+<li>Board answers: with send now ticked they arrive at once (Orca / iTerm2); otherwise at the session's <b>next turn</b>.</li>
+<li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only.</li>
+<li>The Sessions column relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>
+</ul>
+
+<h1 id="en-files">What install changes · uninstall</h1>
+<p>The pet and HQ are two separate installs:</p>
+<table>
+<tr><th>Step</th><th>Changes</th></tr>
+<tr><td><b>1. The pet</b> (<code>scripts/install.sh</code>, or <code>install.sh</code> in the release)</td><td>the app; <code>~/.claude/pet/</code>; 11 hooks appended to <code>~/.claude/settings.json</code> (backed up first) so it can see session state.</td></tr>
+<tr><td><b>2. HQ</b> (<code>hq/install.sh</code>, optional)</td><td>lists every change and asks first: <code>~/.claude/hq/</code>; your task root (missing files only); the <code>/task</code> and <code>/board</code> commands (<code>--no-commands</code> skips); 3 hooks appended to <code>settings.json</code> (<code>--no-hooks</code> skips).</td></tr>
+</table>
+<ul>
+<li>HQ's hooks only act in sessions <b>bound to a task</b> (add the task's rules, record questions, remind it to update the card); elsewhere they read one small file and exit.</li>
+<li>HQ <b>never edits a global CLAUDE.md</b> — it only puts one in your task root, for that folder.</li>
+<li>The board's Sessions column reads the transcripts on this machine (<code>~/.claude/projects</code>) to show recent messages. Nothing leaves the machine.</li>
+<li>Installed with <code>--no-hooks</code>, the board, cards and CLI all work; questions just aren't captured automatically and sessions don't get the task rules.</li>
+</ul>
+<h2>Files</h2>
+<pre>&lt;root&gt;/tasks/T-012-slug/TASK.md       task card
+&lt;root&gt;/tasks/T-012-slug/asks.jsonl     asks ledger
+&lt;root&gt;/templates/                      new-task and lead templates
+~/.claude/hq/bin/hq                    CLI and hook entry point
+~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
+~/.claude/hq/state/sessions.json       session → task bindings
+&lt;root&gt;/hq.json                         projects, categories, link rules</pre>
+<p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
+</div>
+</article>
+
+</div>
+<script>
+(function () {
+  var KEY = "hq-guide-lang";
+  function pick(lang) {
+    document.querySelectorAll("article[lang]").forEach(function (a) { a.hidden = a.lang !== lang; });
+    document.querySelectorAll("[data-lang]").forEach(function (b) { b.classList.toggle("primary", b.dataset.lang === lang); });
+    document.documentElement.lang = lang;
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  pick(saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
+  document.querySelectorAll("[data-lang]").forEach(function (b) {
+    b.addEventListener("click", function () { pick(b.dataset.lang); });
+  });
+  document.querySelectorAll(".toc a").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      var t = document.getElementById(a.getAttribute("href").slice(1));
+      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+})();
+</script>
+</body>
+</html>

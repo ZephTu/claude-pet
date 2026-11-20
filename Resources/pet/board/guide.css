@@ -1,0 +1,32 @@
+/* The guide page: reuses board.css tokens, adds reading layout. */
+body.guide { height: auto; min-height: 100%; }
+.lang { display: flex; gap: 6px; }
+.doc { padding: 0 16px; }
+.doc article { display: grid; grid-template-columns: 190px minmax(0, 760px); gap: 28px; justify-content: center; }
+.doc article[hidden] { display: none; }
+.toc { position: sticky; top: 62px; align-self: start; display: flex; flex-direction: column; gap: 2px;
+  padding-top: 18px; }
+.toc a { color: var(--dim); text-decoration: none; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; }
+.toc a:hover { background: var(--panel); color: var(--text); }
+.content { padding: 6px 0 80px; line-height: 1.65; font-size: 13.5px; }
+.content h1 { font-size: 19px; margin: 30px 0 10px; padding-top: 8px; scroll-margin-top: 60px; color: var(--text); }
+.content h1:first-child { margin-top: 14px; }
+.content h2 { font-size: 14px; margin: 20px 0 6px; color: var(--accent); }
+.content p, .content li { color: #e4e0dc; }
+.content ul, .content ol { padding-left: 22px; }
+.content li { margin: 4px 0; }
+.content code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.content pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; color: #e4e0dc; }
+.content table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 13px; }
+.content th, .content td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+.content th { background: var(--panel); color: var(--dim); font-weight: 600; }
+.content table.cmds td:first-child { white-space: nowrap; }
+.tip { border-left: 3px solid var(--amber); background: var(--panel); padding: 7px 12px; border-radius: 0 8px 8px 0; }
+a { color: var(--accent); }
+@media (max-width: 820px) {
+  .doc article { grid-template-columns: 1fr; }
+  .toc { position: static; flex-direction: row; flex-wrap: wrap; }
+  .content table.cmds td:first-child { white-space: normal; }
+}

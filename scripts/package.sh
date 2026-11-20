@@ -27,6 +27,8 @@ for item in Package.swift Sources Resources hooks scripts; do
   cp -R "$item" "$OUT/src/"
 done
 cp README.md README.zh-CN.md LICENSE "$OUT/src/" 2>/dev/null || true
+# HQ (task board) is plain scripts — ship it at the top level so `./hq/install.sh` just works.
+cp -R hq "$OUT/hq"
 mkdir -p "$OUT/src/docs"
 cp -R docs/superpowers/specs "$OUT/src/docs/" 2>/dev/null || true
 rm -rf "$OUT/src/.build"

@@ -121,6 +121,41 @@ A session stays listed for as long as its process is alive, however long it sits
 
 **Right-click → Settings → Connection Status** reports what is actually wired up, in five states rather than a tick and a cross: `OK`, `Not set up`, `Not supported`, `Needs attention`, `Unknown`. The distinction matters — "you never turned this on" and "this broke" look the same to a cross and mean opposite things. Copy gives you a pasteable summary with your home directory collapsed to `~`; it describes the plumbing and never what you were working on. The check is read-only — it never edits `settings.json`.
 
+## Task board (HQ)
+
+Once a dozen sessions are open across several repos, the hard part is remembering what each
+one was doing, what it asked you, and whether you ever answered. **HQ** moves that state out
+of the conversations into task cards, and the pet gives you a window onto it.
+
+**Double-click the pet** to show or hide the board (or right-click → **Task Board…**):
+
+- **Needs you** — every question a session put to you that you have not answered yet, each
+  with four answers: **Do** (with a note), **Drop**, **Ask later**, **No context**. Plus your
+  `@me` todos and anything a task is waiting on you for. Nothing you skipped is silently
+  treated as "no".
+- **Tasks** — one card per piece of work: status, next step, todos you can tick, a log. A
+  session bound to a task reads the card first and writes progress back, so any session can be
+  closed and the next one picks up where it left off.
+- **Sessions** — every live session with its last message: bind it to a task, peek at the
+  conversation, jump to its terminal, or **type a message to it** right there (Orca and
+  iTerm2; it arrives exactly as if you typed it).
+
+HQ is optional and installed separately, after the pet. It needs `python3` (standard library
+only):
+
+```bash
+hq/install.sh --root ~/claude-hq                # shows every change it will make, asks first
+hq/install.sh --root ~/claude-hq --no-hooks     # board + CLI only; settings.json untouched
+```
+
+What it adds: its own folder `~/.claude/hq/`, your task root, the `/task` and `/board` slash
+commands (skip with `--no-commands`), and — unless `--no-hooks` — three hooks appended to
+`~/.claude/settings.json` (backed up first) that only act in sessions you bind to a task. It
+never edits a global CLAUDE.md. Its Sessions column reads live sessions' recent messages from
+their local transcripts; nothing is sent anywhere.
+
+See [hq/README.md](hq/README.md) for how it works and the card format.
+
 ## The cat
 
 <img src="docs/images/cat-moves.gif" width="480" alt="Eight poses side by side, each playing its own small move: a yawn, thinking at the laptop, a sigh over paperwork, dozing while an agent runs, tapping for attention, jumping when ignored, a dance after a finished turn, and reading">
@@ -171,7 +206,7 @@ Inside `~/.claude/pet/`:
 
 Aliases, pins, mutes, snoozes and settings live in `UserDefaults`, not here.
 
-**It keeps one line of each conversation and nothing else, and it makes no network requests of any kind.** That line is the first line of Claude's last message in a finished turn, handed over by the `Stop` hook, stripped of formatting and cut to 140 characters; it is what a finished row and the "done" bubble show, and it ages out with the row after seven days. Your prompts are never stored. The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
+**It keeps one line of each conversation and nothing else, and it makes no network requests of any kind.** (The optional task board, HQ, reads more — see below.) That line is the first line of Claude's last message in a finished turn, handed over by the `Stop` hook, stripped of formatting and cut to 140 characters; it is what a finished row and the "done" bubble show, and it ages out with the row after seven days. Your prompts are never stored. The activity log stores a deliberately incomplete summary of each command: the program name, then following words only up to the first one that could be carrying a value. `npm test` survives whole; `curl -H Authorization:Bearer …` becomes `curl …`. That is an allow-list by structure, not a denylist of words like "token" — a secret nobody thought to name is withheld too.
 
 ## Optional: reading quota from your statusline
 

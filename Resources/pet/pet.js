@@ -79,6 +79,7 @@ function reportLayout() {
 const TEXT = {
   // Group headings.
   needsYou: "Needs you",
+  asks: "Asks",
   finished: "Finished",
   // "Running" is a claim, and a group holding three answered sessions and an
   // idle one is not running anything. It is only used when the group really is
@@ -622,7 +623,7 @@ function sessionRowHTML(s) {
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
-    '<div class="detail"><span class="branch"></span><span class="note"></span></div>'
+    '<div class="detail"><span class="task"></span><span class="branch"></span><span class="note"></span></div>'
     // A permission the pet can answer itself gets its own line of buttons.
     + (s.askId ? '<div class="detail asks"></div>' : "")
     + "</div>"
@@ -663,9 +664,14 @@ function finishedRowHTML(f) {
  * @param {object[]} finished unread finished turns, newest first
  * @param {number} dropped unread finishes discarded to stay under the cap
  */
-window.setSessions = function (list, hiddenCount, finished, dropped) {
+// Task statuses worth a word on a session row; "active" is the normal case and says nothing.
+const TASK_STATUS_WORD = { "waiting-on-me": "needs you", blocked: "blocked", done: "done", abandoned: "dropped" };
+
+window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
   const muted = hiddenCount || 0;
   const done = finished || [];
+  // Questions waiting on the HQ board — the badge counts them, so the list shows them.
+  const asks = hqAsks || [];
   let footer = "";
   if (dropped > 0) {
     // Losing news quietly is the one thing the queue exists to prevent, so a
@@ -676,7 +682,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   if (muted) {
     footer += '<div class="muted-note">' + muted + TEXT.muted + "</div>";
   }
-  if (!list.length && !done.length) {
+  if (!list.length && !done.length && !asks.length) {
     panel.innerHTML = '<div class="empty">' + TEXT.empty + "</div>" + footer;
     hoverRow = null;
     reportLayout();
@@ -722,6 +728,13 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   }
 
   let html = "";
+  if (asks.length) {
+    html += heading(TEXT.asks, asks.length)
+      + asks.map(function () {
+        return '<div class="row hqask"><div class="line"><span class="tidtag"></span>'
+          + '<span class="asktext"></span><span class="ask-go">\u2197</span></div></div>';
+      }).join("");
+  }
   if (needs.length) {
     html += heading(TEXT.needsYou, needs.length) + needs.map(sessionRowHTML).join("");
   }
@@ -733,7 +746,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
   if (others.length) {
     // One group and nothing to tell it apart from is not a group. A lone
     // "Running" heading above the only rows there are is pure furniture.
-    html += (needs.length || done.length
+    html += (needs.length || done.length || asks.length
               ? heading(allRunning ? TEXT.running : TEXT.sessions, others.length)
               : "")
           + others.map(sessionRowHTML).join("");
@@ -757,7 +770,18 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     }
   });
 
-  const rows = panel.querySelectorAll(".row:not(.done)");
+  panel.querySelectorAll(".row.hqask").forEach(function (row, i) {
+    const a = asks[i];
+    row.dataset.task = a.task || "";
+    row.dataset.askId = a.id || "";
+    const tag = row.querySelector(".tidtag");
+    tag.textContent = a.task || "";
+    if (a.status) tag.classList.add("st-" + a.status);
+    row.querySelector(".asktext").textContent = a.text || "";
+    row.title = "Open the task board at " + (a.task || "this task");
+  });
+
+  const rows = panel.querySelectorAll(".row:not(.done):not(.hqask)");
   // `others` is already filtered, so this walks exactly the rows that were
   // drawn — the two must not drift, or every row below a hidden one is filled
   // with its neighbour's name.
@@ -767,6 +791,25 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
     // competed with the activity column and won, so "Bash npm test 23s" got
     // squeezed down to "E 47s" — the branch is a disambiguator, and it must
     // never cost the row the thing it is actually reporting.
+    // The bound HQ task leads the second line, coloured by its status; without HQ it is empty
+    // and the line is what it always was.
+    // Quiet by default: "title · T-062" in grey, so the session name stays the headline. A
+    // status word is added only when it needs attention — an active task is the normal case.
+    const taskEl = rows[i].querySelector(".task");
+    taskEl.textContent = "";
+    if (s.task) {
+      const cut = s.task.indexOf(" ");
+      const id = cut > 0 ? s.task.slice(0, cut) : s.task;
+      const title = cut > 0 ? s.task.slice(cut + 1) : "";
+      taskEl.appendChild(document.createTextNode(title ? title + " \u00b7 " + id : id));
+      const word = TASK_STATUS_WORD[s.taskStatus];
+      if (word) {
+        const w = document.createElement("span");
+        w.className = "stw st-" + s.taskStatus;
+        w.textContent = " \u00b7 " + word;
+        taskEl.appendChild(w);
+      }
+    }
     rows[i].querySelector(".branch").textContent = s.branch || "";
     const asks = rows[i].querySelector(".detail.asks");
     if (asks) asks.appendChild(decideButtons(s.sessionId, s.askId));
@@ -789,7 +832,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped) {
       note.textContent = s.detail || "";
     }
     rows[i].querySelector(".detail").classList
-      .toggle("blank", !s.branch && !note.textContent);
+      .toggle("blank", !s.branch && !s.task && !note.textContent);
     rows[i].dataset.sessionId = s.sessionId || "";
     if (s.title) rows[i].dataset.title = s.title;
     if (s.termHandle) {
@@ -866,6 +909,9 @@ window.setPanelOpen = function (open) {
 window.hitRow = function (x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el || !el.closest) return null;
+  // A question from the HQ board: open the board at its task.
+  const hqask = el.closest(".row.hqask");
+  if (hqask) return { action: "openBoard", task: hqask.dataset.task || "" };
   // A finish notice above the pet opens its session.
   const notice = el.closest(".notice-item");
   if (notice) return { action: "openNotice", sessionId: notice.dataset.sessionId || "" };

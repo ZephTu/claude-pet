@@ -651,7 +651,23 @@ html, body {
   max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .branch:not(:empty)::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
-.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The HQ task a session is bound to: takes the room the line has, cut only at the edge. */
+.task { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #857c74; }
+.task:empty { display: none; }
+/* Questions from the HQ board, above the sessions; a click opens the board at the task. */
+.row.hqask .line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.row.hqask .tidtag { flex: none; padding: 0 3px; border-radius: 3px; border: 1px solid rgba(224,166,60,.55);
+  color: #e0a63c; font-size: 10px; line-height: 1.25; }
+.row.hqask .tidtag.st-blocked { color: #e8846e; border-color: rgba(224,83,60,.5); }
+.row.hqask .tidtag.st-active { color: #7fb3aa; border-color: rgba(102,163,153,.5); }
+.row.hqask .asktext { flex: 1; min-width: 0; color: #e8e2dc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.hqask .ask-go { flex: none; color: #8a837d; }
+/* A status word only when the task wants attention. */
+.task .stw.st-waiting-on-me { color: #e0a63c; }
+.task .stw.st-blocked { color: #e8846e; }
+.task .stw.st-done { color: #7fa6d9; }
+.task .stw.st-abandoned { color: #6b6560; }
 
 /* Dimmer than the project name on purpose: the name is the thing being
    reported and the status is what is happening to it, so they must not read as

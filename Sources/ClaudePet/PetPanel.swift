@@ -26,6 +26,7 @@ final class PetPanel: NSPanel {
 
     /// Called on a left click that was not a drag.
     var onClick: ((CGPoint) -> Void)?
+    var onDoubleClick: (() -> Bool)?
 
     /// Pointer position in CSS coordinates, plus whether the session list is
     /// open. The page cannot track this itself: it receives no mouse events at
@@ -90,6 +91,7 @@ final class PetPanel: NSPanel {
         contentView = host
 
         host.onClick = { [weak self] point in self?.onClick?(point) }
+        host.onDoubleClick = { [weak self] in self?.onDoubleClick?() ?? false }
         // The side is decided on release, not during the drag: see updateLayoutSide.
         host.onDragEnded = { [weak self] in self?.updateLayoutSide() }
         host.onRightClick = { [weak self] point in self?.onRightClick?(point) }

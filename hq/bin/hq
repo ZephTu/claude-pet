@@ -1,0 +1,1455 @@
+#!/usr/bin/env python3
+"""hq — task headquarters for Claude Code sessions.
+
+One task card (TASK.md) per piece of work, a ledger of things Claude asked you
+(asks.jsonl), and hooks that bind sessions to tasks so the card — not the
+session — carries the state. See hq/README.md.
+
+Python 3.9+ standard library only (macOS /usr/bin/python3 works).
+"""
+import argparse
+import contextlib
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+
+HOME_DIR = os.path.expanduser("~/.claude/hq")
+CONFIG = os.path.join(HOME_DIR, "config.json")
+STATE = os.path.join(HOME_DIR, "state", "sessions.json")
+HQ_BIN = os.path.join(HOME_DIR, "bin", "hq")
+
+STATUSES = ["waiting-on-me", "blocked", "active", "done", "abandoned"]
+OPEN_STATUSES = ["waiting-on-me", "blocked", "active"]
+RESOLUTIONS = {
+    "do": "will do / here is how",
+    "drop": "won't do",
+    "later": "need to ask someone / revisit later",
+    "archive": "no context to answer — parked",
+}
+DEFAULT_CATEGORIES = ["feature", "bug", "investigation", "review", "ops", "docs", "other"]
+# A category is written unquoted into card frontmatter, so keep it to a plain label.
+CATEGORY_RE = re.compile(r"^[^\s#\"'\n:,\[\]][^#\"'\n:,\[\]]{0,39}$")
+TODO_TIME_RE = re.compile(r"\s*<!--\s*t:([^>]+?)\s*-->\s*$")   # hidden creation time on a todo line
+TODO_RE = re.compile(r"^(\s*)- \[([ xX\-])\] (.*)$")
+FENCE_RE = re.compile(r"```(hq-asks|hq-resolved)[^\n]*\n(.*?)```", re.S)
+WRITEBACK_MIN_TURN_SECONDS = 120
+
+
+# ---------------------------------------------------------------- utilities
+def now_iso():
+    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def today():
+    return dt.date.today().isoformat()
+
+
+def die(msg, code=1):
+    print(f"hq: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def atomic_write(path, text):
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".hq-")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def load_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def hq_root(required=True):
+    root = os.environ.get("HQ_ROOT") or load_json(CONFIG, {}).get("root")
+    if root:
+        root = os.path.expanduser(root)
+    if required and (not root or not os.path.isdir(os.path.join(root, "tasks"))):
+        die("no HQ configured — run hq/install.sh --root <dir> (or set HQ_ROOT)")
+    return root
+
+
+def tasks_dir():
+    return os.path.join(hq_root(), "tasks")
+
+
+# ---------------------------------------------------------------- task cards
+def parse_card(path):
+    text = open(path, encoding="utf-8").read()
+    meta = {}
+    m = re.match(r"^---\n(.*?)\n---\n?", text, re.S)
+    body = text[m.end():] if m else text
+    if m:
+        for line in m.group(1).splitlines():
+            if ":" not in line or line.lstrip().startswith("#"):
+                continue
+            k, v = line.split(":", 1)
+            v = v.strip()
+            if v.startswith('"'):
+                v = v[1:v.rfind('"')] if v.count('"') >= 2 else v[1:]
+            else:
+                v = "" if v.startswith("#") else re.sub(r"\s{2,}#\s.*$", "", v).strip()  # template comments
+                if v.startswith("[") and v.endswith("]"):
+                    try:
+                        v = json.loads(v)
+                    except ValueError:
+                        pass
+            meta[k.strip()] = v
+    todos = []
+    for line in body.splitlines():
+        t = TODO_RE.match(line)
+        if not t:
+            continue
+        mark = t.group(2).lower()
+        txt = t.group(3).strip()
+        created = None
+        c = TODO_TIME_RE.search(txt)
+        if c:
+            created, txt = c.group(1), txt[:c.start()].rstrip()
+        owner = None
+        o = re.match(r"@(\S+)\s+(.*)$", txt)
+        if o:
+            owner, txt = o.group(1), o.group(2)
+        todos.append({"i": len(todos) + 1,
+                      "state": {"x": "done", "-": "dropped", " ": "open"}[mark],
+                      "owner": owner, "text": txt, "created": created})
+    meta["todos"] = todos
+    meta["body"] = body.strip()
+    meta["path"] = path
+    meta["dir"] = os.path.dirname(path)
+    return meta
+
+
+def card_paths():
+    td = tasks_dir()
+    out = []
+    for d in sorted(os.listdir(td)):
+        p = os.path.join(td, d, "TASK.md")
+        if os.path.isfile(p):
+            out.append(p)
+    return out
+
+
+def find_card(tid):
+    tid = tid.upper() if re.match(r"^t-\d+$", tid, re.I) else tid
+    for p in card_paths():
+        d = os.path.basename(os.path.dirname(p))
+        if d == tid or d.startswith(tid + "-"):
+            return p
+    die(f"no task {tid}")
+
+
+def set_fields(path, fields):
+    text = open(path, encoding="utf-8").read()
+    for k, v in fields.items():
+        if isinstance(v, list):
+            val = json.dumps(v, ensure_ascii=False)
+        elif k in ("waiting_on_me", "next", "title"):
+            val = '"' + str(v).replace('"', "'") + '"'
+        else:
+            val = str(v)
+        if re.search(rf"^{k}:", text, re.M):
+            text = re.sub(rf"^{k}:.*$", lambda _: f"{k}: {val}", text, count=1, flags=re.M)
+        else:
+            text = text.replace("\n---", f"\n{k}: {val}\n---", 1)
+    if "updated" not in fields:
+        text = re.sub(r"^updated:.*$", f"updated: {today()}", text, count=1, flags=re.M)
+    atomic_write(path, text)
+
+
+def append_log(path, msg, touch=True):
+    text = open(path, encoding="utf-8").read().rstrip("\n")
+    text += f"\n- {today()}: {msg}\n"
+    atomic_write(path, text)
+    if touch:
+        set_fields(path, {})
+
+
+# ---------------------------------------------------------------- categories
+def root_config_path():
+    return os.path.join(hq_root(), "hq.json")
+
+
+def load_categories():
+    cfg = load_json(root_config_path(), None)
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("categories"), list):
+        return list(DEFAULT_CATEGORIES)
+    return [c for c in cfg["categories"] if isinstance(c, str) and c]
+
+
+def save_categories(cats):
+    cfg = load_json(root_config_path(), {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["categories"] = cats
+    atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+
+
+def check_category(name):
+    name = (name or "").strip()
+    if not CATEGORY_RE.match(name):
+        die(f"invalid category {name!r}: 1-40 characters, no # quotes : , [ ]")
+    return name
+
+
+def safe_name(raw, fallback="project"):
+    """A folder name made into a valid project/category name: bad characters become '-', at
+    most 40 characters."""
+    name = re.sub(r"[#\"'\n:,\[\]]+", "-", raw or "").strip(" -")[:40].rstrip(" -")
+    return name if CATEGORY_RE.match(name) else fallback
+
+
+def ensure_listed(name):
+    """A category used on a card joins the list, so the board can offer it."""
+    if name and name not in load_categories():
+        save_categories(load_categories() + [name])
+        print(f"hq: added category {name!r}", file=sys.stderr)
+
+
+def recategorize(old, new):
+    """Rewrite every card (open or closed) whose category is `old`. Returns how many."""
+    n = 0
+    for p in card_paths():
+        meta = parse_card(p)
+        if (meta.get("category") or "") == old:
+            set_fields(p, {"category": new, "updated": meta.get("updated", today())})
+            append_log(p, f"category {old!r} → {new or '(none)'!r} (category list changed)", touch=False)
+            n += 1
+    return n
+
+
+def category_usage():
+    usage = {}
+    for p in card_paths():
+        c = parse_card(p).get("category") or ""
+        usage[c] = usage.get(c, 0) + 1
+    return usage
+
+
+# ---------------------------------------------------------------- projects
+# A project groups tasks: { "name": ..., "paths": [dirs] } in hq.json. A task's directory decides
+# its project automatically (deepest matching path wins); the card's `project` field can be changed.
+def load_projects():
+    cfg = load_json(root_config_path(), None)
+    out = []
+    for pr in (cfg.get("projects") if isinstance(cfg, dict) else None) or []:
+        if isinstance(pr, dict) and isinstance(pr.get("name"), str) and pr["name"]:
+            out.append({"name": pr["name"],
+                        "paths": [x for x in pr.get("paths", []) if isinstance(x, str) and x]})
+    return out
+
+
+def save_projects(projects):
+    cfg = load_json(root_config_path(), {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cfg["projects"] = projects
+    atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+
+
+def norm_path(x):
+    return os.path.realpath(os.path.expanduser(x))
+
+
+def project_for_path(path):
+    if not path:
+        return ""
+    target = norm_path(path)
+    best, depth = "", -1
+    for pr in load_projects():
+        for root in pr["paths"]:
+            r = norm_path(root)
+            if (target == r or target.startswith(r + os.sep)) and len(r) > depth:
+                best, depth = pr["name"], len(r)
+    return best
+
+
+def project_for_dirs(dirs):
+    for d in dirs or []:
+        name = project_for_path(d)
+        if name:
+            return name
+    return ""
+
+
+def ensure_project(name):
+    if name and name not in [x["name"] for x in load_projects()]:
+        save_projects(load_projects() + [{"name": name, "paths": []}])
+        print(f"hq: added project {name!r}", file=sys.stderr)
+
+
+def relabel(field, old, new, why):
+    """Rewrite `field` on every card (open or closed) where it equals `old`. Returns how many."""
+    n = 0
+    for p in card_paths():
+        meta = parse_card(p)
+        if (meta.get(field) or "") == old:
+            set_fields(p, {field: new, "updated": meta.get("updated", today())})
+            append_log(p, f"{field} {old!r} → {new or '(none)'!r} ({why})", touch=False)
+            n += 1
+    return n
+
+
+def cmd_project(args):
+    projects = load_projects()
+    names = [x["name"] for x in projects]
+    usage = {}
+    for p in card_paths():
+        name = parse_card(p).get("project") or ""
+        usage[name] = usage.get(name, 0) + 1
+    a = args.action
+    if a == "list":
+        rows = [dict(pr, count=usage.get(pr["name"], 0), listed=True) for pr in projects]
+        rows += [{"name": n, "paths": [], "count": c, "listed": False} for n, c in usage.items() if n and n not in names]
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return
+        for r in rows:
+            print(f"{r['name']:<22} {r['count']:>3} task(s)  {', '.join(r['paths']) or '-'}"
+                  + ("" if r["listed"] else "   (not in list — used on cards)"))
+        if usage.get(""):
+            print(f"{'(no project)':<22} {usage['']:>3} task(s)")
+        return
+    if a == "order":
+        # Projects named here go first, in this order; any others keep their place after them.
+        wanted = [n for n in args.names if n in names]
+        if not wanted:
+            die("usage: hq project order NAME NAME ...")
+        rest = [pr for pr in projects if pr["name"] not in wanted]
+        by_name = {pr["name"]: pr for pr in projects}
+        save_projects([by_name[n] for n in wanted] + rest)
+        return
+    if a == "auto":
+        n = 0
+        for p in card_paths():
+            meta = parse_card(p)
+            if meta.get("project"):
+                continue
+            name = project_for_dirs(meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else [])
+            if name:
+                set_fields(p, {"project": name, "updated": meta.get("updated", today())})
+                n += 1
+        print(f"assigned {n} task(s)")
+        return
+    if not args.names:
+        die(f"usage: hq project {a} NAME ...")
+    name = check_category(args.names[0])
+    if a == "add":
+        if name in names:
+            die(f"project {name!r} already exists")
+        save_projects(projects + [{"name": name, "paths": [os.path.abspath(os.path.expanduser(x)) for x in args.path or []]}])
+    elif a == "paths":
+        if name not in names:
+            die(f"no project {name!r}")
+        new_paths = [os.path.abspath(os.path.expanduser(x)) for x in args.names[1:]]
+        save_projects([dict(pr, paths=new_paths) if pr["name"] == name else pr for pr in projects])
+    elif a == "rename":
+        if len(args.names) < 2:
+            die("usage: hq project rename OLD NEW")
+        new = check_category(args.names[1])
+        if new in names and new != name:
+            die(f"{new!r} already exists — to merge, use: hq project remove {name!r} --to {new!r}")
+        if name not in names and not usage.get(name):
+            die(f"no project {name!r}")
+        if name in names:
+            save_projects([dict(pr, name=new) if pr["name"] == name else pr for pr in projects])
+        else:
+            save_projects(projects + [{"name": new, "paths": []}])
+        print(f"renamed {name!r} → {new!r} ({relabel('project', name, new, 'project renamed')} task(s) updated)")
+    elif a == "remove":
+        n_used = usage.get(name, 0)
+        if n_used and args.to is None:
+            print(f"hq: {n_used} task(s) are in {name!r}. Re-run with --to <project> to move them, "
+                  f"or --to '' to leave them without a project.", file=sys.stderr)
+            sys.exit(3)
+        to = ""
+        if args.to:
+            to = check_category(args.to)
+            if to == name:
+                die("--to must be a different project")
+            ensure_project(to)
+        save_projects([pr for pr in load_projects() if pr["name"] != name])
+        n = relabel("project", name, to, "project removed") if n_used else 0
+        print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else ""))
+
+
+def cmd_category(args):
+    cats = load_categories()
+    usage = category_usage()
+    if args.action == "list":
+        rows = [{"name": c, "count": usage.get(c, 0), "listed": True} for c in cats]
+        rows += [{"name": c, "count": n, "listed": False} for c, n in usage.items() if c and c not in cats]
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return
+        for r in rows:
+            print(f"{r['name']:<24} {r['count']:>3} task(s){'' if r['listed'] else '   (not in list — used on cards)'}")
+        if usage.get(""):
+            print(f"{'(none)':<24} {usage['']:>3} task(s)")
+        return
+    if not args.names:
+        die(f"usage: hq category {args.action} NAME" + (" NEW" if args.action == "rename" else ""))
+    name = check_category(args.names[0])
+    if args.action == "add":
+        if name in cats:
+            die(f"category {name!r} already exists")
+        save_categories(cats + [name])
+    elif args.action == "rename":
+        if len(args.names) < 2:
+            die("usage: hq category rename OLD NEW")
+        new = check_category(args.names[1])
+        if new in cats and new != name:
+            die(f"{new!r} already exists — to merge, use: hq category remove {name!r} --to {new!r}")
+        if name not in cats and not usage.get(name):
+            die(f"no category {name!r}")
+        save_categories([new if c == name else c for c in cats] if name in cats else cats + [new])
+        n = recategorize(name, new)
+        print(f"renamed {name!r} → {new!r} ({n} task(s) updated)")
+    elif args.action == "remove":
+        n_used = usage.get(name, 0)
+        if n_used and args.to is None:
+            print(f"hq: {n_used} task(s) use {name!r}. Re-run with --to <category> to move them, "
+                  f"or --to '' to leave them uncategorized.", file=sys.stderr)
+            sys.exit(3)
+        to = ""
+        if args.to:
+            to = check_category(args.to)
+            if to == name:
+                die("--to must be a different category")
+            ensure_listed(to)
+        save_categories([c for c in load_categories() if c != name])
+        n = recategorize(name, to) if n_used else 0
+        print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else ""))
+
+
+def age_days(meta):
+    try:
+        return (dt.date.today() - dt.date.fromisoformat(str(meta.get("updated", "")))).days
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------- asks ledger
+def asks_path(task_dir):
+    return os.path.join(task_dir, "asks.jsonl")
+
+
+def read_asks(task_dir):
+    """Fold the event log into current ask records, in creation order."""
+    asks = {}
+    p = asks_path(task_dir)
+    if not os.path.exists(p):
+        return []
+    for line in open(p, encoding="utf-8"):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("type") == "open":
+            asks[e["id"]] = dict(e, state="open")
+        elif e.get("type") == "resolve" and e.get("id") in asks:
+            a = asks[e["id"]]
+            a.update(state=e["resolution"], note=e.get("note", ""), via=e.get("via"),
+                     resolved_at=e.get("ts"), seq=e.get("seq"))
+        elif e.get("type") == "reopen" and e.get("id") in asks:
+            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None)
+    return list(asks.values())
+
+
+def append_event(task_dir, event):
+    event.setdefault("ts", now_iso())
+    event.setdefault("seq", time.time_ns())
+    with open(asks_path(task_dir), "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def add_ask(card, text, session=None, context=None):
+    meta = parse_card(card)
+    existing = read_asks(meta["dir"])
+    # Sessions are reminded of their open asks every turn and tend to repeat them: the same
+    # question still open on this task is the same ask, not a new one.
+    key = " ".join(text.split()).casefold()
+    for a in existing:
+        if a.get("state") == "open" and " ".join(a.get("text", "").split()).casefold() == key:
+            return a["id"]
+    n = max([int(a["id"].rsplit(".", 1)[1]) for a in existing] or [0]) + 1
+    aid = f"{meta['id']}.{n}"
+    event = {"type": "open", "id": aid, "task": meta["id"], "text": text.strip(), "session": session}
+    if context:
+        # The reply that asked — so the board can show why, even after the session is gone.
+        event["context"] = FENCE_RE.sub("", context).strip()[:6000]
+    append_event(meta["dir"], event)
+    return aid
+
+
+def find_ask(aid):
+    tid = aid.rsplit(".", 1)[0]
+    card = find_card(tid)
+    for a in read_asks(os.path.dirname(card)):
+        if a["id"] == aid:
+            return card, a
+    die(f"no ask {aid}")
+
+
+def resolve_ask(aid, resolution, note="", via="cli"):
+    if resolution not in RESOLUTIONS:
+        die(f"resolution must be one of {', '.join(RESOLUTIONS)}")
+    card, _ = find_ask(aid)
+    append_event(os.path.dirname(card), {"type": "resolve", "id": aid, "resolution": resolution,
+                                         "note": note, "via": via})
+
+
+# ---------------------------------------------------------------- session state
+def load_state():
+    return load_json(STATE, {})
+
+
+def save_state(state):
+    atomic_write(STATE, json.dumps(state, ensure_ascii=False, indent=1))
+
+
+@contextlib.contextmanager
+def state_lock():
+    """Every session's hooks and the board write sessions.json; each read-change-write holds
+    this lock so one writer can't put back an old copy over another's change."""
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE + ".lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def update_session(sid, change):
+    """Apply change(entry) to this session's entry as it is now on disk (skipped if unbound)."""
+    with state_lock():
+        state = load_state()
+        if sid in state:
+            change(state[sid])
+            save_state(state)
+
+
+def bound_task(session):
+    s = load_state().get(session or "")
+    return s.get("task") if s else None
+
+
+def session_id(arg=None):
+    return arg or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+
+
+# ---------------------------------------------------------------- protocol text
+def protocol(meta):
+    return f"""This Claude Code session is bound to HQ task {meta['id']}: {meta.get('title','')}.
+Task card: {meta['path']}
+The card, not this conversation, is the source of truth. Rules:
+1. Read the card before acting. Keep it current: status / next in the frontmatter, todos as
+   `- [ ] @owner text` (owner: me = the user, claude, or a person's name); mark `[x]` done,
+   `[-]` dropped. Anything the user has to DO (send, review, decide offline) is an `@me` todo;
+   anything you need the user to ANSWER goes in an hq-asks block (rule 2). Append decisions with `{HQ_BIN} log {meta['id']} "..."`.
+   If you changed nothing worth recording, run `{HQ_BIN} touch {meta['id']}`.
+   Record related tickets, PRs and docs as a short title plus the full URL:
+   `{HQ_BIN} ref add {meta['id']} "<title> <url>"` (the board shows the title, not the URL).
+   If you start working in another directory, add it: `{HQ_BIN} set {meta['id']} 'workdirs=[...]'`.
+2. When you need the user to decide, confirm, answer or do something, end your reply with
+   one self-contained item per line in this block (they are tracked until answered):
+```hq-asks
+- <question or request>
+```
+3. When the user answers tracked asks in chat, record each one:
+```hq-resolved
+- <ask id> <do|drop|later|archive>: <short note>
+```
+   do = will do / how; drop = won't do; later = needs someone else, revisit; archive = no
+   context, parked. Never treat an unanswered ask as declined.
+4. If the work drifts into a different task, say so and suggest `/task` for a new card."""
+
+
+def open_asks_text(meta, limit=10):
+    asks = [a for a in read_asks(meta["dir"]) if a["state"] == "open"]
+    if not asks:
+        return ""
+    lines = [f"Open asks on {meta['id']} still waiting for the user ({len(asks)}):"]
+    for a in asks[:limit]:
+        lines.append(f"- {a['id']}: {a['text']}")
+    if len(asks) > limit:
+        lines.append(f"- … {len(asks) - limit} more (`{HQ_BIN} asks {meta['id']}`)")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- commands
+def stamp_todos(metas):
+    """Give every open todo a creation time: its hidden <!--t:…--> stamp if it has one, else the
+    first time HQ saw it (kept in HQ's state, so the card itself is not rewritten)."""
+    path = os.path.join(HOME_DIR, "state", "todo-seen.json")
+    seen = load_json(path, {})
+    changed = False
+    now = now_iso()
+    for m in metas:
+        items = [t for t in m["todos"] if t["state"] == "open"]
+        if m.get("waiting_on_me"):
+            items.append({"text": m["waiting_on_me"], "_legacy": True})
+        for t in items:
+            key = f"{m.get('id')}|{t['text']}"
+            if not t.get("created"):
+                if key not in seen:
+                    seen[key] = now
+                    changed = True
+                if t.get("_legacy"):
+                    m["waiting_since"] = seen[key]
+                else:
+                    t["created"] = seen[key]
+    if changed:
+        atomic_write(path, json.dumps(seen, ensure_ascii=False))
+
+
+def cmd_board(args):
+    metas = [parse_card(p) for p in card_paths()]
+    for m in metas:
+        m["age_days"] = age_days(m)
+        m["asks"] = read_asks(m["dir"])
+    stamp_todos(metas)
+    if args.json:
+        out = []
+        for m in metas:
+            d = {k: v for k, v in m.items() if k not in ("dir",)}
+            out.append(d)
+        cfg = load_json(root_config_path(), {})
+        links = cfg.get("links", []) if isinstance(cfg, dict) else []
+        print(json.dumps({"root": hq_root(), "focus": focus_state(), "categories": load_categories(), "projects": load_projects(),
+                          "links": links, "tasks": out},
+                         ensure_ascii=False, indent=1))
+        return
+    open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
+    my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES
+                for t in m["todos"] if t["state"] == "open" and t["owner"] == "me"]
+    my_todos += [(m, {"i": "-", "text": m["waiting_on_me"]}) for m in metas
+                 if m.get("status") in OPEN_STATUSES and m.get("waiting_on_me")]
+    if open_asks:
+        print(f"\n❓ 待你回应 asks ({len(open_asks)})")
+        for m, a in open_asks:
+            print(f"  {a['id']:<8} {a['text']}")
+    if my_todos:
+        print(f"\n📝 你的待办 @me ({len(my_todos)})")
+        for m, t in my_todos:
+            print(f"  {m['id']}#{t['i']:<3} {t['text']}")
+    labels = {"waiting-on-me": "🔴 等你处理", "blocked": "🟠 阻塞", "active": "🟢 进行中",
+              "done": "✅ 已完成", "abandoned": "⚪ 已放弃"}
+    for st in STATUSES:
+        if st in ("done", "abandoned") and not args.all:
+            continue
+        group = sorted([m for m in metas if m.get("status") == st],
+                       key=lambda m: str(m.get("updated", "")), reverse=True)
+        if not group:
+            continue
+        print(f"\n{labels[st]} ({len(group)})")
+        for m in group:
+            age = f"{m['age_days']}d" if m["age_days"] is not None else "?"
+            print(f"  {m.get('id','?'):<6} [{m.get('category','?'):<13}] {m.get('title','')}  ({m.get('lead','-')}, {age})")
+            mine = [t["text"] for t in m["todos"] if t["state"] == "open" and t["owner"] == "me"]
+            if m.get("waiting_on_me"):           # legacy field; @me todos replaced it
+                mine.insert(0, m["waiting_on_me"])
+            if mine and st not in ("done", "abandoned"):
+                print(f"         ⮑ 你: {mine[0]}" + (f"（+{len(mine) - 1}）" if len(mine) > 1 else ""))
+            elif m.get("next") and st not in ("done", "abandoned"):
+                print(f"         ⮑ 下一步: {m['next']}")
+    hidden = sum(1 for m in metas if m.get("status") in ("done", "abandoned"))
+    if hidden and not args.all:
+        print(f"\n（另有 {hidden} 个已完成/已放弃，用 --all 查看）")
+
+
+def cmd_show(args):
+    card = find_card(args.task)
+    print(open(card, encoding="utf-8").read())
+    t = open_asks_text(parse_card(card), limit=100)
+    if t:
+        print(t)
+
+
+def slugify(s):
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", s).strip("-").lower()
+    return s[:40] or "task"
+
+
+# ---------------------------------------------------------------- today's focus
+# <root>/focus.json: {"days": {"2026-11-20": ["T-062", "T-003"], ...}} — the tasks picked for a day.
+# "carry" = tasks from the last day before today that had picks and are still open.
+def focus_path():
+    return os.path.join(hq_root(), "focus.json")
+
+
+def load_focus():
+    f = load_json(focus_path(), {})
+    days = f.get("days") if isinstance(f, dict) else None
+    return days if isinstance(days, dict) else {}
+
+
+def save_focus(days):
+    # keep the last 90 days; older history is not needed for carry-over
+    keep = dict(sorted(days.items())[-90:])
+    atomic_write(focus_path(), json.dumps({"days": keep}, ensure_ascii=False, indent=1) + "\n")
+
+
+def focus_state():
+    days = load_focus()
+    t = today()
+    ids = list(days.get(t, []))
+    earlier = sorted(d for d in days if d < t and days[d])
+    last = earlier[-1] if earlier else None
+    status = {}
+    for path in card_paths():
+        m = parse_card(path)
+        status[m.get("id")] = m.get("status")
+    carry = [i for i in (days.get(last, []) if last else [])
+             if i not in ids and status.get(i) in OPEN_STATUSES]
+    ids = [i for i in ids if i in status]          # drop tasks that no longer exist
+    return {"today": t, "ids": ids, "last_day": last, "carry": carry}
+
+
+def focus_add(ids):
+    days = load_focus()
+    cur = days.setdefault(today(), [])
+    for i in ids:
+        if i not in cur:
+            cur.append(i)
+    save_focus(days)
+
+
+def cmd_focus(args):
+    if args.action in ("add", "remove"):
+        if not args.tasks:
+            die(f"usage: hq focus {args.action} T-012 ...")
+        ids = [parse_card(find_card(x))["id"] for x in args.tasks]
+        if args.action == "add":
+            focus_add(ids)
+        else:
+            days = load_focus()
+            days[today()] = [i for i in days.get(today(), []) if i not in ids]
+            save_focus(days)
+    elif args.action == "carry":
+        focus_add(focus_state()["carry"])
+    st = focus_state()
+    if args.json:
+        print(json.dumps(st, ensure_ascii=False))
+        return
+    print(f"Today ({st['today']}): {', '.join(st['ids']) or '— nothing picked yet'}")
+    if st["carry"]:
+        print(f"Unfinished from {st['last_day']}: {', '.join(st['carry'])}   (hq focus carry)")
+
+
+def cmd_new(args):
+    td = tasks_dir()
+    nums = [int(m.group(1)) for d in os.listdir(td) for m in [re.match(r"T-(\d+)", d)] if m]
+    tid = f"T-{(max(nums) + 1 if nums else 1):03d}"
+    d = os.path.join(td, f"{tid}-{slugify(args.slug or args.title)}")
+    tpl = os.path.join(hq_root(), "templates", "TASK.md")
+    if not os.path.exists(tpl):
+        tpl = os.path.join(HOME_DIR, "template", "TASK.md")
+    text = open(tpl, encoding="utf-8").read()
+    cats = load_categories()
+    category = check_category(args.category) if args.category else (
+        "other" if "other" in cats else (cats[0] if cats else ""))
+    ensure_listed(category)
+    workdirs = [os.path.abspath(os.path.expanduser(w)) for w in (args.workdir or [])]
+    project = check_category(args.project) if args.project else project_for_dirs(workdirs)
+    ensure_project(project)
+    os.makedirs(d)
+    p = os.path.join(d, "TASK.md")
+    atomic_write(p, text)
+    set_fields(p, {"id": tid, "title": args.title, "project": project, "category": category,
+                   "status": "active", "lead": args.lead or "-", "updated": today(), "workdirs": workdirs})
+    if not args.no_focus:
+        focus_add([tid])            # a task made today is on today's list
+    print(tid)
+    print(p)
+
+
+def cmd_bind(args):
+    sid = session_id(args.session)
+    if not sid:
+        die("no session id (run inside Claude Code or pass --session)")
+    card = find_card(args.task)
+    meta = parse_card(card)
+    # Bound from inside the session (its own Bash tool) the session reads this output now;
+    # bound from outside (the board) it learns the rules on its next prompt.
+    from_inside = sid == os.environ.get("CLAUDE_CODE_SESSION_ID")
+    with state_lock():
+        state = load_state()
+        prev = state.get(sid, {}).get("task")
+        state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
+                      "delivered": state.get(sid, {}).get("delivered", [])}
+        save_state(state)
+    fields = {}
+    sessions = meta.get("sessions") if isinstance(meta.get("sessions"), list) else []
+    if sid[:8] not in sessions:
+        fields["sessions"] = sessions + [sid[:8]]
+    # The session's directory is where this task's work happens: remember it on the card.
+    cwd = os.getcwd() if from_inside else (pet_session(sid) or {}).get("cwd")
+    workdirs = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
+    if (cwd and os.path.isdir(cwd) and cwd not in workdirs
+            and os.path.realpath(cwd) not in ("/", os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~")))):
+        fields["workdirs"] = workdirs + [cwd]
+    if not meta.get("project"):
+        guess = project_for_path(cwd) or project_for_dirs(workdirs)
+        if guess:
+            fields["project"] = guess
+    if fields:
+        set_fields(card, fields)
+    if prev and prev != meta["id"]:
+        print(f"(re-bound from {prev})")
+    print(protocol(meta))
+    t = open_asks_text(meta)
+    if t:
+        print("\n" + t)
+
+
+def cmd_unbind(args):
+    sid = session_id(args.session)
+    with state_lock():
+        state = load_state()
+        if state.pop(sid, None) is None:
+            print("this session was not bound")
+        save_state(state)
+
+
+def cmd_whoami(args):
+    sid = session_id(args.session)
+    t = bound_task(sid)
+    print(t or "(not bound)")
+
+
+def cmd_touch(args):
+    set_fields(find_card(args.task), {})
+
+
+def cmd_log(args):
+    append_log(find_card(args.task), args.message)
+
+
+def cmd_set(args):
+    fields = {}
+    for kv in args.fields:
+        if "=" not in kv:
+            die(f"expected key=value, got {kv}")
+        k, v = kv.split("=", 1)
+        if k == "status" and v not in STATUSES:
+            die(f"status must be one of {', '.join(STATUSES)}")
+        if k == "category" and v:
+            v = check_category(v)
+            ensure_listed(v)
+        if k == "project" and v:
+            v = check_category(v)
+            ensure_project(v)
+        fields[k] = v
+    set_fields(find_card(args.task), fields)
+
+
+def cmd_todo(args):
+    card = find_card(args.task)
+    lines = open(card, encoding="utf-8").read().split("\n")
+    n = 0
+    mark = {"done": "x", "drop": "-", "open": " "}[args.state]
+    todos = []                      # (line index, todo number, match, plain text)
+    for i, line in enumerate(lines):
+        t = TODO_RE.match(line)
+        if t:
+            n += 1
+            todos.append((i, n, t, todo_plain(t.group(3))))
+    pick = next((x for x in todos if x[1] == args.index), None)
+    if args.text is not None:
+        # The caller saw this text at #index; the card may have changed since (a session added
+        # or removed a todo). Trust the text, not the position.
+        want = " ".join(args.text.split())
+        if not pick or pick[3] != want:
+            pick = next((x for x in todos if x[3] == want), None)
+            if not pick:
+                die(f"{args.task} no longer has the todo {args.text!r} — refresh and try again")
+    if not pick:
+        die(f"{args.task} has no todo #{args.index}")
+    i, num, t, _ = pick
+    lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
+    atomic_write(card, "\n".join(lines))
+    append_log(card, f"todo #{num} → {args.state} ({args.via}): {TODO_TIME_RE.sub('', t.group(3))}")
+
+
+def todo_plain(raw):
+    """A todo line's text as the board shows it: no time stamp, no @owner, spaces collapsed."""
+    txt = TODO_TIME_RE.sub("", raw.strip()).rstrip()
+    o = re.match(r"@(\S+)\s+(.*)$", txt)
+    return " ".join((o.group(2) if o else txt).split())
+
+
+def cmd_ref(args):
+    card = find_card(args.task)
+    meta = parse_card(card)
+    refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
+    if args.action == "add":
+        ref = args.ref.strip()
+        if not ref or "\n" in ref:
+            die("empty ref")
+        if ref not in refs:
+            set_fields(card, {"refs": refs + [ref]})
+    else:
+        if args.ref not in refs:
+            die(f"{args.task} has no ref {args.ref!r}")
+        set_fields(card, {"refs": [r for r in refs if r != args.ref]})
+
+
+def cmd_addtodo(args):
+    card = find_card(args.task)
+    lines = open(card, encoding="utf-8").read().split("\n")
+    item = f"- [ ] {args.text.strip()} <!--t:{now_iso()}-->"
+    head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办)", l, re.I)), None)
+    last_todo = None
+    for i, l in enumerate(lines):
+        if TODO_RE.match(l) and (head is None or i > head):
+            last_todo = i
+    if last_todo is not None:
+        lines.insert(last_todo + 1, item)
+    elif head is not None:
+        j = head + 1
+        while j < len(lines) and lines[j].strip().startswith("<!--"):
+            j += 1
+        lines.insert(j, item)
+    else:
+        lines += ["", "## Todo", item]
+    atomic_write(card, "\n".join(lines))
+    set_fields(card, {})
+
+
+def cmd_ask(args):
+    if args.action == "add":
+        print(add_ask(find_card(args.target), " ".join(args.rest), session_id(None) or None))
+    elif args.action == "delivered":
+        # The board typed this answer straight into the session: don't inject it again next turn.
+        _, a = find_ask(args.target)
+        sid = args.session or a.get("session")
+        def mark(entry):
+            have = set(entry.get("delivered", []))
+            have = have - {args.target} if args.undo else have | {args.target}
+            entry["delivered"] = sorted(have)
+        update_session(sid, mark)
+    elif args.action == "reopen":
+        card, _ = find_ask(args.target)
+        append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
+    elif args.action == "resolve":
+        if not args.rest:
+            die("usage: hq ask resolve <ask-id> <do|drop|later|archive> [note…]")
+        resolve_ask(args.target, args.rest[0], args.note or " ".join(args.rest[1:]), via=args.via)
+
+
+def cmd_asks(args):
+    paths = [find_card(args.task)] if args.task else card_paths()
+    out = []
+    for p in paths:
+        m = parse_card(p)
+        for a in read_asks(m["dir"]):
+            if args.all or a["state"] == "open":
+                a["title"] = m.get("title")
+                out.append(a)
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return
+    for a in out:
+        st = "" if a["state"] == "open" else f"  [{a['state']}{': ' + a['note'] if a.get('note') else ''}]"
+        print(f"{a['id']:<8} {a['text']}{st}")
+
+
+# ---------------------------------------------------------------- live sessions
+PET_SESSIONS = os.path.expanduser("~/.claude/pet/sessions")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def transcript_tail(path, nbytes=600_000):
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - nbytes))
+        lines = f.read().decode("utf-8", "ignore").splitlines()
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def message_text(o):
+    """Visible text of a transcript entry: the user's typed prompt or Claude's prose."""
+    if o.get("isSidechain") or o.get("isMeta") or o.get("isCompactSummary"):
+        return None  # compaction summaries are not something anyone said
+    c = o.get("message", {}).get("content")
+    if o.get("type") == "user":
+        if isinstance(c, str):
+            t = c
+        elif isinstance(c, list):
+            if any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c):
+                return None
+            t = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        else:
+            return None
+        if t.startswith("<") and ("command-" in t[:40] or "local-command" in t[:40]
+                                  or "system-reminder" in t[:40] or "task-notification" in t[:40]):
+            return None
+        return t.strip() or None
+    if o.get("type") == "assistant" and isinstance(c, list):
+        t = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        return t.strip() or None
+    return None
+
+
+def recent_messages(path, n=8):
+    for nbytes in (600_000, 6_000_000):
+        msgs = []
+        for o in transcript_tail(path, nbytes):
+            t = message_text(o)
+            if t:
+                msgs.append({"role": o["type"], "text": t, "ts": o.get("timestamp")})
+        if len(msgs) >= n:
+            break
+    return msgs[-n:]
+
+
+def session_title(entries):
+    for o in reversed(entries):
+        if o.get("type") == "custom-title" and o.get("customTitle"):
+            return o["customTitle"]
+    return None
+
+
+def pet_session(sid):
+    return load_json(os.path.join(PET_SESSIONS, f"{sid}.json"), None) if sid and "/" not in sid else None
+
+
+def live_sessions():
+    state = load_state()
+    out = []
+    if not os.path.isdir(PET_SESSIONS):
+        return out
+    for name in os.listdir(PET_SESSIONS):
+        if not name.endswith(".json"):
+            continue
+        d = load_json(os.path.join(PET_SESSIONS, name), None)
+        if not isinstance(d, dict) or not pid_alive(d.get("pid")):
+            continue
+        sid = d.get("sessionId") or name[:-5]
+        last = None
+        # Screenshots and big tool results can fill the tail; widen once if needed.
+        for nbytes in (300_000, 3_000_000):
+            entries = transcript_tail(d.get("transcript"), nbytes)
+            for o in reversed(entries):
+                if o.get("type") == "assistant":
+                    last = message_text(o)
+                    if last:
+                        break
+            if last:
+                break
+        out.append({
+            "sessionId": sid,
+            "title": session_title(entries),
+            "project": d.get("project") or os.path.basename(d.get("cwd", "")),
+            "cwd": d.get("cwd"),
+            "state": d.get("state"),
+            "waitingOn": d.get("waitingOn"),
+            "updatedAt": d.get("updatedAt"),
+            "terminal": d.get("terminal"),
+            "transcript": d.get("transcript"),
+            "task": state.get(sid, {}).get("task"),
+            "lastText": (last or "")[:400],
+        })
+    out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
+    return out
+
+
+# ---------------------------------------------------------------- onboarding scan
+# Reads the Claude Code transcripts already on this machine and proposes projects (one per git
+# repository, or per directory outside a repository) with the sessions that worked in them.
+# Deterministic and read-only unless --apply-projects; turning sessions into task cards needs
+# judgment, which is what the /hq-onboard command (Claude) does with this output.
+SCAN_SKIP = re.compile(r"-private-|-var-folders-|^-tmp-|-T-tgkb-|scratchpad")
+
+
+def transcript_head(path, nbytes=96_000):
+    out = []
+    with open(path, "rb") as f:
+        chunk = f.read(nbytes).decode("utf-8", "ignore").splitlines()
+    for line in chunk[:-1] if len(chunk) > 1 else chunk:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def git_root(path):
+    home = os.path.realpath(os.path.expanduser("~"))
+    cur = os.path.realpath(path)
+    while cur not in ("/", home) and os.path.dirname(cur) != cur:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        cur = os.path.dirname(cur)
+    return None
+
+
+def scan_sessions(days):
+    base = os.path.expanduser("~/.claude/projects")
+    cutoff = time.time() - days * 86400
+    state = load_state()
+    rows = []
+    for slug in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        if SCAN_SKIP.search(slug):
+            continue
+        d = os.path.join(base, slug)
+        if not os.path.isdir(d):
+            continue
+        for name in os.listdir(d):
+            if not name.endswith(".jsonl"):
+                continue
+            path = os.path.join(d, name)
+            mtime = os.path.getmtime(path)
+            if mtime < cutoff:
+                continue
+            head = transcript_head(path)
+            tail = transcript_tail(path, 250_000)
+            cwd = next((o.get("cwd") for o in head + tail if o.get("cwd")), None)
+            if not cwd:
+                continue
+            first = next((t for t in (message_text(o) for o in head if o.get("type") == "user") if t), "")
+            users = sum(1 for o in tail if o.get("type") == "user" and message_text(o))
+            sid = name[:-6]
+            pet = pet_session(sid) or {}
+            rows.append({
+                "sessionId": sid, "cwd": cwd, "title": session_title(tail) or session_title(head),
+                "first": first[:200], "last": dt.datetime.fromtimestamp(mtime).astimezone().isoformat(timespec="minutes"),
+                "turns_in_tail": users, "live": pid_alive(pet.get("pid")) if pet else False,
+                "task": state.get(sid, {}).get("task"), "transcript": path,
+            })
+    rows.sort(key=lambda r: r["last"], reverse=True)
+    return rows
+
+
+def scan_projects(sessions):
+    home = os.path.realpath(os.path.expanduser("~"))
+    skip = {"/", home, os.path.realpath(hq_root(required=False) or "/")}
+    groups = {}
+    for r in sessions:
+        root = git_root(r["cwd"]) or os.path.realpath(r["cwd"])
+        if root in skip or not os.path.isdir(root):
+            continue
+        g = groups.setdefault(root, {"path": root, "name": safe_name(os.path.basename(root)), "sessions": [], "last": ""})
+        g["sessions"].append(r["sessionId"])
+        g["last"] = max(g["last"], r["last"])
+        r["root"] = root
+    out = sorted(groups.values(), key=lambda g: g["last"], reverse=True)
+    for g in out:
+        g["existing"] = project_for_path(g["path"]) or None
+        g["count"] = len(g["sessions"])
+    return out
+
+
+def cmd_scan(args):
+    sessions = scan_sessions(args.days)
+    projects = scan_projects(sessions)
+    if args.apply_projects:
+        only = set(x.strip() for x in (args.only or "").split(",") if x.strip())
+        taken = set(x["name"] for x in load_projects())
+        added = []
+        for g in projects:
+            if g["existing"] or (only and g["name"] not in only and g["path"] not in only):
+                continue
+            name, n = safe_name(g["name"]), 2
+            while name in taken:
+                suffix = f"-{n}"
+                name, n = safe_name(g["name"])[:40 - len(suffix)] + suffix, n + 1
+            save_projects(load_projects() + [{"name": name, "paths": [g["path"]]}])
+            taken.add(name)
+            added.append(name)
+        assigned = 0
+        for path in card_paths():
+            meta = parse_card(path)
+            if not meta.get("project"):
+                guess = project_for_dirs(meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else [])
+                if guess:
+                    set_fields(path, {"project": guess, "updated": meta.get("updated", today())})
+                    assigned += 1
+        print(json.dumps({"added": added, "assigned": assigned}) if args.json
+              else f"added {len(added)} project(s): {', '.join(added) or '-'}; assigned {assigned} task(s)")
+        return
+    if args.json:
+        print(json.dumps({"days": args.days, "projects": projects, "sessions": sessions}, ensure_ascii=False, indent=1))
+        return
+    print(f"Sessions in the last {args.days} days: {len(sessions)}\n")
+    print("Suggested projects:")
+    for g in projects:
+        flag = f"(already: {g['existing']})" if g["existing"] else "(new)"
+        print(f"  {g['name']:<24} {g['count']:>3} session(s)  last {g['last'][:16]}  {flag}  {g['path']}")
+    print("\nSessions:")
+    for r in sessions:
+        live = "live " if r["live"] else "     "
+        print(f"  {r['sessionId'][:8]} {live}{r['last'][:16]}  {os.path.basename(r.get('root') or r['cwd']):<20} "
+              f"{(r['title'] or r['first'] or '')[:60]}")
+    print("\nCreate the new projects: hq scan --apply-projects [--only name,name]"
+          "\nTurn sessions into task cards: run /hq-onboard in Claude Code.")
+
+
+def cmd_sessions(args):
+    s = live_sessions()
+    if args.json:
+        print(json.dumps(s, ensure_ascii=False, indent=1))
+        return
+    for x in s:
+        print(f"{x['sessionId'][:8]}  {x['state'] or '?':<8} {x['task'] or '-':<6} "
+              f"{x['project']:<20} {x['title'] or ''}")
+
+
+def find_transcript(prefix):
+    """A session's transcript by id or id prefix: the pet's record if the session is live,
+    else a search of ~/.claude/projects (so closed sessions can still be read)."""
+    if not prefix or "/" in prefix or len(prefix) < 6:
+        return None, False
+    for name in os.listdir(PET_SESSIONS) if os.path.isdir(PET_SESSIONS) else []:
+        if name.startswith(prefix):
+            d = load_json(os.path.join(PET_SESSIONS, name), {})
+            if d.get("transcript") and os.path.exists(d["transcript"]):
+                return d["transcript"], pid_alive(d.get("pid"))
+    import glob
+    hits = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{glob.escape(prefix)}*.jsonl"))
+    if not hits:
+        return None, False
+    return max(hits, key=os.path.getmtime), False
+
+
+def cmd_peek(args):
+    path, live = find_transcript(args.session)
+    msgs = recent_messages(path, args.n) if path else []
+    if args.json:
+        if args.meta:
+            entries = transcript_tail(path, 300_000) if path else []
+            cwd = next((o.get("cwd") for o in reversed(entries) if o.get("cwd")), None)
+            print(json.dumps({"session": os.path.basename(path)[:-6] if path else args.session,
+                              "found": bool(path), "live": live, "title": session_title(entries),
+                              "cwd": cwd, "messages": msgs}, ensure_ascii=False, indent=1))
+        else:
+            print(json.dumps(msgs, ensure_ascii=False, indent=1))
+        return
+    for m in msgs:
+        print(f"[{m['role']}] {m['text']}\n")
+
+
+# ---------------------------------------------------------------- hooks
+def last_assistant_text(payload):
+    t = payload.get("last_assistant_message")
+    if isinstance(t, str) and t.strip():
+        return t
+    path = payload.get("transcript_path")
+    if not path or not os.path.exists(path):
+        return ""
+    # Read the tail only; transcripts can be large.
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - 400_000))
+        tail = f.read().decode("utf-8", "ignore").splitlines()
+    for line in reversed(tail):
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if o.get("type") == "user" and not o.get("isMeta") and not o.get("isSidechain"):
+            c = o.get("message", {}).get("content")
+            if isinstance(c, str) or (isinstance(c, list) and any(
+                    isinstance(x, dict) and x.get("type") == "text" for x in c)):
+                return ""  # reached the user's prompt without finding a reply
+        if o.get("type") == "assistant" and not o.get("isSidechain"):
+            parts = [x.get("text", "") for x in o.get("message", {}).get("content", [])
+                     if isinstance(x, dict) and x.get("type") == "text"]
+            if any(p.strip() for p in parts):
+                return "\n".join(parts)
+    return ""
+
+
+def emit(event, context):
+    if context:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                                 "additionalContext": context}}, ensure_ascii=False))
+
+
+def hook_main():
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        return
+    if os.environ.get("HQ_HOOK_CHILD"):
+        return
+    sid = payload.get("session_id", "")
+    event = payload.get("hook_event_name", "")
+    state = load_state()
+    s = state.get(sid)
+    if not s:
+        return  # unbound sessions cost one small JSON read and nothing else
+    try:
+        card = find_card(s["task"])
+    except SystemExit:
+        return
+    meta = parse_card(card)
+
+    if event == "SessionStart":
+        update_session(sid, lambda e: e.update(announced=True))
+        ctx = protocol(meta)
+        t = open_asks_text(meta)
+        emit(event, ctx + ("\n\n" + t if t else ""))
+
+    elif event == "UserPromptSubmit":
+        turn_start = time.time()
+        lines = []
+        if not s.get("announced", True):
+            lines.append("The user bound this session to an HQ task from the board.\n" + protocol(meta))
+        delivered = set(s.get("delivered", []))
+        fresh = [a for a in read_asks(meta["dir"])
+                 if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered]
+        if fresh:
+            lines.append("The user answered these asks on the HQ board since your last turn:")
+            for a in fresh:
+                lines.append(f"- {a['id']} → {a['state']}{': ' + a['note'] if a.get('note') else ''} ({a['text']})")
+        told = {a["id"] for a in fresh}
+
+        def note_turn(entry):
+            entry.update(turn_start=turn_start, announced=True)
+            entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
+        update_session(sid, note_turn)
+        t = open_asks_text(meta)
+        if t:
+            lines.append(t)
+        emit(event, "\n".join(lines))
+
+    elif event == "Stop":
+        text = last_assistant_text(payload)
+        for kind, block in FENCE_RE.findall(text):
+            for line in block.splitlines():
+                line = re.sub(r"^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s*", "", line).strip()
+                if not line:
+                    continue
+                if kind == "hq-asks":
+                    add_ask(card, line, sid, context=text)
+                else:
+                    m = re.match(r"(T-\d+\.\d+)\s+(do|drop|later|archive)\b[:\s]*(.*)$", line)
+                    if m:
+                        try:
+                            resolve_ask(m.group(1), m.group(2), m.group(3), via="session")
+                        except SystemExit:
+                            pass
+        # Write-back guard: a long turn that never touched the card gets one nudge.
+        start = s.get("turn_start")
+        if (start and not payload.get("stop_hook_active")
+                and time.time() - start > WRITEBACK_MIN_TURN_SECONDS
+                and os.path.getmtime(card) < start):
+            print(json.dumps({"decision": "block", "reason":
+                f"HQ: this turn did work on {meta['id']} but the task card was not updated. "
+                f"Update status/next/todos in {card} (or `{HQ_BIN} touch {meta['id']}` if nothing "
+                f"changed), then finish."}, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------- main
+def main():
+    ap = argparse.ArgumentParser(prog="hq", description="task headquarters for Claude Code")
+    sub = ap.add_subparsers(dest="cmd")
+
+    p = sub.add_parser("board", help="print the board"); p.add_argument("--all", action="store_true")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_board)
+    p = sub.add_parser("show", help="print a task card and its open asks"); p.add_argument("task")
+    p.set_defaults(fn=cmd_show)
+    p = sub.add_parser("new", help="create a task card")
+    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category"); p.add_argument("--project")
+    p.add_argument("--no-focus", action="store_true", help="don't add it to today's focus")
+    p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
+    p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
+    p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
+    p = sub.add_parser("unbind"); p.add_argument("--session"); p.set_defaults(fn=cmd_unbind)
+    p = sub.add_parser("whoami", help="task bound to this session"); p.add_argument("--session")
+    p.set_defaults(fn=cmd_whoami)
+    p = sub.add_parser("touch", help="mark a card as reviewed today"); p.add_argument("task")
+    p.set_defaults(fn=cmd_touch)
+    p = sub.add_parser("log", help="append a decision/progress line"); p.add_argument("task")
+    p.add_argument("message"); p.set_defaults(fn=cmd_log)
+    p = sub.add_parser("set", help="set frontmatter fields: hq set T-1 status=done next=...")
+    p.add_argument("task"); p.add_argument("fields", nargs="+"); p.set_defaults(fn=cmd_set)
+    p = sub.add_parser("todo", help="mark todo #n: hq todo T-1 2 done|drop|open")
+    p.add_argument("task"); p.add_argument("index", type=int)
+    p.add_argument("state", choices=["done", "drop", "open"]); p.add_argument("--via", default="cli")
+    p.add_argument("--text", help="the todo's text as last seen; used if #n no longer matches")
+    p.set_defaults(fn=cmd_todo)
+    p = sub.add_parser("category", help="hq category list | add NAME | rename OLD NEW | remove NAME [--to OTHER]")
+    p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
+    p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
+    p = sub.add_parser("project", help="hq project list | add NAME [--path DIR] | paths NAME DIR... | "
+                                         "rename OLD NEW | remove NAME [--to OTHER] | auto | order NAME...")
+    p.add_argument("action", choices=["list", "add", "paths", "rename", "remove", "auto", "order"])
+    p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
+    p = sub.add_parser("focus", help="today's focus: hq focus [add|remove T-012 ...|carry] [--json]")
+    p.add_argument("action", nargs="?", choices=["show", "add", "remove", "carry"], default="show")
+    p.add_argument("tasks", nargs="*"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_focus)
+    p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")
+    p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("ref")
+    p.set_defaults(fn=cmd_ref)
+    p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
+    p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
+    p = sub.add_parser("ask", help="hq ask add <task> <text…> | resolve <ask-id> <res> [note…] | reopen <ask-id>")
+    p.add_argument("action", choices=["add", "resolve", "reopen", "delivered"]); p.add_argument("target")
+    p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.add_argument("--note")
+    p.add_argument("--session"); p.add_argument("--undo", action="store_true")
+    p.set_defaults(fn=cmd_ask)
+    p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
+    p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_asks)
+    p = sub.add_parser("scan", help="propose projects and list sessions from existing transcripts (onboarding)")
+    p.add_argument("--days", type=int, default=60); p.add_argument("--json", action="store_true")
+    p.add_argument("--apply-projects", action="store_true"); p.add_argument("--only")
+    p.set_defaults(fn=cmd_scan)
+    p = sub.add_parser("sessions", help="live Claude Code sessions (needs Claude Pet)")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sessions)
+    p = sub.add_parser("peek", help="recent messages of a live session"); p.add_argument("session")
+    p.add_argument("-n", type=int, default=8); p.add_argument("--json", action="store_true")
+    p.add_argument("--meta", action="store_true", help="with --json: an object with title, cwd, live")
+    p.set_defaults(fn=cmd_peek)
+    p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")
+    p.set_defaults(fn=lambda a: hook_main())
+
+    args = ap.parse_args()
+    if not getattr(args, "fn", None):
+        ap.print_help()
+        return
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BrokenPipeError:
+        pass

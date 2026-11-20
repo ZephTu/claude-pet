@@ -29,6 +29,10 @@ final class WebBridge {
     /// The user wants to be reminded about this session later; the point is
     /// where to put the menu.
     var onSnooze: ((String, CGPoint) -> Void)?
+    /// An ask row in the list: open the board at that task.
+    var onOpenBoardAt: ((String) -> Void)?
+    /// The pet itself was double-clicked (not a row): the task board's toggle.
+    var onDoubleClickPet: (() -> Void)?
     /// Right-click landed on a session row rather than on the pet.
     var onRowMenu: ((String, CGPoint) -> Void)?
 
@@ -75,12 +79,37 @@ final class WebBridge {
         // Pinned: a click is not a request to close, and there is nothing to
         // open either. Asserting the state rather than returning outright covers
         // the one case where they disagree — pinning while the panel is shut.
-        if panelPinned { return setPanelOpen(true) }
+        if panelPinned {
+            lastToggle = (Date(), true)
+            return setPanelOpen(true)
+        }
         webView.evaluateJavaScript("window.togglePanel();") { [weak self] result, _ in
             MainActor.assumeIsolated {
-                if result as? Bool == true { self?.onPanelOpened?() }
+                let open = result as? Bool == true
+                self?.lastToggle = (Date(), !open)
+                if open { self?.onPanelOpened?() }
             }
         }
+    }
+
+    /// When the last click on the pet toggled the list, and whether the list
+    /// was open before it. Row clicks never set this, so double-clicking a row
+    /// does nothing extra.
+    private var lastToggle: (at: Date, wasOpen: Bool)?
+
+    /// A double-click on the pet: put the list back the way the first click
+    /// found it, then toggle the board.
+    /// True if this was the pet's double-click; false (a second click on a row) lets the caller
+    /// treat it as an ordinary click.
+    @discardableResult
+    func handleDoubleClick() -> Bool {
+        guard let t = lastToggle,
+              Date().timeIntervalSince(t.at) <= NSEvent.doubleClickInterval + 0.2
+        else { return false }
+        lastToggle = nil
+        setPanelOpen(t.wasOpen || panelPinned)
+        onDoubleClickPet?()
+        return true
     }
 
     /// The user asked for the list to stay up — AppMain's "Keep List Open".
@@ -130,6 +159,9 @@ final class WebBridge {
                     return
                 }
                 switch row["action"] as? String {
+                case "openBoard":
+                    self.onOpenBoardAt?(row["task"] as? String ?? "")
+                    self.closePanel()
                 case "openNotice":
                     if let id = row["sessionId"] as? String, !id.isEmpty { self.onOpenNotice?(id) }
                 case "decide":
@@ -372,7 +404,10 @@ final class WebBridge {
                       prefs: [String: SessionLabels.Prefs] = [:],
                       branches: [String: String] = [:],
                       turns: [String: Int] = [:],
-                      context: [String: Int] = [:]) {
+                      context: [String: Int] = [:],
+                      tasks: [String: String] = [:],
+                      taskStatus: [String: String] = [:],
+                      hqAsks: [[String: String]] = []) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -407,6 +442,11 @@ final class WebBridge {
             // How long the conversation has gone on, and how full its context
             // is — see TranscriptStats.
             if let count = turns[s.sessionId] { item["turns"] = count }
+            // The HQ task this session is bound to, if any — see TaskIndex.
+            if let task = tasks[s.sessionId] {
+                item["task"] = task
+                item["taskStatus"] = taskStatus[s.sessionId] ?? ""
+            }
             if let percent = context[s.sessionId] { item["context"] = percent }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {
@@ -504,10 +544,13 @@ final class WebBridge {
             let finishedJSON = String(data: finishedData, encoding: .utf8)
         else { return }
 
-        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)"
+        // Open questions on the HQ board, so the badge's count has rows to point at.
+        let asksJSON = (try? JSONSerialization.data(withJSONObject: hqAsks))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)|\(asksJSON)"
         guard payload != lastSessionsPayload else { return }
         lastSessionsPayload = payload
-        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice));")
+        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice), \(asksJSON));")
     }
 
     /// A nil completionHandler swallows JS errors silently, which is exactly how
