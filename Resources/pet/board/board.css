@@ -18,14 +18,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 13px/1.45 -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
 
-#top { display: flex; align-items: center; gap: 10px; height: 46px; padding: 8px 16px 8px 84px;
-  border-bottom: 1px solid var(--line); -webkit-app-region: drag; position: sticky; top: 0;
+#top { display: flex; align-items: center; gap: 10px; height: 46px; padding: 8px 16px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0;
   background: var(--bg); z-index: 5; }
-#top > * { -webkit-app-region: no-drag; }
 .brand { font-weight: 700; letter-spacing: .08em; color: var(--accent); }
 #counts { display: flex; gap: 12px; color: var(--dim); font-size: 12px; }
 #counts b { color: var(--text); font-weight: 600; }
-.spacer { flex: 1; -webkit-app-region: drag; }
+.spacer { flex: 1; }
 #search { width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
   padding: 4px 9px; outline: none; }
 #search:focus { border-color: var(--accent); }

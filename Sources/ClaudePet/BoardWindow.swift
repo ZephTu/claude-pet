@@ -25,8 +25,12 @@ final class BoardWindow: NSWindow {
         }
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 760), configuration: config)
         super.init(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
-                   styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
+                   styleMask: [.titled, .closable, .resizable, .miniaturizable],
                    backing: .buffered, defer: false)
+        // A real title bar, painted the board's colour, is what the window is
+        // dragged by. The page must not extend under it: WKWebView swallows
+        // every mouse event, and `-webkit-app-region` is Electron-only — with
+        // the content under the bar the window could not be moved at all.
         title = "HQ"
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
