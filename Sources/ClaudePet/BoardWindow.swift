@@ -171,6 +171,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
         case "send": return await send(session: str("session"), text: str("text"))
+        case "saveImage": return saveImage(dataURL: str("data"))
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
                                 place: str("where"), prompt: str("prompt"))
@@ -212,6 +213,28 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         default:
             return (nil, "unknown operation")
         }
+    }
+
+    // MARK: - Images
+
+    /// An image pasted or dropped into a message box, saved as a file so its path can go into the
+    /// message — Claude Code reads an image from a path in the prompt.
+    private func saveImage(dataURL: String) -> (Any?, String?) {
+        let types = ["image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"]
+        guard dataURL.hasPrefix("data:"), let comma = dataURL.firstIndex(of: ",") else { return (nil, "not an image") }
+        let header = dataURL[dataURL.index(dataURL.startIndex, offsetBy: 5)..<comma]   // image/png;base64
+        let mime = String(header.split(separator: ";").first ?? "")
+        guard header.hasSuffix(";base64"), let ext = types[mime] else { return (nil, "unsupported image type \(mime)") }
+        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) else { return (nil, "bad image data") }
+        guard data.count <= 20 * 1024 * 1024 else { return (nil, "image is larger than 20 MB") }
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/attachments")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd-HHmmss"
+        let name = "\(fmt.string(from: Date()))-\(UUID().uuidString.prefix(6).lowercased()).\(ext)"
+        let url = dir.appending(path: name)
+        do { try data.write(to: url) } catch { return (nil, "could not save the image: \(error.localizedDescription)") }
+        return (["path": url.path], nil)
     }
 
     // MARK: - New sessions

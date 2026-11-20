@@ -155,7 +155,9 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--text); margin: 0; }
 .today-h .pick { max-width: 280px; }
 .card.carry { border-left: 3px solid var(--blue); }
-.fcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 12px; margin-bottom: 12px; }
+.fcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 12px; margin-bottom: 12px; cursor: pointer; }
+.fcard:hover { border-color: #57504a; }
+.fcard [data-action="none"] { cursor: auto; }
 .fhead { display: flex; align-items: center; gap: 8px; }
 .ftitle { flex: 1; min-width: 0; font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fnext { margin: 6px 0 2px 52px; font-size: 12.5px; color: #e4e0dc; }
@@ -192,6 +194,12 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .task.flash, .fcard.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
 .toggle.af { margin-left: 0; }
 .pchip { color: var(--blue); }
+.atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pfoot + .atts { padding: 0 16px 12px; margin-top: 0; }
+.att { position: relative; width: 64px; height: 48px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); }
+.att img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att .icon { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; }
+.send.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 8px; }
 .icon.armed { width: auto; padding: 0 6px; color: #fff; background: var(--red); border-color: var(--red); font-size: 11px; }
 .bgtag { font-size: 10px; padding: 0 5px; border-radius: 6px; border: 1px solid rgba(127,166,217,.45); color: var(--blue); }
 select.place { max-width: 100px; }

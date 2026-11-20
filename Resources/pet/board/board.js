@@ -25,7 +25,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -504,13 +504,14 @@ function focusCard(t) {
         ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
           : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
       </div></div>`;
-  return `<div class="fcard" id="ftask-${esc(t.id)}">
+  // Clicking the card opens or closes its details, like a row in All; the details themselves
+  // swallow clicks (data-action="none") so selecting or typing there never folds the card.
+  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="btn small ghost" data-action="expand" data-task="${esc(t.id)}">${detail ? "Less" : "Details"}</button>
       <button class="icon" title="Not today — take it off today's list (the task stays)" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
@@ -520,7 +521,7 @@ function focusCard(t) {
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
         <span style="flex:1"></span>
         <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>
-    ${detail ? renderTaskBody(t) : ""}
+    ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
   </div>`;
 }
 
@@ -719,7 +720,7 @@ function renderSessions(items = ui.sessions, plain = false) {
     const why = canSend ? "" : s.background ? "A background session has no terminal to type into — Attach to talk to it."
       : `Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
     // The message box only takes room when asked for (or while it holds a draft).
-    const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)));
+    const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
     return `<div class="card session">
       <span class="dot ${esc(s.state || "")}" title="${esc(s.state || "")}"></span>
       <div class="body">
@@ -741,9 +742,9 @@ function renderSessions(items = ui.sessions, plain = false) {
         ${s.lastText ? `<div class="last">${esc(s.lastText)}</div>` : ""}
         ${open ? `<div class="send">
           <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
-            placeholder="${busy ? "Busy — your message will queue" : "Message — Enter to send"}">${esc(draft("msg:" + sid))}</textarea>
+            placeholder="${busy ? "Busy — it will queue · paste or drop images" : "Message · paste or drop images"}">${esc(draft("msg:" + sid))}</textarea>
           <button class="btn small primary" data-action="send" data-session="${esc(sid)}">Send</button>
-        </div>` : ""}
+        </div>${attachStrip(sid)}` : ""}
       </div>
     </div>`;
   };
@@ -994,9 +995,9 @@ function drawPeek(toBottom) {
     <div class="peek-body">${list}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
       <textarea data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
-        placeholder="${canSend ? "Reply to this session — Enter to send" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
+        placeholder="${canSend ? "Reply to this session — paste or drop images too" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
       <button class="btn small primary" data-action="send" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}>Send</button>
-    </div>
+    </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
   const nb = box.querySelector(".peek-body");
@@ -1220,14 +1221,69 @@ function scrollToCard(elementId) {
 }
 
 // ------------------------------------------------------------------ actions
+// ---- images in a message: pasted or dropped, saved to a file, sent as their paths (Claude Code
+// reads an image from a path in the prompt).
+function attachStrip(sid) {
+  const list = ui.atts[sid] || [];
+  if (!list.length) return "";
+  return `<div class="atts">${list.map((a, i) => `<span class="att" title="${esc(a.path)}"><img src="${a.url}" alt="">
+      <button class="icon" title="Remove" data-action="att-remove" data-session="${esc(sid)}" data-i="${i}">✕</button></span>`).join("")}</div>`;
+}
+function readAsDataURL(file) {
+  return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(file); });
+}
+async function addImages(sid, files) {
+  let added = 0;
+  for (const f of files) {
+    if (!f || !/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast("Only PNG, JPEG, GIF or WebP images", true); continue; }
+    if (f.size > 20 * 1024 * 1024) { toast("That image is larger than 20 MB", true); continue; }
+    try {
+      const url = await readAsDataURL(f);
+      const saved = await api("saveImage", { data: url });
+      (ui.atts[sid] = ui.atts[sid] || []).push({ path: saved.path, url });
+      added++;
+    } catch (e) { toast(String(e.message || e), true); }
+  }
+  if (added) { ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
+}
+document.addEventListener("paste", (ev) => {
+  const box = ev.target.closest && ev.target.closest("textarea[data-session]");
+  if (!box || !ev.clipboardData) return;
+  const files = [...ev.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile());
+  if (!files.length) return;     // plain text pastes as usual
+  ev.preventDefault();
+  addImages(box.dataset.session, files);
+});
+document.addEventListener("dragover", (ev) => {
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
+  ev.preventDefault();
+  zone.classList.add("dropping");
+});
+document.addEventListener("dragleave", (ev) => {
+  const zone = ev.target.closest && ev.target.closest(".send");
+  if (zone) zone.classList.remove("dropping");
+});
+document.addEventListener("drop", (ev) => {
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send");
+  if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
+  ev.preventDefault();
+  zone.classList.remove("dropping");
+  const box = zone.querySelector("textarea[data-session]");
+  if (box) addImages(box.dataset.session, [...ev.dataTransfer.files]);
+});
+
 async function send(sid) {
   const key = "msg:" + sid;
   const text = (ui.drafts[key] || "").trim();
-  if (!text) return;
+  const images = ui.atts[sid] || [];
+  if (!text && !images.length) return;
+  const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
   try {
-    await api("send", { session: sid, text });
+    await api("send", { session: sid, text: message });
     delete ui.drafts[key];
-    toast("Sent");
+    delete ui.atts[sid];
+    toast(images.length ? `Sent with ${images.length} image${images.length === 1 ? "" : "s"}` : "Sent");
   } catch (e) {
     toast(String(e.message || e), true);
   }
@@ -1305,6 +1361,11 @@ document.addEventListener("click", async (ev) => {
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
     case "peek": return openPeek(d.session);
+    case "att-remove":
+      (ui.atts[d.session] || []).splice(Number(d.i), 1);
+      render();
+      if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === d.session) drawPeek(false);
+      return;
     case "toggle-msg": {
       if (ui.msgOpen.has(d.session)) { ui.msgOpen.delete(d.session); delete ui.drafts["msg:" + d.session]; return render(); }
       ui.msgOpen.add(d.session);
@@ -1587,7 +1648,7 @@ document.addEventListener("keydown", async (ev) => {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
-  if (el.tagName === "TEXTAREA" && el.dataset.session && !ev.shiftKey) { ev.preventDefault(); return send(el.dataset.session); }
+  if (el.tagName === "TEXTAREA" && el.dataset.session) return;   // Enter is a new line; only Send sends
   if (el.dataset.field) { ev.preventDefault(); return; }   // fields save with their Save button
   if (el.dataset.enter) {
     ev.preventDefault();
