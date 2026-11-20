@@ -33,6 +33,10 @@ leaves your cards alone.
 
 ## Daily use
 
+The full user guide (both languages) is built into the board: open it with **Guide** in the
+board's top bar. Its source is `Resources/pet/board/guide.html`.
+
+
 ```text
 /board                    in any session: open asks, your @me todos, every open task
 /task T-012               bind this session to T-012 and pick up from its card

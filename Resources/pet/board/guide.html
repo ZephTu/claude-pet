@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQ Guide</title>
+<link rel="stylesheet" href="board.css">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body class="guide">
+<!--
+  Keep this guide in step with the code: any change to the board (board.js / BoardWindow.swift),
+  the hq CLI (hq/bin/hq) or the hooks updates BOTH language sections below in the same commit.
+  See CLAUDE.md at the repo root.
+-->
+<header id="top">
+  <a class="btn" href="board.html">← Board</a>
+  <div class="brand">HQ Guide</div>
+  <div class="spacer"></div>
+  <nav class="lang">
+    <button class="btn small" data-lang="zh">中文</button>
+    <button class="btn small" data-lang="en">English</button>
+  </nav>
+</header>
+
+<div class="doc">
+
+<!-- ======================================================================= 中文 -->
+<article lang="zh" hidden>
+<aside class="toc">
+  <a href="#zh-what">HQ 是什么</a>
+  <a href="#zh-start">开始使用</a>
+  <a href="#zh-board">看板上能做什么</a>
+  <a href="#zh-link">session 和看板怎么联动</a>
+  <a href="#zh-cli">命令行用法</a>
+  <a href="#zh-card">任务卡格式</a>
+  <a href="#zh-leads">负责人（lead）</a>
+  <a href="#zh-limits">注意事项</a>
+  <a href="#zh-files">文件与卸载</a>
+</aside>
+<div class="content">
+
+<h1 id="zh-what">HQ 是什么</h1>
+<p>同时开着十几个 Claude Code session 时，难的不再是干活本身，而是记住每个 session 在做什么、它问过你什么、你有没有回答。HQ 把这些状态从对话里搬到文件里：</p>
+<table>
+<tr><th>概念</th><th>是什么</th><th>存在多久</th></tr>
+<tr><td><b>任务卡</b></td><td><code>tasks/T-012-xxx/TASK.md</code>：目标、状态、下一步、待办、日志</td><td>到任务完成</td></tr>
+<tr><td><b>待回应事项（ask）</b></td><td>session 问过你、需要你决定或去做的事，记在 <code>asks.jsonl</code>，直到你回应</td><td>跟随任务</td></tr>
+<tr><td><b>session</b></td><td>绑定到某个任务的一条工作线程，随时可以关</td><td>随你</td></tr>
+<tr><td><b>负责人（lead）</b></td><td>可选。负责某一类任务的 agent 角色</td><td>长期</td></tr>
+</table>
+<p>核心原则：<b>任务卡才是真实状态，对话不是</b>。session 关了没关系，下一个 session 绑定到同一个任务、读卡就能接着做。</p>
+
+<h1 id="zh-start">开始使用</h1>
+<ol>
+<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。需要 <code>python3</code>。</li>
+<li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。</li>
+<li>在 Sessions 栏给正在跑的 session 选一个任务绑定，或点 <b>+ New task</b> 新建任务并顺手绑定。</li>
+<li>之后就在看板上处理 <b>Needs you</b> 里的事情，在 Sessions 栏直接给 session 发消息。</li>
+</ol>
+<p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
+
+<h1 id="zh-board">看板上能做什么</h1>
+<h2>顶栏</h2>
+<ul>
+<li>计数：未回应的 ask、你的待办、等你处理的任务、进行中的任务、在跑的 session。</li>
+<li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
+<li><b>+ New task</b>：新建任务，可选分类、工作目录，并立即绑定一个 session。</li>
+<li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
+</ul>
+<h2>Needs you（左栏）</h2>
+<ul>
+<li><b>Asks</b>：所有还没回应的问题，最早的排在最上面。每条四种回应，可以先在输入框写一句说明：
+<table>
+<tr><th>按钮</th><th>含义</th></tr>
+<tr><td><b>Do</b></td><td>要做 / 同意，说明里写怎么做</td></tr>
+<tr><td><b>Drop</b></td><td>不做了，不再跟踪</td></tr>
+<tr><td><b>Ask later</b></td><td>要先问别人，之后再说</td></tr>
+<tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
+</table>
+回应会在绑定的 session <b>下一轮</b>送达给它。</li>
+<li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办。点方框 = 做完；点 ✕ = 不做。</li>
+<li><b>Waiting on you</b>：任务卡上"等你处理"字段不为空的任务。处理完点 <b>Handled</b> 清空。</li>
+</ul>
+<h2>Tasks（中栏）</h2>
+<ul>
+<li>按状态分组：Waiting on you / Blocked / Active；勾 <b>show closed</b> 显示已完成和已放弃。</li>
+<li>行尾的黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
+<li>点开一个任务可以：
+  <ul>
+  <li>改 <b>status</b>（下拉）、<b>next</b>、<b>waiting on you</b>（回车保存）；</li>
+  <li>点待办前的方框切换：未做 → 做完 → 不做 → 未做；</li>
+  <li>在 "add todo" 框里加待办，开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做；</li>
+  <li>查看、跳转、解绑正在为它工作的 session，或从下拉框绑定一个新的；</li>
+  <li>在 Log 框里写一句话追加到日志；<b>Open card</b> 用默认编辑器打开任务卡文件。</li>
+  </ul></li>
+</ul>
+<h2>Sessions（右栏）</h2>
+<ul>
+<li>每个在跑的 session：状态点（绿色 = 在干活，灰色 = 空闲，黄色 = 等你）、标题、项目、最后一条回复。</li>
+<li><b>Bind to task…</b>：绑定到任务。session 会在下一条消息时收到任务规则。</li>
+<li><b>Peek</b>：看最近的对话。<b>Jump</b>：跳到它所在的终端。</li>
+<li>输入框：直接给它发消息，<b>Enter</b> 发送，<b>Shift+Enter</b> 换行。效果和你在终端里亲手输入完全一样。session 正忙时消息会排队。</li>
+</ul>
+
+<h1 id="zh-link">session 和看板怎么联动</h1>
+<p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
+<ol>
+<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。</li>
+<li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。
+<pre>```hq-asks
+- 方案 v2 可以吗？
+- 要不要找 Chengjie 要数据集？
+```</pre></li>
+<li><b>没回应的问题不会被当成"不做"</b>：每一轮都会把还没回应的 ask 重新提醒给 session。</li>
+<li><b>两边都能回应</b>：
+  <ul>
+  <li>在看板上点按钮 → session 下一轮收到"用户在看板上回应了 …"；</li>
+  <li>在 session 里直接回答 → session 用 <code>hq-resolved</code> 块记下来，看板上那条随之关闭。</li>
+  </ul></li>
+<li><b>草稿不等于完成</b>：session 替你起草、需要你去发的东西，会变成一条 <code>@me</code> 待办，直到你勾掉。</li>
+</ol>
+<p>什么时候用哪边：要看全局、批量处理问题、改状态，用看板；跟某个 session 深入讨论，在它的终端里直接聊，绑定之后它说的、问的同样会出现在看板上。</p>
+
+<h1 id="zh-cli">命令行用法</h1>
+<p>命令在 <code>~/.claude/hq/bin/hq</code>。看板上的每个操作背后都是这些命令，所以在终端里或让 Claude 调用，效果完全相同。</p>
+<table class="cmds">
+<tr><th>命令</th><th>作用</th></tr>
+<tr><td><code>hq board [--all] [--json]</code></td><td>打印看板；<code>--all</code> 含已完成；<code>--json</code> 给程序读</td></tr>
+<tr><td><code>hq show T-012</code></td><td>打印任务卡和它未回应的 ask</td></tr>
+<tr><td><code>hq new "标题" [--category rca] [--workdir DIR]</code></td><td>新建任务，输出编号</td></tr>
+<tr><td><code>hq bind T-012 [--session ID]</code></td><td>把当前（或指定）session 绑定到任务</td></tr>
+<tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>解绑 · 查看当前 session 绑定的任务</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=等 token"</code></td><td>改任务卡字段（status / next / waiting_on_me / title …）</td></tr>
+<tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
+<tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
+<tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行</td></tr>
+<tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
+<tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话</td></tr>
+</table>
+<p>在 Claude Code 里还可以用两个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）。</p>
+
+<h1 id="zh-card">任务卡格式</h1>
+<pre>---
+id: T-012
+title: "release_test_all 排障"
+category: test-followup      # 自由填写
+status: active               # active | waiting-on-me | blocked | done | abandoned
+lead: test-lead
+updated: 2026-11-20
+workdirs: ["/path/to/bigtest"]
+refs: ["QA-9519", "bigtest#3248"]
+sessions: ["48f4f564"]
+waiting_on_me: ""            # 需要你做的事；空 = 没有
+next: "fix 分支跑 Jenkins 并提 PR"
+---
+## Goal / Status / Todo / Log（标题用中文也行）
+- [ ] @me 未做，你来做
+- [ ] @claude 未做，Claude 来做
+- [ ] @Wenbing 在等别人
+- [x] 做完   ·   - [-] 不做了</pre>
+<p>任务卡是普通 Markdown，可以直接手改，也可以放进 git。<code>asks.jsonl</code> 是只追加的事件日志，不要手改，用命令或看板操作。</p>
+
+<h1 id="zh-leads">负责人（lead）</h1>
+<p>把任务根目录下的 <code>templates/lead.md</code> 复制到 <code>.claude/agents/bench-lead.md</code>，写清楚它负责的范围，然后在任务根目录运行 <code>claude --agent bench-lead</code>，跟它说"继续 T-020"。负责人会绑定任务、把重活交给后台 subagent、保持自己的上下文精简，并按固定格式汇报。小任务不需要负责人，绑定的 session 自己就是负责人。</p>
+
+<h1 id="zh-limits">注意事项</h1>
+<ul>
+<li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
+<li>看板上的回应在 session <b>下一轮</b>才送达，不会唤醒空闲的 session；要它立刻处理，就在 Sessions 栏给它发一句。</li>
+<li>直接发消息支持 <b>Orca</b> 和 <b>iTerm2</b>（第一次发到 iTerm2 时 macOS 会请求授权）。Ghostty、VS Code 目前只能 Jump。</li>
+<li>Sessions 栏依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
+</ul>
+
+<h1 id="zh-files">文件与卸载</h1>
+<pre>&lt;任务根目录&gt;/tasks/T-012-xxx/TASK.md     任务卡
+&lt;任务根目录&gt;/tasks/T-012-xxx/asks.jsonl   待回应事项
+&lt;任务根目录&gt;/templates/                   新任务模板、lead 模板
+~/.claude/hq/bin/hq                       命令行工具 + hook 入口
+~/.claude/hq/config.json                  {"root": "任务根目录"}
+~/.claude/hq/state/sessions.json          session → 任务的绑定</pre>
+<p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。</p>
+</div>
+</article>
+
+<!-- ======================================================================= English -->
+<article lang="en" hidden>
+<aside class="toc">
+  <a href="#en-what">What HQ is</a>
+  <a href="#en-start">Getting started</a>
+  <a href="#en-board">What the board does</a>
+  <a href="#en-link">How sessions and the board connect</a>
+  <a href="#en-cli">Command line</a>
+  <a href="#en-card">Task card format</a>
+  <a href="#en-leads">Leads</a>
+  <a href="#en-limits">Good to know</a>
+  <a href="#en-files">Files and uninstall</a>
+</aside>
+<div class="content">
+
+<h1 id="en-what">What HQ is</h1>
+<p>With a dozen Claude Code sessions open, the hard part is no longer the work — it is remembering what each session was doing, what it asked you, and whether you ever answered. HQ moves that state out of the conversations and into files:</p>
+<table>
+<tr><th>Concept</th><th>What it is</th><th>Lives</th></tr>
+<tr><td><b>Task card</b></td><td><code>tasks/T-012-slug/TASK.md</code>: goal, status, next step, todos, log</td><td>until the task is done</td></tr>
+<tr><td><b>Ask</b></td><td>something a session needs you to decide or do, kept in <code>asks.jsonl</code> until you answer</td><td>with the task</td></tr>
+<tr><td><b>Session</b></td><td>a working thread bound to one task; close it any time</td><td>as long as you like</td></tr>
+<tr><td><b>Lead</b></td><td>optional agent role that owns a category of tasks</td><td>long-term</td></tr>
+</table>
+<p>The one rule: <b>the card is the truth, not the conversation.</b> When a session is closed, the next one binds to the same task, reads the card and carries on.</p>
+
+<h1 id="en-start">Getting started</h1>
+<ol>
+<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). Needs <code>python3</code>.</li>
+<li>Open the board: <b>double-click the pet</b> (double-click again to hide it), or right-click → <b>Task Board…</b>.</li>
+<li>In the Sessions column, bind a running session to a task — or click <b>+ New task</b> to create one and bind it.</li>
+<li>From then on, work through <b>Needs you</b> and message sessions straight from the board.</li>
+</ol>
+<p class="tip">Sessions that were already running when HQ was installed should be restarted once so the hooks load.</p>
+
+<h1 id="en-board">What the board does</h1>
+<h2>Top bar</h2>
+<ul>
+<li>Counts: unanswered asks, your todos, tasks waiting on you, open tasks, live sessions.</li>
+<li><b>Filter tasks…</b> by id, title or refs. <b>+ New task</b> with category, workdir and a session to bind.</li>
+<li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
+</ul>
+<h2>Needs you (left)</h2>
+<ul>
+<li><b>Asks</b> — every unanswered question, oldest first. Type an optional note, then answer:
+<table>
+<tr><th>Button</th><th>Meaning</th></tr>
+<tr><td><b>Do</b></td><td>yes / will do — the note says how</td></tr>
+<tr><td><b>Drop</b></td><td>won't do, stop tracking</td></tr>
+<tr><td><b>Ask later</b></td><td>need to ask someone else first</td></tr>
+<tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
+</table>
+The bound session receives your answer on its <b>next turn</b>.</li>
+<li><b>Your todos</b> — every <code>@me</code> todo across tasks. Box = done, ✕ = won't do.</li>
+<li><b>Waiting on you</b> — tasks whose "waiting on you" field is set. <b>Handled</b> clears it.</li>
+</ul>
+<h2>Tasks (middle)</h2>
+<ul>
+<li>Grouped by status; tick <b>show closed</b> for done and abandoned. Amber number = open asks, green = live sessions on it.</li>
+<li>Open a task to change <b>status</b>, <b>next</b> and <b>waiting on you</b> (Enter saves); click a todo's box to cycle open → done → dropped; add todos (start with <code>@me</code>, <code>@claude</code> or a name); jump to, unbind or bind sessions; append to the log; <b>Open card</b> in your editor.</li>
+</ul>
+<h2>Sessions (right)</h2>
+<ul>
+<li>Every live session: state dot (green working, grey idle, amber waiting on you), title, project, last reply.</li>
+<li><b>Bind to task…</b> — the session learns the task's rules with its next message.</li>
+<li><b>Peek</b> at recent messages, <b>Jump</b> to its terminal, or type a message: <b>Enter</b> sends, <b>Shift+Enter</b> adds a line. It arrives exactly as if you typed it; a busy session queues it.</li>
+</ul>
+
+<h1 id="en-link">How sessions and the board connect</h1>
+<p>Once bound, three hooks make the session follow these rules:</p>
+<ol>
+<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. A turn longer than two minutes that never touched the card is sent back once to update it.</li>
+<li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …).
+<pre>```hq-asks
+- Approve plan v2?
+- Ask Chengjie for the dataset?
+```</pre></li>
+<li><b>An unanswered ask is never a "no"</b> — open asks are reminded to the session every turn.</li>
+<li><b>Answer on either side</b> — on the board (delivered next turn), or in the chat (the session records it with an <code>hq-resolved</code> block and the board updates).</li>
+<li><b>Drafts are not done</b> — anything the session drafted for you to send becomes an <code>@me</code> todo until you tick it.</li>
+</ol>
+<p>Use the board for the overview, batches of answers and status changes; talk in the session's terminal for a deep discussion — once bound, what it asks there shows up here too.</p>
+
+<h1 id="en-cli">Command line</h1>
+<p>The CLI is <code>~/.claude/hq/bin/hq</code>. Every board action is one of these commands, so running them yourself (or letting Claude run them) has exactly the same effect.</p>
+<table class="cmds">
+<tr><th>Command</th><th>Does</th></tr>
+<tr><td><code>hq board [--all] [--json]</code></td><td>print the board; <code>--all</code> includes closed; <code>--json</code> for tools</td></tr>
+<tr><td><code>hq show T-012</code></td><td>print a card and its open asks</td></tr>
+<tr><td><code>hq new "title" [--category rca] [--workdir DIR]</code></td><td>create a task, prints its id</td></tr>
+<tr><td><code>hq bind T-012 [--session ID]</code></td><td>bind this (or the given) session to a task</td></tr>
+<tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>unbind · which task this session is bound to</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=wait for token"</code></td><td>set card fields (status / next / waiting_on_me / title …)</td></tr>
+<tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
+<tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
+<tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log</td></tr>
+<tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
+<tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
+<tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages</td></tr>
+</table>
+<p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board.</p>
+
+<h1 id="en-card">Task card format</h1>
+<pre>---
+id: T-012
+title: "Rerun perf baseline"
+category: benchmark          # free text
+status: active               # active | waiting-on-me | blocked | done | abandoned
+lead: bench-lead
+updated: 2026-11-20
+workdirs: ["/path/to/bigtest"]
+refs: ["QA-9519", "bigtest#3248"]
+sessions: ["48f4f564"]
+waiting_on_me: ""            # what you must do; empty = nothing
+next: "run baseline on clusters A/C"
+---
+## Goal / Status / Todo / Log
+- [ ] @me open, yours
+- [ ] @claude open, Claude's
+- [ ] @Wenbing waiting on someone
+- [x] done   ·   - [-] dropped</pre>
+<p>Cards are plain Markdown — edit them by hand or keep them in git. <code>asks.jsonl</code> is an append-only event log; change it through the board or the CLI only.</p>
+
+<h1 id="en-leads">Leads</h1>
+<p>Copy <code>templates/lead.md</code> from your task root to <code>.claude/agents/bench-lead.md</code>, describe its scope, then run <code>claude --agent bench-lead</code> in the task root and say "continue T-020". A lead binds to the task, delegates heavy work to background subagents, keeps its own context small and reports in a fixed shape. Small tasks don't need one — the bound session is the lead.</p>
+
+<h1 id="en-limits">Good to know</h1>
+<ul>
+<li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
+<li>Board answers reach a session on its <b>next turn</b>; they don't wake an idle session. Send it a message from the Sessions column if it should act now.</li>
+<li>Messaging works for <b>Orca</b> and <b>iTerm2</b> (iTerm2 asks for Automation permission the first time). Ghostty and VS Code: Jump only.</li>
+<li>The Sessions column relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>
+</ul>
+
+<h1 id="en-files">Files and uninstall</h1>
+<pre>&lt;root&gt;/tasks/T-012-slug/TASK.md       task card
+&lt;root&gt;/tasks/T-012-slug/asks.jsonl     asks ledger
+&lt;root&gt;/templates/                      new-task and lead templates
+~/.claude/hq/bin/hq                    CLI and hook entry point
+~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
+~/.claude/hq/state/sessions.json       session → task bindings</pre>
+<p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay.</p>
+</div>
+</article>
+
+</div>
+<script>
+(function () {
+  var KEY = "hq-guide-lang";
+  function pick(lang) {
+    document.querySelectorAll("article[lang]").forEach(function (a) { a.hidden = a.lang !== lang; });
+    document.querySelectorAll("[data-lang]").forEach(function (b) { b.classList.toggle("primary", b.dataset.lang === lang); });
+    document.documentElement.lang = lang;
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  pick(saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
+  document.querySelectorAll("[data-lang]").forEach(function (b) {
+    b.addEventListener("click", function () { pick(b.dataset.lang); });
+  });
+  document.querySelectorAll(".toc a").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      e.preventDefault();
+      var t = document.getElementById(a.getAttribute("href").slice(1));
+      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+})();
+</script>
+</body>
+</html>
