@@ -67,7 +67,7 @@
 <p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
 
 <h1 id="zh-today">三个页面 · Focus：正在关注的任务</h1>
-<p>顶栏左边的 <b>Focus | All | Needs you</b> 切换三个页面（会记住），每页都是两列。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是所有还没回答的问题（左）和你的 <code>@me</code> 待办（右），标签上的数字就是这两样加起来。</p>
+<p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每页都是两列。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是所有还没回答的问题（左）和你的 <code>@me</code> 待办（右），标签上的数字就是这两样加起来。</p>
 <ul>
 <li><b>加进 Focus</b>：顶部输入框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。新建的任务自动加入 Focus。卡片右上角的 ✕（点两下）把它从 Focus 拿掉，任务本身不变。</li>
 <li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 一直按最近活动排。</li>
@@ -80,10 +80,12 @@
 <h1 id="zh-board">All 与 Needs you</h1>
 <h2>顶栏</h2>
 <ul>
-<li>计数：进行中的任务、在跑的 session（未回答的问题和你的待办算在 Needs you 标签的数字里）。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you</b>，右边是搜索框、<b>+ New task</b>、<b>↻</b> 刷新、<b>⚙</b> 设置、<b>Guide</b>。</li>
+<li><b>底部状态栏</b>：session 有几个（在干活的、等你的），任务有几个（在 Focus 里的、阻塞的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。</li>
+<li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、active first。</li>
 <li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>↻</b> 后面是多久后重置。和悬停在小猫身上看到的是同一份数据。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存下来：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/hud-usage.json"</code>（必须写绝对路径）；或者用 <code>pet-emit --statusline</code> 包一层你的状态栏命令（见仓库的 docs/pet.zh-CN.md）。没有新鲜的数据就不显示。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
-<li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
+
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>↻</b>：立即刷新（平时每 4 秒自动刷新）。<b>Guide</b>：打开本说明。</li>
 <li><b>删除 / 解绑都要点两下</b>：解绑 session、从任务移除以前的 session、删关联链接、待办的 ✕（不做）、Focus 卡片的 ✕、删项目目录、删空的项目或分类——第一下按钮变成红色的"Unbind?""Remove?"等，4 秒内再点一下才执行，不点就恢复原样。</li>
@@ -223,7 +225,7 @@
 <li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
 <li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
 <li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
-<li>顶栏 <b>Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li><b>⚙ 设置 → Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
 <li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。</li>
 </ul>
 
@@ -231,7 +233,7 @@
 <h2>分类</h2>
 <ul>
 <li>每个任务根目录有自己的分类列表，存在 <code>hq.json</code> 里。新装的默认是一组通用分类：feature、bug、investigation、review、ops、docs、other，可以随意改。</li>
-<li>在看板上点 <b>Categories</b>：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
+<li>在 <b>⚙ 设置 → Categories</b> 里：改名 = 改输入框里的名字后按回车；删除 = 点 ✕；底部输入框回车 = 新增。命令行用 <code>hq category …</code>。</li>
 <li>分类只是写在每张任务卡上的一个标签，所以：
   <ul>
   <li><b>改名</b>会同时改写所有用到它的任务卡；</li>
@@ -366,9 +368,11 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">All and Needs you</h1>
 <h2>Top bar</h2>
 <ul>
-<li>Counts: open tasks and live sessions (asks and your todos are counted on the Needs you tab).</li>
+<li>The top bar holds only things you click: <b>Focus · All · Needs you</b> on the left; the filter box, <b>+ New task</b>, <b>↻</b> refresh, <b>⚙</b> settings and <b>Guide</b> on the right.</li>
+<li><b>The status bar</b> at the bottom: sessions (working, waiting on you), tasks (in Focus, blocked, waiting), asks and todos (click → Needs you), and the quota on the right.</li>
+<li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, active first.</li>
 <li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>↻</b> how long until each resets. It is the same reading the pet shows when you hover it. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/hud-usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>; or wrap your statusline command in <code>pet-emit --statusline</code> (see docs/pet.md in the repo). With no fresh reading, nothing is shown.</li>
-<li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
+<li><b>Filter tasks…</b> by id, title or refs.</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
 <li><b>Removing or unbinding takes two clicks</b>: unbinding a session, removing an earlier session from a task, removing a link, a todo's ✕ (won't do), ✕ on a Focus card, removing a project directory, an empty project or category — the first click turns the button into a red "Unbind?", "Remove?"…; click again within 4 s to do it, or leave it and it goes back.</li>
@@ -504,7 +508,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
 <li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
 <li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
-<li><b>Projects</b> in the top bar: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li><b>⚙ Settings → Projects</b>: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
 <li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>.</li>
 </ul>
 
@@ -512,7 +516,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h2>Categories</h2>
 <ul>
 <li>Each task root keeps its own list in <code>hq.json</code>. New roots start with a generic set — feature, bug, investigation, review, ops, docs, other — change it freely.</li>
-<li>On the board, <b>Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
+<li>In <b>⚙ Settings → Categories</b>: rename by editing a name and pressing Enter; ✕ removes; the bottom box adds. From a shell: <code>hq category …</code>.</li>
 <li>A category is just a label on each card, so:
   <ul>
   <li><b>renaming</b> rewrites every card that uses it;</li>

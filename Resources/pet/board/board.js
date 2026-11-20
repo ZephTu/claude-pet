@@ -415,10 +415,7 @@ function render() {
   $("#foldall").title = ui.groupBy === "project" ? "Fold or unfold every project group" : "Close every open task";
   $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
   $("#activefirst input").checked = ui.activeFirst;
-  $("#projects-panel").hidden = !ui.projOpen;
-  if (ui.projOpen) $("#projects-panel").innerHTML = renderProjects();
-  $("#cats-panel").hidden = !ui.catsOpen;
-  if (ui.catsOpen) $("#cats-panel").innerHTML = renderCategories();
+  renderSettings();
   $("#tasks").innerHTML = renderTasks();
   $("#sessions").innerHTML = renderSessions();
 
@@ -462,13 +459,23 @@ function needCount() {
   return tasks().reduce((n, t) => n + openAsks(t).length, 0) +
     open.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
 }
+// The status bar at the bottom: where things stand, at a glance — sessions by state, tasks by
+// status, what is waiting on you (click → Needs you), and the quota on the right.
 function renderCounts() {
-  const all = tasks();
-  const activeN = all.filter(isOpen).length;
+  const all = tasks().filter(isOpen);
+  const by = (st) => ui.sessions.filter((x) => x.state === st).length;
+  const tby = (st) => all.filter((t) => t.status === st).length;
+  const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
+  const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
+  const mine = all.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
+  const part = (n, label, cls = "") => n ? `<span class="sp ${cls}"><b>${n}</b> ${label}</span>` : "";
   $("#counts").innerHTML =
-    // Asks and your todos are counted on the Needs you tab.
-    `<span title="Open tasks"><b>${activeN}</b> tasks</span>` +
-    `<span title="Live sessions"><b>${ui.sessions.length}</b> live</span>`;
+    `<span class="sgroup" title="Live Claude Code sessions"><span class="dot busy"></span><b>${ui.sessions.length}</b> sessions` +
+      `${part(by("busy"), "working")}${part(by("waiting"), "waiting on you", "warn")}</span>` +
+    `<span class="sgroup" title="Open tasks by status"><b>${all.length}</b> tasks` +
+      `${part(focusIds().length, "in Focus")}${part(tby("blocked"), "blocked", "bad")}${part(tby("waiting-on-me"), "waiting", "warn")}</span>` +
+    `<span class="sgroup jump" data-action="mode" data-m="needs" title="Open Needs you"><b>${asks}</b> asks · <b>${mine}</b> todos` +
+      `${later ? `<span class="sp">${later} for later</span>` : ""}</span>`;
   $("#quota").innerHTML = usageChips();
 }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
@@ -1182,6 +1189,37 @@ function renderNewTask() {
 
 function clearNewTaskDrafts() { for (const k of Object.keys(ui.drafts)) if (k.startsWith("nt:")) delete ui.drafts[k]; saveDrafts(); }
 
+// ---- Settings: one window for what used to crowd the top bar — projects, categories, and how
+// the board starts sessions. Open on any page (⚙); Esc, Done or a click outside closes it.
+const SETTINGS_TABS = [["projects", "Projects"], ["categories", "Categories"], ["sessions", "Sessions"]];
+function renderSettings() {
+  const box = $("#settings");
+  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
+  const tab = ui.settings;
+  const body = tab === "projects" ? renderProjects() : tab === "categories" ? renderCategories() : renderSessionSettings();
+  // Keep the cursor if a box in here is being typed in (the window is rebuilt with the board).
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="Settings">
+    <div class="phead"><div class="stitle">Settings</div>
+      <span class="seg">${SETTINGS_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-action="settings-tab" data-tab="${k}">${label}</button>`).join("")}</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-settings">Done</button></div>
+    <div class="settings-body">${body}</div></div>`;
+  box.hidden = false;
+}
+function closeSettings() { ui.settings = null; ui.projRemove = {}; ui.catRemove = {}; render(); }
+function renderSessionSettings() {
+  const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
+  return `<div class="set-list">
+    ${row("New sessions open in", "Where ▶ New session, ↻ Resume and ▶ Do it open a session",
+      `<select class="bind" data-action="launch-place">${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
+    ${row("Skip permissions", "Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files",
+      `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
+    ${row("Stay on board", "Open the session's terminal tab in the background and carry on here, in its conversation window",
+      `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
+    ${row("Active first", "Tasks (and project groups) with a live session come first, most recently active first. Off: your own order",
+      `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
+  </div>`;
+}
+
 function renderProjects() {
   const ps = projects();
   const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
@@ -1400,6 +1438,7 @@ function drawPeek(toBottom) {
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
   if (ui.modal && ev.target === $("#modal")) closePeek();
+  if (ui.settings && ev.target === $("#settings")) closeSettings();
 });
 
 // ------------------------------------------------------------------ context window
@@ -2062,8 +2101,11 @@ document.addEventListener("click", async (ev) => {
       ui.collapsed.has(d.key) ? ui.collapsed.delete(d.key) : ui.collapsed.add(d.key);
       savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       return render();
-    case "open-projects": ui.projOpen = !ui.projOpen; return render();
-    case "close-projects": ui.projOpen = false; ui.projRemove = {}; return render();
+    case "open-settings": ui.settings = ui.settings || "projects"; return render();
+    case "settings-tab": ui.settings = d.tab; return render();
+    case "close-settings": closeSettings(); return;
+    case "open-projects": ui.settings = "projects"; return render();
+    case "close-projects": closeSettings(); return;
     case "proj-rename": {
       const v = (ui.drafts["projname:" + d.p] || "").trim();
       delete ui.drafts["projname:" + d.p];
@@ -2100,7 +2142,7 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
       return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, `Added ${name}`);
     }
-    case "scan-open": ui.projOpen = true; // fall through to scan
+    case "scan-open": ui.settings = "projects"; // fall through to scan
     case "scan":
       ui.scan = "loading"; ui.scanPick = new Set(); render();
       try {
@@ -2170,8 +2212,8 @@ document.addEventListener("click", async (ev) => {
       ui.stopArmed = null;
       return act("stop", { session: d.session }, "Stopped");
     case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
-    case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
-    case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
+    case "open-cats": ui.settings = "categories"; return render();
+    case "close-cats": closeSettings(); return;
     case "cat-remove": {
       const n = categoryCount(d.cat);
       if (!n) return act("category", { action: "remove", names: [d.cat] }, `Removed ${d.cat}`);
@@ -2262,6 +2304,7 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
+  if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
