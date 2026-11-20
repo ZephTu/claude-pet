@@ -33,6 +33,7 @@
   <a href="#zh-board">看板上能做什么</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
+  <a href="#zh-onboard">从已有 session 开始</a>
   <a href="#zh-proj">项目</a>
   <a href="#zh-cats">分类与工作目录</a>
   <a href="#zh-card">任务卡格式</a>
@@ -83,7 +84,7 @@
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
 </table>
 回应会在绑定的 session <b>下一轮</b>送达给它。</li>
-<li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办。点方框 = 做完；点 ✕ = 不做。</li>
+<li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
 <li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。</li>
@@ -171,9 +172,18 @@
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
 <tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
+<tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录）</td></tr>
 </table>
-<p>在 Claude Code 里还可以用两个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）。</p>
+<p>在 Claude Code 里还可以用三个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）、<code>/hq-onboard</code>（从已有 session 初始化）。</p>
+
+<h1 id="zh-onboard">从已有 session 开始</h1>
+<p>刚装好时，本机通常已经有很多 Claude Code session 和历史对话。两步把它们变成看板：</p>
+<ol>
+<li><b>项目</b>：Projects 面板里点 <b>Suggest from sessions</b>（看板为空时中栏也有这个入口）。它扫描最近 60 天的对话，按 git 仓库（不在仓库里的按目录）列出候选项目和 session 数，默认一个都不勾，勾选后点 Create。命令行：<code>hq scan</code>（只读）、<code>hq scan --apply-projects --only 名字,名字</code>。</li>
+<li><b>任务</b>：在任意 Claude Code session 里输入 <code>/hq-onboard</code>。Claude 会读这些 session，起草任务卡（状态、下一步、你的待办、相关链接、置信度），按项目列成表给你确认，<b>确认之前不会创建任何东西</b>；创建后，正在运行的 session 会绑定到对应任务，已结束的记在任务卡上、可以在看板上查看历史。</li>
+</ol>
+<p>之后任何地方都能改：在看板上直接改，或者在 session 里让 Claude 改。从推断得来的状态在任务日志里标了"请核实"。</p>
 
 <h1 id="zh-proj">项目</h1>
 <ul>
@@ -275,6 +285,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-board">What the board does</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
+  <a href="#en-onboard">Start from existing sessions</a>
   <a href="#en-proj">Projects</a>
   <a href="#en-cats">Categories and workdirs</a>
   <a href="#en-card">Task card format</a>
@@ -324,7 +335,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
 </table>
 The bound session receives your answer on its <b>next turn</b>.</li>
-<li><b>Your todos</b> — every <code>@me</code> todo across tasks. Box = done, ✕ = won't do.</li>
+<li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
 <li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
 <li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too.</li>
@@ -408,9 +419,18 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
 <tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
+<tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts)</td></tr>
 </table>
-<p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board.</p>
+<p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board, <code>/hq-onboard</code> sets HQ up from your existing sessions.</p>
+
+<h1 id="en-onboard">Start from existing sessions</h1>
+<p>A fresh install usually meets a machine full of Claude Code sessions and history. Two steps turn them into a board:</p>
+<ol>
+<li><b>Projects</b>: <b>Suggest from sessions</b> in the Projects panel (an empty board offers it too). It scans the last 60 days of transcripts and lists candidate projects — one per git repository, or per directory outside one — with their session counts. Nothing is pre-selected; tick and Create. From a shell: <code>hq scan</code> (read-only), <code>hq scan --apply-projects --only name,name</code>.</li>
+<li><b>Tasks</b>: run <code>/hq-onboard</code> in any Claude Code session. Claude reads those sessions, drafts task cards (status, next step, your todos, links, confidence), shows them per project and <b>creates nothing until you confirm</b>; then live sessions are bound to their tasks and ended ones are recorded on the cards, their history one click away.</li>
+</ol>
+<p>Change anything afterwards — on the board, or by asking Claude in any session. Inferred statuses are flagged "verify" in each task's log.</p>
 
 <h1 id="en-proj">Projects</h1>
 <ul>

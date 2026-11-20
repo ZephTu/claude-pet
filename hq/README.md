@@ -43,6 +43,17 @@ recent messages from their transcripts under `~/.claude/projects`. Nothing leave
 Re-run `hq/install.sh` to upgrade. `hq/uninstall.sh` removes hooks, commands and CLI and
 leaves your cards alone.
 
+## Start from the sessions you already have
+
+```bash
+hq scan                                   # read-only: suggested projects + recent sessions
+hq scan --apply-projects --only api,web   # create the ones you want
+```
+
+Then run `/hq-onboard` in any Claude Code session: Claude reads your recent sessions, drafts task
+cards per project, shows them and asks before creating anything, and binds live sessions to their
+tasks. The board offers the same on an empty board and under Projects → Suggest from sessions.
+
 ## Daily use
 
 The full user guide (both languages) is built into the board: open it with **Guide** in the

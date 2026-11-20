@@ -25,7 +25,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
@@ -74,7 +74,8 @@ function toast(msg, bad, undo) {
 
 // Every one-click change that is easy to hit by accident can be taken back.
 const RECENT_MS = 60 * 60 * 1000;
-const FINISHED_SHOWN = 3;   // finished todos shown on a task before they fold
+const FINISHED_SHOWN = 3;
+const STALE_DAYS = 3;       // a todo older than this shows its age in amber   // finished todos shown on a task before they fold
 const TODO_STATE = { open: "open", done: "done", dropped: "drop", drop: "drop" };
 async function changeTodo(task, i, to, from, text) {
   const label = { done: "Done", drop: "Won't do", open: "Reopened" }[to] || to;
@@ -206,6 +207,17 @@ function renderMyTodos() {
   // A card may still carry the old free-text "waiting on you" field (written before it was
   // folded into @me todos). Show it here as a todo rather than lose it; ticking clears it.
   const legacy = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
+  // Newest first; each shows how long it has been waiting (amber after STALE_DAYS).
+  const since = (iso) => Date.parse(iso || "") || 0;
+  items.sort((a, b) => since(b[1].created) - since(a[1].created));
+  legacy.sort((a, b) => since(b.waiting_since) - since(a.waiting_since));
+  const age = (iso) => {
+    const ms = since(iso);
+    if (!ms) return "";
+    const days = (Date.now() - ms) / 86400000;
+    const label = ago(iso).replace(" ago", "").replace("just now", "new");
+    return `<span class="age ${days >= STALE_DAYS ? "stale" : ""}" title="Waiting since ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
+  };
   // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
   // reopen from the task itself — every change is also in the card's log.
   ui.recent = ui.recent.filter((r) => Date.now() - r.at < RECENT_MS);
@@ -219,12 +231,12 @@ function renderMyTodos() {
     <div class="todo">
       <span class="box" title="Handled (you can undo)" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
       <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>
-        <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
+        <div class="meta">${age(t.waiting_since)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
     </div>`).join("") + items.map(([t, x]) => `
     <div class="todo">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
-        <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
+        <div class="meta">${age(x.created)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
       <button class="btn small ghost" title="Won't do (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
     </div>`).join("") + recent.map((r) => `
     <div class="todo ${r.to === "drop" ? "dropped" : "done"}">
@@ -275,6 +287,7 @@ function renderTasks() {
   const f = ui.filter.toLowerCase();
   const visible = tasks().filter((t) => (ui.showClosed || isOpen(t)) &&
     (!f || `${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)));
+  if (!tasks().length) return renderOnboarding();
   if (!visible.length) return `<div class="empty">No tasks${f ? " match" : ""}.</div>`;
   let html = "";
   if (ui.groupBy === "project") {
@@ -635,6 +648,36 @@ function renderProjects() {
       <button class="btn small primary" data-action="proj-add">Add</button></div></div>
     ${unassigned ? `<div class="row" style="margin-top:6px"><span class="meta">${unassigned} task(s) have no project.</span>
       <button class="btn small" data-action="proj-auto">Assign by directory</button></div>` : ""}
+    <div class="row" style="margin-top:8px"><button class="btn small" data-action="scan">Suggest from sessions</button>
+      <span class="meta">finds repositories and directories your Claude Code sessions worked in</span></div>
+    ${renderScan()}
+  </div>`;
+}
+
+// ---- onboarding: suggest projects from the sessions already on this machine (hq scan)
+function renderScan() {
+  if (!ui.scan) return "";
+  if (ui.scan === "loading") return `<div class="empty">Scanning your Claude Code sessions…</div>`;
+  const fresh = ui.scan.projects.filter((p) => !p.existing);
+  if (!fresh.length) return `<div class="empty">Every directory your sessions worked in already belongs to a project.</div>`;
+  return `<div class="res" style="margin-top:6px">
+    <div class="meta" style="margin-bottom:4px">${ui.scan.sessions.length} sessions in the last ${ui.scan.days} days. Pick the projects to create (skip personal or throwaway folders):</div>
+    ${fresh.map((p) => `<label class="scan-i"><input type="checkbox" data-action="scan-pick" data-name="${esc(p.name)}" ${ui.scanPick.has(p.name) ? "checked" : ""}>
+      <b>${esc(p.name)}</b> <span class="meta">${p.count} session${p.count === 1 ? "" : "s"} · ${ago(p.last)} · ${esc(p.path)}</span></label>`).join("")}
+    <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="scan-apply" ${ui.scanPick.size ? "" : "disabled"}>Create ${ui.scanPick.size || ""} project${ui.scanPick.size === 1 ? "" : "s"}</button>
+      <button class="btn small ghost" data-action="scan-close">Close</button></div>
+  </div>`;
+}
+function renderOnboarding() {
+  return `<div class="card onboard">
+    <h4>Start from the sessions you already have</h4>
+    <ol>
+      <li><b>Projects.</b> Find the repositories and folders your Claude Code sessions worked in, and pick which become projects.
+        <div class="row" style="margin-top:4px"><button class="btn small primary" data-action="scan-open">Suggest projects</button></div></li>
+      <li><b>Tasks.</b> In any Claude Code session, run <code>/hq-onboard</code>. Claude reads your recent sessions, drafts task cards (status, next step, your todos, links), shows you the list and creates nothing until you confirm. Live sessions get bound to their tasks.
+        <div class="row" style="margin-top:4px"><button class="btn small" data-action="copy-onboard">Copy /hq-onboard</button></div></li>
+      <li>Adjust anything here afterwards — or start fresh with <b>+ New task</b>.</li>
+    </ol>
   </div>`;
 }
 
@@ -1150,6 +1193,20 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
       return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, `Added ${name}`);
     }
+    case "scan-open": ui.projOpen = true; // fall through to scan
+    case "scan":
+      ui.scan = "loading"; ui.scanPick = new Set(); render();
+      try {
+        ui.scan = await apiJSON("scan");
+      } catch (e) { ui.scan = null; toast(String(e.message || e), true); }
+      return render();
+    case "scan-close": ui.scan = null; return render();
+    case "scan-apply": {
+      const names = [...ui.scanPick];
+      ui.scan = null;
+      return act("scan-apply", { names }, `Created ${names.length} project(s) and sorted tasks into them`);
+    }
+    case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
     case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
     case "open-cats": ui.catsOpen = !ui.catsOpen; return render();
     case "close-cats": ui.catsOpen = false; ui.catRemove = {}; return render();
@@ -1190,6 +1247,7 @@ document.addEventListener("change", (ev) => {
   const el = ev.target;
   const d = el.dataset;
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
+  if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }

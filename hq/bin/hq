@@ -32,6 +32,7 @@ RESOLUTIONS = {
 DEFAULT_CATEGORIES = ["feature", "bug", "investigation", "review", "ops", "docs", "other"]
 # A category is written unquoted into card frontmatter, so keep it to a plain label.
 CATEGORY_RE = re.compile(r"^[^\s#\"'\n:,\[\]][^#\"'\n:,\[\]]{0,39}$")
+TODO_TIME_RE = re.compile(r"\s*<!--\s*t:([^>]+?)\s*-->\s*$")   # hidden creation time on a todo line
 TODO_RE = re.compile(r"^(\s*)- \[([ xX\-])\] (.*)$")
 FENCE_RE = re.compile(r"```(hq-asks|hq-resolved)[^\n]*\n(.*?)```", re.S)
 WRITEBACK_MIN_TURN_SECONDS = 120
@@ -110,13 +111,17 @@ def parse_card(path):
             continue
         mark = t.group(2).lower()
         txt = t.group(3).strip()
+        created = None
+        c = TODO_TIME_RE.search(txt)
+        if c:
+            created, txt = c.group(1), txt[:c.start()].rstrip()
         owner = None
         o = re.match(r"@(\S+)\s+(.*)$", txt)
         if o:
             owner, txt = o.group(1), o.group(2)
         todos.append({"i": len(todos) + 1,
                       "state": {"x": "done", "-": "dropped", " ": "open"}[mark],
-                      "owner": owner, "text": txt})
+                      "owner": owner, "text": txt, "created": created})
     meta["todos"] = todos
     meta["body"] = body.strip()
     meta["path"] = path
@@ -548,11 +553,37 @@ def open_asks_text(meta, limit=10):
 
 
 # ---------------------------------------------------------------- commands
+def stamp_todos(metas):
+    """Give every open todo a creation time: its hidden <!--t:…--> stamp if it has one, else the
+    first time HQ saw it (kept in HQ's state, so the card itself is not rewritten)."""
+    path = os.path.join(HOME_DIR, "state", "todo-seen.json")
+    seen = load_json(path, {})
+    changed = False
+    now = now_iso()
+    for m in metas:
+        items = [t for t in m["todos"] if t["state"] == "open"]
+        if m.get("waiting_on_me"):
+            items.append({"text": m["waiting_on_me"], "_legacy": True})
+        for t in items:
+            key = f"{m.get('id')}|{t['text']}"
+            if not t.get("created"):
+                if key not in seen:
+                    seen[key] = now
+                    changed = True
+                if t.get("_legacy"):
+                    m["waiting_since"] = seen[key]
+                else:
+                    t["created"] = seen[key]
+    if changed:
+        atomic_write(path, json.dumps(seen, ensure_ascii=False))
+
+
 def cmd_board(args):
     metas = [parse_card(p) for p in card_paths()]
     for m in metas:
         m["age_days"] = age_days(m)
         m["asks"] = read_asks(m["dir"])
+    stamp_todos(metas)
     if args.json:
         out = []
         for m in metas:
@@ -730,7 +761,7 @@ def cmd_todo(args):
             if n == args.index:
                 lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
                 atomic_write(card, "\n".join(lines))
-                append_log(card, f"todo #{n} → {args.state} ({args.via}): {t.group(3)}")
+                append_log(card, f"todo #{n} → {args.state} ({args.via}): {TODO_TIME_RE.sub('', t.group(3))}")
                 return
     die(f"{args.task} has no todo #{args.index}")
 
@@ -754,7 +785,7 @@ def cmd_ref(args):
 def cmd_addtodo(args):
     card = find_card(args.task)
     lines = open(card, encoding="utf-8").read().split("\n")
-    item = f"- [ ] {args.text.strip()}"
+    item = f"- [ ] {args.text.strip()} <!--t:{now_iso()}-->"
     head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办)", l, re.I)), None)
     last_todo = None
     for i, l in enumerate(lines):
@@ -920,6 +951,137 @@ def live_sessions():
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
     return out
+
+
+# ---------------------------------------------------------------- onboarding scan
+# Reads the Claude Code transcripts already on this machine and proposes projects (one per git
+# repository, or per directory outside a repository) with the sessions that worked in them.
+# Deterministic and read-only unless --apply-projects; turning sessions into task cards needs
+# judgment, which is what the /hq-onboard command (Claude) does with this output.
+SCAN_SKIP = re.compile(r"-private-|-var-folders-|^-tmp-|-T-tgkb-|scratchpad")
+
+
+def transcript_head(path, nbytes=96_000):
+    out = []
+    with open(path, "rb") as f:
+        chunk = f.read(nbytes).decode("utf-8", "ignore").splitlines()
+    for line in chunk[:-1] if len(chunk) > 1 else chunk:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def git_root(path):
+    home = os.path.realpath(os.path.expanduser("~"))
+    cur = os.path.realpath(path)
+    while cur not in ("/", home) and os.path.dirname(cur) != cur:
+        if os.path.exists(os.path.join(cur, ".git")):
+            return cur
+        cur = os.path.dirname(cur)
+    return None
+
+
+def scan_sessions(days):
+    base = os.path.expanduser("~/.claude/projects")
+    cutoff = time.time() - days * 86400
+    state = load_state()
+    rows = []
+    for slug in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        if SCAN_SKIP.search(slug):
+            continue
+        d = os.path.join(base, slug)
+        if not os.path.isdir(d):
+            continue
+        for name in os.listdir(d):
+            if not name.endswith(".jsonl"):
+                continue
+            path = os.path.join(d, name)
+            mtime = os.path.getmtime(path)
+            if mtime < cutoff:
+                continue
+            head = transcript_head(path)
+            tail = transcript_tail(path, 250_000)
+            cwd = next((o.get("cwd") for o in head + tail if o.get("cwd")), None)
+            if not cwd:
+                continue
+            first = next((t for t in (message_text(o) for o in head if o.get("type") == "user") if t), "")
+            users = sum(1 for o in tail if o.get("type") == "user" and message_text(o))
+            sid = name[:-6]
+            pet = pet_session(sid) or {}
+            rows.append({
+                "sessionId": sid, "cwd": cwd, "title": session_title(tail) or session_title(head),
+                "first": first[:200], "last": dt.datetime.fromtimestamp(mtime).astimezone().isoformat(timespec="minutes"),
+                "turns_in_tail": users, "live": pid_alive(pet.get("pid")) if pet else False,
+                "task": state.get(sid, {}).get("task"), "transcript": path,
+            })
+    rows.sort(key=lambda r: r["last"], reverse=True)
+    return rows
+
+
+def scan_projects(sessions):
+    home = os.path.realpath(os.path.expanduser("~"))
+    skip = {"/", home, os.path.realpath(hq_root(required=False) or "/")}
+    groups = {}
+    for r in sessions:
+        root = git_root(r["cwd"]) or os.path.realpath(r["cwd"])
+        if root in skip or not os.path.isdir(root):
+            continue
+        g = groups.setdefault(root, {"path": root, "name": os.path.basename(root), "sessions": [], "last": ""})
+        g["sessions"].append(r["sessionId"])
+        g["last"] = max(g["last"], r["last"])
+        r["root"] = root
+    out = sorted(groups.values(), key=lambda g: g["last"], reverse=True)
+    for g in out:
+        g["existing"] = project_for_path(g["path"]) or None
+        g["count"] = len(g["sessions"])
+    return out
+
+
+def cmd_scan(args):
+    sessions = scan_sessions(args.days)
+    projects = scan_projects(sessions)
+    if args.apply_projects:
+        only = set(x.strip() for x in (args.only or "").split(",") if x.strip())
+        taken = set(x["name"] for x in load_projects())
+        added = []
+        for g in projects:
+            if g["existing"] or (only and g["name"] not in only and g["path"] not in only):
+                continue
+            name, n = g["name"], 2
+            while name in taken:
+                name, n = f"{g['name']}-{n}", n + 1
+            check_category(name)
+            save_projects(load_projects() + [{"name": name, "paths": [g["path"]]}])
+            taken.add(name)
+            added.append(name)
+        assigned = 0
+        for path in card_paths():
+            meta = parse_card(path)
+            if not meta.get("project"):
+                guess = project_for_dirs(meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else [])
+                if guess:
+                    set_fields(path, {"project": guess, "updated": meta.get("updated", today())})
+                    assigned += 1
+        print(json.dumps({"added": added, "assigned": assigned}) if args.json
+              else f"added {len(added)} project(s): {', '.join(added) or '-'}; assigned {assigned} task(s)")
+        return
+    if args.json:
+        print(json.dumps({"days": args.days, "projects": projects, "sessions": sessions}, ensure_ascii=False, indent=1))
+        return
+    print(f"Sessions in the last {args.days} days: {len(sessions)}\n")
+    print("Suggested projects:")
+    for g in projects:
+        flag = f"(already: {g['existing']})" if g["existing"] else "(new)"
+        print(f"  {g['name']:<24} {g['count']:>3} session(s)  last {g['last'][:16]}  {flag}  {g['path']}")
+    print("\nSessions:")
+    for r in sessions:
+        live = "live " if r["live"] else "     "
+        print(f"  {r['sessionId'][:8]} {live}{r['last'][:16]}  {os.path.basename(r.get('root') or r['cwd']):<20} "
+              f"{(r['title'] or r['first'] or '')[:60]}")
+    print("\nCreate the new projects: hq scan --apply-projects [--only name,name]"
+          "\nTurn sessions into task cards: run /hq-onboard in Claude Code.")
 
 
 def cmd_sessions(args):
@@ -1124,6 +1286,10 @@ def main():
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_asks)
+    p = sub.add_parser("scan", help="propose projects and list sessions from existing transcripts (onboarding)")
+    p.add_argument("--days", type=int, default=60); p.add_argument("--json", action="store_true")
+    p.add_argument("--apply-projects", action="store_true"); p.add_argument("--only")
+    p.set_defaults(fn=cmd_scan)
     p = sub.add_parser("sessions", help="live Claude Code sessions (needs Claude Pet)")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sessions)
     p = sub.add_parser("peek", help="recent messages of a live session"); p.add_argument("session")

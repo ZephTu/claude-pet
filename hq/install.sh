@@ -53,8 +53,9 @@ HQ will make these changes:
        (only missing files are created; nothing there is overwritten)
 EOF
 if [ "$COMMANDS" = 1 ]; then cat <<EOF
-  3. $CLAUDE_DIR/commands/task.md and board.md
-       the /task and /board slash commands (skipped if you already have commands by those names)
+  3. $CLAUDE_DIR/commands/task.md, board.md, hq-onboard.md
+       the /task, /board and /hq-onboard slash commands (skipped if you already have commands by
+       those names)
 EOF
 fi
 if [ "$HOOKS" = 1 ]; then cat <<EOF
@@ -117,7 +118,7 @@ mkdir -p "$ROOT/tasks" "$ROOT/templates" "$ROOT/.claude/agents"
 if [ "$COMMANDS" = 1 ]; then
 echo "==> slash commands → $CLAUDE_DIR/commands"
 mkdir -p "$CLAUDE_DIR/commands"
-for c in task board; do
+for c in task board hq-onboard; do
   dst="$CLAUDE_DIR/commands/$c.md"
   if [ -f "$dst" ] && ! grep -q '.claude/hq/bin/hq' "$dst"; then
     echo "    skip /$c: $dst exists and is not HQ's (rename it, then re-run)"
@@ -161,6 +162,13 @@ PY
 fi
 
 echo ""
-echo "Done. New Claude Code sessions pick up the hooks. Try:"
-echo "  $HQ_HOME/bin/hq board"
-echo "  /task <T-id | new task title>   (inside any Claude Code session)"
+echo "Done. New Claude Code sessions pick up the hooks."
+echo ""
+echo "Optional — start from the sessions you already have:"
+echo "  $HQ_HOME/bin/hq scan            see the projects and sessions it would suggest (read-only)"
+if [ "$COMMANDS" = 1 ]; then
+echo "  /hq-onboard                    in any Claude Code session: Claude drafts projects and task cards"
+echo "                                 from those sessions, shows you the list and asks before creating"
+fi
+echo ""
+echo "Open the board: double-click the Claude Pet cat (or right-click → Task Board…)."

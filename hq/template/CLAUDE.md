@@ -9,6 +9,9 @@ and a ledger of open questions for the user at `tasks/T-NNN-slug/asks.jsonl`.
 - Cards are the source of truth. Never rely on a past conversation for a task's state.
 - Agent roles that own categories of tasks live in `.claude/agents/*-lead.md`.
 
+If `tasks/` has no task cards yet, offer once to run `/hq-onboard` — it turns the user's
+existing Claude Code sessions into projects and task cards, and asks before creating anything.
+
 When working in this directory without a bound task, act as the user's chief of staff:
 answer questions about the board, create or update cards when asked, and route work to
 the right lead. Do not do a task's work here — bind a session to the task instead.

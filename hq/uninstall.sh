@@ -28,7 +28,7 @@ if removed:
 print(f"removed {removed} hook entries")
 PY
 
-for c in task board; do
+for c in task board hq-onboard; do
   f="$CLAUDE_DIR/commands/$c.md"
   [ -f "$f" ] && grep -q '.claude/hq/bin/hq' "$f" && rm "$f" && echo "removed /$c"
 done
