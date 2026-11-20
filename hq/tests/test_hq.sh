@@ -163,6 +163,21 @@ touch -t 200001010000 "$T"/root/tasks/T-001-*/TASK.md
 hook '{"session_id":"sess-1","hook_event_name":"Stop","last_assistant_message":"x"}' | grep -q '"decision": "block"' && ok "write-back guard blocks stale card"
 hook '{"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"x"}' | grep -q block && fail "guard looped" || ok "guard does not loop"
 
+# Two sessions on one task: an answer goes to the session that asked it, and only to it.
+"$HQ" new "Shared work" >/dev/null
+SID="$(basename "$(ls -d "$T"/root/tasks/T-*-shared-work)" | cut -d- -f1-2)"
+"$HQ" bind "$SID" --session sess-a >/dev/null; "$HQ" bind "$SID" --session sess-b >/dev/null
+MSG2='ok.\n\n```hq-asks\n- Run the review?\n- Draft the note?\n```'
+hook "{\"session_id\":\"sess-a\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
+ctxof() { hook "{\"session_id\":\"$1\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hi\"}" | python3 -c 'import json,sys; t=sys.stdin.read(); print(json.loads(t)["hookSpecificOutput"]["additionalContext"] if t.strip() else "")'; }
+ctxof sess-b | grep -q "$SID.1 (asked by another session on this task)" && ok "open asks say which ones another session on the task raised"
+"$HQ" ask resolve "$SID.1" do --via board >/dev/null
+ctxof sess-b | grep -q "$SID.1 \"" && fail "another session on the task got the answer" || ok "an answer is not given to another session on the same task"
+ctxof sess-a | grep -q "^- $SID.1 \"Run the review?\" → do" && ok "the session that asked gets its answer"
+"$HQ" ask resolve "$SID.2" drop --via board >/dev/null
+"$HQ" unbind --session sess-a >/dev/null
+ctxof sess-b | grep -q "^- $SID.2 \"Draft the note?\" → drop" && ok "once the asker has left the task, the next session on it takes the answer"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

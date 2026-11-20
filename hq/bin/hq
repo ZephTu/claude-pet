@@ -584,13 +584,35 @@ The card, not this conversation, is the source of truth. Rules:
 4. If the work drifts into a different task, say so and suggest `/task` for a new card."""
 
 
-def open_asks_text(meta, limit=10):
+def session_alive(sid):
+    """True / False from the pet's record of that session, None when there is no record to go by
+    (the pet isn't installed, or never saw it)."""
+    d = load_json(os.path.join(PET_SESSIONS, f"{sid}.json"), None) if sid else None
+    if not isinstance(d, dict):
+        return None
+    return pid_alive(d.get("pid"))
+
+
+def owned_elsewhere(a, sid, meta, state):
+    """An ask raised by another session that is still on this task: its answer is that
+    session's to act on. Several sessions can share a task; each must act only on its own
+    answers, or two of them do the same work."""
+    asker = a.get("session")
+    if not asker or asker == sid:
+        return False
+    if (state.get(asker) or {}).get("task") != meta["id"]:
+        return False          # it left the task — whoever is on it now takes the answer
+    return session_alive(asker) is not False
+
+
+def open_asks_text(meta, limit=10, sid=None, state=None):
     asks = [a for a in read_asks(meta["dir"]) if a["state"] == "open"]
     if not asks:
         return ""
     lines = [f"Open asks on {meta['id']} still waiting for the user ({len(asks)}):"]
     for a in asks[:limit]:
-        lines.append(f"- {a['id']}: {a['text']}")
+        theirs = sid is not None and owned_elsewhere(a, sid, meta, state or {})
+        lines.append(f"- {a['id']}{' (asked by another session on this task)' if theirs else ''}: {a['text']}")
     if len(asks) > limit:
         lines.append(f"- … {len(asks) - limit} more (`{HQ_BIN} asks {meta['id']}`)")
     return "\n".join(lines)
@@ -1329,7 +1351,7 @@ def hook_main():
     if event == "SessionStart":
         update_session(sid, lambda e: e.update(announced=True))
         ctx = protocol(meta)
-        t = open_asks_text(meta)
+        t = open_asks_text(meta, sid=sid, state=state)
         emit(event, ctx + ("\n\n" + t if t else ""))
 
     elif event == "UserPromptSubmit":
@@ -1337,9 +1359,13 @@ def hook_main():
         lines = []
         if not s.get("announced", True):
             lines.append("The user bound this session to an HQ task from the board.\n" + protocol(meta))
-        delivered = set(s.get("delivered", []))
+        # An answer goes to the session that asked, once. Another session on the same task
+        # doesn't get it — it would act on it too. Only when the asker has left the task (or
+        # ended) does the next session on it take the answer over.
+        delivered = set().union(*(set(e.get("delivered", [])) for e in state.values() if isinstance(e, dict)))
         fresh = [a for a in read_asks(meta["dir"])
-                 if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered]
+                 if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered
+                 and not owned_elsewhere(a, sid, meta, state)]
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
@@ -1350,7 +1376,7 @@ def hook_main():
             entry.update(turn_start=turn_start, announced=True)
             entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
         update_session(sid, note_turn)
-        t = open_asks_text(meta)
+        t = open_asks_text(meta, sid=sid, state=state)
         if t:
             lines.append(t)
         emit(event, "\n".join(lines))

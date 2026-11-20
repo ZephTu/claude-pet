@@ -96,6 +96,7 @@
 <tr><td><b>No context</b></td><td>不了解背景、答不上来，先归档</td></tr>
 </table>
 <b>送达</b>：提出问题的 session 还在运行、而且在 Orca 或 iTerm2 里时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。消息里只带问题编号和问题开头的几个字（如 <code>T-012.3 "再跑一次 release_test 验证删机器吗？参…": Do — 不用了</code>），不把整条问题再发一遍，省 token 也好读；只发编号不行，因为 session 自己并不知道编号。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
+<b>一个任务有好几个 session 时</b>：回应只送给提问的那个 session，同一任务下的其他 session 收不到，不会两边做同一件事；它们看到的"未回应的问题"里，别人问的会标注 "asked by another session on this task"。只有提问的 session 已经结束或者解绑了，回应才交给这个任务下一个开始新一轮的 session（只交给一个）。<br>
 <b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
 <b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下高亮（再点取消，可以改选），不会马上发出；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
@@ -376,6 +377,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <tr><td><b>No context</b></td><td>can't answer this — park it</td></tr>
 </table>
 <b>Delivery</b>: when the session that asked is live in Orca or iTerm2, <b>send to ‹session› now</b> appears under the buttons (ticked while the session is idle): your answer is typed into it as a message and it carries on at once. The message names the ask by its id and the question's opening words (e.g. <code>T-012.3 "Re-run release_test to verify th…": Do — no need</code>) rather than repeating the whole question — shorter and easier to read; the id alone isn't enough, since the session never sees it. Unticked, or with the session gone, the answer reaches it at the start of its <b>next turn</b>. A message already sent can't be taken back — Undo only reopens the ask.<br>
+<b>Several sessions on one task</b>: an answer goes only to the session that asked, never to the others on the task, so two of them don't do the same work; in their list of open asks, the ones another session raised are marked "asked by another session on this task". Only when the asker has ended or left the task does its answer go to the next session on the task to start a turn — to one of them.<br>
 <b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
 <b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — click to highlight (again to clear, or pick another), nothing is sent yet. When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
