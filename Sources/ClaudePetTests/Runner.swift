@@ -1134,6 +1134,23 @@ struct Runner {
                 CompletionQueue.unread([ev("a", "T1", 0), ev("a", "T2", 1)], read: read)
                     .map(\.turnKey) == ["T2"])
 
+        // One quota file, many sessions: an idle one writes an older, lower reading back.
+        func q(_ five: Int, _ week: Int, fiveAt: TimeInterval = 3600, weekAt: TimeInterval = 86400) -> UsageSnapshot {
+            UsageSnapshot(planName: "", fiveHourPercent: five, sevenDayPercent: week,
+                          fiveHourResetAt: t0.addingTimeInterval(fiveAt), sevenDayResetAt: t0.addingTimeInterval(weekAt),
+                          capturedAt: t0, source: "claude-hud")
+        }
+        let freshQ = q(55, 93)
+        let staleBack = UsageHighWater.merge(previous: freshQ, next: q(31, 89))
+        t.check("a lower reading for the same window is stale and ignored",
+                staleBack.fiveHourPercent == 55 && staleBack.sevenDayPercent == 93)
+        let rolledQ = UsageHighWater.merge(previous: freshQ, next: q(2, 93, fiveAt: 3600 + 5 * 3600))
+        t.check("a new 5-hour window replaces the old figure",
+                rolledQ.fiveHourPercent == 2 && rolledQ.sevenDayPercent == 93)
+        let oldWindow = UsageHighWater.merge(previous: rolledQ, next: q(55, 93))
+        t.check("a reading from a window already over doesn't come back",
+                oldWindow.fiveHourPercent == 2)
+
         // claude-hud's saved snapshot (display.externalUsageWritePath) is a quota source.
         let hud = Data(#"{"updated_at":"2026-11-20T11:54:38.974Z","five_hour":{"used_percentage":27,"resets_at":"2026-11-20T14:10:00.000Z"},"seven_day":{"used_percentage":81.4,"resets_at":"2026-11-22T04:00:00.000Z"}}"#.utf8)
         let hudSnap = UsageReader.parseSnapshot(hud)

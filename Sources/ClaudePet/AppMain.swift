@@ -447,6 +447,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var lastSpoken: [Chatter.Kind: Date] = [:]
     private var lastAnything: Date?
     private var usageCache: (snapshot: UsageSnapshot?, readAt: Date)?
+    private var usageHighWater: UsageSnapshot?
     private var dwellTimer: Timer?
     private var dwellShowing = false
     private var dwellTarget: DwellTarget?
@@ -462,7 +463,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// re-reading it on every 5s render would be pure waste.
     private func currentUsage() -> UsageSnapshot? {
         let now = Date()
-        if let cached = usageCache, now.timeIntervalSince(cached.readAt) < 60 {
+        if let cached = usageCache, now.timeIntervalSince(cached.readAt) < 15 {
             return cached.snapshot
         }
         // Two possible sources, read independently and never blended. The one
@@ -482,7 +483,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             .flatMap(StatuslineUsage.decode) {
             candidates.append(line)
         }
-        let snapshot = UsageSources.pick(candidates, now: now)
+        // Keep the highest reading seen for each window: a session that has been idle writes its
+        // older, lower numbers over fresh ones — see UsageHighWater.
+        let picked = UsageSources.pick(candidates, now: now)
+        let snapshot = picked.map { UsageHighWater.merge(previous: usageHighWater, next: $0) }
+        if let snapshot { usageHighWater = snapshot }
         usageCache = (snapshot, now)
         return snapshot
     }
