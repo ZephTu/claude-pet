@@ -196,11 +196,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "saveImage": return saveImage(dataURL: str("data"))
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
-                                place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false)
+                                place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false,
+                                focus: body["focus"] as? Bool ?? true)
         case "history": return await hq(["history", str("task"), "--json"])
         case "resume":
             return await resume(task: str("task"), session: str("session"), dir: str("dir"),
-                                place: str("where"), skip: body["skip"] as? Bool ?? false, name: str("name"))
+                                place: str("where"), skip: body["skip"] as? Bool ?? false, name: str("name"),
+                                focus: body["focus"] as? Bool ?? true)
         case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
                                                     command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
@@ -303,7 +305,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// directory it ran in (Claude Code keeps a conversation under that directory), bound to the
     /// task again. A background place opens a terminal instead — there is nothing to attach to.
     private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool,
-                        name: String = "") async -> (Any?, String?) {
+                        name: String = "", focus: Bool = true) async -> (Any?, String?) {
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
                             options: .regularExpression) != nil else { return (nil, "not a session id") }
         let dir = (rawDir as NSString).expandingTildeInPath
@@ -318,12 +320,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
         // The tab keeps the session's own name, as the pet and the board show it.
         let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
-        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title)
+        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title, focus: focus)
         return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
     }
 
     private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String,
-                        skip: Bool = false) async -> (Any?, String?) {
+                        skip: Bool = false, focus: Bool = true) async -> (Any?, String?) {
         let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
@@ -337,7 +339,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         if let err = bound.1 { return (nil, err) }
         var cmd = [claude, "--session-id", sid, "--name", name] + (skip ? [Self.skipFlag] : [])
         cmd.append(prompt)
-        let opened = await openInTerminal(place: place, dir: dir, command: cmd, title: name)
+        let opened = await openInTerminal(place: place, dir: dir, command: cmd, title: name, focus: focus)
         if opened.1 != nil { _ = await hq(["unbind", "--session=\(sid)"]) }
         return opened.1 == nil ? (["ok": true, "session": sid, "where": place], nil) : opened
     }
@@ -373,7 +375,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     /// Runs a command in a new tab of the chosen terminal, in `dir`.
-    private func openInTerminal(place: String, dir: String, command: [String], title: String) async -> (Any?, String?) {
+    /// `focus: false` opens the tab in the background and leaves the terminal app where it was —
+    /// the user carries on from the board (its conversation window), not the terminal.
+    private func openInTerminal(place: String, dir: String, command: [String], title: String,
+                                focus: Bool = true) async -> (Any?, String?) {
         // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
         var line = "cd \(Self.shq(dir)) && "
         if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(Self.shq(root)) " }
@@ -385,18 +390,19 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             // In the Orca workspace for that folder when there is one, else in the current one.
+            let front = focus ? ["--focus"] : []
             var r = await Self.run(cli, ["terminal", "create", "--worktree", "path:\(dir)", "--title", title,
-                                         "--command", line, "--focus", "--json"])
+                                         "--command", line] + front + ["--json"])
             if r.status != 0 {
-                r = await Self.run(cli, ["terminal", "create", "--title", title, "--command", line, "--focus", "--json"])
+                r = await Self.run(cli, ["terminal", "create", "--title", title, "--command", line] + front + ["--json"])
             }
-            if r.status == 0 { NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate() }
+            if r.status == 0, focus { NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate() }
             return r.status == 0 ? (["ok": true], nil) : (nil, "orca: " + (r.err.isEmpty ? r.out : r.err).prefix(300))
         case "iterm2", "terminal":
             let esc = line.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let script = place == "iterm2" ? """
             tell application "iTerm2"
-              activate
+              \(focus ? "activate" : "")
               if (count of windows) = 0 then
                 create window with default profile
               else
@@ -406,7 +412,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             end tell
             """ : """
             tell application "Terminal"
-              activate
+              \(focus ? "activate" : "")
               do script "\(esc)"
             end tell
             """
