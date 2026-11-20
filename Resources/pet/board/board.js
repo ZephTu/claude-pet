@@ -97,6 +97,37 @@ async function undoTodo(task, i) {
 const tasks = () => (ui.board ? ui.board.tasks : []);
 const taskById = (id) => tasks().find((t) => t.id === id);
 const isOpen = (t) => ["waiting-on-me", "blocked", "active"].includes(t.status);
+// ---- drafts survive the pet quitting: what you typed, the images you added and the answers you
+// picked are kept in localStorage (per machine), and put back when the board loads.
+const DRAFTS_KEY = "hq-drafts-v1";
+(function restoreDrafts() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}");
+    Object.assign(ui.drafts, d.drafts || {});
+    Object.assign(ui.atts, d.atts || {});
+    Object.assign(ui.picks, d.picks || {});
+  } catch (e) { /* nothing kept, or storage off */ }
+})();
+function saveDrafts() {
+  clearTimeout(saveDrafts.t);
+  saveDrafts.t = setTimeout(() => {
+    const drafts = Object.fromEntries(Object.entries(ui.drafts).filter(([, v]) => v !== "" && v != null));
+    const atts = Object.fromEntries(Object.entries(ui.atts).filter(([, v]) => v && v.length));
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts, atts, picks: ui.picks })); } catch (e) { /* full or off */ }
+  }, 300);
+}
+// Drop what belonged to asks that are no longer open (answered elsewhere, or reopened then closed).
+function pruneDrafts() {
+  if (!ui.board) return;
+  const open = new Set(tasks().flatMap((t) => openAsks(t).map((a) => a.id)));
+  const gone = (id) => !open.has(id);
+  for (const k of Object.keys(ui.drafts)) { const m = /^(?:note|push):(.+)$/.exec(k); if (m && gone(m[1])) delete ui.drafts[k]; }
+  for (const k of Object.keys(ui.atts)) { const m = /^ask:(.+)$/.exec(k); if (m && gone(m[1])) delete ui.atts[k]; }
+  for (const id of Object.keys(ui.picks)) if (gone(id)) delete ui.picks[id];
+}
+window.addEventListener("pagehide", () => { clearTimeout(saveDrafts.t); saveDrafts.t = null; try {
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts: ui.drafts, atts: ui.atts, picks: ui.picks })); } catch (e) { /* */ } });
+
 const openAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
 // The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
@@ -136,6 +167,7 @@ async function refresh(force) {
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
+    pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
@@ -189,6 +221,7 @@ function launchDir(t) {
 const LAUNCH_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
 
 function render() {
+  saveDrafts();
   // Never yank an open dropdown out from under the pointer.
   if (ui.dragging) return;
   // Nor rebuild a box an input method (Pinyin…) is composing in: the new box would get the raw
@@ -1306,6 +1339,20 @@ function attachStrip(sid) {
   return `<div class="atts">${list.map((a, i) => `<span class="att" title="${esc(a.path)}"><img src="${a.url}" alt="">
       <button class="icon" title="Remove" data-action="att-remove" data-session="${esc(sid)}" data-i="${i}">✕</button></span>`).join("")}</div>`;
 }
+// A 128×96 JPEG preview of an image, small enough to keep with the drafts.
+function thumbnail(dataURL) {
+  return new Promise((ok) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = 128; c.height = 96;
+      const k = Math.max(128 / img.width, 96 / img.height), w = img.width * k, h = img.height * k;
+      c.getContext("2d").drawImage(img, (128 - w) / 2, (96 - h) / 2, w, h);
+      try { ok(c.toDataURL("image/jpeg", 0.75)); } catch (e) { ok(dataURL); }
+    };
+    img.onerror = () => ok(dataURL);
+    img.src = dataURL;
+  });
+}
 function readAsDataURL(file) {
   return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(file); });
 }
@@ -1317,7 +1364,8 @@ async function addImages(sid, files) {
     try {
       const url = await readAsDataURL(f);
       const saved = await api("saveImage", { data: url });
-      (ui.atts[sid] = ui.atts[sid] || []).push({ path: saved.path, url });
+      // Only a small preview is kept (it is saved with the draft); the full image is the file.
+      (ui.atts[sid] = ui.atts[sid] || []).push({ path: saved.path, url: await thumbnail(url) });
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
@@ -1810,7 +1858,7 @@ document.addEventListener("change", (ev) => {
 document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
-  if (el.dataset.key) ui.drafts[el.dataset.key] = el.value;
+  if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
 });
