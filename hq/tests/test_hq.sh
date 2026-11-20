@@ -217,6 +217,11 @@ hook '{"session_id":"sess-later","hook_event_name":"UserPromptSubmit","prompt":"
 "$HQ" ask snooze "$LID" --until "" >/dev/null
 "$HQ" asks "$PID" | grep -q "later — until" && fail "clearing Later left it hidden" || ok "Later can be cleared"
 
+# Today's order: hq focus order puts the named tasks first, in that order; the rest keep theirs.
+"$HQ" focus add T-001 T-002 "$PID" >/dev/null
+"$HQ" focus order "$PID" T-001 >/dev/null
+"$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert ids[:3]==["'"$PID"'","T-001","T-002"], ids' && ok "today's tasks can be reordered"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

@@ -790,15 +790,23 @@ function renderTask(t, mode) {
 const focusState = () => (ui.board && ui.board.focus) || { ids: [], carry: [] };
 const focusIds = () => focusState().ids || [];
 
+// The latest activity of a task's live sessions (ISO), or "" when none is live.
+const lastActive = (t) => liveFor(t.id).map((s) => s.updatedAt || "").sort().pop() || "";
 function renderToday() {
   const f = focusState();
-  const picked = focusIds().map(taskById).filter(Boolean);
+  // Active first: tasks with a live session lead, most recently active first; the rest keep your
+  // order. Off: your order throughout, and the cards can be dragged into it.
+  const mine = focusIds().map(taskById).filter(Boolean);
+  const picked = ui.activeFirst
+    ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
+    : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
   const day = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
   const carry = (f.carry || []).map(taskById).filter(Boolean);
   const showCarry = carry.length && ui.carryDismissed !== f.today;
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
   return `<div class="today-h"><h2 class="big">Today</h2><span class="meta">${esc(day)} · ${picked.length} task${picked.length === 1 ? "" : "s"}</span>
+      <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
       <span style="flex:1"></span>
       <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to today…" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
@@ -836,8 +844,9 @@ function focusCard(t) {
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
   // Open, the details carry the full todo and session lists, so the card's own short ones step
   // aside — each shows once.
-  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
+  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
+      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder today's tasks">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
@@ -1733,7 +1742,7 @@ async function saveField(el) {
   await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, "Saved");
 }
 
-const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts";
+const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts, .tgrip";
 
 // Record every answer picked on a task's asks, then type them into their session as one message.
 async function resolveAll(taskId) {
@@ -2209,7 +2218,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, "Bound — the session learns the task on its next message");
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, "Bound — the session learns the task on its next message");
   if (el.id === "show-closed") { ui.showClosed = el.checked; render(); }
-  if (el.id === "activefirst-cb") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
+  if (el.id === "activefirst-cb" || d.action === "active-first") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
 
 document.addEventListener("input", (ev) => {
@@ -2326,6 +2335,50 @@ function finishDrag() {
   document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
 }
 document.addEventListener("dragend", () => { finishDrag(); render(); });
+
+// ---- reorder Today's task cards by their ⠿ grip (only with Active first off). The order is
+// today's list in focus.json, saved with `hq focus order`.
+document.addEventListener("dragstart", (ev) => {
+  const grip = ev.target.closest && ev.target.closest("[data-drag-task]");
+  if (!grip) return;
+  ui.dragging = "task:" + grip.dataset.dragTask;      // holds rebuilds until the drop
+  ui.dropAt = null;
+  ev.dataTransfer.effectAllowed = "move";
+  ev.dataTransfer.setData("text/plain", grip.dataset.dragTask);
+  const card = grip.closest(".fcard");
+  if (card) card.classList.add("dragging");
+});
+document.addEventListener("dragover", (ev) => {
+  if (!String(ui.dragging || "").startsWith("task:")) return;
+  const zone = ev.target.closest && ev.target.closest("#today-focus");
+  if (!zone) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "move";
+  let best = null, dist = Infinity;
+  for (const el of zone.querySelectorAll("[data-today-card]")) {
+    const r = el.getBoundingClientRect(), mid = r.top + r.height / 2, d = Math.abs(ev.clientY - mid);
+    if (d < dist) { dist = d; best = { el, before: ev.clientY < mid }; }
+  }
+  clearDropMarks();
+  if (!best || "task:" + best.el.dataset.todayCard === ui.dragging) { ui.dropAt = null; return; }
+  best.el.classList.add(best.before ? "drop-before" : "drop-after");
+  ui.dropAt = { id: best.el.dataset.todayCard, before: best.before };
+});
+document.addEventListener("drop", async (ev) => {
+  const moving = String(ui.dragging || "");
+  if (!moving.startsWith("task:") || !(ev.target.closest && ev.target.closest("#today-focus"))) return;
+  ev.preventDefault();
+  const at = ui.dropAt, id = moving.slice(5);
+  finishDrag();
+  if (!at) return render();
+  const order = focusIds().filter((x) => x !== id);
+  const i = order.indexOf(at.id);
+  if (i < 0) return render();
+  order.splice(at.before ? i : i + 1, 0, id);
+  ui.board.focus.ids = order;                    // shows at once; the save follows
+  render();
+  try { await api("focus", { action: "order", tasks: order }); } catch (e) { toast(String(e.message || e), true); }
+});
 
 $("#refresh").addEventListener("click", refresh);
 function openNewTask(project) {
