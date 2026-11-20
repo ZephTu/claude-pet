@@ -7,13 +7,16 @@ const LABEL = {
   "waiting-on-me": "Waiting on you", blocked: "Blocked", active: "Active",
   done: "Done", abandoned: "Abandoned",
 };
+// How an ask can be answered. Most asks are "should I?" or "A or B — I suggest A", so Yes ("go
+// ahead / as you suggest", or with a note: "my answer is the note") comes first. "Later" keeps the
+// ask open and out of sight until tomorrow. "No context" is rare and sits behind ⋯.
 const RESOLUTIONS = [
-  ["do", "Do", "Yes / will do — the note says how"],
-  ["drop", "Drop", "Won't do — stop tracking it"],
-  ["later", "Ask later", "Need to ask someone else — revisit"],
-  ["archive", "No context", "I can't answer this — park it"],
+  ["do", "Yes", "Yes — go ahead, or as you suggested. With a note, the note is your answer (\"A+C\", \"run it once\")"],
+  ["drop", "No", "No — don't do it. A note can say why, or what instead"],
   ["todo", "To todo", "Something I'll do myself — make it an @me todo on this task and close the ask"],
+  ["snooze", "Later", "Not now — keep the question, but hide it until tomorrow: it leaves Needs you and the cat's badge, and the session is told you'll answer later"],
 ];
+const MORE_RESOLUTIONS = [["archive", "No context", "I can't answer this — park it"]];
 // Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
 const projectNames = () => projects().map((p) => p.name);
@@ -26,7 +29,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"), carryDismissed: pref("hq-carry-dismissed", ""),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -122,7 +125,7 @@ function saveDrafts() {
 // Drop what belonged to asks that are no longer open (answered elsewhere, or reopened then closed).
 function pruneDrafts() {
   if (!ui.board) return;
-  const open = new Set(tasks().flatMap((t) => openAsks(t).map((a) => a.id)));
+  const open = new Set(tasks().flatMap((t) => pendingAsks(t).map((a) => a.id)));
   const gone = (id) => !open.has(id);
   for (const k of Object.keys(ui.drafts)) { const m = /^(?:note|push):(.+)$/.exec(k); if (m && gone(m[1])) delete ui.drafts[k]; }
   for (const k of Object.keys(ui.atts)) { const m = /^ask:(.+)$/.exec(k); if (m && gone(m[1])) delete ui.atts[k]; }
@@ -131,7 +134,21 @@ function pruneDrafts() {
 window.addEventListener("pagehide", () => { clearTimeout(saveDrafts.t); saveDrafts.t = null; try {
   localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts: ui.drafts, atts: ui.atts, picks: ui.picks })); } catch (e) { /* */ } });
 
-const openAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
+// Open asks you are to answer now; ones put off with "Later" stay open but out of sight until
+// they come back (snoozed_until, local time), and pendingAsks counts both.
+const isLater = (a) => Boolean(a.snoozed_until) && new Date(a.snoozed_until) > new Date();
+const pendingAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
+const openAsks = (t) => pendingAsks(t).filter((a) => !isLater(a));
+const laterAsks = (t) => pendingAsks(t).filter(isLater);
+// "2 for later · back tomorrow", and the asks themselves when opened.
+function laterLine(t) {
+  const later = laterAsks(t);
+  if (!later.length) return "";
+  const open = ui.showLater.has(t.id);
+  return `<button class="btn small ghost later-toggle" data-action="show-later" data-task="${esc(t.id)}"
+      title="Questions you put off with Later. They come back by themselves tomorrow; open them to answer now">${open ? "Hide" : `${later.length} for later · back tomorrow`}</button>` +
+    (open ? later.map((a) => askCard(t, a)).join("") : "");
+}
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
 // The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
 // a reply (from here or its terminal) clears it, same as in the pet's list.
@@ -342,7 +359,7 @@ async function doTodo(taskId, text) {
 // A card with nothing on it yet (no next step, todos or log) gets a different opening: the
 // title alone is not a brief, and a session left to guess raised several asks about what it
 // imagined the task to be. It asks one thing — what to work on — and waits.
-const emptyCard = (t) => !t.next && !t.todos.length && !logEntries(t).length && !openAsks(t).length;
+const emptyCard = (t) => !t.next && !t.todos.length && !logEntries(t).length && !pendingAsks(t).length;
 const LAUNCH_PROMPT = (t) => emptyCard(t)
   ? `This session works on HQ task ${t.id}: ${t.title}. The task card is new and empty. Don't guess what the task is from its title and don't plan anything yet. Reply in one short line, ending with an hq-asks block holding exactly one ask — what should we work on first in ${t.id}? (in the language the task card is written in) — and wait for my answer.`
   : `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then reply in three short lines — where it stands, the next step, and anything waiting on me — and wait for my instructions before doing the work.`;
@@ -406,14 +423,16 @@ function render() {
   });
   paintTaskIds();
   paintArmed();
+  fitAllGrow();
   // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
   // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
   // a session's message box in the Sessions column shares its key with the conversation window's
   // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
   if (key && !active.isConnected) {
     const inModal = Boolean(activeRegion && activeRegion.id === "modal");
+    // …and a visible one: Today's cards stay in the DOM, hidden, while All is showing.
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
-      .find((x) => Boolean(x.closest("#modal")) === inModal);
+      .find((x) => Boolean(x.closest("#modal")) === inModal && x.getClientRects().length);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -470,10 +489,12 @@ function renderAsks() {
   const items = [];
   for (const t of tasks()) for (const a of openAsks(t)) items.push([t, a]);
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
-  if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>`;
+  const later = tasks().filter((t) => laterAsks(t).length);
+  const laterHtml = later.map((t) => `<div class="later-of"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${laterLine(t)}</div>`).join("");
+  if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>` + laterHtml;
   const byTask = new Map();
   for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
-  return `<h3>Asks · ${items.length}</h3>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("");
+  return `<h3>Asks · ${items.length}</h3>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
 }
 
 // A task with several open asks answers them together: each answer button only picks, and one
@@ -507,11 +528,12 @@ function askCard(t, a, opt = {}) {
     <div class="card ask ${pick ? "picked" : ""}">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
       <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
-      <div class="row">
-        <input class="note" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="note (optional) · paste or drop images" value="${esc(draft("note:" + a.id))}">
-        ${RESOLUTIONS.map(([r, label, tip]) => opt.group
+      <div class="row askrow">
+        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="note · paste images" title="Optional note — your answer in words, or why; paste or drop screenshots too">${esc(draft("note:" + a.id))}</textarea>
+        ${RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []).map(([r, label, tip]) => opt.group
           ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)} — pick, then Send below" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
           : `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
+        ${ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="More answers: No context — I can't answer this, park it" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
       </div>
       ${attachStrip(attKey)}
       ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
@@ -532,11 +554,19 @@ function wantPush(a) {
   const s = pushTarget(a);
   return Boolean(s) && s.state !== "busy";
 }
-const RES_TEXT = { do: "Do", drop: "Drop — won't do", later: "Ask later — needs someone else first", archive: "No context — parked",
-  todo: "Made it an @me todo — the user will do it themselves; don't ask again" };
+const RES_TEXT = { do: "Yes", drop: "No", later: "Ask later — needs someone else first", archive: "No context — parked",
+  todo: "Made it an @me todo — the user will do it themselves; don't ask again",
+  snooze: "Later — the user will answer this later; carry on with what doesn't depend on it" };
+// An answer as the session reads it: Yes with a note is the user's own answer, not "Yes — …".
+function resText(res, note) {
+  if (res === "do") return note ? `Answer: ${note}` : "Yes — go ahead as you suggested";
+  if (res === "drop") return "No" + (note ? ` — ${note}` : "");
+  return (RES_TEXT[res] || res) + (note && res !== "snooze" ? ` — ${note}` : "");
+}
 // "To todo" is the board's own answer: the ask becomes an @me todo on its task, and is closed as
 // "do" with a note saying so. Returns what an Undo needs.
 async function answerAsk(a, res, note) {
+  if (res === "snooze") { await api("snooze", { id: a.id }); return { snoozed: true }; }
   if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
   const task = a.id.replace(/\.\d+$/, "");
   const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
@@ -565,13 +595,24 @@ function gist(text) {
   return t.length > 30 ? t.slice(0, 30) + "…" : t;
 }
 function pushMessage(a, res, note) {
-  return `[HQ board] ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}` + (note ? ` — ${note}` : "");
+  return `[HQ board] ${a.id} "${gist(a.text)}": ${resText(res, note)}`;
 }
 function pushMessageAll(answers) {
   return "[HQ board] Answers:\n" +
-    answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${RES_TEXT[res] || res}${note ? ` — ${note}` : ""}`).join("\n");
+    answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${resText(res, note)}`).join("\n");
 }
 // An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
+// Writing a note on one of several asks means you're answering it: Do is picked for you. Only
+// a pick made this way is taken back when the note is emptied again; one you clicked stays.
+function autoPick(id, hasNote) {
+  const t = taskById(id.replace(/\.\d+$/, ""));
+  if (!t || openAsks(t).length < 2) return;        // a lone ask's buttons answer at once
+  if (!openAsks(t).some((a) => a.id === id)) return;   // a put-off ask (for later) isn't in the group
+  if (hasNote && !ui.picks[id]) { ui.picks[id] = "do"; ui.autoPicked.add(id); render(); }
+  else if (!hasNote && ui.autoPicked.has(id) && !(ui.atts["ask:" + id] || []).length) {
+    delete ui.picks[id]; ui.autoPicked.delete(id); render();
+  }
+}
 function answerNote(id) {
   const text = (ui.drafts["note:" + id] || "").trim();
   const imgs = (ui.atts["ask:" + id] || []).map((x) => x.path);
@@ -806,7 +847,7 @@ function focusCard(t) {
       <button class="icon" title="Not today — take it off today's list (the task stays)" data-confirm="Not today?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
-    ${asks.length ? `<div class="fsec">${renderAskGroup(t, asks)}</div>` : ""}
+    ${asks.length || laterAsks(t).length ? `<div class="fsec">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
     ${detail ? "" : `${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
     <div class="fsec">${live.map(sess).join("")}
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
@@ -1056,7 +1097,7 @@ function renderSessions(items = ui.sessions, plain = false) {
         </div>
         ${s.lastText ? `<div class="last">${esc(s.lastText)}</div>` : ""}
         ${open ? `<div class="send">
-          <textarea data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
+          <textarea class="grow" rows="1" data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
             placeholder="${busy ? "Busy — it will queue · paste or drop images" : "Message · paste or drop images"}">${esc(draft("msg:" + sid))}</textarea>
           ${sendButton(sid, true)}
         </div>${attachStrip(sid)}` : ""}
@@ -1329,12 +1370,13 @@ function drawPeek(toBottom) {
     </div>
     <div class="peek-body">${list}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? "Starting the session…" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
-      <textarea data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
+      <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
         placeholder="${canSend ? "Reply to this session — paste or drop images too" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
       ${sendButton(m.sid, canSend)}
     </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
+  fitAllGrow(box);
   if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
@@ -1556,6 +1598,17 @@ function scrollToCard(elementId) {
   setTimeout(() => node.classList.remove("flash"), 1400);
 }
 
+// Text boxes that may hold several lines grow with what is in them — up to five lines, then
+// they scroll (the cap is max-height in CSS). Run after every rebuild too: a box redrawn with a
+// three-line draft would otherwise come back one line tall.
+function fitGrow(el) {
+  // Empty: one line, whatever the placeholder would wrap to in a narrow column.
+  if (!el.value) { el.style.height = ""; return; }
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + 2 + "px";
+}
+function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").forEach(fitGrow); }
+
 // The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
 function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
 function paintArmed() {
@@ -1605,10 +1658,11 @@ async function addImages(sid, files) {
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
+  if (added && sid.startsWith("ask:")) autoPick(sid.slice(4), true);   // an image is an answer too
   if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
 }
 document.addEventListener("paste", (ev) => {
-  const box = ev.target.closest && ev.target.closest("textarea[data-session], input[data-att]");
+  const box = ev.target.closest && ev.target.closest("textarea[data-session], [data-att]");
   if (!box || !ev.clipboardData) return;
   const files = [...ev.clipboardData.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile());
   if (!files.length) return;     // plain text pastes as usual
@@ -1630,7 +1684,7 @@ document.addEventListener("drop", (ev) => {
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
-  const box = zone.querySelector("textarea[data-session], input[data-att]");
+  const box = zone.querySelector("textarea[data-session], [data-att]");
   if (box) addImages(box.dataset.session || box.dataset.att, [...ev.dataTransfer.files]);
 });
 
@@ -1700,7 +1754,8 @@ async function resolveAll(taskId) {
       try {
         x.made = await answerAsk(x.a, x.res, x.note);
         done.push(x);
-        delete ui.picks[x.a.id]; delete ui.drafts["note:" + x.a.id]; delete ui.drafts["push:" + x.a.id]; delete ui.atts["ask:" + x.a.id];
+        delete ui.picks[x.a.id]; delete ui.drafts["push:" + x.a.id];
+        if (x.res !== "snooze") { delete ui.drafts["note:" + x.a.id]; delete ui.atts["ask:" + x.a.id]; }
       } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
     }
     if (!done.length) return;
@@ -1715,7 +1770,7 @@ async function resolveAll(taskId) {
     for (const [sid, xs] of bySession) {
       const s = xs[0].target;
       try {
-        for (const x of xs) await api("delivered", { id: x.a.id, session: sid });
+        for (const x of xs) if (x.res !== "snooze") await api("delivered", { id: x.a.id, session: sid });
         await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
         sent.push(...xs);
         msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
@@ -1728,7 +1783,10 @@ async function resolveAll(taskId) {
       // Reopen everything first, then put the notes back — a refresh in between would prune
       // drafts of asks that are still closed.
       for (const x of done) {
-        try { await api("reopen", { id: x.a.id }); await dropMadeTodo(x.made); } catch (e) { toast(String(e.message || e), true); }
+        try {
+          if (x.made && x.made.snoozed) await api("snooze", { id: x.a.id, until: "" });
+          else { await api("reopen", { id: x.a.id }); await dropMadeTodo(x.made); }
+        } catch (e) { toast(String(e.message || e), true); }
       }
       for (const x of done) {
         ui.drafts["note:" + x.a.id] = x.draft || "";
@@ -1767,8 +1825,8 @@ document.addEventListener("click", async (ev) => {
       ui.resolving.add(d.id);
       const note = answerNote(d.id);
       const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
-      delete ui.drafts["note:" + d.id];
-      delete ui.atts["ask:" + d.id];
+      // Later leaves the ask open, so a half-written note and its images stay for tomorrow.
+      if (d.res !== "snooze") { delete ui.drafts["note:" + d.id]; delete ui.atts["ask:" + d.id]; }
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
       const target = a && pushTarget(a);
       const push = Boolean(target) && wantPush(a);
@@ -1780,7 +1838,8 @@ document.addEventListener("click", async (ev) => {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
           try {
-            await api("delivered", { id: d.id, session: target.sessionId });
+            // (Later is not an answer: nothing to keep the hook from repeating.)
+            if (d.res !== "snooze") await api("delivered", { id: d.id, session: target.sessionId });
             await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy" });
             msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
           } catch (e) {
@@ -1792,8 +1851,8 @@ document.addEventListener("click", async (ev) => {
         // Reopen first: a refresh while the ask is still closed would prune the restored note.
         toast(msg, false, async () => {
           try {
-            await api("reopen", { id: d.id });
-            await dropMadeTodo(made);
+            if (made && made.snoozed) await api("snooze", { id: d.id, until: "" });
+            else { await api("reopen", { id: d.id }); await dropMadeTodo(made); }
             ui.drafts["note:" + d.id] = draftNote || "";
             if (imgs) ui.atts["ask:" + d.id] = imgs;
             toast(push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
@@ -1810,10 +1869,13 @@ document.addEventListener("click", async (ev) => {
       return;
     }
     case "pick":
+      ui.autoPicked.delete(d.id);    // the user chose; typing no longer changes it
       if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
       return render();
     case "resolve-all": return resolveAll(d.task);
     case "do-todo": return doTodo(d.task, d.text);
+    case "more-res": ui.moreRes.add(d.id); return render();
+    case "show-later": ui.showLater.has(d.task) ? ui.showLater.delete(d.task) : ui.showLater.add(d.task); return render();
     case "forget-session": {
       const t = taskById(d.task);
       if (!t) return;
@@ -2158,8 +2220,10 @@ document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
+  const note = /^note:(.+)$/.exec(el.dataset.key || "");
+  if (note) autoPick(note[1], el.value.trim() !== "");
   if (el.dataset.field) render();
-  if (el.tagName === "TEXTAREA") { el.style.height = "30px"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }
+  if (el.tagName === "TEXTAREA" && el.classList.contains("grow")) fitGrow(el);
 });
 
 // Input methods (Pinyin, Japanese…): hold every redraw while a word is being composed.

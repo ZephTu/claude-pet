@@ -149,6 +149,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"])
         case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
+        case "snooze":
+            // "Later": the ask stays open, out of sight until tomorrow (or `until`; "" brings it back).
+            let until = body["until"] as? String
+            return await hq(["ask", "snooze", str("id"), "--via=board"] + (until.map { ["--until=\($0)"] } ?? []))
         case "delivered":
             return await hq(["ask", "delivered", str("id"), "--session=\(str("session"))"] + (body["undo"] as? Bool == true ? ["--undo"] : []))
         case "todo":

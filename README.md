@@ -49,7 +49,7 @@ With a dozen sessions open across several repos, the hard part stops being the w
 
 ### Questions, answered in one go
 
-A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer each with **Do** (plus a note, and pasted screenshots if you like), **Drop**, **Ask later**, **No context**, or **To todo** when it is really something you will do yourself. When a task has several, pick an answer for each and send them together as one message:
+A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer each with **Yes** (go ahead, or as suggested — or write your own answer in the note, several lines and screenshots welcome), **No**, **To todo** when it is really something you will do yourself, or **Later**: the question stays, out of sight until tomorrow, and the session is told you'll answer later. When a task has several, pick an answer for each and send them together as one message:
 
 <img src="docs/images/board-asks.gif" width="700" alt="Three questions from one session: an answer is picked for each, with a note on the first and the third turned into a todo, then all three are sent at once">
 

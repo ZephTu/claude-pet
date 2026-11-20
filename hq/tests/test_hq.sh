@@ -51,14 +51,14 @@ hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_m
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-echo "$ctx" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "- T-001.1 \"Approve plan v2?\" → do: go with v2" in c, c' && ok "board answer injected on next prompt"
+echo "$ctx" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "- T-001.1 \"Approve plan v2?\" → answer: go with v2" in c, c' && ok "board answer injected on next prompt"
 echo "$ctx" | grep -q "T-001.2: Ask Chengjie" && ok "still-open asks re-injected"
 hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; t=sys.stdin.read(); c=json.loads(t)["hookSpecificOutput"]["additionalContext"] if t.strip() else ""; assert not any(x.startswith("- T-001.1 ") for x in c.splitlines()), c' && ok "board answer delivered once" || fail "board answer delivered twice"
 "$HQ" ask add T-001 "Deploy now?" >/dev/null; "$HQ" ask resolve T-001.3 do --via board --note "yes"; "$HQ" ask delivered T-001.3 --session sess-1
 hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert not any(x.startswith("- T-001.3 ") for x in c.splitlines()), c' && ok "an answer already sent to the session is not injected again" || fail "pushed answer injected again"
 "$HQ" ask add T-001 "$(printf 'x%.0s' {1..80}) long question" >/dev/null
 "$HQ" ask resolve T-001.4 drop --via board >/dev/null
-hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; l=[x for x in c.splitlines() if x.startswith("- T-001.4 ")][0]; assert l == "- T-001.4 \"" + "x"*30 + "…\" → drop", l' && ok "an injected answer quotes only the question's opening words"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; l=[x for x in c.splitlines() if x.startswith("- T-001.4 ")][0]; assert l == "- T-001.4 \"" + "x"*30 + "…\" → no", l' && ok "an injected answer quotes only the question's opening words"
 
 MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
@@ -173,10 +173,10 @@ ctxof() { hook "{\"session_id\":\"$1\",\"hook_event_name\":\"UserPromptSubmit\",
 ctxof sess-b | grep -q "$SID.1 (asked by another session on this task)" && ok "open asks say which ones another session on the task raised"
 "$HQ" ask resolve "$SID.1" do --via board >/dev/null
 ctxof sess-b | grep -q "$SID.1 \"" && fail "another session on the task got the answer" || ok "an answer is not given to another session on the same task"
-ctxof sess-a | grep -q "^- $SID.1 \"Run the review?\" → do" && ok "the session that asked gets its answer"
+ctxof sess-a | grep -q "^- $SID.1 \"Run the review?\" → yes" && ok "the session that asked gets its answer"
 "$HQ" ask resolve "$SID.2" drop --via board >/dev/null
 "$HQ" unbind --session sess-a >/dev/null
-ctxof sess-b | grep -q "^- $SID.2 \"Draft the note?\" → drop" && ok "once the asker has left the task, the next session on it takes the answer"
+ctxof sess-b | grep -q "^- $SID.2 \"Draft the note?\" → no" && ok "once the asker has left the task, the next session on it takes the answer"
 ctxof sess-b | grep -q "^- $SID.1 " && fail "an answer the asker already had went out again after it was unbound" || ok "an answer already given to the asker is not given again once it leaves"
 # The asker ended: with the pet installed it drops a dead session's record, and the answer must
 # not wait for that session forever.
@@ -187,7 +187,7 @@ mkdir -p "$HOME/.claude/pet/sessions"
 echo "{\"pid\": $$}" > "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 " && fail "a live asker's answer went to another session" || ok "a live asker keeps its answer"
 rm "$HOME/.claude/pet/sessions/sess-c.json"
-ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → do" && ok "once the asker has ended, the next session on the task takes the answer"
+ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker has ended, the next session on the task takes the answer"
 rm -rf "$HOME/.claude/pet"
 
 # history: the sessions that worked on a task, with what resuming one needs.
@@ -206,6 +206,25 @@ PC="$(ls "$T"/root/tasks/T-*-placeholder/TASK.md)"; PID="$(basename "$(dirname "
 printf '%s\n' '- [ ] ...' '- [ ] real one' >> "$PC"
 "$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$PID"'"][0]; assert [(x["i"],x["text"]) for x in t["todos"]]==[(2,"real one")], t["todos"]' && ok "a placeholder todo is not listed, and the next keeps its number"
 "$HQ" todo "$PID" 2 done --text "real one" >/dev/null && grep -q '^- \[x\] real one' "$PC" && ok "ticking by that number ticks the right line" || fail "ticking by number missed"
+
+# "Later": the ask stays open, out of sight until tomorrow; the session hears it's coming later.
+"$HQ" ask add "$PID" "Which index type?" >/dev/null
+LID="$("$HQ" asks "$PID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Which index type?"][0])')"
+"$HQ" ask snooze "$LID" >/dev/null
+"$HQ" asks "$PID" --json | python3 -c 'import json,sys,datetime as d; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LID"'"][0]; assert a["state"]=="open" and d.datetime.fromisoformat(a["snoozed_until"]) > d.datetime.now(), a' && ok "Later keeps the ask open until tomorrow"
+"$HQ" bind "$PID" --session sess-later >/dev/null
+hook '{"session_id":"sess-later","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "$LID (the user will answer this later" && ok "the session is told an ask is coming later"
+"$HQ" ask snooze "$LID" --until "" >/dev/null
+"$HQ" asks "$PID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LID"'"][0]; assert a["state"]=="open" and not a.get("snoozed_until"), a' && ok "Later can be cleared" || fail "clearing Later left it hidden"
+# A Later typed into the session must not stop the real answer, later, from reaching it.
+"$HQ" ask snooze "$LID" >/dev/null; "$HQ" ask delivered "$LID" --session sess-later >/dev/null
+"$HQ" ask resolve "$LID" do --via board --note "btree" >/dev/null
+ctxof sess-later | grep -q "^- $LID \".*\" → answer: btree" && ok "an answer after a delivered Later still reaches the session" || fail "the answer after Later was never delivered"
+# --until is normalised to local time, and nonsense is refused rather than written.
+"$HQ" ask add "$PID" "Offsets?" >/dev/null
+OID="$("$HQ" asks "$PID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Offsets?"][0])')"
+"$HQ" ask snooze "$OID" --until 2030-01-01T00:00:00+00:00 >/dev/null && "$HQ" asks "$PID" >/dev/null && "$HQ" asks "$PID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$OID"'"][0]; assert "+" not in a["snoozed_until"] and len(a["snoozed_until"])==19, a' && ok "a snooze time with an offset is stored as local time" || fail "offset snooze broke hq asks"
+"$HQ" ask snooze "$OID" --until tomorrow >/dev/null 2>&1 && fail "nonsense --until was accepted" || ok "nonsense --until is refused"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
