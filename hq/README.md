@@ -109,7 +109,10 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    now"); otherwise it is delivered at the start of that session's next turn. With several
    sessions on one task, an answer reaches only the session that asked — the others are not
    told, so they don't act on it too; if the asker has ended or left the task, the next session
-   on it to start a turn takes the answer over.
+   on it to start a turn takes the answer over. Which session was told is recorded on the ask
+   (a `delivered` event in `asks.jsonl`), so unbinding a session never makes its answer go out
+   again. "Ended" is read from Claude Pet's session records; without the pet installed, an
+   asker keeps its answers until it is unbound.
 4. **Drafts are not done.** A message Claude drafted for you to send becomes an `@me` todo
    until you tick it.
 

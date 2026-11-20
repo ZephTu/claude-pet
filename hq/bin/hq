@@ -470,7 +470,11 @@ def read_asks(task_dir):
             a.update(state=e["resolution"], note=e.get("note", ""), via=e.get("via"),
                      resolved_at=e.get("ts"), seq=e.get("seq"))
         elif e.get("type") == "reopen" and e.get("id") in asks:
-            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None)
+            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None)
+        elif e.get("type") in ("delivered", "undelivered") and e.get("id") in asks:
+            # Which session has been told the answer. Kept on the ask, not on the session, so it
+            # survives that session being unbound — a second session must not be told again.
+            asks[e["id"]]["delivered"] = e.get("session") if e["type"] == "delivered" else None
     return list(asks.values())
 
 
@@ -604,7 +608,12 @@ def owned_elsewhere(a, sid, meta, state):
         return False
     if (state.get(asker) or {}).get("task") != meta["id"]:
         return False          # it left the task — whoever is on it now takes the answer
-    return session_alive(asker) is not False
+    alive = session_alive(asker)
+    if alive is None:
+        # No record of it. With the pet installed that means it ended (the pet drops a dead
+        # session's record); without the pet there is no telling, so it keeps its asks.
+        return not os.path.isdir(PET_SESSIONS)
+    return alive
 
 
 def open_asks_text(meta, limit=10, sid=None, state=None):
@@ -965,13 +974,10 @@ def cmd_ask(args):
         print(add_ask(find_card(args.target), " ".join(args.rest), session_id(None) or None))
     elif args.action == "delivered":
         # The board typed this answer straight into the session: don't inject it again next turn.
-        _, a = find_ask(args.target)
+        card, a = find_ask(args.target)
         sid = args.session or a.get("session")
-        def mark(entry):
-            have = set(entry.get("delivered", []))
-            have = have - {args.target} if args.undo else have | {args.target}
-            entry["delivered"] = sorted(have)
-        update_session(sid, mark)
+        append_event(os.path.dirname(card), {"type": "undelivered" if args.undo else "delivered",
+                                             "id": args.target, "session": sid})
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
         append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
@@ -1364,10 +1370,13 @@ def hook_main():
         # An answer goes to the session that asked, once. Another session on the same task
         # doesn't get it — it would act on it too. Only when the asker has left the task (or
         # ended) does the next session on it take the answer over.
-        delivered = set().union(*(set(e.get("delivered", [])) for e in state.values() if isinstance(e, dict)))
+        # (`delivered` in sessions.json is the older record; still honoured.)
+        legacy = set().union(*(set(e.get("delivered", [])) for e in state.values() if isinstance(e, dict)))
         fresh = [a for a in read_asks(meta["dir"])
-                 if a["state"] != "open" and a.get("via") == "board" and a["id"] not in delivered
-                 and not owned_elsewhere(a, sid, meta, state)]
+                 if a["state"] != "open" and a.get("via") == "board" and not a.get("delivered")
+                 and a["id"] not in legacy and not owned_elsewhere(a, sid, meta, state)]
+        for a in fresh:
+            append_event(meta["dir"], {"type": "delivered", "id": a["id"], "session": sid})
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
