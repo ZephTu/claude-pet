@@ -32,15 +32,16 @@ Ordered by how much it wants from you, starting from asleep:
 **Click it** to expand the panel. It has three groups, in the order they want your attention:
 
 - **Needs you** — sessions blocked on an approval or a question, longest wait first
-- **Finished** — turns that ended while you were not looking, folded to one row per session, each with the first line of what Claude said last — "all 12 tests pass" and "which of these do you want?" are the difference between needing to look and not. The "done" bubble says the same line
+- **Just finished** — turns that ended while you were not looking, folded to one row per session, each with the first line of what Claude said last — "all 12 tests pass" and "which of these do you want?" are the difference between needing to look and not. The "done" bubble says the same line
 - **Running** — everything else that is alive
 
 Each heading carries its own count, and a lone **Running** heading is left off: one
 group with nothing to tell it apart from is not a group.
 
 A row in **Needs you** says which kind of interruption it is — **Needs approval**
-against **Awaiting reply** — and carries a warm bar down its left edge, which goes
-red once it has waited past the point that turns the pet's own badge red. Its
+against **Awaiting reply** — and sits on a tinted background (coral for an approval,
+amber for a question), which deepens and turns its age bold once it has waited past the
+point that turns the pet's own badge red. Its
 second line is what you would be approving (`rm -rf build/`), never the hook's own
 "Claude is waiting for your input": three blocked rows used to print that sentence
 three times, under three first lines that already said so.
@@ -57,13 +58,13 @@ three times, under three first lines that already said so.
 
 | Dot | Means |
 | --- | --- |
-| orange, breathing | working |
-| orange with a small amber corner | working, but the last four tool calls all failed |
-| orange three-quarter arc, turning | Claude has stopped; an agent it sent off is doing the work |
-| amber with an exclamation bar | wants a decision (red once it has waited past a minute) |
-| amber ring | wants an answer |
-| hollow brown ring | busy on paper, but the turn was interrupted (Claude Code says idle) |
-| green | finished, not looked at yet |
+| green, breathing | working |
+| green with a small coral corner | working, but the last four tool calls all failed |
+| green three-quarter arc, turning | Claude has stopped; an agent it sent off is doing the work |
+| coral diamond | wants a decision |
+| amber dot with a soft halo | wants an answer |
+| dashed grey ring | busy on paper, but the turn was interrupted (Claude Code says idle) |
+| hollow green ring | finished, not looked at yet |
 | grey with a teal heartbeat | **turn over, commands still running in the background** — the row says `2 in background`, and hovering lists them (`npm run dev · 12m`), cut down by the same rule as the activity log |
 | grey | idle |
 

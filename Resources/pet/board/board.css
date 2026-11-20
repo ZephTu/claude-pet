@@ -904,3 +904,5 @@ main.single { grid-template-columns: 1fr; }
 .dot.waiting.approve { background: var(--red); border-radius: 1.5px; transform: rotate(45deg) scale(.9); }
 .dot.waiting.approve::after { content: none; }
 .dot.waiting.reply { box-shadow: inset 0 0 0 1.75px var(--amber), 0 0 0 3px var(--wash-amber); }
+.dot.busy.struggling::after { background: var(--red); }
+.dot.quiet { box-shadow: none; border: 1.5px dashed var(--faint); }
