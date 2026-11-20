@@ -66,7 +66,7 @@
 <h1 id="zh-board">看板上能做什么</h1>
 <h2>顶栏</h2>
 <ul>
-<li>计数：未回应的 ask、你的待办、等你处理的任务、进行中的任务、在跑的 session。</li>
+<li>计数：未回应的 ask、你的待办、进行中的任务、在跑的 session。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
 <li><b>Projects</b>：管理项目（见<a href="#zh-proj">项目</a>）。<b>Categories</b>：增加、改名、删除分类（见<a href="#zh-cats">分类与工作目录</a>）。</li>
 <li><b>+ New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
@@ -84,7 +84,7 @@
 </table>
 回应会在绑定的 session <b>下一轮</b>送达给它。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办。点方框 = 做完；点 ✕ = 不做。</li>
-<li><b>Waiting on you</b>：任务卡上"等你处理"字段不为空的任务。处理完点 <b>Handled</b>。</li>
+<li>左栏只有两块，分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在中栏定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
 <li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。</li>
 </ul>
@@ -92,7 +92,7 @@
 <p>回答"这一项到底是什么、从哪来、去哪看"：</p>
 <ul>
 <li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
-<li><b>待办 / 等你处理</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
+<li><b>待办</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
 <li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
 <li><b>Show task</b> 在中栏定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
 </ul>
@@ -109,9 +109,9 @@
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
 <tr><td><b>project / status / category</b></td><td>下拉框，选了就保存</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
-<tr><td><b>next / waiting on you</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>next</b></td><td>修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
-<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完（划线保留），✕ = 不做</td><td>你和 session</td></tr>
+<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做。方框 = 做完，✕ = 不做。未完成的排前面；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）</td><td>你和 session</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>点 ＋ 选一个正在运行的 session 绑定。已绑定的显示成带边框的面板，有 👁 ↗ 和解绑 ✕</td><td>你</td></tr>
 <tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
 <tr><td><b>Resources</b></td><td>相关的工单、PR、文档，按类型分组成可点击的链接；可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
@@ -158,7 +158,7 @@
 <tr><td><code>hq new "标题" [--category rca] [--workdir DIR]</code></td><td>新建任务，输出编号</td></tr>
 <tr><td><code>hq bind T-012 [--session ID]</code></td><td>把当前（或指定）session 绑定到任务</td></tr>
 <tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>解绑 · 查看当前 session 绑定的任务</td></tr>
-<tr><td><code>hq set T-012 status=blocked "next=等 token"</code></td><td>改任务卡字段（status / next / waiting_on_me / title …）</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=等 token"</code></td><td>改任务卡字段（status / next / project / category / title …）</td></tr>
 <tr><td><code>hq addtodo T-012 "@me 发回复给 Atul"</code></td><td>加一条待办</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;网址或 QA-123&gt;</code></td><td>增删关联资源</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
@@ -220,7 +220,6 @@ updated: 2026-11-20
 workdirs: ["/path/to/bigtest"]
 refs: ["QA-9519", "bigtest#3248"]
 sessions: ["48f4f564"]
-waiting_on_me: ""            # 需要你做的事；空 = 没有
 next: "fix 分支跑 Jenkins 并提 PR"
 ---
 ## Goal / Status / Todo / Log（标题用中文也行）
@@ -307,7 +306,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">What the board does</h1>
 <h2>Top bar</h2>
 <ul>
-<li>Counts: unanswered asks, your todos, tasks waiting on you, open tasks, live sessions.</li>
+<li>Counts: unanswered asks, your todos, open tasks, live sessions.</li>
 <li><b>Filter tasks…</b> by id, title or refs. <b>Projects</b> to manage projects (see <a href="#en-proj">Projects</a>); <b>Categories</b> to add, rename or remove categories (see <a href="#en-cats">Categories and workdirs</a>).</li>
 <li><b>+ New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
 <li><b>↻</b> refreshes now (it also refreshes every 4 seconds). <b>Guide</b> opens this page.</li>
@@ -324,7 +323,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 </table>
 The bound session receives your answer on its <b>next turn</b>.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks. Box = done, ✕ = won't do.</li>
-<li><b>Waiting on you</b> — tasks whose "waiting on you" field is set. <b>Handled</b> clears it.</li>
+<li>The left column has just two parts: <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in the middle column (its folded project group opens, a search that hides it is cleared).</li>
 <li><b>Mis-clicks can be undone</b>: after a tick, ✕, answer or Handled, a toast offers <b>Undo</b> for 8 seconds, and a ticked todo stays in the list, struck through with Undo, for <b>an hour</b>. Later than that, open the task and click the box again; every change is in the card's log too.</li>
 </ul>
@@ -332,7 +331,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <p>Answers "what is this item, where did it come from, where do I look":</p>
 <ul>
 <li><b>An ask</b>: the Claude reply that raised it, and which session — open that conversation directly. (Asks recorded before this feature have no reply attached; open the conversation instead.)</li>
-<li><b>A todo / waiting item</b>: the task's status, next step and the whole card, log included.</li>
+<li><b>A todo</b>: the task's status, next step and the whole card, log included.</li>
 <li>Both list the task's sessions: <b>live</b> ones open their conversation or jump; <b>ended</b> ones show their history (<b>History</b>).</li>
 <li><b>Show task</b> finds and opens the task in the middle column; <b>Open card</b> opens the card in your editor.</li>
 </ul>
@@ -349,9 +348,9 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <table>
 <tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
 <tr><td><b>project / status / category</b></td><td>menus; picking saves</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
-<tr><td><b>next / waiting on you</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
+<tr><td><b>next</b></td><td>edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
-<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done (stays, struck through), ✕ = won't do</td><td>you and sessions</td></tr>
+<tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name. Box = done, ✕ = won't do. Open ones come first; once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo)</td><td>you and sessions</td></tr>
 <tr><td><b>Sessions ＋</b></td><td>＋ picks a live session to bind. Bound ones show as framed panels with 👁 ↗ and unbind ✕</td><td>you</td></tr>
 <tr><td><b>Log ＋</b></td><td>the task's memory: decisions, findings, notes for whoever picks it up. Latest 3 shown</td><td>your notes; bound sessions read it and record decisions; ticking todos etc. is logged automatically</td></tr>
 <tr><td><b>Resources</b></td><td>related tickets, PRs and docs as clickable links, grouped by kind; add or remove (removal can be undone)</td><td>you; sessions record the tickets / PRs / docs they use, as links</td></tr>
@@ -394,7 +393,7 @@ The bound session receives your answer on its <b>next turn</b>.</li>
 <tr><td><code>hq new "title" [--category rca] [--workdir DIR]</code></td><td>create a task, prints its id</td></tr>
 <tr><td><code>hq bind T-012 [--session ID]</code></td><td>bind this (or the given) session to a task</td></tr>
 <tr><td><code>hq unbind [--session ID]</code> · <code>hq whoami</code></td><td>unbind · which task this session is bound to</td></tr>
-<tr><td><code>hq set T-012 status=blocked "next=wait for token"</code></td><td>set card fields (status / next / waiting_on_me / title …)</td></tr>
+<tr><td><code>hq set T-012 status=blocked "next=wait for token"</code></td><td>set card fields (status / next / project / category / title …)</td></tr>
 <tr><td><code>hq addtodo T-012 "@me reply to Atul"</code></td><td>add a todo</td></tr>
 <tr><td><code>hq ref add|remove T-012 &lt;url or QA-123&gt;</code></td><td>add / remove a related resource</td></tr>
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
@@ -456,7 +455,6 @@ updated: 2026-11-20
 workdirs: ["/path/to/bigtest"]
 refs: ["QA-9519", "bigtest#3248"]
 sessions: ["48f4f564"]
-waiting_on_me: ""            # what you must do; empty = nothing
 next: "run baseline on clusters A/C"
 ---
 ## Goal / Status / Todo / Log

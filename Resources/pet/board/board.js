@@ -25,7 +25,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {},
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(),
   groupBy: pref("hq-groupby", "project"), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
 };
 
@@ -73,6 +73,7 @@ function toast(msg, bad, undo) {
 
 // Every one-click change that is easy to hit by accident can be taken back.
 const RECENT_MS = 60 * 60 * 1000;
+const FINISHED_SHOWN = 3;   // finished todos shown on a task before they fold
 const TODO_STATE = { open: "open", done: "done", dropped: "drop", drop: "drop" };
 async function changeTodo(task, i, to, from, text) {
   const label = { done: "Done", drop: "Won't do", open: "Reopened" }[to] || to;
@@ -131,7 +132,6 @@ function render() {
   renderCounts();
   $("#asks").innerHTML = renderAsks();
   $("#mytodos").innerHTML = renderMyTodos();
-  $("#waiting").innerHTML = renderWaiting();
   $("#newtask-form").hidden = !ui.newTask;
   if (ui.newTask && !$("#newtask-form").dataset.drawn) {
     $("#newtask-form").innerHTML = renderNewTask();
@@ -165,11 +165,11 @@ function renderCounts() {
   const all = tasks();
   const asks = all.reduce((n, t) => n + openAsks(t).length, 0);
   const mine = all.filter(isOpen).reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length, 0);
-  const waiting = all.filter((t) => t.status === "waiting-on-me").length;
+  const legacy = all.filter((t) => isOpen(t) && t.waiting_on_me).length;
   const activeN = all.filter(isOpen).length;
   $("#counts").innerHTML =
-    `<span><b>${asks}</b> asks</span><span><b>${mine}</b> your todos</span>` +
-    `<span><b>${waiting}</b> waiting on you</span><span><b>${activeN}</b> open tasks</span>` +
+    `<span><b>${asks}</b> asks</span><span><b>${mine + legacy}</b> your todos</span>` +
+    `<span><b>${activeN}</b> open tasks</span>` +
     `<span><b>${ui.sessions.length}</b> live sessions</span>`;
 }
 
@@ -194,6 +194,9 @@ function renderMyTodos() {
   const items = [];
   for (const t of tasks().filter(isOpen))
     for (const x of t.todos) if (x.state === "open" && x.owner === "me") items.push([t, x]);
+  // A card may still carry the old free-text "waiting on you" field (written before it was
+  // folded into @me todos). Show it here as a todo rather than lose it; ticking clears it.
+  const legacy = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
   // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
   // reopen from the task itself — every change is also in the card's log.
   ui.recent = ui.recent.filter((r) => Date.now() - r.at < RECENT_MS);
@@ -202,8 +205,13 @@ function renderMyTodos() {
     const x = t && t.todos.find((y) => y.i === r.i);
     return x && x.state !== "open";
   });
-  if (!items.length && !recent.length) return `<h3>Your todos</h3><div class="empty">No open @me todos.</div>`;
-  return `<h3>Your todos · ${items.length}</h3><div class="card">` + items.map(([t, x]) => `
+  if (!items.length && !recent.length && !legacy.length) return `<h3>Your todos</h3><div class="empty">Nothing waiting on you.</div>`;
+  return `<h3>Your todos · ${items.length + legacy.length}</h3><div class="card">` + legacy.map((t) => `
+    <div class="todo">
+      <span class="box" title="Handled (you can undo)" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
+      <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>
+        <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
+    </div>`).join("") + items.map(([t, x]) => `
     <div class="todo">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
@@ -218,7 +226,7 @@ function renderMyTodos() {
     </div>`).join("") + `</div>`;
 }
 
-function renderWaiting() {
+function renderWaitingUnused() {
   const items = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
   if (!items.length) return "";
   return `<h3>Waiting on you · ${items.length}</h3>` + items.map((t) => `
@@ -302,7 +310,8 @@ function renderTask(t, mode) {
   const asks = openAsks(t).length;
   const live = liveFor(t.id).length;
   const open = ui.expanded.has(t.id);
-  const sub = t.waiting_on_me ? `<div class="tsub waiting">⮑ ${esc(t.waiting_on_me)}</div>`
+  const mine = t.waiting_on_me || (t.todos.find((x) => x.state === "open" && x.owner === "me") || {}).text;
+  const sub = mine && isOpen(t) ? `<div class="tsub waiting" title="Waiting on you">⮑ ${esc(mine)}</div>`
     : (t.next && isOpen(t) ? `<div class="tsub">⮑ ${esc(t.next)}</div>` : "");
   return `<div class="task" id="task-${esc(t.id)}">
     <div class="task-head" data-action="expand" data-task="${esc(t.id)}">
@@ -359,7 +368,7 @@ function secHead(title, t, what, tip, count) {
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
   const adding = (what) => ui.adding.has(`${t.id}:${what}`);
-  // next / waiting on you: edit, then Save or Cancel — nothing saves on Enter or on blur.
+  // next: edit, then Save or Cancel — nothing saves on Enter or on blur.
   const field = (name, label, placeholder) => {
     const v = t[name] || "";
     const d = ui.drafts[k(name)];
@@ -370,7 +379,15 @@ function renderTaskBody(t) {
         <button class="btn small ghost" data-action="cancel-field" data-field="${name}" data-task="${esc(t.id)}">Cancel</button>` : ""}
     </div></div>`;
   };
-  const todos = t.todos.length ? t.todos.map((x) => {
+  // Open todos first, always shown. Finished ones follow; past FINISHED_SHOWN of them they fold
+  // behind "Show N done" — except ones ticked in the last hour, which stay for an easy undo.
+  const isRecent = (x) => ui.recent.some((r) => r.task === t.id && r.i === x.i && Date.now() - r.at < RECENT_MS);
+  const openTodos = t.todos.filter((x) => x.state === "open");
+  const finished = t.todos.filter((x) => x.state !== "open");
+  const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
+  const shownTodos = openTodos.concat(foldDone ? finished.filter(isRecent) : finished);
+  const hiddenDone = finished.length - (shownTodos.length - openTodos.length);
+  const todoRow = (x) => {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
     const owner = x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : "";
@@ -378,7 +395,11 @@ function renderTaskBody(t) {
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
       ${x.state === "open" ? `<button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
-  }).join("") : `<div class="empty">No todos.</div>`;
+  };
+  const todos = !t.todos.length ? `<div class="empty">No todos.</div>`
+    : (openTodos.length ? "" : `<div class="empty">All done.</div>`) + shownTodos.map(todoRow).join("") +
+      (finished.length > FINISHED_SHOWN
+        ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
   const logs = logEntries(t);
@@ -404,7 +425,6 @@ function renderTaskBody(t) {
         ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
       </select></div>
     ${field("next", "next", "the next concrete step")}
-    ${field("waiting_on_me", "waiting on you", "empty = nothing")}
     <div class="field"><label>workdirs</label><div class="meta">${list(t.workdirs).length
         ? list(t.workdirs).map(esc).join("<br>") : "— added automatically when a session is bound"}</div></div>
 
@@ -716,7 +736,7 @@ function drawContext() {
   if (!t) { closePeek(); return toast("That task is gone", true); }
   const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
   const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
-  const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : m.kind === "todo" ? "Your todo" : "Waiting on you";
+  const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : "Your todo";
   const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
   const live = ui.sessions.filter((s) => s.task === t.id);
   const liveIds = new Set(live.map((s) => s.sessionId.slice(0, 8)));
@@ -1008,6 +1028,7 @@ document.addEventListener("click", async (ev) => {
       ui.adding.delete(`${d.task}:log`);
       return act("log", { task: d.task, message: text }, "Note saved");
     }
+    case "done-toggle": ui.doneOpen.has(d.task) ? ui.doneOpen.delete(d.task) : ui.doneOpen.add(d.task); return render();
     case "log-all": ui.logAll.has(d.task) ? ui.logAll.delete(d.task) : ui.logAll.add(d.task); return render();
     case "toggle-res": ui.resOpen.has(d.task) ? ui.resOpen.delete(d.task) : ui.resOpen.add(d.task); return render();
     case "add-ref": {

@@ -9,7 +9,6 @@ updated: 2026-01-01
 workdirs: []             # absolute paths this task touches
 refs: []                 # tickets, PRs, docs
 sessions: []             # Claude Code session id prefixes that worked on it (history only)
-waiting_on_me: ""        # what the human must do or decide; empty = nothing
 next: ""                 # the next concrete action
 ---
 

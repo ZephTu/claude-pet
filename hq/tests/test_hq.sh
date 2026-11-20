@@ -100,8 +100,10 @@ printf -- '---\nid: T-099\nproject:                 # a comment\nstatus: active\
 "$HQ" board --json | python3 -c 'import json,sys; assert all(not str(t.get("project","")).startswith("#") for t in json.load(sys.stdin)["tasks"])' && ok "a blank field followed by a comment parses as empty"
 "$HQ" project add pa >/dev/null; "$HQ" project add pb >/dev/null
 "$HQ" project order pb pa && [ "$("$HQ" project list --json | python3 -c 'import json,sys; n=[p["name"] for p in json.load(sys.stdin) if p["listed"]]; print(n.index("pb") < n.index("pa"))')" = True ] && ok "project order"
-"$HQ" set T-001 status=waiting-on-me "waiting_on_me=pick a dataset"
-"$HQ" board | grep -q "等你: pick a dataset" && ok "set + board"
+"$HQ" set T-001 status=waiting-on-me "next=pick a dataset"
+"$HQ" board | grep -q "你: ping Wenbing" && ok "set + board shows your next todo"
+"$HQ" set T-002 "waiting_on_me=legacy text" && "$HQ" board | grep -q "legacy text" && ok "a leftover waiting_on_me still shows as yours"
+"$HQ" set T-002 "waiting_on_me=" >/dev/null
 
 # write-back guard: a long turn that never touched the card is nudged once
 python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'

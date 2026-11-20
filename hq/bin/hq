@@ -513,9 +513,10 @@ def protocol(meta):
     return f"""This Claude Code session is bound to HQ task {meta['id']}: {meta.get('title','')}.
 Task card: {meta['path']}
 The card, not this conversation, is the source of truth. Rules:
-1. Read the card before acting. Keep it current: status / next / waiting_on_me in the
-   frontmatter, todos as `- [ ] @owner text` (owner: me = the user, claude, or a person's
-   name); mark `[x]` done, `[-]` dropped. Append decisions with `{HQ_BIN} log {meta['id']} "..."`.
+1. Read the card before acting. Keep it current: status / next in the frontmatter, todos as
+   `- [ ] @owner text` (owner: me = the user, claude, or a person's name); mark `[x]` done,
+   `[-]` dropped. Anything the user has to DO (send, review, decide offline) is an `@me` todo;
+   anything you need the user to ANSWER goes in an hq-asks block (rule 2). Append decisions with `{HQ_BIN} log {meta['id']} "..."`.
    If you changed nothing worth recording, run `{HQ_BIN} touch {meta['id']}`.
    Record related tickets, PRs and docs as a short title plus the full URL:
    `{HQ_BIN} ref add {meta['id']} "<title> <url>"` (the board shows the title, not the URL).
@@ -566,6 +567,8 @@ def cmd_board(args):
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open"]
     my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES
                 for t in m["todos"] if t["state"] == "open" and t["owner"] == "me"]
+    my_todos += [(m, {"i": "-", "text": m["waiting_on_me"]}) for m in metas
+                 if m.get("status") in OPEN_STATUSES and m.get("waiting_on_me")]
     if open_asks:
         print(f"\n❓ 待你回应 asks ({len(open_asks)})")
         for m, a in open_asks:
@@ -587,8 +590,11 @@ def cmd_board(args):
         for m in group:
             age = f"{m['age_days']}d" if m["age_days"] is not None else "?"
             print(f"  {m.get('id','?'):<6} [{m.get('category','?'):<13}] {m.get('title','')}  ({m.get('lead','-')}, {age})")
-            if m.get("waiting_on_me"):
-                print(f"         ⮑ 等你: {m['waiting_on_me']}")
+            mine = [t["text"] for t in m["todos"] if t["state"] == "open" and t["owner"] == "me"]
+            if m.get("waiting_on_me"):           # legacy field; @me todos replaced it
+                mine.insert(0, m["waiting_on_me"])
+            if mine and st not in ("done", "abandoned"):
+                print(f"         ⮑ 你: {mine[0]}" + (f"（+{len(mine) - 1}）" if len(mine) > 1 else ""))
             elif m.get("next") and st not in ("done", "abandoned"):
                 print(f"         ⮑ 下一步: {m['next']}")
     hidden = sum(1 for m in metas if m.get("status") in ("done", "abandoned"))
