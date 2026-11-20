@@ -414,7 +414,8 @@ final class WebBridge {
                       context: [String: Int] = [:],
                       tasks: [String: String] = [:],
                       taskStatus: [String: String] = [:],
-                      hqAsks: [[String: String]] = []) {
+                      hqAsks: [[String: String]] = [],
+                      jobs: [[String: String]] = []) {
         guard isReady else { return }
         // Only rows that share a project with another need naming inline.
         let ambiguous = StateAggregator.ambiguousProjects(sessions)
@@ -560,10 +561,13 @@ final class WebBridge {
         // Open questions on the HQ board, so the badge's count has rows to point at.
         let asksJSON = (try? JSONSerialization.data(withJSONObject: hqAsks))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)|\(asksJSON)"
+        // Scheduled jobs running now, or failed and not yet looked at.
+        let jobsJSON = (try? JSONSerialization.data(withJSONObject: jobs))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let payload = "\(json)|\(hiddenCount)|\(finishedJSON)|\(droppedNotice)|\(asksJSON)|\(jobsJSON)"
         guard payload != lastSessionsPayload else { return }
         lastSessionsPayload = payload
-        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice), \(asksJSON));")
+        evaluate("window.setSessions(\(json), \(hiddenCount), \(finishedJSON), \(droppedNotice), \(asksJSON), \(jobsJSON));")
     }
 
     /// A nil completionHandler swallows JS errors silently, which is exactly how
