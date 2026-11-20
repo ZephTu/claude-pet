@@ -118,6 +118,7 @@
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
+<li><b>任务编号的颜色 = 状态</b>（看板上和小猫列表里都一样）：<span style="color:var(--amber)">黄 = 等你处理</span>、<span style="color:#e8846e">红 = 阻塞</span>、<span style="color:#7fb3aa">青绿 = 进行中</span>、<span style="color:var(--blue)">蓝 = 已完成</span>、<span style="color:var(--faint);text-decoration:line-through">灰 = 已放弃</span>；悬停显示状态名。</li>
 </ul>
 <p>点开一个任务：</p>
 <table>
@@ -149,7 +150,7 @@
 </ul>
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
-<li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行显示它绑定的任务编号和标题。</li>
+<li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行显示它绑定的任务编号和标题（按状态着色，占满整行宽度）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
 <li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子）；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
 <li><b>每天挑任务</b>：每天第一次看到 session 活动、而今天还没挑任务时，小猫提醒一次"挑一下今天的任务"（会提到上次没完成的有几个）；双击小猫打开看板的 Today。</li>
 </ul>
@@ -392,6 +393,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>Tick <b>show closed</b> for done and abandoned.</li>
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
+<li><b>A task id's colour is its status</b> (on the board and in the cat's list alike): <span style="color:var(--amber)">amber = waiting on you</span>, <span style="color:#e8846e">red = blocked</span>, <span style="color:#7fb3aa">teal = active</span>, <span style="color:var(--blue)">blue = done</span>, <span style="color:var(--faint);text-decoration:line-through">grey = abandoned</span>; hover for the name.</li>
 </ul>
 <p>Open a task:</p>
 <table>
@@ -423,7 +425,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 </ul>
 <h1 id="en-pet">With the cat</h1>
 <ul>
-<li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to.</li>
+<li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to (coloured by status, using the whole line). Without HQ, or for an unbound session, the line is what it always was.</li>
 <li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you); a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
 <li><b>Pick today's tasks</b>: once a day, the first time the cat sees sessions at work while nothing is picked for today, it suggests picking (mentioning how many are still open from last time); double-click the cat to open Today.</li>
 </ul>
