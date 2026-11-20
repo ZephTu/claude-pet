@@ -157,7 +157,7 @@
 <li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
 <li><b>复制</b>：选中文字 Cmd+C；每条消息悬停有 <b>Copy</b>；顶部 <b>Copy all</b> 复制整段对话。</li>
 <li><b>链接</b>：网页链接点击用浏览器打开；文件路径（<code>.md</code>、<code>.html</code>、代码文件、目录……）点击用默认程序打开，相对路径按该 session 的目录解析。脚本、可执行文件和 App 只会在访达里定位，不会直接运行。</li>
-<li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> 块显示成"Asked you"/"Answers recorded"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
+<li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> / <code>hq-update</code> 块显示成"Asked you"/"Answers recorded"/"Card updated"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
 <li>底部可以直接回复。已经结束的 session 只能看历史。</li>
 </ul>
 <h1 id="zh-pet">和小猫的联动</h1>
@@ -170,7 +170,17 @@
 <h1 id="zh-link">session 和看板怎么联动</h1>
 <p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
 <ol>
-<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。</li>
+<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。session 不再一条条跑 <code>hq log</code> / <code>hq set</code> 这些命令，而是在回复末尾写一个 <code>hq-update</code> 块，由 Stop hook 写进卡片。每多一次工具调用就要把整段对话再读一遍，这样能省掉这部分 token。写不进去的行（状态拼错、找不到那条待办……）会退回给 session 改一次。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。
+<pre>```hq-update
+status: blocked
+next: 等 infra 给 token
+state: 构建已通过，等 token
+todo: @me 发 token 申请
+done: 重跑测试
+log: 选方案 v2，因为更便宜
+ref: PR #9 https://github.com/…/pull/9
+```</pre>
+只写变了的行；<code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> 可以写多行；<code>state</code> 会替换卡片的"当前状态"一节；<code>done</code> / <code>drop</code> 按待办的文字匹配。什么都没变就只写一行 <code>touch</code>。</li>
 <li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。
 <pre>```hq-asks
 - 方案 v2 可以吗？
@@ -444,7 +454,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <li>The session's last 30 messages, Claude's replies rendered as Markdown. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
 <li><b>Copy</b>: select and Cmd+C; hover a message for <b>Copy</b>; <b>Copy all</b> for the whole conversation.</li>
 <li><b>Links</b>: web links open in your browser; file paths (<code>.md</code>, <code>.html</code>, source files, folders, …) open in their default app, relative paths resolved against the session's directory. Scripts, executables and apps are only shown in Finder, never run.</li>
-<li>The <code>hq-asks</code> / <code>hq-resolved</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
+<li>The <code>hq-asks</code> / <code>hq-resolved</code> / <code>hq-update</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" / "Card updated" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
 <li>Reply from the box at the bottom. Ended sessions are history-only.</li>
 </ul>
 <h1 id="en-pet">With the cat</h1>
@@ -457,7 +467,17 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h1 id="en-link">How sessions and the board connect</h1>
 <p>Once bound, three hooks make the session follow these rules:</p>
 <ol>
-<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. A turn longer than two minutes that never touched the card is sent back once to update it.</li>
+<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. Instead of running <code>hq log</code> / <code>hq set</code> … one call at a time, the session ends its reply with an <code>hq-update</code> block and the Stop hook writes it to the card. Every extra tool call re-reads the whole conversation, so this saves those tokens. Lines it cannot apply (a misspelt status, a todo it cannot find, …) are sent back to the session once to fix. A turn longer than two minutes that never touched the card is sent back once to update it.
+<pre>```hq-update
+status: blocked
+next: wait for infra's token
+state: build is green; waiting on the token
+todo: @me send the token request
+done: rerun the suite
+log: picked plan v2 because it is cheaper
+ref: PR #9 https://github.com/…/pull/9
+```</pre>
+Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> may repeat; <code>state</code> replaces the card's Status section; <code>done</code> / <code>drop</code> find the todo by its text. Nothing changed: a block holding just <code>touch</code>.</li>
 <li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …).
 <pre>```hq-asks
 - Approve plan v2?

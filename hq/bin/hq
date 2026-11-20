@@ -36,7 +36,10 @@ DEFAULT_CATEGORIES = ["feature", "bug", "investigation", "review", "ops", "docs"
 CATEGORY_RE = re.compile(r"^[^\s#\"'\n:,\[\]][^#\"'\n:,\[\]]{0,39}$")
 TODO_TIME_RE = re.compile(r"\s*<!--\s*t:([^>]+?)\s*-->\s*$")   # hidden creation time on a todo line
 TODO_RE = re.compile(r"^(\s*)- \[([ xX\-])\] (.*)$")
-FENCE_RE = re.compile(r"```(hq-asks|hq-resolved)[^\n]*\n(.*?)```", re.S)
+FENCE_RE = re.compile(r"```(hq-asks|hq-resolved|hq-update)[^\n]*\n(.*?)```", re.S)
+# Bookkeeping blocks: what the board and previews leave out of a reply's gist.
+BOOKKEEPING_RE = re.compile(r"```(?:hq-resolved|hq-update)[^\n]*\n.*?```", re.S)
+UPDATE_KEYS = ("status", "next", "state", "todo", "done", "drop", "log", "ref", "workdir", "touch")
 WRITEBACK_MIN_TURN_SECONDS = 120
 
 
@@ -577,14 +580,25 @@ def protocol(meta):
     return f"""This Claude Code session is bound to HQ task {meta['id']}: {meta.get('title','')}.
 Task card: {meta['path']}
 The card, not this conversation, is the source of truth. Rules:
-1. Read the card before acting. Keep it current: status / next in the frontmatter, todos as
-   `- [ ] @owner text` (owner: me = the user, claude, or a person's name); mark `[x]` done,
-   `[-]` dropped. Anything the user has to DO (send, review, decide offline) is an `@me` todo;
-   anything you need the user to ANSWER goes in an hq-asks block (rule 2). Append decisions with `{HQ_BIN} log {meta['id']} "..."`.
-   If you changed nothing worth recording, run `{HQ_BIN} touch {meta['id']}`.
-   Record related tickets, PRs and docs as a short title plus the full URL:
-   `{HQ_BIN} ref add {meta['id']} "<title> <url>"` (the board shows the title, not the URL).
-   If you start working in another directory, add it: `{HQ_BIN} set {meta['id']} 'workdirs=[...]'`.
+1. Read the card before acting. Keep it current by ending your reply with an hq-update block;
+   the Stop hook writes it to the card. Don't run `hq log/set/ref/addtodo/todo` or edit the card
+   for this: each tool call is one more round trip over the whole conversation. Write only the
+   lines that changed; todo / done / drop / log / ref / workdir may repeat:
+```hq-update
+status: active | waiting-on-me | blocked | done | abandoned
+next: <the next concrete action>
+state: <where it stands — replaces the card's status section; one `state:` per line>
+todo: @owner <text>
+done: <text of an open todo>
+drop: <text of an open todo>
+log: <a decision and why>
+ref: <short title> <full URL>
+workdir: <absolute path you started working in>
+```
+   owner: me = the user, claude, or a person's name. Anything the user has to DO (send, review,
+   decide offline) is an `@me` todo; anything you need the user to ANSWER goes in an hq-asks
+   block (rule 2). A turn that did work but changed nothing worth recording: a block holding
+   just `touch`. The board shows a ref's title, not its URL.
 2. When you need the user to decide, confirm or answer something before you can go on, end
    your reply with one self-contained question per line in this block (tracked until answered).
    Something the user has to DO — now, or after something else ("once the PRs merge, send the
@@ -943,14 +957,7 @@ def cmd_set(args):
 def cmd_todo(args):
     card = find_card(args.task)
     lines = open(card, encoding="utf-8").read().split("\n")
-    n = 0
-    mark = {"done": "x", "drop": "-", "open": " "}[args.state]
-    todos = []                      # (line index, todo number, match, plain text)
-    for i, line in enumerate(lines):
-        t = TODO_RE.match(line)
-        if t:
-            n += 1
-            todos.append((i, n, t, todo_plain(t.group(3))))
+    todos = card_todos(lines)
     pick = next((x for x in todos if x[1] == args.index), None)
     if args.text is not None:
         # The caller saw this text at #index; the card may have changed since (a session added
@@ -962,10 +969,26 @@ def cmd_todo(args):
                 die(f"{args.task} no longer has the todo {args.text!r} — refresh and try again")
     if not pick:
         die(f"{args.task} has no todo #{args.index}")
+    mark_todo(card, lines, pick, args.state, args.via)
+
+
+def card_todos(lines):
+    """(line index, todo number, match, plain text) for every todo line, numbered as the board does."""
+    out, n = [], 0
+    for i, line in enumerate(lines):
+        t = TODO_RE.match(line)
+        if t:
+            n += 1
+            out.append((i, n, t, todo_plain(t.group(3))))
+    return out
+
+
+def mark_todo(card, lines, pick, state, via):
     i, num, t, _ = pick
+    mark = {"done": "x", "drop": "-", "open": " "}[state]
     lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
     atomic_write(card, "\n".join(lines))
-    append_log(card, f"todo #{num} → {args.state} ({args.via}): {TODO_TIME_RE.sub('', t.group(3))}")
+    append_log(card, f"todo #{num} → {state} ({via}): {TODO_TIME_RE.sub('', t.group(3))}")
 
 
 def todo_plain(raw):
@@ -992,9 +1015,12 @@ def cmd_ref(args):
 
 
 def cmd_addtodo(args):
-    card = find_card(args.task)
+    add_todo(find_card(args.task), args.text)
+
+
+def add_todo(card, text):
     lines = open(card, encoding="utf-8").read().split("\n")
-    item = f"- [ ] {args.text.strip()} <!--t:{now_iso()}-->"
+    item = f"- [ ] {text.strip()} <!--t:{now_iso()}-->"
     head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办)", l, re.I)), None)
     last_todo = None
     for i, l in enumerate(lines):
@@ -1011,6 +1037,94 @@ def cmd_addtodo(args):
         lines += ["", "## Todo", item]
     atomic_write(card, "\n".join(lines))
     set_fields(card, {})
+
+
+def update_lines(block):
+    """The lines of an hq-update block as (key, value), with list markers and blank lines dropped."""
+    out = []
+    for raw in block.splitlines():
+        line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", raw).strip()
+        if not line:
+            continue
+        m = re.match(r"^([A-Za-z]+)\s*(?::\s*(.*))?$", line)
+        out.append((m.group(1).lower(), (m.group(2) or "").strip()) if m else (None, line))
+    return out
+
+
+def apply_update(card, block, via="session"):
+    """Apply an hq-update block — the card changes a session writes in its reply instead of running
+    `hq log/set/ref/addtodo/todo` one tool call at a time. Every such call is another model round trip
+    that re-reads the whole conversation; the block costs a few output tokens.
+
+    Returns the lines it could not apply, so the Stop hook can send them back once."""
+    problems, fields, state = [], {}, []
+    adds, marks, logs, refs, dirs = [], [], [], [], []
+    for k, v in update_lines(block):
+        if k not in UPDATE_KEYS:
+            problems.append(f"not an hq-update line: {v if k is None else k + ': ' + v}")
+        elif k == "touch":
+            continue
+        elif not v:
+            problems.append(f"`{k}:` with nothing after it")
+        elif k == "status":
+            if v in STATUSES:
+                fields["status"] = v
+            else:
+                problems.append(f"status must be one of {', '.join(STATUSES)} (got {v!r})")
+        elif k == "next":
+            fields["next"] = v
+        elif k == "state":
+            state.append(v)
+        elif k == "todo":
+            adds.append(v)
+        elif k in ("done", "drop"):
+            marks.append((k, v))
+        elif k == "log":
+            logs.append(v)
+        elif k == "ref":
+            refs.append(v)
+        elif k == "workdir":
+            dirs.append(v)
+
+    for text in adds:
+        add_todo(card, text)
+    for k, want in marks:
+        lines = open(card, encoding="utf-8").read().split("\n")
+        todos = [x for x in card_todos(lines) if x[2].group(2) == " "]
+        key = " ".join(todo_plain(want).split()).casefold()
+        exact = [x for x in todos if x[3].casefold() == key]
+        loose = exact or [x for x in todos if key in x[3].casefold()]
+        if len(loose) == 1:
+            mark_todo(card, lines, loose[0], k, via)
+        else:
+            problems.append(f"`{k}: {want}` matches {'no' if not loose else len(loose)} open todos"
+                            " — quote the todo's text exactly")
+    if state:
+        text = open(card, encoding="utf-8").read()
+        m = re.search(r"^##\s*(?:Status|Current state|当前状态|状态)\s*\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+        if m:
+            atomic_write(card, text[:m.start(1)] + "\n".join(state) + "\n\n" + text[m.end(1):])
+        else:
+            problems.append("`state:` — the card has no Status / 当前状态 section")
+    meta = parse_card(card)
+    if refs:
+        have = meta.get("refs") if isinstance(meta.get("refs"), list) else []
+        fields["refs"] = have + [r for r in dict.fromkeys(refs) if r not in have]
+    if dirs:
+        have = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
+        new = []
+        for d in dirs:
+            d = os.path.expanduser(d)
+            if not os.path.isabs(d) or not os.path.isdir(d):
+                problems.append(f"`workdir: {d}` is not an existing absolute path")
+            elif d not in have and d not in new:
+                new.append(d)
+        if new:
+            fields["workdirs"] = have + new
+    set_fields(card, fields)            # also stamps `updated`, so an empty block is a touch
+    for msg in logs:
+        append_log(card, msg)
+    return problems
 
 
 def cmd_ask(args):
@@ -1177,7 +1291,7 @@ def live_sessions():
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),
             "task": state.get(sid, {}).get("task"),
-            "lastText": (last or "")[:400],
+            "lastText": BOOKKEEPING_RE.sub("", last or "").strip()[:400],
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
     return out
@@ -1377,7 +1491,7 @@ def cmd_history(args):
             "title": session_title(entries),
             "lastAt": dt.datetime.fromtimestamp(os.path.getmtime(path)).astimezone().isoformat(timespec="seconds"),
             "live": live,
-            "lastText": " ".join(last.split())[:160],
+            "lastText": " ".join(BOOKKEEPING_RE.sub("", last).split())[:160],
         })
     rows.sort(key=lambda r: r["lastAt"], reverse=True)
     if args.json:
@@ -1482,7 +1596,11 @@ def hook_main():
 
     elif event == "Stop":
         text = last_assistant_text(payload)
+        problems = []
         for kind, block in FENCE_RE.findall(text):
+            if kind == "hq-update":
+                problems += apply_update(card, block)
+                continue
             for line in block.splitlines():
                 line = re.sub(r"^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s*", "", line).strip()
                 if not line:
@@ -1496,15 +1614,22 @@ def hook_main():
                             resolve_ask(m.group(1), m.group(2), m.group(3), via="session")
                         except SystemExit:
                             pass
+        if payload.get("stop_hook_active"):
+            return                      # one nudge per turn, never a loop
+        reasons = []
+        if problems:
+            reasons.append(f"HQ: some lines of your hq-update block were not applied to {meta['id']}:\n"
+                           + "\n".join(f"- {p}" for p in problems)
+                           + "\nReply with just a corrected hq-update block holding those lines.")
         # Write-back guard: a long turn that never touched the card gets one nudge.
         start = s.get("turn_start")
-        if (start and not payload.get("stop_hook_active")
-                and time.time() - start > WRITEBACK_MIN_TURN_SECONDS
+        if (not problems and start and time.time() - start > WRITEBACK_MIN_TURN_SECONDS
                 and os.path.getmtime(card) < start):
-            print(json.dumps({"decision": "block", "reason":
-                f"HQ: this turn did work on {meta['id']} but the task card was not updated. "
-                f"Update status/next/todos in {card} (or `{HQ_BIN} touch {meta['id']}` if nothing "
-                f"changed), then finish."}, ensure_ascii=False))
+            reasons.append(f"HQ: this turn did work on {meta['id']} but the task card was not updated. "
+                           "Reply with just an hq-update block (status / next / state / todo / done / log …; "
+                           "a block holding only `touch` if nothing changed), then finish.")
+        if reasons:
+            print(json.dumps({"decision": "block", "reason": "\n\n".join(reasons)}, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------- main
