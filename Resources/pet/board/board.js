@@ -253,7 +253,8 @@ function earlierList(t) {
         <div class="meta">ended · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="Read its conversation">${ICON.peek}</button>
-        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
+        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
+        <button class="icon" data-confirm="Remove?" data-action="forget-session" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" title="Remove it from this task's sessions (the conversation itself is kept)">✕</button>
       </div></div>`).join("") +
     (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? "Show fewer" : `Show all ${rows.length}`}</button>` : "");
 }
@@ -377,6 +378,7 @@ function render() {
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
   paintTaskIds();
+  paintArmed();
   // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
   // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
   // a session's message box in the Sessions column shares its key with the conversation window's
@@ -564,7 +566,7 @@ function renderMyTodos() {
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
         <div class="meta">${age(x.created)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
-      <button class="btn small ghost" title="Won't do (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
+      <button class="btn small ghost" title="Won't do (you can undo)" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
     </div>`).join("") + recent.map((r) => `
     <div class="todo ${r.to === "drop" ? "dropped" : "done"}">
       <span class="box ${r.to === "drop" ? "dropped" : "done"}">${r.to === "drop" ? "–" : "✓"}</span>
@@ -732,7 +734,7 @@ function focusCard(t) {
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
       <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
       ${doItButton(t, x)}
-      <button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
+      <button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   const sess = (s) => `<div class="bsess">
       ${dot(s)}
       <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
@@ -752,7 +754,7 @@ function focusCard(t) {
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
       ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="icon" title="Not today — take it off today's list (the task stays)" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      <button class="icon" title="Not today — take it off today's list (the task stays)" data-confirm="Not today?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
     ${asks.length ? `<div class="fsec">${renderAskGroup(t, asks)}</div>` : ""}
@@ -761,7 +763,7 @@ function focusCard(t) {
       <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
         <span style="flex:1"></span>
         ${live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
-          ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">↻ Resume</button>` : ""; })()}
+          ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">↻ Resume</button>` : ""; })()}
         <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>`}
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
   </div>`;
@@ -844,7 +846,7 @@ function renderTaskBody(t) {
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
       ${doItButton(t, x)}
-      ${x.state === "open" ? `<button class="icon" title="Won't do" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
+      ${x.state === "open" ? `<button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
   const todos = !t.todos.length ? `<div class="empty">No todos.</div>`
     : (openTodos.length ? "" : `<div class="empty">All done.</div>`) + shownTodos.map(todoRow).join("") +
@@ -907,7 +909,7 @@ function renderTaskBody(t) {
             ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
             : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
-          <button class="icon" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
+          <button class="icon" data-confirm="Unbind?" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
         </div></div>`).join("")
       : `<div class="empty">No live session is working on this.</div>`}
     ${earlierList(t)}
@@ -926,7 +928,7 @@ function renderTaskBody(t) {
     ${resOpen ? `<div class="res">
       ${groups.map(([kd, rs]) => `<div class="res-g"><div class="meta">${KIND_LABEL[kd]}</div>${rs.map((r) => `<div class="res-i">
           ${r.url ? `<a href="#" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
-          <button class="icon" title="Remove" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
+          <button class="icon" title="Remove" data-confirm="Remove?" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
         || `<div class="empty">No related tickets, PRs or docs yet.</div>`}
       <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="Add a URL, or a ticket / PR like QA-123, repo#45" value="${esc(draft(k("addref")))}">
         <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
@@ -1071,10 +1073,10 @@ function renderProjects() {
         <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="Edit to rename (tasks are updated)">
         ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">Save</button>` : ""}
         <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-        <button class="icon" title="Remove this project" data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
+        <button class="icon" title="Remove this project" ${tasks().some((x) => x.project === pr.name) ? "" : `data-confirm="Remove?"`} data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
       </div>
       <div class="proj-paths">${pr.paths.map((x) => `<div class="res-i"><span class="meta">${esc(x)}</span>
-          <button class="icon" title="Remove this directory" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
+          <button class="icon" title="Remove this directory" data-confirm="Remove?" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
         || `<div class="meta">No directory — tasks are only assigned by hand.</div>`}
         ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="a directory whose tasks belong here" value="${esc(draft("projpath:" + pr.name))}">
           <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">Add</button></div>`
@@ -1148,7 +1150,7 @@ function renderCategories() {
     return `<div class="cat-row">
       <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="Edit and press Enter to rename (tasks are updated)">
       <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-      <button class="btn small ghost" data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
+      <button class="btn small ghost" ${categoryCount(c) ? "" : `data-confirm="Remove?"`} data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
     </div>`;
   }).join("");
   const unlisted = used.map((c) => `<div class="cat-row"><span class="chip">${esc(c)}</span>
@@ -1470,6 +1472,15 @@ function scrollToCard(elementId) {
   setTimeout(() => node.classList.remove("flash"), 1400);
 }
 
+// The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
+function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
+function paintArmed() {
+  if (!ui.armed) return;
+  for (const b of document.querySelectorAll("[data-confirm]")) {
+    if (confirmKey(b.dataset) === ui.armed) { b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+  }
+}
+
 // ------------------------------------------------------------------ actions
 // ---- images in a message or an ask's note: pasted or dropped, saved to a file, sent as their
 // paths (Claude Code reads an image from a path in the prompt). Keyed by session id, or
@@ -1652,6 +1663,19 @@ document.addEventListener("click", async (ev) => {
   const el = ev.target.closest("[data-action]");
   if (!el || el.tagName === "SELECT") return;
   const d = el.dataset;
+  // Removing or unbinding asks twice: the first click turns the button into a red "Unbind?" for
+  // 4 s, the second does it. (WKWebView has no confirm() dialog.)
+  if (d.confirm) {
+    const key = confirmKey(d);
+    if (ui.armed !== key) {
+      ui.armed = key;
+      clearTimeout(ui.armTimer);
+      ui.armTimer = setTimeout(() => { if (ui.armed === key) { ui.armed = null; render(); } }, 4000);
+      return render();
+    }
+    ui.armed = null;
+    clearTimeout(ui.armTimer);
+  }
   switch (d.action) {
     case "resolve": {
       // one answer per ask, even if the button is clicked again while it's being sent
@@ -1706,12 +1730,25 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "resolve-all": return resolveAll(d.task);
     case "do-todo": return doTodo(d.task, d.text);
+    case "forget-session": {
+      const t = taskById(d.task);
+      if (!t) return;
+      const before = list(t.sessions);
+      const after = before.filter((x) => !d.session.startsWith(String(x)));
+      const set = (v) => api("set", { task: d.task, fields: [`sessions=${JSON.stringify(v)}`] });
+      try {
+        await set(after);
+        toast("Removed from this task's sessions", false, async () => { await set(before); delete ui.history[d.task]; await refresh(); });
+      } catch (e) { toast(String(e.message || e), true); }
+      delete ui.history[d.task];
+      return refresh();
+    }
     case "hist-all": ui.histAll.has(d.task) ? ui.histAll.delete(d.task) : ui.histAll.add(d.task); return render();
     case "resume": {
       const t = taskById(d.task);
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
       try {
-        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms() });
+        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "" });
         toast(`Resuming it in ${PLACES[place]} — bound to ${d.task}`);
       } catch (e) { toast(String(e.message || e), true); }
       delete ui.history[d.task];

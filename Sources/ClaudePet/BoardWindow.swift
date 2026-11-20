@@ -199,7 +199,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "history": return await hq(["history", str("task"), "--json"])
         case "resume":
             return await resume(task: str("task"), session: str("session"), dir: str("dir"),
-                                place: str("where"), skip: body["skip"] as? Bool ?? false)
+                                place: str("where"), skip: body["skip"] as? Bool ?? false, name: str("name"))
         case "attach": return await openInTerminal(place: str("where"), dir: NSHomeDirectory(),
                                                     command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
@@ -297,7 +297,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Picks up an earlier session of a task where it left off: `claude --resume <id>` in the
     /// directory it ran in (Claude Code keeps a conversation under that directory), bound to the
     /// task again. A background place opens a terminal instead — there is nothing to attach to.
-    private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool) async -> (Any?, String?) {
+    private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool,
+                        name: String = "") async -> (Any?, String?) {
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
                             options: .regularExpression) != nil else { return (nil, "not a session id") }
         let dir = (rawDir as NSString).expandingTildeInPath
@@ -310,7 +311,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         if let err = bound.1 { return (nil, err) }
         let into = place == "bg" ? "terminal" : place
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
-        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: "\(task) resume")
+        // The tab keeps the session's own name, as the pet and the board show it.
+        let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
+        let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title)
         return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
     }
 
