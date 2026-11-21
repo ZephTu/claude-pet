@@ -4,12 +4,32 @@ set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # Point at the Swift binary; PET_EMIT can override it (packaging tests reuse this).
-EMIT="${PET_EMIT:-$HERE/../.build/debug/PetEmit}"
-if [ ! -x "$EMIT" ]; then
-  echo "PetEmit binary not found: $EMIT"
+EMIT_BIN="${PET_EMIT:-$HERE/../.build/debug/PetEmit}"
+if [ ! -x "$EMIT_BIN" ]; then
+  echo "PetEmit binary not found: $EMIT_BIN"
   echo "run swift build before this test"
   exit 1
 fi
+# Claude Code puts transcript_path on every hook payload, and pet-emit ignores one without it
+# (a hand-typed test, not a session). The fixtures below leave it out for brevity, so "$EMIT"
+# is this function, which adds one to any payload that names a session and lacks it. Tests of
+# that rule call "$EMIT_BIN" directly; so must anything run through `env`, which cannot see
+# shell functions.
+pet_emit() {
+  if [ $# -gt 0 ]; then "$EMIT_BIN" "$@"; return; fi
+  local p; p="$(cat)"
+  case "$p" in
+    *'"session_id"'*) case "$p" in
+      *'"transcript_path"'*) ;;
+      '{'*) p="{\"transcript_path\":\"/fixture/session.jsonl\",${p#\{}" ;;
+      # Spliced in blind, this would be invalid JSON that the binary drops silently, and a
+      # "writes nothing" test would then pass for the wrong reason.
+      *) echo "pet_emit: a fixture must start with '{': $p" >&2; fails=$((fails + 1)); return 1 ;;
+    esac ;;
+  esac
+  printf '%s' "$p" | "$EMIT_BIN"
+}
+EMIT=pet_emit
 export PET_HOME="$(mktemp -d)/pet"
 # A PermissionRequest holds its hook open for an answer from the pet; only the
 # tests about that want it to.
@@ -107,6 +127,23 @@ check "session_id with slash writes nothing" "$(ls "$PET_HOME/sessions" | wc -l 
 # the escape target itself was never created.
 check "session_id with slash does not escape sessions dir" \
   "$([ -e "$PET_HOME/escape.json" ] && echo exists || echo absent)" "absent"
+
+# --- a payload without a transcript is not from Claude Code ---
+# Another session testing the binary by hand once left a session called "x" on the board for an
+# afternoon. Such a payload records nothing, and cannot end a real session either.
+before="$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')"
+printf '{"hook_event_name":"UserPromptSubmit","session_id":"x","prompt":"hi"}' | "$EMIT_BIN"
+check "a payload without transcript_path exits 0" "$?" "0"
+check "...and writes no session" "$([ -e "$PET_HOME/sessions/x.json" ] && echo yes || echo no)" "no"
+printf '{"hook_event_name":"PreToolUse","session_id":"x","cwd":"/tmp/x","tool_name":"Bash","transcript_path":""}' | "$EMIT_BIN"
+check "...nor does an empty transcript path" "$([ -e "$PET_HOME/sessions/x.json" ] && echo yes || echo no)" "no"
+printf '{"hook_event_name":"SessionEnd","session_id":"s1"}' | "$EMIT_BIN"
+check "...and a SessionEnd without one removes nothing" "$(field s1 state)" "idle"
+check "...so the session count is unchanged" "$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')" "$before"
+printf '{"hook_event_name":"SessionStart","session_id":"sRel","cwd":"/w/app","transcript_path":"cfg/projects/sRel.jsonl"}' | "$EMIT_BIN"
+check "a relative transcript path (CLAUDE_CONFIG_DIR) is still a session" "$(field sRel state)" "idle"
+check "...whose path is not kept, the pet could not open it" "$(field sRel transcript)" ""
+rm -f "$PET_HOME/sessions/sRel.json"
 
 # --- an event we do not install must not touch the state ---
 # SubagentStop is real but not one of ours; it stands in for anything a future
@@ -453,13 +490,13 @@ terminal() {  # terminal <session_id> → "kind handle"
   /usr/bin/python3 -c "import json,sys;t=json.load(open(sys.argv[1])).get('terminal') or {};print(t.get('kind',''),t.get('handle',''))" \
     "$PET_HOME/sessions/$1.json"
 }
-printf '{"hook_event_name":"SessionStart","session_id":"sC","cwd":"/w/app"}' \
+printf '{"hook_event_name":"SessionStart","session_id":"sC","cwd":"/w/app","transcript_path":"/fixture/sC.jsonl"}' \
   | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=vscode \
-        __CFBundleIdentifier=com.todesktop.230313mzl4w4u92 "$EMIT"
+        __CFBundleIdentifier=com.todesktop.230313mzl4w4u92 "$EMIT_BIN"
 check "Cursor's terminal is recorded with the app and the directory" \
   "$(terminal sC)" "vscode com.todesktop.230313mzl4w4u92|/w/app"
-printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app"}' \
-  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT"
+printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app","transcript_path":"/fixture/sT.jsonl"}' \
+  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT_BIN"
 check "a terminal we cannot address records nothing" "$(terminal sT)" " "
 
 # ---- Ghostty ------------------------------------------------------------------
@@ -470,9 +507,9 @@ check "a terminal we cannot address records nothing" "$(terminal sT)" " "
 # than a value. GHOSTTY_SURFACE_ID is exported precisely because it must NOT be
 # used: it is an address, not the id Ghostty's scripting interface answers to,
 # and a jump on it would match no tab.
-printf '{"hook_event_name":"SessionStart","session_id":"sG","cwd":"/w/app"}' \
+printf '{"hook_event_name":"SessionStart","session_id":"sG","cwd":"/w/app","transcript_path":"/fixture/sG.jsonl"}' \
   | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=ghostty \
-        GHOSTTY_SURFACE_ID=0x26088a1939867766 "$EMIT"
+        GHOSTTY_SURFACE_ID=0x26088a1939867766 "$EMIT_BIN"
 case "$(terminal sG)" in
   " "|"ghostty /dev/tty"*) ghostty_handle="a tty path or nothing" ;;
   *) ghostty_handle="$(terminal sG)" ;;

@@ -72,6 +72,14 @@ enum HookEmit {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         // A session id with a slash would escape the sessions directory.
         guard !sessionID.isEmpty, !sessionID.contains("/") else { return }
+        // Claude Code puts the transcript path on every hook payload. One without it was typed
+        // by hand — another session testing this binary with `echo '{"session_id":"x"}' |
+        // pet-emit` — and recording it would list a session that does not exist, kept alive for
+        // as long as the process that ran the test (a whole afternoon, under the "~" project).
+        // Checked before SessionEnd too, so such a test cannot remove a real session either.
+        // Present is enough: a relative path (CLAUDE_CONFIG_DIR set to one) is still a session.
+        guard let transcript = hook["transcript_path"] as? String, !transcript.isEmpty
+        else { return }
 
         let directory = sessionsDirectory
         let path = directory.appending(path: sessionID + ".json")
@@ -136,8 +144,9 @@ enum HookEmit {
             "waitingOn": waitingOn,
             "updatedAt": now,
         ]
-        // The pet counts the session's turns from it — see TranscriptStats.
-        if let transcript = hook["transcript_path"] as? String, transcript.hasPrefix("/") {
+        // The pet counts the session's turns from it — see TranscriptStats. Only a path it can
+        // open without knowing Claude Code's working directory.
+        if transcript.hasPrefix("/") {
             document["transcript"] = transcript
         }
         // The pet decides liveness from this, so an idle session stays listed.
