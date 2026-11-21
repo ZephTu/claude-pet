@@ -284,7 +284,7 @@ function renderJobsView() {
       <span>${t.kind === "shell" ? jt("shell") : jt("claude")} · ${esc(scheduleText(t.schedule))}</span></button>`).join("")}</div></div>`;
   // Looking at the view is seeing its failures: the pet stops counting them.
   const seen = new Date(d.seenAt || 0).getTime();
-  if (jobs.some((j) => { const r = lastReal(j); return isFail(r) && new Date(r.ended || 0).getTime() > seen; })
+  if (jobs.some((j) => { const r = lastReal(j); return isFail(r) && new Date(r.ended || r.started || 0).getTime() > seen; })
       && document.visibilityState === "visible") {
     d.seenAt = new Date().toISOString();
     api("job-seen").catch(() => {});
@@ -305,7 +305,9 @@ function runBars(runs) {
 
 function jobRow(j) {
   const runs = j.runs || [];
-  const running = runs[0] && runs[0].status === "running" ? runs[0] : null;
+  // The newest run that isn't a skip: a skip logged while a run goes on must not hide it.
+  const current = runs.find((r) => r.status !== "skipped");
+  const running = current && current.status === "running" ? current : null;
   const last = lastReal(j);
   const failed = isFail(last) && !running;
   const lastLine = running ? jt("runningFor", { d: tookText(running) })
@@ -369,6 +371,9 @@ function openJobForm(job) {
     for (const k of Object.keys(f)) if (job[k] !== undefined) f[k] = JSON.parse(JSON.stringify(job[k]));
     if (job.id) f.id = job.id;
   }
+  // A new job is named now, not by the first save: Save again after an error (or a double
+  // click) then saves the same job instead of making a second one.
+  if (!f.id) f.id = "j" + Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   jui.form = f;
   jui.freq = null;
   jui.formError = "";
@@ -500,7 +505,7 @@ function formInput(el) {
   } else if (el.type === "radio") {
     if (el.checked) setPath(f, path, el.value);
   } else if (el.dataset.num) {
-    const n = Number(el.value);
+    const n = Math.round(Number(el.value));
     setPath(f, path, isNaN(n) ? 0 : n);
   } else {
     setPath(f, path, el.value);
@@ -529,7 +534,8 @@ document.addEventListener("change", (ev) => {
 
 async function saveJobForm(runAfter) {
   const f = jui.form;
-  if (!f) return;
+  if (!f || jui.saving) return;
+  jui.saving = true;
   try {
     const r = await apiObj("job-save", { job: f });
     if (runAfter && r.id) await api("job-run", { id: r.id });
@@ -540,6 +546,8 @@ async function saveJobForm(runAfter) {
     jui.formError = String(e.message || e);
     drawJobForm();
     return;
+  } finally {
+    jui.saving = false;
   }
   setTimeout(() => refresh(true), runAfter ? 600 : 0);
 }

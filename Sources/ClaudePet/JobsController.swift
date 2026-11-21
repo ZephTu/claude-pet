@@ -23,7 +23,7 @@ final class JobsController {
             var o = dict(job)
             let runs = store.runs(job.id)
             o["runs"] = runs.prefix(30).map { $0.json() }
-            o["running"] = runs.first?.status == .running
+            o["running"] = runs.first(where: { $0.status != .skipped })?.status == .running
             o["installed"] = FileManager.default.fileExists(atPath: LaunchAgent.plistURL(for: job.id).path)
             // How full the carried-on session is, for "same session every run".
             let state = store.state(job.id)
@@ -56,8 +56,12 @@ final class JobsController {
         let before = store.load(job.id)
         do { try store.save(job) } catch { return (nil, "Couldn't save the job: \(error.localizedDescription)") }
         // A changed session mode starts the session over.
-        if before?.sessionMode != job.sessionMode { store.setState(job.id) { $0.removeValue(forKey: "sessionId") } }
-        if let err = await apply(job) { return (nil, err) }
+        // A changed session mode or folder starts the session over (a session belongs to its folder).
+        if before?.sessionMode != job.sessionMode || before?.directory != job.directory {
+            store.setState(job.id) { $0.removeValue(forKey: "sessionId") }
+        }
+        // Only a changed schedule reloads the agent: launchd stops a running job when it does.
+        if let err = await apply(job, onlyIfChanged: true) { return (nil, err) }
         return (["ok": true, "id": job.id], nil)
     }
 
@@ -206,17 +210,18 @@ final class JobsController {
         let first = announced == nil
         for job in store.list() {
             let runs = store.runs(job.id)
-            for r in runs.prefix(20) where r.ended != nil { ended.insert(r.id) }
-            if let r = runs.first, r.status == .running {
+            // A run cut off ("interrupted") never wrote an end: it counts from when it started.
+            for r in runs.prefix(20) where r.ended != nil || r.status == .lost { ended.insert(r.id) }
+            if let r = runs.first(where: { $0.status != .skipped }), r.status == .running {
                 report.rows.append(["job": job.id, "name": job.name, "status": "running",
                                     "text": "running · " + Chatter.duration(until: now, now: r.started)])
-            } else if let r = runs.first(where: { $0.status != .skipped }), r.failed, let end = r.ended, end > seenAt {
+            } else if let r = runs.first(where: { $0.status != .skipped }), r.failed, (r.ended ?? r.started) > seenAt {
                 report.unseenFailures += 1
                 report.rows.append(["job": job.id, "name": job.name, "status": "failed",
                                     "text": Self.failureWord(r) + (r.summary.isEmpty ? "" : " · " + r.summary)])
             }
             guard !first else { continue }
-            for r in runs.prefix(5) where r.ended != nil && !(announced?.contains(r.id) ?? false) {
+            for r in runs.prefix(5) where (r.ended != nil || r.status == .lost) && !(announced?.contains(r.id) ?? false) {
                 let wanted = job.notify == .always ? r.status != .skipped : job.notify == .failure && r.failed
                 guard wanted else { continue }
                 let what = r.failed ? Self.failureWord(r) : r.status == .stopped ? "stopped" : "done"

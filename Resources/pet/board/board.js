@@ -199,7 +199,7 @@ async function refresh(force) {
   let sig = null;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
-      api("pet").catch(() => "{}"), ui.mode === "jobs" ? loadJobs() : ""]);
+      api("pet").catch(() => "{}"), ui.mode === "jobs" && typeof loadJobs === "function" ? loadJobs() : ""]);
     sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
     const pet = JSON.parse(unreadText || "{}");
@@ -387,13 +387,13 @@ function render() {
   // unanswered ask and your todos) with its count on the tab, and Scheduled (jobs.js).
   if (!["today", "all", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
   const need = needCount();
-  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", jt("tab")]].map(([m, label]) =>
+  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
     `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${m === "needs" && need ? `<span class="n">${need}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
   $("#all").hidden = ui.mode !== "all";
   $("#needs").hidden = ui.mode !== "needs";
   $("#jobs").hidden = ui.mode !== "jobs";
-  if (ui.mode === "jobs") renderJobsView();   // see jobs.js
+  if (ui.mode === "jobs" && typeof renderJobsView === "function") renderJobsView();   // see jobs.js
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
     $("#today-sessions").innerHTML = renderTodaySessions();

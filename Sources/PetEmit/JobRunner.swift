@@ -28,6 +28,15 @@ enum JobRunner {
         }
         defer { flock(lockFD, LOCK_UN); close(lockFD) }
         try? FileManager.default.removeItem(at: store.stopURL(id))
+        // launchd ends a job's agent with SIGTERM (switched off, deleted, uninstalled). Left to
+        // its default, that would kill this runner and orphan what it started, which runs in
+        // its own process group. Treat it as Stop: end the group and record the run as stopped.
+        let stopPath = store.stopURL(id).path
+        signal(SIGTERM, SIG_IGN)
+        let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        term.setEventHandler { FileManager.default.createFile(atPath: stopPath, contents: nil) }
+        term.resume()
+        defer { term.cancel() }
 
         let runID = JobStore.newRunID()
         let outPath = store.logsURL(id).appending(path: runID + (job.kind == .claude ? ".jsonl" : ".log")).path
@@ -126,9 +135,18 @@ enum JobRunner {
         store.append(id, end)
 
         if job.kind == .claude, job.sessionMode == .fresh {
-            for old in JobRun.sessionsToPrune(store.runs(id), keep: job.keepSessions) { deleteTranscript(old) }
+            let runs = store.runs(id)
+            for old in JobRun.sessionsToPrune(runs, keep: job.keepSessions) {
+                // Continued by hand after its run ("Continue" on the board): the user's now, kept.
+                let ended = runs.filter { $0.sessionId == old }.compactMap(\.ended).max()
+                if let f = transcript(of: old), let ended,
+                   let modified = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                   modified > ended.addingTimeInterval(120) { continue }
+                deleteTranscript(old)
+            }
         }
-        store.trim(id)
+        // The run history must outlive the sessions it keeps, or the oldest are never pruned.
+        store.trim(id, keep: max(100, job.keepSessions + 10))
         return 0
     }
 
