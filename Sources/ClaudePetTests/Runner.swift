@@ -1233,7 +1233,8 @@ struct Runner {
         // Readings written while the pet was off are new to it, and arrive in any order: they
         // settle among themselves (the tie takes the higher) instead of the last to arrive winning.
         let before = learn([(0, q(30, 50)), (settle + 5, q(45, 55))])
-        let offline = resume(before, [(4 * 3600, q(60, 70)), (4 * 3600 + 2, q(50, 65)), (4 * 3600 + 4, q(45, 55))])
+        let offAt: TimeInterval = 4 * 3600      // spelled out: older compilers (CI) infer Int here
+        let offline = resume(before, [(offAt, q(60, 70)), (offAt + 2, q(50, 65)), (offAt + 4, q(45, 55))])
         t.check("readings new after a restart tie for a minute instead of the last-arrived winning",
                 offline?.fiveHourPercent == 60 && offline?.sevenDayPercent == 70)
         // The same after the Mac slept: readings written meanwhile are new and settle among themselves.
