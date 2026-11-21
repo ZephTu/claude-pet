@@ -126,20 +126,20 @@ public struct Job: Codable, Equatable, Sendable {
 
     /// What is wrong with it, in a sentence the form can show; nil when it can be saved.
     public func problem() -> String? {
-        if !Jobs.isValidID(id) { return "bad job id" }
-        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Give the job a name." }
+        if !Jobs.isValidID(id) { return L("bad job id", "任务 id 无效") }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return L("Give the job a name.", "给任务起个名字。") }
         switch kind {
         case .claude where prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
-            return "Write the prompt to send."
+            return L("Write the prompt to send.", "写下要发送的 prompt。")
         case .shell where command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
-            return "Write the command to run."
+            return L("Write the command to run.", "写下要运行的命令。")
         default: break
         }
-        if !(1...24 * 60).contains(timeoutMinutes) { return "The time limit must be between 1 minute and 24 hours." }
-        if !(0...100).contains(skipWeekPct) || !(0...100).contains(skipFiveHourPct) { return "A quota percentage is between 0 and 100." }
-        if !(1...500).contains(keepSessions) { return "Keep between 1 and 500 sessions." }
-        if !(0...100).contains(compactAbovePct) { return "The compaction threshold is a percentage between 0 and 100." }
-        if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return "That model name has odd characters." }
+        if !(1...24 * 60).contains(timeoutMinutes) { return L("The time limit must be between 1 minute and 24 hours.", "时间上限要在 1 分钟到 24 小时之间。") }
+        if !(0...100).contains(skipWeekPct) || !(0...100).contains(skipFiveHourPct) { return L("A quota percentage is between 0 and 100.", "额度百分比要在 0 到 100 之间。") }
+        if !(1...500).contains(keepSessions) { return L("Keep between 1 and 500 sessions.", "保留的 session 数要在 1 到 500 之间。") }
+        if !(0...100).contains(compactAbovePct) { return L("The compaction threshold is a percentage between 0 and 100.", "compact 阈值是 0 到 100 之间的百分比。") }
+        if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return L("That model name has odd characters.", "模型名里有奇怪的字符。") }
         return schedule.problem()
     }
 
@@ -192,10 +192,10 @@ public struct Schedule: Codable, Equatable, Sendable {
     public func problem() -> String? {
         switch kind {
         case .every:
-            return (1...7 * 24 * 60).contains(everyMinutes) ? nil : "Pick an interval between 1 minute and 7 days."
+            return (1...7 * 24 * 60).contains(everyMinutes) ? nil : L("Pick an interval between 1 minute and 7 days.", "间隔要在 1 分钟到 7 天之间。")
         case .daily, .weekdays, .weekly:
-            guard (0...23).contains(hour), (0...59).contains(minute) else { return "That isn't a time of day." }
-            if kind == .weekly, days.isEmpty || !days.allSatisfy({ (1...7).contains($0) }) { return "Pick at least one day." }
+            guard (0...23).contains(hour), (0...59).contains(minute) else { return L("That isn't a time of day.", "这不是一个有效的时刻。") }
+            if kind == .weekly, days.isEmpty || !days.allSatisfy({ (1...7).contains($0) }) { return L("Pick at least one day.", "至少选一天。") }
             return nil
         case .cron:
             do {
@@ -241,13 +241,14 @@ public struct CronSpec: Equatable, Sendable {
     public static func parse(_ text: String) throws -> CronSpec {
         let f = text.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
         guard f.count == 5 else {
-            throw ParseError(message: "A cron expression has five fields: minute hour day month weekday.")
+            throw ParseError(message: L("A cron expression has five fields: minute hour day month weekday.",
+                                        "cron 表达式有五个字段：分 时 日 月 星期。"))
         }
-        let minutes = try field(f[0], 0...59, "minute")
-        let hours = try field(f[1], 0...23, "hour")
-        let days = try field(f[2], 1...31, "day")
-        let months = try field(f[3], 1...12, "month", names: monthNames, nameBase: 1)
-        var weekdays = try field(f[4], 0...7, "weekday", names: dayNames, nameBase: 0)
+        let minutes = try field(f[0], 0...59, L("minute", "分钟"))
+        let hours = try field(f[1], 0...23, L("hour", "小时"))
+        let days = try field(f[2], 1...31, L("day", "日"))
+        let months = try field(f[3], 1...12, L("month", "月"), names: monthNames, nameBase: 1)
+        var weekdays = try field(f[4], 0...7, L("weekday", "星期"), names: dayNames, nameBase: 0)
         weekdays = weekdays.map { Array(Set($0.map { $0 % 7 })).sorted() }
         if weekdays?.count == 7 { weekdays = nil }
         return CronSpec(minutes: minutes ?? Array(0...59), hours: hours ?? Array(0...23),
@@ -260,16 +261,16 @@ public struct CronSpec: Equatable, Sendable {
         func num(_ x: Substring) throws -> Int {
             if let n = Int(x) { return n }
             if let i = names.firstIndex(of: x.lowercased()) { return i + nameBase }
-            throw ParseError(message: "\"\(x)\" isn't a valid \(what).")
+            throw ParseError(message: L("\"\(x)\" isn't a valid \(what).", "“\(x)”不是有效的\(what)。"))
         }
         var out = Set<Int>()
         var everything = false
         for item in s.split(separator: ",", omittingEmptySubsequences: false) {
             let parts = item.split(separator: "/", omittingEmptySubsequences: false)
-            guard parts.count <= 2, !parts[0].isEmpty else { throw ParseError(message: "\"\(item)\" isn't a valid \(what).") }
+            guard parts.count <= 2, !parts[0].isEmpty else { throw ParseError(message: L("\"\(item)\" isn't a valid \(what).", "“\(item)”不是有效的\(what)。")) }
             var step = 1
             if parts.count == 2 {
-                guard let n = Int(parts[1]), n > 0 else { throw ParseError(message: "\"\(item)\" has a bad step.") }
+                guard let n = Int(parts[1]), n > 0 else { throw ParseError(message: L("\"\(item)\" has a bad step.", "“\(item)”的步长不对。")) }
                 step = n
             }
             var lo = range.lowerBound, hi = range.upperBound
@@ -281,7 +282,8 @@ public struct CronSpec: Equatable, Sendable {
                 lo = try num(parts[0]); hi = parts.count == 2 ? range.upperBound : lo
             }
             guard range.contains(lo), range.contains(hi), lo <= hi else {
-                throw ParseError(message: "\"\(item)\" is outside \(range.lowerBound)–\(range.upperBound) for the \(what).")
+                throw ParseError(message: L("\"\(item)\" is outside \(range.lowerBound)–\(range.upperBound) for the \(what).",
+                                            "“\(item)”超出了\(what)的范围 \(range.lowerBound)–\(range.upperBound)。"))
             }
             out.formUnion(stride(from: lo, through: hi, by: step))
         }
@@ -337,7 +339,8 @@ public struct CronSpec: Equatable, Sendable {
         default: out = product(product(base, "Day", days), "Weekday", weekdays)
         }
         guard out.count <= 1000 else {
-            throw ParseError(message: "That expression matches too many separate times for macOS to schedule (\(out.count)); use \"every N minutes\" instead.")
+            throw ParseError(message: L("That expression matches too many separate times for macOS to schedule (\(out.count)); use \"every N minutes\" instead.",
+                                        "这个表达式对应的时间点太多（\(out.count) 个），macOS 排不过来；改用“每 N 分钟”吧。"))
         }
         return out
     }

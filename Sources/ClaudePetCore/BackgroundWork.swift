@@ -95,8 +95,8 @@ public enum BackgroundWork {
     public static func phrase(_ labels: [String]) -> String {
         switch labels.count {
         case 0: return ""
-        case 1: return "waiting for \(labels[0])"
-        default: return "waiting for \(labels.count) background agents"
+        case 1: return L("waiting for \(labels[0])", "在等 \(labels[0])")
+        default: return L("waiting for \(labels.count) background agents", "在等 \(labels.count) 个后台 agent")
         }
     }
 }

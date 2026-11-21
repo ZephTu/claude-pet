@@ -491,7 +491,7 @@ final class WebBridge {
             // Going round in circles: said on the row's second line, where the
             // notification text would otherwise go — see Struggle.
             if Struggle.isStruggling(s) {
-                item["struggle"] = "\(s.failStreak) failed in a row"
+                item["struggle"] = L("\(s.failStreak) failed in a row", "连续失败 \(s.failStreak) 次")
                     + (s.failTarget.isEmpty ? "" : " · " + s.failTarget)
             }
             // "It answered and is waiting on the next instruction" is a fact

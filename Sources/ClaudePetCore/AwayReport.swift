@@ -36,15 +36,15 @@ public enum AwayReport {
     public static func line(away: TimeInterval, finished: Int, waiting: [Waiting],
                             quotaUsed: Int?) -> String? {
         var parts: [String] = []
-        if finished > 0 { parts.append("\(finished) finished") }
+        if finished > 0 { parts.append(L("\(finished) finished", "\(finished) 个已完成")) }
         if let first = waiting.first {
-            var part = "\(first.name) waiting \(span(first.waited))"
+            var part = L("\(first.name) waiting \(span(first.waited))", "\(first.name) 等了 \(span(first.waited))")
             if waiting.count > 1 { part += " (+\(waiting.count - 1))" }
             parts.append(part)
         }
-        if let quotaUsed, quotaUsed > 0 { parts.append("quota +\(quotaUsed)%") }
+        if let quotaUsed, quotaUsed > 0 { parts.append(L("quota +\(quotaUsed)%", "额度 +\(quotaUsed)%")) }
         guard !parts.isEmpty else { return nil }
-        return "While you were away (\(span(away))): " + parts.joined(separator: " · ")
+        return L("While you were away (\(span(away))): ", "你离开的这 \(span(away)) 里：") + parts.joined(separator: " · ")
     }
 
     /// "42m", "1h 5m" — the same wording as every other duration the pet says.

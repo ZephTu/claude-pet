@@ -2490,6 +2490,7 @@ struct Runner {
         ContextTests.run(t)
         SkinTests.run(t)
         IdleTabTests.run(t)
+        LanguageTests.run(t)
 
         print("\n-- language")
         t.check("a stored language wins over the system's",

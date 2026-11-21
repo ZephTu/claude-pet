@@ -43,7 +43,7 @@ enum HealthCollector {
         }
 
         if let usage {
-            facts.usageSource = usage.source.isEmpty ? "unknown source" : usage.source
+            facts.usageSource = usage.source.isEmpty ? L("unknown source", "来源不明") : usage.source
             facts.usageCapturedAt = usage.capturedAt
             facts.usageStale = !usage.percentagesUsable(now: now)
         }

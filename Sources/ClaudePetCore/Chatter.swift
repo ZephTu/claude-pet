@@ -210,7 +210,8 @@ public enum Chatter {
             if ready(.quotaResetting), untilReset > 0, untilReset <= resetSoon {
                 return Utterance(
                     kind: .quotaResetting,
-                    text: "5-hour quota resets in \(minutes(untilReset))m"
+                    text: L("5-hour quota resets in \(minutes(untilReset))m",
+                             "5 小时额度 \(minutes(untilReset)) 分钟后重置")
                 )
             }
             // Quota warnings are decided by QuotaAlarm, which fires on CROSSING
@@ -243,7 +244,8 @@ public enum Chatter {
             let mins = minutes(now.timeIntervalSince(longest.since))
             return Utterance(
                 kind: .longRun,
-                text: "\(longest.project) has been at it for \(mins)m",
+                text: L("\(longest.project) has been at it for \(mins)m",
+                         "\(longest.project) 已经连续干了 \(mins) 分钟"),
                 emphasis: longest.project
             )
         }
@@ -254,7 +256,8 @@ public enum Chatter {
     /// Each turn re-sends the whole context, so a long one is what spends the
     /// five-hour quota — the line says so, and what to do about it.
     public static func contextLine(_ note: ContextNote) -> String {
-        "\(note.name) is carrying \(ContextBudget.short(note.tokens)) of context — /compact or a new session saves quota"
+        L("\(note.name) is carrying \(ContextBudget.short(note.tokens)) of context — /compact or a new session saves quota",
+          "\(note.name) 带着 \(ContextBudget.short(note.tokens)) 的 context — 可以 /compact 或开新会话，省额度")
     }
 
     /// One row of the hover readout: a labelled meter.
@@ -298,7 +301,8 @@ public enum Chatter {
     /// Shown when there is no usable quota reading — claude-hud is not installed,
     /// or its cache has gone stale.
     public static func fallbackLine(state: GlobalState) -> String {
-        state.sessions.isEmpty ? "No live sessions" : "\(state.sessions.count) sessions running"
+        state.sessions.isEmpty ? L("No live sessions", "没有在运行的 session")
+                                : L("\(state.sessions.count) sessions running", "\(state.sessions.count) 个 session 在运行")
     }
 
     private static func clampPercent(_ p: Int) -> Int { min(100, max(0, p)) }
@@ -402,7 +406,7 @@ public enum Chatter {
     ///   instead of a bare "done", because "tests pass" and "I am stuck" are
     ///   the difference between needing to look and not.
     public static func doneText(_ session: SessionState, name: String, summary: String) -> String {
-        guard !summary.isEmpty else { return name + " done" }
+        guard !summary.isEmpty else { return name + L(" done", " 完成了") }
         let short = summary.count > summaryInBubble
             ? String(summary.prefix(summaryInBubble - 1)).trimmingCharacters(in: .whitespaces) + "…"
             : summary
@@ -412,7 +416,7 @@ public enum Chatter {
     // MARK: - Wording
 
     private static func finishedLine(count: Int) -> String {
-        count > 1 ? "All \(count) done" : "Done"
+        count > 1 ? L("All \(count) done", "\(count) 个都完成了") : L("Done", "完成了")
     }
 
     /// The session that has been busy longest — skipping any that has gone
@@ -432,11 +436,11 @@ public enum Chatter {
     /// a countdown is useful within the hour and useless beyond it.
     private static func clockHint(_ date: Date, now: Date) -> String {
         let delta = date.timeIntervalSince(now)
-        if delta <= 0 { return "any moment" }
-        if delta < 60 * 60 { return "in \(minutes(delta))m" }
+        if delta <= 0 { return L("any moment", "随时") }
+        if delta < 60 * 60 { return L("in \(minutes(delta))m", "\(minutes(delta)) 分钟后") }
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        return "at " + formatter.string(from: date)
+        return L("at ", "") + formatter.string(from: date)
     }
 }

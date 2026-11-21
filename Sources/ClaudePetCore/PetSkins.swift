@@ -23,10 +23,13 @@ public enum PetSkins {
     /// Every skin the app knows about, in menu order. A skin listed here whose
     /// pictures are not in the bundle yet is shown greyed out, not hidden: it
     /// says the skin is coming without pretending it can be picked.
-    public static let all: [Skin] = [
-        Skin(id: "cat", name: "Cat"),
-        Skin(id: "cultivator", name: "Cultivator"),
-    ]
+    /// Computed, so the names follow the language the pet is set to (see `L`).
+    public static var all: [Skin] {
+        [
+            Skin(id: "cat", name: L("Cat", "小猫")),
+            Skin(id: "cultivator", name: L("Cultivator", "修仙者")),
+        ]
+    }
 
     /// The cat: the one skin every install is guaranteed to have.
     public static let defaultID = "cat"

@@ -15,8 +15,8 @@ public enum QuotaAlarm {
 
         public var label: String {
             switch self {
-            case .fiveHour: return "5-hour"
-            case .sevenDay: return "weekly"
+            case .fiveHour: return L("5-hour", "5 小时")
+            case .sevenDay: return L("weekly", "每周")
             }
         }
 
@@ -46,10 +46,12 @@ public enum QuotaAlarm {
         public var text: String {
             switch window {
             case .fiveHour:
-                return "5-hour quota at \(percent)% — \(resetsIn) left in this window"
+                return L("5-hour quota at \(percent)% — \(resetsIn) left in this window",
+                         "5 小时额度已用 \(percent)% — 这个窗口还剩 \(resetsIn)")
             case .sevenDay:
                 // Named as the more expensive one to run out of, because it is.
-                return "weekly quota at \(percent)% — \(resetsIn) until it resets"
+                return L("weekly quota at \(percent)% — \(resetsIn) until it resets",
+                         "每周额度已用 \(percent)% — 还有 \(resetsIn) 重置")
             }
         }
     }

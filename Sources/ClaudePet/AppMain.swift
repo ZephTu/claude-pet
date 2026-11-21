@@ -668,7 +668,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                                  withIntermediateDirectories: true)
         guard (try? PermissionDecision.encode(PermissionDecision.Answer(askId: askId, behavior: behavior))
             .write(to: file, options: .atomic)) != nil else {
-            bridge?.say("could not answer — use the terminal", hold: 5, variant: .warn)
+            bridge?.say(L("could not answer — use the terminal", "没能回应 — 请到终端里处理"), hold: 5, variant: .warn)
             return
         }
         answered = answered.filter { now.timeIntervalSince($0.value) < 15 * 60 }
@@ -745,20 +745,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let current = labelPrefs[sessionID] ?? SessionLabels.Prefs()
 
-        let rename = NSMenuItem(title: current.alias.isEmpty ? "Name This Session…" : "Rename…",
+        let rename = NSMenuItem(title: current.alias.isEmpty ? L("Name This Session…", "给这个 session 起名…") : L("Rename…", "重命名…"),
                                 action: #selector(renamePicked(_:)), keyEquivalent: "")
         rename.target = self
         rename.representedObject = sessionID
         menu.addItem(rename)
 
-        let pin = NSMenuItem(title: current.pinned ? "Unpin" : "Pin to Top",
+        let pin = NSMenuItem(title: current.pinned ? L("Unpin", "取消置顶") : L("Pin to Top", "置顶"),
                              action: #selector(pinPicked(_:)), keyEquivalent: "")
         pin.target = self
         pin.representedObject = sessionID
         menu.addItem(pin)
 
         menu.addItem(.separator())
-        let mute = NSMenuItem(title: "Mute Until I Speak To It",
+        let mute = NSMenuItem(title: L("Mute Until I Speak To It", "静音，直到我再和它说话"),
                               action: #selector(mutePicked(_:)), keyEquivalent: "")
         mute.target = self
         mute.representedObject = sessionID
@@ -785,15 +785,16 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let id = sender.representedObject as? String,
               let session = latest.first(where: { $0.sessionId == id }) else { return }
         let alert = NSAlert()
-        alert.messageText = "Name this session"
-        alert.informativeText = "Shown instead of the folder name and the tab title. "
-            + "Leave it empty to go back to those."
+        alert.messageText = L("Name this session", "给这个 session 起名")
+        alert.informativeText = L("Shown instead of the folder name and the tab title. "
+            + "Leave it empty to go back to those.",
+            "显示时代替文件夹名和标签页标题。留空就恢复原样。")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = labelPrefs[id]?.alias ?? ""
         field.placeholderString = session.project
         alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L("Save", "保存"))
+        alert.addButton(withTitle: L("Cancel", "取消"))
         // The ONE place the pet takes the keyboard, and only because the user
         // asked to type: a text field that cannot receive keystrokes is not a
         // text field. Everything the pet shows without being asked — the
@@ -950,7 +951,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let already = announcedAsks else { announcedAsks = ids; return }
         for ask in hq.openAsks where !already.contains(ask.id) {
             let text = ask.text.count > 90 ? String(ask.text.prefix(90)) + "…" : ask.text
-            bridge?.notify("\(ask.task) asks: \(text)", hold: 25, emphasis: ask.task, sessionId: ask.session,
+            bridge?.notify(L("\(ask.task) asks: \(text)", "\(ask.task) 在问：\(text)"), hold: 25, emphasis: ask.task, sessionId: ask.session,
                            jumpable: !ask.session.isEmpty)
         }
         // Remember every ask announced, not only the ones open now: one put off with "Later"
@@ -1022,7 +1023,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         guard let problem = HealthCollector.quickProblem(petHome: petHome),
               mentionedProblem != problem.name else { return }
         mentionedProblem = problem.name
-        bridge?.say("\(problem.name): \(problem.detail) — right-click me for details",
+        bridge?.say(L("\(problem.name): \(problem.detail) — right-click me for details",
+                      "\(problem.name)：\(problem.detail) — 右键点我看详情"),
                     hold: 12, emphasis: problem.name, variant: .warn)
     }
 
@@ -1070,30 +1072,31 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let flash: String
     }
 
-    private static let demoSteps: [DemoStep] = [
-        DemoStep(caption: "editing a file", mood: .busy, tool: "Edit",
+    /// Computed, so the captions follow the language the pet is set to (see `L`).
+    private static var demoSteps: [DemoStep] { [
+        DemoStep(caption: L("editing a file", "在改文件"), mood: .busy, tool: "Edit",
                  project: "api-server", waitingOn: "", phase: "", flash: ""),
-        DemoStep(caption: "reading around the code", mood: .busy, tool: "Read",
+        DemoStep(caption: L("reading around the code", "在读代码"), mood: .busy, tool: "Read",
                  project: "api-server", waitingOn: "", phase: "", flash: ""),
-        DemoStep(caption: "waiting on a command", mood: .busy, tool: "Bash",
+        DemoStep(caption: L("waiting on a command", "在等一条命令跑完"), mood: .busy, tool: "Bash",
                  project: "api-server", waitingOn: "", phase: "", flash: ""),
-        DemoStep(caption: "a tool call was interrupted", mood: .busy, tool: "Bash",
+        DemoStep(caption: L("a tool call was interrupted", "一次工具调用被打断了"), mood: .busy, tool: "Bash",
                  project: "api-server", waitingOn: "", phase: "", flash: "trouble"),
-        DemoStep(caption: "compacting its context", mood: .busy, tool: "",
+        DemoStep(caption: L("compacting its context", "在 compact 它的 context"), mood: .busy, tool: "",
                  project: "api-server", waitingOn: "", phase: "compacting", flash: ""),
-        DemoStep(caption: "waiting on a background agent", mood: .busy, tool: "",
+        DemoStep(caption: L("waiting on a background agent", "在等一个后台 agent"), mood: .busy, tool: "",
                  project: "api-server", waitingOn: "", phase: "awaiting-agent", flash: ""),
-        DemoStep(caption: "asking to run something", mood: .waiting, tool: "",
+        DemoStep(caption: L("asking to run something", "要运行什么，等你授权"), mood: .waiting, tool: "",
                  project: "api-server", waitingOn: "rm -rf build/", phase: "", flash: ""),
-        DemoStep(caption: "asking you a question", mood: .waiting, tool: "",
+        DemoStep(caption: L("asking you a question", "在问你问题"), mood: .waiting, tool: "",
                  project: "api-server", waitingOn: "", phase: "", flash: ""),
-        DemoStep(caption: "ignored for a minute", mood: .urgent, tool: "",
+        DemoStep(caption: L("ignored for a minute", "一分钟没人理了"), mood: .urgent, tool: "",
                  project: "api-server", waitingOn: "rm -rf build/", phase: "", flash: ""),
-        DemoStep(caption: "a turn just finished", mood: .idle, tool: "",
+        DemoStep(caption: L("a turn just finished", "刚做完一轮"), mood: .idle, tool: "",
                  project: "api-server", waitingOn: "", phase: "", flash: "done"),
-        DemoStep(caption: "nothing to do", mood: .idle, tool: "",
+        DemoStep(caption: L("nothing to do", "空闲"), mood: .idle, tool: "",
                  project: "api-server", waitingOn: "", phase: "", flash: ""),
-    ]
+    ] }
 
     private func advanceDemo() {
         let now = Date()
@@ -1132,7 +1135,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         if !step.flash.isEmpty { bridge?.flash(step.flash) }
         // The caption says both what is being shown AND that it is not real.
         // A demo that looks like live state is a demo that gets acted on.
-        bridge?.say("demo · \(step.caption)", hold: 0, emphasis: "demo")
+        bridge?.say(L("demo · \(step.caption)", "演示 · \(step.caption)"), hold: 0, emphasis: L("demo", "演示"))
     }
 
     // MARK: - Shortcut
@@ -1151,7 +1154,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let ok = hotKey.register()
         UserDefaults.standard.set(ok, forKey: Self.hotKeyKey)
         if !ok {
-            bridge?.say("\(HotKey.displayName) is taken by another app", hold: 5)
+            bridge?.say(L("\(HotKey.displayName) is taken by another app", "\(HotKey.displayName) 已被别的应用占用"), hold: 5)
         }
     }
 
@@ -1164,11 +1167,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                               snoozed: snoozeMarks, approved: isSettled)
         guard let target = PanelModel.jumpTarget(state.sessions, snoozed: snoozeMarks, now: now)
         else {
-            bridge?.say("nothing is waiting on you", hold: 3)
+            bridge?.say(L("nothing is waiting on you", "没有在等你的 session"), hold: 3)
             return
         }
         guard let terminal = target.terminal, TerminalTarget.canJump(kind: terminal.kind) else {
-            bridge?.say("\(target.project) is waiting, but its terminal cannot be addressed",
+            bridge?.say(L("\(target.project) is waiting, but its terminal cannot be addressed",
+                          "\(target.project) 在等你，但跳不到它的终端"),
                         hold: 5, emphasis: target.project)
             return
         }
@@ -1182,9 +1186,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private func askSnooze(sessionID: String, at point: CGPoint) {
         guard !sessionID.isEmpty, let view = panel?.contentView else { return }
         let menu = NSMenu()
-        menu.addItem(withTitle: "Remind me in…", action: nil, keyEquivalent: "").isEnabled = false
+        menu.addItem(withTitle: L("Remind me in…", "多久后提醒我…"), action: nil, keyEquivalent: "").isEnabled = false
         for minutes in Snooze.options {
-            let item = NSMenuItem(title: "\(minutes) minutes",
+            let item = NSMenuItem(title: L("\(minutes) minutes", "\(minutes) 分钟"),
                                   action: #selector(snoozePicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = [sessionID, minutes] as [Any]

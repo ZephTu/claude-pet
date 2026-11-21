@@ -38,8 +38,8 @@ public struct ActivityEntry: Sendable, Equatable {
         let phrase = ActivitySummary.phrase(toolName: tool, target: target)
         var text = phrase
         if durationMs > 0 { text += " · " + duration }
-        if result == .interrupted { text += " · interrupted" }
-        if result == .failed { text += " · failed" }
+        if result == .interrupted { text += L(" · interrupted", " · 被打断") }
+        if result == .failed { text += L(" · failed", " · 失败") }
         return text
     }
 
