@@ -11,6 +11,14 @@ commands or templates (`hq/template/`), or how the board is opened from the pet 
 **both language sections** of the guide in the same commit, plus `hq/README.md` when the CLI
 or file formats change.
 
+## Installing the pet
+
+`scripts/install.sh` installs the checkout it runs in, and the last install from any worktree wins.
+It refuses (via `scripts/check-main.sh`) when the checkout lacks commits on `origin/main` — install
+from main, or merge main into the branch first. Don't reach for `--force` on the user's behalf:
+it puts already-merged fixes out of the installed pet. When a merged fix "doesn't work", compare
+`shasum ~/Applications/ClaudePet.app/Contents/MacOS/ClaudePet` with the worktrees' `ClaudePet.app`.
+
 ## Checks before committing
 
 - `swift build && swift run ClaudePetTests`

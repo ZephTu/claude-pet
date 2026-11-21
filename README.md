@@ -95,6 +95,8 @@ hq/install.sh --root ~/claude-hq --no-hooks       # the board and CLI only, sett
 
 **The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
 
+**`scripts/install.sh` installs the checkout it runs in**, so it first checks that the checkout contains everything on `origin/main`. If not — a feature branch cut before a fix merged — it lists the missing commits and stops (in a terminal it asks first); `--force` installs anyway. Otherwise the installed pet would quietly lose fixes that are already merged.
+
 What it keeps: each session's current state, one record per finished turn (7 days), and **one line of each conversation** — the first line of Claude's last reply. Your prompts are never stored, and the pet makes **no network requests**. The Task Board reads live sessions' recent messages from their local transcripts to show them; nothing is sent anywhere. Details: [docs/pet.md](docs/pet.md#what-it-touches).
 
 ```bash
