@@ -230,8 +230,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let behavior = PermissionDecision.Behavior(rawValue: str("behavior")),
                   !str("session").isEmpty, !str("ask").isEmpty else { return (nil, "bad decision") }
             guard let decide = Self.onDecide else { return (nil, "answer it in the terminal") }
+            // The prompt the click was for must still be the one the pet can answer: a hold that
+            // ended, or a prompt replaced since the board drew it, approves nothing.
+            guard (Self.petDots?()[str("session")]?["askId"] as? String) == str("ask") else {
+                return (nil, "that prompt is no longer waiting here — answer it in the terminal")
+            }
             decide(str("session"), str("ask"), behavior)
-            Self.onSeen?(str("session"))
             return (["ok": true], nil)
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }

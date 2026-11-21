@@ -165,7 +165,8 @@ public enum StateAggregator {
         snoozed: [String: Snooze.Mark] = [:],
         isLive: (SessionState, Date) -> Bool = Self.isLive,
         approved: (SessionState) -> Bool = Self.wasApproved,
-        ended: (SessionState) -> SessionState? = Self.waitEnded
+        ended: (SessionState) -> SessionState? = Self.waitEnded,
+        answerable: (SessionState, Date) -> Bool = { $0.askAnswerable(now: $1) }
     ) -> GlobalState {
         let live = all.filter { isLive($0, now) }
             .map { approved($0) ? $0.approvedNow() : ended($0) ?? $0 }
@@ -185,7 +186,8 @@ public enum StateAggregator {
                 hiddenCount: hiddenCount,
                 waitingOn: longest.waitingOn,
                 waitingSessionId: longest.sessionId,
-                waitingAskId: longest.askId
+                // Only a prompt someone is still holding open can be answered from the pet.
+                waitingAskId: answerable(longest, now) ? longest.askId : ""
             )
         }
 

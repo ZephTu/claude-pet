@@ -161,6 +161,7 @@ select.bind.mini { max-width: 92px; padding: 0 2px; font-size: 11.5px; color: va
   border-radius: 6px; min-width: 0; }
 .approve .ap-head { display: flex; align-items: center; gap: 6px; }
 .approve .ap-k { font-size: 11px; color: var(--amber); text-transform: uppercase; letter-spacing: .05em; margin-right: auto; }
+.approve .btn.armed { background: var(--amber); color: var(--bg); border-color: var(--amber); }
 .approve .ap-what { display: block; margin-top: 4px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .card.session { padding: 8px 10px; }
 /* Session dots: the same colours, shapes and motion as the pet's list (pet.css) — keep in step.

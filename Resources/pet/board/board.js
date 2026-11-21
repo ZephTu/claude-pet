@@ -187,16 +187,23 @@ function ctxTag(s) {
   return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 60 ? "mid" : ""}" title="Context window used">${p}% ctx</span>`;
 }
 // Allow / Deny for a session stuck on a permission prompt — the same answer the pet's alert card
-// gives (pet-emit holds the hook open; first answer wins, terminal or here). Only when the pet
-// can answer it: the askId names the exact prompt, so a stale click approves nothing.
+// gives (pet-emit holds the hook open; first answer wins, terminal or here). Shown only while the
+// pet can still answer it: the dots carry an askId only while a pet-emit is holding that prompt.
+// The text and the askId come from the same snapshot (the pet's dots), and the text is the whole
+// command / path / URL / arguments, not the bubble's 48-character phrase.
+// Allow takes two clicks, and the second must land on the same prompt: the board rebuilds every few
+// seconds and rows can move, so a first click only arms THIS askId ("Allow?"); a click on another
+// row's Allow arms that one instead of approving it.
 function approveBar(s) {
   const p = (ui.dots || {})[s.sessionId];
   if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
-  const btn = (b, label) => `<button class="btn small ${b === "deny" ? "ghost" : ""}" data-action="decide" data-behavior="${b}"
-    data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}">${label}</button>`;
-  // The whole of what is being approved, wrapped — never cut short by an ellipsis.
-  return `<div class="approve"><div class="ap-head"><span class="ap-k">Approve</span>${btn("allow", "Allow")}${btn("deny", "Deny")}</div>
-    <code class="ap-what">${esc(s.waitingOn || "this tool call")}</code></div>`;
+  const armed = ui.allowArmed && ui.allowArmed.ask === p.askId;
+  const data = `data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}"`;
+  return `<div class="approve"><div class="ap-head"><span class="ap-k">Approve</span>
+      <button class="btn small ${armed ? "armed" : ""}" data-action="decide" data-behavior="allow" ${data}
+        title="${armed ? "Click again to allow it" : "Allow — click twice"}">${armed ? "Allow?" : "Allow"}</button>
+      <button class="btn small ghost" data-action="decide" data-behavior="deny" ${data}>Deny</button></div>
+    <code class="ap-what">${esc(p.approveText || s.waitingOn || "this tool call")}</code></div>`;
 }
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
@@ -229,7 +236,8 @@ async function refresh(force) {
     ui.lastSig = sig;
     // Only a timed rebuild waits for the mouse button; one you caused shows at once. (A native
     // dropdown's menu swallows the mouseup, so waiting for it could hold the board stale.)
-    if (ui.pointerDown && force === "timer") ui.pendingRender = true;
+    // Nor while the pointer rests on an Approve box: the row under it must not change while aimed at.
+    if ((ui.pointerDown || ui.overApprove) && force === "timer") ui.pendingRender = true;
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
@@ -2062,8 +2070,17 @@ document.addEventListener("click", async (ev) => {
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
     case "jump": return act("jump", { session: d.session });
-    case "decide": return act("decide", { session: d.session, ask: d.ask, behavior: d.behavior },
-                              d.behavior === "allow" ? "Allowed" : "Denied");
+    case "decide": {
+      if (d.behavior === "allow" && !(ui.allowArmed && ui.allowArmed.ask === d.ask)) {
+        clearTimeout(ui.allowArmed && ui.allowArmed.timer);
+        ui.allowArmed = { ask: d.ask, timer: setTimeout(() => { ui.allowArmed = null; render(); }, 6000) };
+        return render();
+      }
+      clearTimeout(ui.allowArmed && ui.allowArmed.timer);
+      ui.allowArmed = null;
+      return act("decide", { session: d.session, ask: d.ask, behavior: d.behavior },
+                 d.behavior === "allow" ? "Allowed" : "Denied");
+    }
     case "unbind": return act("unbind", { session: d.session }, "Unbound");
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
@@ -2548,6 +2565,12 @@ refresh();
 setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
 // Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
 document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
+document.addEventListener("mouseover", (ev) => {
+  const over = Boolean(ev.target.closest && ev.target.closest(".approve"));
+  if (over === Boolean(ui.overApprove)) return;
+  ui.overApprove = over;
+  if (!over && !ui.pointerDown && ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }
+}, true);
 document.addEventListener("mouseup", () => {
   ui.pointerDown = false;
   if (ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }

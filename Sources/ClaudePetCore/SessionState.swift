@@ -108,6 +108,16 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// Non-empty only while one is, and only then can the pet answer it — see
     /// PermissionDecision.
     public let askId: String
+    /// What the prompt would allow, in full — the whole command, the whole path or URL, a
+    /// tool's arguments — for the board's Approve box. `waitingOn` is the 48-character phrase
+    /// for a bubble, and approving from a phrase is approving something unread.
+    public let waitingOnFull: String
+    /// The pet-emit process holding this prompt's hook open, and until when. An askId alone
+    /// does not mean anyone is listening: the hold ends after `PermissionDecision.wait`, and
+    /// none starts when the pet was not running as the prompt came up — a click then writes a
+    /// file nobody reads. See `askAnswerable`.
+    public let askHeldBy: Int32?
+    public let askHeldUntil: Date?
     /// Tool calls failed in a row, and the last one that did ("Bash npm test").
     /// Zero after any success — see `Struggle`.
     public let failStreak: Int
@@ -135,6 +145,9 @@ public struct SessionState: Sendable, Equatable, Decodable {
         troubleAt: Date? = nil,
         backgroundAgents: [String] = [],
         askId: String = "",
+        waitingOnFull: String = "",
+        askHeldBy: Int32? = nil,
+        askHeldUntil: Date? = nil,
         failStreak: Int = 0,
         failTarget: String = "",
         transcript: String = ""
@@ -157,6 +170,9 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.troubleAt = troubleAt
         self.backgroundAgents = backgroundAgents
         self.askId = askId
+        self.waitingOnFull = waitingOnFull
+        self.askHeldBy = askHeldBy
+        self.askHeldUntil = askHeldUntil
         self.failStreak = failStreak
         self.failTarget = failTarget
         self.transcript = transcript
@@ -166,6 +182,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
         case backgroundAgents, askId, failStreak, failTarget, transcript
+        case waitingOnFull, askHeldBy, askHeldUntil
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -197,9 +214,21 @@ public struct SessionState: Sendable, Equatable, Decodable {
         backgroundAgents =
             (try? c.decodeIfPresent([String].self, forKey: .backgroundAgents)) as? [String] ?? []
         askId = (try? c.decodeIfPresent(String.self, forKey: .askId)) as? String ?? ""
+        waitingOnFull = (try? c.decodeIfPresent(String.self, forKey: .waitingOnFull)) as? String ?? ""
+        askHeldBy = (try? c.decodeIfPresent(Int32.self, forKey: .askHeldBy)) ?? nil
+        askHeldUntil = (try? c.decodeIfPresent(Date.self, forKey: .askHeldUntil)) ?? nil
         failStreak = (try? c.decodeIfPresent(Int.self, forKey: .failStreak)) as? Int ?? 0
         failTarget = (try? c.decodeIfPresent(String.self, forKey: .failTarget)) as? String ?? ""
         transcript = (try? c.decodeIfPresent(String.self, forKey: .transcript)) as? String ?? ""
+    }
+
+    /// Can a click outside the terminal answer this prompt right now? Only while a pet-emit is
+    /// actually holding its hook open: alive, and before the end of its wait.
+    public func askAnswerable(now: Date, isAlive: (Int32) -> Bool = { kill($0, 0) == 0 }) -> Bool {
+        guard state == .waiting, !askId.isEmpty, let until = askHeldUntil, now < until,
+              let holder = askHeldBy, holder > 0
+        else { return false }
+        return isAlive(holder)
     }
 
     /// Decode one state file. Returns nil on any malformed input — a broken file

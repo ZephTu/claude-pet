@@ -400,7 +400,7 @@ final class WebBridge {
     /// two never disagree.
     private(set) var dotState: [String: [String: Any]] = [:]
     private static let dotKeys: Set<String> = ["state", "quiet", "asks", "agent", "struggle", "background",
-                                               "activity", "replied", "context", "askId"]
+                                               "activity", "replied", "context", "askId", "approveText"]
 
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       background: [String: [BackgroundShells.Shell]] = [:],
@@ -446,7 +446,11 @@ final class WebBridge {
             // decision, the other wants typing, and the row says which.
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
-            if s.state == .waiting, !s.askId.isEmpty { item["askId"] = s.askId }
+            // Only while a pet-emit is still holding that prompt open — see askAnswerable.
+            if s.askAnswerable(now: now) {
+                item["askId"] = s.askId
+                item["approveText"] = s.waitingOnFull.isEmpty ? s.waitingOn : s.waitingOnFull
+            }
             // How long the conversation has gone on, and how full its context
             // is — see TranscriptStats.
             if let count = turns[s.sessionId] { item["turns"] = count }
