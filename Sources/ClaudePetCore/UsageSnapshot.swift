@@ -105,8 +105,51 @@ public struct UsageRecency: Sendable {
 
     public init() {}
 
-    /// Notes one reading of the file.
-    public mutating func observe(_ s: UsageSnapshot, now: Date) {
+    // MARK: Kept across restarts
+
+    /// What is saved: every reading still remembered, with when it was first and last seen, and
+    /// when watching began. Without it each restart of the pet — every install — met all the
+    /// readings in the file at once, could not tell them apart, and showed the higher figures
+    /// (after a reset, the old 100%) until a working session's figures next moved.
+    struct Saved: Codable {
+        struct Entry: Codable {
+            let five: Int, fiveReset: Date, week: Int, weekReset: Date, first: Date, last: Date
+        }
+        let readings: [Entry]
+        let watchingSince: Date
+        let lastObserved: Date
+    }
+
+    /// The order learned so far, for `init(saved:)` after a restart. Nil before anything was seen.
+    public func saved() -> Data? {
+        guard let since = watchingSince, let last = lastObserved else { return nil }
+        let entries = seen.map { Saved.Entry(five: $0.key.five, fiveReset: $0.key.fiveReset, week: $0.key.week,
+                                             weekReset: $0.key.weekReset, first: $0.value.first, last: $0.value.last) }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970     // sub-second: births a moment apart stay apart
+        encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(Saved(readings: entries, watchingSince: since, lastObserved: last))
+    }
+
+    /// Picks up where a previous run left off. Nil for anything unreadable — then the pet starts
+    /// from scratch, as before. The settling span is long over for what was learned then; a gap
+    /// since is handled by `observe` like any other (the order is carried across it).
+    public init?(saved data: Data) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        guard let s = try? decoder.decode(Saved.self, from: data) else { return nil }
+        for e in s.readings {
+            seen[Reading(five: e.five, fiveReset: e.fiveReset, week: e.week, weekReset: e.weekReset)] =
+                (first: e.first, last: e.last)
+        }
+        watchingSince = s.watchingSince
+        lastObserved = s.lastObserved
+    }
+
+    /// Notes one reading of the file. True when it is one not seen before — the moment the order
+    /// changes, and so the moment worth saving.
+    @discardableResult
+    public mutating func observe(_ s: UsageSnapshot, now: Date) -> Bool {
         // A gap in watching — the lid closed, the Mac asleep — says nothing about which readings
         // left the file: nobody was writing either. Forgetting them all here made the order start
         // over, and the tie after it brought a reset's old 100% back. Carry them across instead.
@@ -125,8 +168,10 @@ public struct UsageRecency: Sendable {
         let (five, fiveReset) = window(s.fiveHourPercent, s.fiveHourResetAt)
         let (week, weekReset) = window(s.sevenDayPercent, s.sevenDayResetAt)
         let r = Reading(five: five, fiveReset: fiveReset, week: week, weekReset: weekReset)
+        let born = seen[r] == nil
         seen[r] = (first: seen[r]?.first ?? now, last: now)
         if newest.map({ s.capturedAt >= $0.capturedAt }) ?? true { newest = s }
+        return born
     }
 
     /// The reading to show. Nil before any observation.

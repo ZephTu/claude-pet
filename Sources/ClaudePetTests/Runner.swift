@@ -1200,6 +1200,30 @@ struct Runner {
                            (settle + 11, q(14, 2)), (settle + 14, q(0, 100))])
         t.check("a working session's next five-hour tick brings the true weekly figure with it",
                 ticked?.sevenDayPercent == 2 && ticked?.fiveHourPercent == 14)
+        // Kept across a restart: after a reset the pet learned 2% is newer than the idle session's
+        // 100%; restarted (an install), it meets both again within seconds and must still know.
+        var learned = UsageRecency()
+        for (at, reading) in [(0.0, q(40, 100)), (settle + 10, q(0, 2)), (settle + 12, q(40, 100))] {
+            learned.observe(reading, now: t0.addingTimeInterval(at))
+        }
+        let restartAt = settle + 120
+        if let data = learned.saved(), var restored = UsageRecency(saved: data) {
+            restored.observe(q(40, 100), now: t0.addingTimeInterval(restartAt))
+            restored.observe(q(0, 2), now: t0.addingTimeInterval(restartAt + 1))
+            t.check("after a restart the saved order still shows the newer reading, not the higher",
+                    restored.current()?.sevenDayPercent == 2)
+            var later = UsageRecency(saved: data)!
+            later.observe(q(40, 100), now: t0.addingTimeInterval(restartAt + 3 * 3600))
+            later.observe(q(0, 2), now: t0.addingTimeInterval(restartAt + 3 * 3600 + 2))
+            t.check("and after a restart hours later too",
+                    later.current()?.sevenDayPercent == 2)
+        } else {
+            t.check("the learned order can be saved and read back", false)
+        }
+        var firstSight = UsageRecency()
+        t.check("a reading not seen before is reported as new, a repeat is not",
+                firstSight.observe(q(10, 20), now: t0) && !firstSight.observe(q(10, 20), now: t0.addingTimeInterval(5)))
+        t.check("an unreadable save starts from scratch", UsageRecency(saved: Data("nope".utf8)) == nil)
         // A reading from the old five-hour window that turns up later still loses: the window
         // rule decides, not the order (both tie at startup here, and 55 is the higher figure).
         let oldLater = seen([(0, q(2, 93, fiveAt: 3600 + 5 * 3600)), (3, q(55, 93)), (settle + 5, q(55, 93))])
