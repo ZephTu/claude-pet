@@ -128,6 +128,30 @@ public enum QuotaAlarm {
         return Decision(speak: best, markSaid: toMark)
     }
 
+    /// How far below a threshold use must fall before that threshold can warn again.
+    public static let rearmMargin = 10
+
+    /// Clears the marks of thresholds the current reading is well below, in the same window.
+    ///
+    /// Within a window use only grows — except after a manual reset, which leaves the weekly
+    /// reset instant (and so every key) unchanged while use drops from 100% to near nothing. The
+    /// keys said before the reset then matched again and the rest of that week passed 65, 85
+    /// and 95% in silence. The margin keeps a reading wobbling a point around a line from
+    /// saying it twice.
+    public static func rearmed(_ said: Set<String>, usage: UsageSnapshot?, now: Date) -> Set<String> {
+        guard let usage, usage.percentagesUsable(now: now) else { return said }
+        var out = said
+        for window in Window.allCases {
+            let (percent, resetAt) = window == .fiveHour
+                ? (usage.fiveHourPercent, usage.fiveHourResetAt)
+                : (usage.sevenDayPercent, usage.sevenDayResetAt)
+            for threshold in window.thresholds where percent < threshold - rearmMargin {
+                out.remove(key(window: window, resetAt: resetAt, threshold: threshold))
+            }
+        }
+        return out
+    }
+
     /// Drops keys for periods that have ended, so the store does not grow for
     /// ever. A key whose reset instant is in the past can never match again.
     public static func pruned(_ said: Set<String>, now: Date) -> Set<String> {

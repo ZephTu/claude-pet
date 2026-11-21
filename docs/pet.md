@@ -171,6 +171,8 @@ Claude Code hands the rate limits only to the statusline command, so something t
 
 `pet-emit --statusline` passes the input through byte for byte and forwards your command's output and exit code unchanged; a parse failure costs a quota reading and nothing else.
 
+**Many sessions, one file.** Every open session's statusline writes the figures from *its own* last API call, so a session idle since this morning keeps writing this morning's numbers, and the file flips between readings every few seconds. The pet watches the file (and re-reads it every two seconds) and shows the reading that appeared **last**: a working session's next call produces a new one, an idle session only repeats an old one. That holds through a quota reset too, when the weekly reset time does not change but the use drops (an earlier "keep the highest" rule stuck at the pre-reset 100%). Which is newer is kept across sleep. Right after the pet starts it cannot tell which reading is newer and shows the higher one, until a working session's figures next move.
+
 **The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. It also means uninstalling the pet cannot break a statusline it never touched.
 
 Wiring this up also gives each row a **context-window percentage**, the model's name and the session's `/rename` name — none of which reaches a hook. Hover a row to see them, along with the full path, the turn's age and the last tool call.

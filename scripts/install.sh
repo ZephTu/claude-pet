@@ -12,10 +12,20 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 PET_DIR="$CLAUDE_DIR/pet"
 APP_DEST="$HOME/Applications/ClaudePet.app"
 
-MODE="${1:-release}"
-ARCH="${2:-host}"
+# Positional: [release|debug] [host|universal]. --force anywhere: install even if this checkout
+# is missing commits that are on origin/main (see scripts/check-main.sh).
+FORCE=()
+ARGS=()
+for a in "$@"; do
+  if [ "$a" = "--force" ]; then FORCE=(--force); else ARGS+=("$a"); fi
+done
+MODE="${ARGS[0]:-release}"
+ARCH="${ARGS[1]:-host}"
 
 [ -d "$CLAUDE_DIR" ] || { echo "no ${CLAUDE_DIR} — Claude Code is not installed here" >&2; exit 1; }
+
+echo "==> checking this checkout has everything on origin/main"
+"$ROOT/scripts/check-main.sh" ${FORCE[@]+"${FORCE[@]}"} || exit 1
 
 echo "==> building ($MODE / ${ARCH})"
 "$ROOT/scripts/build-app.sh" "$MODE" "$ARCH"
