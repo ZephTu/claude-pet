@@ -52,14 +52,29 @@ enum ContextTests {
         alarm.said("b")
         alarm.observe(["a": reading(280), "b": reading(230)])
         t.check("once said, it is not said again", alarm.due.isEmpty)
+        alarm.observe(["a": reading(280), "b": reading(190)])
+        alarm.observe(["a": reading(280), "b": reading(210)])
+        t.check("a dip that is not a compaction does not re-arm it", alarm.due.isEmpty)
         alarm.observe(["a": reading(280), "b": reading(40)])
         alarm.observe(["a": reading(280), "b": reading(210)])
         t.check("compacting re-arms it", alarm.due == ["b"])
-        alarm.observe(["a": reading(280), "b": reading(30)])
+        alarm.observe(["a": reading(280), "b": reading(190)])
         t.check("dropping back under before it was said takes it off", alarm.due.isEmpty)
         alarm.observe(["a": reading(280), "b": reading(210)])
+        t.check("and it may cross again, since it was never said", alarm.due == ["b"])
         alarm.observe(["a": reading(280)])
         t.check("a session gone from the screen is forgotten", alarm.due.isEmpty && alarm.last["b"] == nil)
+        alarm.observe(["a": reading(280), "c": reading(100)])
+        alarm.observe(["a": reading(280), "c": B.Reading(tokens: 100_000, budget: 140_000)])
+        t.check("lowering the window under a session is not a crossing", alarm.due.isEmpty)
+        alarm.observe(["c": B.Reading(percentOnly: 90)])
+        t.check("a bare percentage is never reminded about", alarm.due.isEmpty && alarm.last["c"] == nil)
+        t.check("a bare percentage shows as it came", B.Reading(percentOnly: 42).percent == 42
+                    && !B.Reading(percentOnly: 42).hasTokens)
+        t.check("an exact key wins over one that strips down to it, whatever the order",
+                B.budget(model: "claude-opus-5-5", settings: B.parse(Data(#"{"modelSettings":{"claude-opus-5-5[1m]":{"autoCompactWindow":500000},"claude-opus-5-5":{"autoCompactWindow":200000}}}"#.utf8))) == 200_000
+                    && B.budget(model: "claude-opus-5-5[1m]", settings: B.parse(Data(#"{"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":200000},"claude-opus-5-5[1m]":{"autoCompactWindow":500000}}}"#.utf8))) == 500_000)
+        t.check("999.6k reads as 1M, not 1000k", B.short(999_600) == "1M")
 
         // ---- what the pet says
         let t0 = Date(timeIntervalSince1970: 1_789_467_600)

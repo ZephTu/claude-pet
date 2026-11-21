@@ -525,7 +525,7 @@ const BUBBLE_SVG = '<svg class="glyph" viewBox="0 0 10 10" aria-hidden="true">'
 
 /** 48k, 300k, 1.2M — the same shorthand as ContextBudget.short. */
 function tokensShort(n) {
-  if (n >= 1e6) return (Math.round(n / 1e5) / 10) + "M";
+  if (n >= 999500) return (Math.round(n / 1e5) / 10) + "M";
   return Math.round(n / 1000) + "k";
 }
 

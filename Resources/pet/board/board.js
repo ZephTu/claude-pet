@@ -186,7 +186,7 @@ function ctxTag(s) {
   const d = (ui.dots || {})[s.sessionId] || {};
   const p = d.context;
   if (p == null) return "";
-  const k = (n) => n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
+  const k = (n) => n >= 999500 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
   const tokens = d.contextTokens ? `${k(d.contextTokens)} · ` : "";
   const title = d.contextTokens ? `Context: ${k(d.contextTokens)} of the ${k(d.contextBudget)} auto-compact window — every turn re-sends it` : "Context used";
   return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 67 ? "mid" : ""}" title="${title}">${tokens}${p}% ctx</span>`;

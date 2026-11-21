@@ -467,8 +467,10 @@ final class WebBridge {
             // Measured against the auto-compact window — see ContextBudget.
             if let reading = context[s.sessionId] {
                 item["context"] = reading.percent
-                item["contextTokens"] = reading.tokens
-                item["contextBudget"] = reading.budget
+                if reading.hasTokens {
+                    item["contextTokens"] = reading.tokens
+                    item["contextBudget"] = reading.budget
+                }
             }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {

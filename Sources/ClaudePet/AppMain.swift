@@ -233,6 +233,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onPauseToggle: { [weak self] in
                 guard let self else { return }
                 paused.toggle()
+                // What crossed while paused is not news afterwards: start the
+                // context reminders from what is on screen now.
+                contextAlarm = ContextAlarm()
                 render()
             },
             onLoginToggle: { [weak self] in self?.toggleLaunchAtLogin() },
@@ -688,8 +691,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 out[session.sessionId] = ContextBudget.Reading(tokens: read.contextTokens, budget: budget)
             } else if let insight = insights[session.sessionId], insight.isFresh(now: now),
                       let percent = insight.contextPercent {
-                let tokens = percent * TranscriptStats.window(model: model) / 100
-                out[session.sessionId] = ContextBudget.Reading(tokens: tokens, budget: budget)
+                // A share of a window this does not know (no model read yet), so
+                // it is shown as it came, not turned into tokens.
+                out[session.sessionId] = ContextBudget.Reading(percentOnly: percent)
             }
         }
         return out

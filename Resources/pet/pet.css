@@ -867,11 +867,11 @@ html, body {
 .turns .glyph {
   width: 9px; height: 9px; margin-right: 2px; vertical-align: -1px; color: var(--fainter);
 }
-/* Nearly full: the next compaction is close, and with it the detail of
-   everything before. */
-/* Context is measured against the auto-compact window (ContextBudget): warm
-   from two thirds of it, when the pet says so once; hot from 80%. */
-.ctx.warm { color: var(--tabby); }
+/* Context is measured against the auto-compact window (ContextBudget). Warm
+   from two thirds of it, when the pet speaks up: a paler coral, not tabby —
+   tabby means "waiting on you" and nothing else. Hot from 80%: the next
+   compaction is close, and with it the detail of everything before. */
+.ctx.warm { color: color-mix(in srgb, var(--coral) 60%, var(--fainter)); }
 .ctx.hot { color: var(--coral); }
 /* The second line: what an approval would run, the branch, the bound task, or
    Claude's own last words. Indented to the name, past the lamp's column. */
