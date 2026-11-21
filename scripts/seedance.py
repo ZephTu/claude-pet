@@ -4,8 +4,12 @@
 Development-machine tool, like everything else under art/. The pet itself makes
 no network requests.
 
-    python3 scripts/seedance.py to-working             # → art/seedance/videos/to-working.mp4
-    python3 scripts/seedance.py to-working --model doubao-seedance-2-0-260128
+    python3 scripts/seedance.py cat to-working         # → art/cat/videos/to-working.mp4
+    python3 scripts/seedance.py cultivator to-working --model doubao-seedance-2-0-260128
+
+The first argument is the skin: its sheets are scripts/<skin>-sheets.json, its
+first/last frames and prompts art/<skin>/sheets/ (swift scripts/skin-seeds.swift
+<skin>), and the video lands in art/<skin>/videos/.
 
 The API key is read from `key=` in ./.env (git-ignored), never from the command
 line, so it stays out of shell history and process listings.
@@ -20,14 +24,13 @@ import argparse
 import base64
 import json
 import pathlib
+import re
 import sys
 import time
 import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SHEETS = ROOT / "art/seedance/sheets"
-VIDEOS = ROOT / "art/seedance/videos"
 API = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
 
 
@@ -58,12 +61,20 @@ def image(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("sheet", help="sheet name in scripts/cat-sheets.json, e.g. to-working")
+    parser.add_argument("skin", help="skin folder under Resources/pet/skins, e.g. cat")
+    parser.add_argument("sheet", help="sheet name in scripts/<skin>-sheets.json, e.g. to-working")
     parser.add_argument("--model", default="doubao-seedance-2-0-mini-260615")
     parser.add_argument("--resolution", default="720p")
     args = parser.parse_args()
 
-    spec = json.loads((ROOT / "scripts/cat-sheets.json").read_text())
+    if not re.fullmatch(r"[a-z0-9-]+", args.skin):
+        sys.exit(f"bad skin name {args.skin!r}")
+    sheets_file = ROOT / f"scripts/{args.skin}-sheets.json"
+    if not sheets_file.exists():
+        sys.exit(f"no {sheets_file.relative_to(ROOT)}")
+    SHEETS = ROOT / f"art/{args.skin}/sheets"
+    VIDEOS = ROOT / f"art/{args.skin}/videos"
+    spec = json.loads(sheets_file.read_text())
     sheet = next((s for s in spec["sheets"] if s["name"] == args.sheet), None)
     if not sheet:
         sys.exit(f"no sheet {args.sheet!r}; have {[s['name'] for s in spec['sheets']]}")
@@ -71,7 +82,7 @@ def main():
     prompt = (SHEETS / f"{args.sheet}.txt").read_text().strip()
     for path in (first, last):
         if not path.exists():
-            sys.exit(f"missing {path} — run swift scripts/cat-seeds.swift first")
+            sys.exit(f"missing {path} — run swift scripts/skin-seeds.swift {args.skin} first")
 
     key = api_key()
     body = {

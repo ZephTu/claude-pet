@@ -1,0 +1,394 @@
+{
+  "_": "散修皮肤，结构和 cat-sheets.json 完全一样（说明见那边的 _）。角色设定：Q 版少年修士，灰青袍；忙碌四态（working / reading / compacting / awaiting-agent）在同一个蒲团上同一个坐姿，丹炉固定在右前方，只换手上的东西，过渡才只是手上的动作。站姿四态（idle / waiting / urgent / finished）和 sleeping 身边没有丹炉。",
+  "canvas": [
+    1080,
+    1920
+  ],
+  "one": "一个Q版小修士",
+  "three": "三个小修士",
+  "who": "小修士",
+  "common": "固定机位，静止镜头，无运镜，无缩放。纯绿色背景（#00FF00）始终保持纯色不变，无阴影、无渐变、无地面、无分隔线、无其他物体。三个小修士各自待在自己那一行里原地动作，不越界、不互相遮挡、不交流，动作互不同步。保持原有萌系 2D 日系 Q 版赛璐珞画风、圆润黑色描边和配色不变：黑发扎成圆圆的包子髻插短木簪，灰青色（偏蓝、低饱和）交领长袍，白色内衬领口，深棕腰带，腰间土黄色储物袋和小葫芦，黑布靴；萌系 2 头身（头和身体一样高），大头圆脸、大圆眼睛、短手短脚，身体比例和大小不变，始终完整留在画面内。角色和道具上不出现任何绿色，玉器一律是白玉；灵气、法诀、丹药等光效只用金色或白色，不用绿色或青色。画面里不出现文字、问号、感叹号，除动作里提到的东西外不出现新道具。动作幅度小、柔和流畅，手臂和衣袖不要伸到身体两侧很远的地方。",
+  "sheets": [
+    {
+      "name": "calm",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "sleeping",
+          "to": "sleeping",
+          "action": "全程盘腿坐在蒲团上打坐入定，双手在腹前结印，双眼闭着，身体随呼吸缓慢起伏，身边几缕很淡的金色灵气缓缓流转。中途只做一次小动作：头一点一点打个盹，身子微微一歪又坐正，继续入定，不要睁眼，不要站起来。",
+          "segments": [
+            {
+              "name": "sleeping",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "sleeping@nod",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "idle",
+          "action": "全程双手负在身后站着、眼睛睁开，轻松呼吸，眨眼，衣角微微飘动。中途只做一次小动作：从腰间解下小葫芦喝一口，挂回腰间，双手重新负到身后。",
+          "segments": [
+            {
+              "name": "idle",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "idle@gourd",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "awaiting-agent",
+          "to": "awaiting-agent",
+          "action": "全程盘腿坐在蒲团上，一只手托着腮，另一只手托着发淡淡金光的白玉传音符，眼睛半睁，手指在脸颊上轻敲，慢慢眨眼；右前方的丹炉炉火很小。中途只做一次小动作：打个哈欠差点睡着，又清醒过来，恢复开始时的表情。",
+          "segments": [
+            {
+              "name": "awaiting-agent",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "awaiting-agent@doze",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "busy",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "working",
+          "to": "working",
+          "action": "全程盘腿坐在蒲团上，双手在胸前交替掐诀，指尖闪着一点金光，专注地看着右前方的小丹炉，橙色炉火随法诀一跳一跳。中途只做一次小动作：停下来用一只手挠挠头想一想，然后继续掐诀。",
+          "segments": [
+            {
+              "name": "working",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "working@think",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "reading",
+          "to": "reading",
+          "action": "全程盘腿坐在蒲团上，双手捧着一卷展开的米黄色竹简认真阅读，眼睛左右扫读；右前方的丹炉炉火很小。中途只做一次小动作：把竹简再展开一截，然后继续读。",
+          "segments": [
+            {
+              "name": "reading",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "reading@scroll",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "compacting",
+          "to": "compacting",
+          "action": "全程盘腿坐在蒲团上，双手撑开腰间的土黄色储物袋，把身前那摞白玉玉简一枚一枚收进去，表情有点吃力；右前方的丹炉炉火很小。中途只做一次小动作：用袖子擦一下额头的汗，然后继续收。",
+          "segments": [
+            {
+              "name": "compacting",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "compacting@sigh",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "alert",
+      "duration": 10,
+      "rows": [
+        {
+          "from": "waiting",
+          "to": "waiting",
+          "action": "全程站着，面向前方双手抱拳拱手，一下一下微微欠身行礼，表情礼貌、眼神带着询问。中途只做一次小动作：放下双手左右张望一下，再抱拳继续行礼。",
+          "segments": [
+            {
+              "name": "waiting",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "waiting@look",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "urgent",
+          "to": "urgent",
+          "action": "全程站着、一直面朝前方，着急地挥舞双手、张嘴大喊，眉头紧皱、眼含泪花，身边那张没有字的符箓一闪一闪发红光。从头到尾都是着急快哭的表情，不笑、不闭眼、不转身、不背对镜头。中途只做一次小动作：原地跺一下脚，继续着急地喊。",
+          "segments": [
+            {
+              "name": "urgent",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "urgent@stamp",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        },
+        {
+          "from": "finished",
+          "to": "finished",
+          "action": "全程站着，一只手高高举起一颗发金光的圆形丹药，另一只手叉腰，眼睛弯成月牙得意地笑，身体轻轻摇摆。中途只做一次小动作：举着丹药原地开心地蹦一下，落回原位继续得意，始终面朝前方，不转身。",
+          "segments": [
+            {
+              "name": "finished",
+              "kind": "loop",
+              "end": 5
+            },
+            {
+              "name": "finished@hop",
+              "kind": "fidget",
+              "end": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "to-working",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "sleeping",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：睁开眼睛出定，从袖中取出一个小三足古铜丹炉放到身体右前方，炉中燃起橙色火苗，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "sleeping_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：在原地盘腿坐到蒲团上，从袖中取出小丹炉放到身体右前方，炉中燃起橙色火苗，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "idle_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "waiting",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：放下拱手的双手，点点头，在原地盘腿坐到蒲团上，从袖中取出小丹炉放到身体右前方，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "waiting_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "from-working",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "working",
+          "to": "finished",
+          "action": "用整整5秒慢慢完成：丹炉盖子一震，飞出一颗发金光的丹药，伸手接住；丹炉收回袖中，站起来把丹药高高举起，另一只手叉腰得意地笑。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_finished",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "waiting",
+          "action": "用整整5秒慢慢完成：停下掐诀抬起头，把丹炉收回袖中，站起来面向前方双手抱拳拱手。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_waiting",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "idle",
+          "action": "用整整5秒慢慢完成：停下掐诀，把丹炉收回袖中，站起来掸掸衣袖，双手负到身后站好。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_idle",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "settle",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "finished",
+          "to": "idle",
+          "action": "用整整5秒慢慢完成：把丹药收进腰间的小葫芦里，满意地点点头，双手负到身后站好。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "finished_to_idle",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "idle",
+          "to": "sleeping",
+          "action": "用整整5秒慢慢完成：在原地盘腿坐到蒲团上，双手在腹前结印，慢慢闭上眼睛入定，身边浮起几缕很淡的金色灵气。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "idle_to_sleeping",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "waiting",
+          "to": "urgent",
+          "action": "用整整5秒慢慢完成：拱手越来越着急，放开双手挥舞起来，张嘴大喊，身边飘出一张没有字的符箓，发出红光。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "waiting_to_urgent",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "to-task",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "working",
+          "to": "reading",
+          "action": "用整整5秒慢慢完成：停下掐诀，丹炉炉火变小，从储物袋里取出一卷米黄色竹简展开，双手捧着认真读。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_reading",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "compacting",
+          "action": "用整整5秒慢慢完成：停下掐诀，丹炉炉火变小，身前出现一小摞白玉玉简，双手撑开腰间的储物袋开始往里收。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_compacting",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "working",
+          "to": "awaiting-agent",
+          "action": "用整整5秒慢慢完成：停下掐诀，丹炉炉火变小，取出一枚白玉传音符托在手里，另一只手托着腮等待。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "working_to_awaiting-agent",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "from-task",
+      "duration": 5,
+      "rows": [
+        {
+          "from": "reading",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：卷起竹简收进储物袋，丹炉炉火重新变旺，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "reading_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "compacting",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：收好最后一枚玉简，系紧储物袋，丹炉炉火重新变旺，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "compacting_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        },
+        {
+          "from": "awaiting-agent",
+          "to": "working",
+          "action": "用整整5秒慢慢完成：回过神来，收起传音符，放下托腮的手，丹炉炉火重新变旺，双手在胸前掐诀。最后一帧的姿势、位置和道具与尾帧图完全一致。",
+          "segments": [
+            {
+              "name": "awaiting-agent_to_working",
+              "kind": "transition",
+              "end": 5
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

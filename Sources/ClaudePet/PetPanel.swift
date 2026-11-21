@@ -44,6 +44,8 @@ final class PetPanel: NSPanel {
     /// Saved beside the origin: the origin alone no longer says where the pet
     /// IS, because a mirrored window draws it 320pt further left.
     private static let mirroredKey = "petMirrored"
+    /// Which skin the pet is drawn as — see PetSkins.
+    private static let skinKey = "petSkin"
 
     private var layoutHandler: LayoutMessageHandler?
     private var globalMouseMonitor: Any?
@@ -52,13 +54,20 @@ final class PetPanel: NSPanel {
 
     /// Retained for as long as the web view: WKWebView does not own it.
     private let petScheme: PetSchemeHandler?
+    /// The pet's resource folder in the bundle, nil when it is missing.
+    private let petRoot: URL?
+    /// The skin on screen. Always one whose pictures are all in the bundle.
+    private(set) var skin: String
 
     init() {
         let size = PetLayout.windowSize
         let config = WKWebViewConfiguration()
         // One origin for the page and everything it loads — see PetSchemeHandler.
-        petScheme = Bundle.module.url(forResource: "pet", withExtension: nil)
-            .map { PetSchemeHandler(root: $0) }
+        let root = Bundle.module.url(forResource: "pet", withExtension: nil)
+        petRoot = root
+        petScheme = root.map { PetSchemeHandler(root: $0) }
+        skin = PetSkins.resolve(stored: UserDefaults.standard.string(forKey: Self.skinKey),
+                                isComplete: { Self.isComplete($0, root: root) })
         if let petScheme {
             config.setURLSchemeHandler(petScheme, forURLScheme: PetSchemeHandler.scheme)
         }
@@ -218,8 +227,30 @@ final class PetPanel: NSPanel {
         frameRect
     }
 
+    /// Whether a skin's pictures are all in the bundle, so it can be picked.
+    func canShow(skin id: String) -> Bool { Self.isComplete(id, root: petRoot) }
+
+    private static func isComplete(_ id: String, root: URL?) -> Bool {
+        guard let root else { return false }
+        return PetSkins.isComplete(id) { path in
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+        }
+    }
+
+    /// Switch the pet to another skin and remember it.
+    ///
+    /// The page is reloaded rather than told: a reload is the path every launch
+    /// already takes, and `onReady` puts back everything the page had — pose,
+    /// side, open list — so a switch cannot leave half of the old skin behind.
+    func setSkin(_ id: String) {
+        guard id != skin, canShow(skin: id) else { return }
+        skin = id
+        UserDefaults.standard.set(id, forKey: Self.skinKey)
+        loadPetPage()
+    }
+
     private func loadPetPage() {
-        guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html") else {
+        guard petScheme != nil, let index = PetSchemeHandler.url(path: "index.html?skin=\(skin)") else {
             // assertionFailure alone is a no-op in release, which is the only
             // build that ships — without this the failure mode is a blank
             // window and no clue anywhere.

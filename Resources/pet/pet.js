@@ -1330,19 +1330,32 @@ window.setHoverAt = function (x, y) {
  * The cat has as many poses as it has pictures, so the pose and the glyph are
  * decided in Swift (ClaudePetCore/CatSkin.swift, where they are unit-tested
  * against every pet state) and pushed here. This file only applies them.
+ *
+ * "The cat" is whichever skin is on: every skin draws the same nine poses, so
+ * nothing below this block knows which one it is. Swift picks the skin and
+ * loads this page as index.html?skin=<id> (ClaudePetCore/PetSkins.swift); a
+ * new skin is a new folder under skins/, not new code.
  */
 
-const STILLS = {
-  idle: "skins/cat/assets/idle.png",
-  working: "skins/cat/assets/working.png",
-  waiting: "skins/cat/assets/waiting.png",
-  sleeping: "skins/cat/assets/sleeping.png",
-  urgent: "skins/cat/assets/urgent.png",
-  reading: "skins/cat/assets/reading.png",
-  compacting: "skins/cat/assets/compacting.png",
-  finished: "skins/cat/assets/finished.png",
-  "awaiting-agent": "skins/cat/assets/awaiting-agent.png",
-};
+/** The skin's folder under skins/. Anything odd falls back to the cat. */
+const SKIN = (function () {
+  const asked = new URLSearchParams(location.search).get("skin") || "";
+  return /^[a-z0-9-]+$/.test(asked) ? asked : "cat";
+})();
+
+const POSES = ["idle", "working", "waiting", "sleeping", "urgent", "reading",
+  "compacting", "finished", "awaiting-agent"];
+
+const STILLS = {};
+POSES.forEach(function (pose) { STILLS[pose] = "skins/" + SKIN + "/assets/" + pose + ".png"; });
+
+/**
+ * Skins whose still pictures the warped-stills renderer (skins/cat/cat-pet.js)
+ * was drawn for. It knows where the cat's eyes and sleeping Zs sit in each
+ * texture, so on anybody else's pictures it would blink a sleeve. A skin not
+ * listed here shows its plain stills until it has video frames.
+ */
+const WARPED = { cat: true };
 
 /** The live renderer, or null once it has failed and the stills are showing. */
 let cat = null;
@@ -1365,22 +1378,49 @@ function setPose(pose) {
 }
 
 /**
- * Frame-by-frame once there is any video to play (frames.js is written by
- * scripts/cat-frames.swift); the warped stills until then.
+ * The skin's clip list, frames.js, written by scripts/skin-frames.swift. Loaded
+ * here rather than by a <script> tag because which file depends on the skin. A
+ * skin with no video yet has no frames.js at all, and that is not an error:
+ * it resolves to null and the stills take over.
+ */
+function loadFrames() {
+  return new Promise(function (resolve) {
+    window.CAT_FRAMES = null;
+    const tag = document.createElement("script");
+    tag.src = "skins/" + SKIN + "/frames/frames.js";
+    tag.onload = function () { resolve(window.CAT_FRAMES || null); };
+    tag.onerror = function () { resolve(null); };
+    document.body.appendChild(tag);
+  });
+}
+
+/** The skin's still pictures, unanimated: a skin with nothing else to show. */
+function showStills() {
+  stillsOnly = true;
+  document.getElementById("cat").hidden = true;
+  document.getElementById("still").hidden = false;
+  setPose(lastPose);
+}
+
+/**
+ * Frame-by-frame once there is any video to play; the cat's warped stills
+ * until then; plain stills for a skin that has neither.
  */
 function startCat() {
-  try {
-    const frames = window.CAT_FRAMES;
+  loadFrames().then(function (frames) {
     const canvas = document.getElementById("cat");
-    cat = frames && Object.keys(frames.clips || {}).length
-      ? new CatFrames(canvas, frames, "skins/cat/frames/", STILLS)
-      : new CatPet(canvas, STILLS);
+    if (frames && Object.keys(frames.clips || {}).length) {
+      cat = new CatFrames(canvas, frames, "skins/" + SKIN + "/frames/", STILLS);
+    } else if (WARPED[SKIN] && typeof CatPet === "function") {
+      cat = new CatPet(canvas, STILLS);
+    } else {
+      showStills();
+      return;
+    }
     cat.setReducedMotion(document.getElementById("stage").classList.contains("calm"));
     cat.ready.then(function () { if (cat) cat.setState(lastPose); })
              .catch(function (e) { catFailed(e); });
-  } catch (e) {
-    catFailed(e);
-  }
+  }).catch(function (e) { catFailed(e); });
 }
 
 /**
@@ -1406,10 +1446,7 @@ function catFailed(error) {
   // eslint-disable-next-line no-console
   console.error("the cat could not animate, showing stills:", error);
   if (cat) { cat.dispose(); cat = null; }
-  stillsOnly = true;
-  document.getElementById("cat").hidden = true;
-  document.getElementById("still").hidden = false;
-  setPose(lastPose);
+  showStills();
   const handler =
     window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.layout;
   if (handler) handler.postMessage({ skinFailed: String(error) });
