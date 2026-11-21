@@ -1164,16 +1164,57 @@ struct Runner {
                           fiveHourResetAt: t0.addingTimeInterval(fiveAt), sevenDayResetAt: t0.addingTimeInterval(weekAt),
                           capturedAt: t0, source: "claude-hud")
         }
-        let freshQ = q(55, 93)
-        let staleBack = UsageHighWater.merge(previous: freshQ, next: q(31, 89))
-        t.check("a lower reading for the same window is stale and ignored",
-                staleBack.fiveHourPercent == 55 && staleBack.sevenDayPercent == 93)
-        let rolledQ = UsageHighWater.merge(previous: freshQ, next: q(2, 93, fiveAt: 3600 + 5 * 3600))
-        t.check("a new 5-hour window replaces the old figure",
-                rolledQ.fiveHourPercent == 2 && rolledQ.sevenDayPercent == 93)
-        let oldWindow = UsageHighWater.merge(previous: rolledQ, next: q(55, 93))
-        t.check("a reading from a window already over doesn't come back",
-                oldWindow.fiveHourPercent == 2)
+        // Readings arrive over time; `at` is seconds after watching began.
+        func seen(_ readings: [(TimeInterval, UsageSnapshot)]) -> UsageSnapshot? {
+            var r = UsageRecency()
+            for (at, reading) in readings { r.observe(reading, now: t0.addingTimeInterval(at)) }
+            return r.current()
+        }
+        let settle = UsageRecency.settleFor
+        // An idle session keeps writing its older, lower figures back between fresh ones.
+        let staleBack = seen([(0, q(31, 89)), (settle + 5, q(55, 93)), (settle + 8, q(31, 89)), (settle + 11, q(55, 93)),
+                              (settle + 14, q(31, 89))])
+        t.check("an idle session's older, lower reading does not win over the newer one",
+                staleBack?.fiveHourPercent == 55 && staleBack?.sevenDayPercent == 93)
+        // The reported bug: a reset with the weekly reset time unchanged, and an idle session still
+        // writing the pre-reset 100%.
+        let reset = seen([(0, q(40, 100)), (settle + 10, q(0, 2)), (settle + 12, q(40, 100)), (settle + 15, q(0, 2)),
+                          (settle + 18, q(40, 100))])
+        t.check("after a reset, the lower reading that appeared later wins over the old 100%",
+                reset?.sevenDayPercent == 2 && reset?.fiveHourPercent == 0)
+        let climbing = seen([(0, q(10, 50)), (settle + 1, q(11, 50)), (settle + 2, q(10, 50)), (settle + 3, q(12, 51))])
+        t.check("normal use climbs: the newest figure wins, per window",
+                climbing?.fiveHourPercent == 12 && climbing?.sevenDayPercent == 51)
+        // Right after the pet starts every figure turns up within seconds in arbitrary order:
+        // they tie, and the tie goes to the higher one (the old behaviour).
+        let startup = seen([(0, q(55, 93)), (3, q(31, 89))])
+        t.check("figures first seen while settling tie, and the higher one is shown",
+                startup?.fiveHourPercent == 55 && startup?.sevenDayPercent == 93)
+        // The pet restarted after the reset, with the idle session still open: both readings
+        // arrive while settling and the tie shows 100% — until the working session's five-hour
+        // figure moves, and the reading it moves in carries the true weekly figure along.
+        let restarted = seen([(0, q(13, 2)), (2, q(0, 100)), (settle + 5, q(13, 2)), (settle + 8, q(0, 100))])
+        t.check("right after a restart the tie shows the higher figures",
+                restarted?.sevenDayPercent == 100)
+        let ticked = seen([(0, q(13, 2)), (2, q(0, 100)), (settle + 5, q(14, 2)), (settle + 8, q(0, 100)),
+                           (settle + 11, q(14, 2)), (settle + 14, q(0, 100))])
+        t.check("a working session's next five-hour tick brings the true weekly figure with it",
+                ticked?.sevenDayPercent == 2 && ticked?.fiveHourPercent == 14)
+        let rolledFive = seen([(0, q(55, 93)), (settle + 5, q(2, 93, fiveAt: 3600 + 5 * 3600)), (settle + 8, q(55, 93))])
+        t.check("a new 5-hour window replaces the old figure, and the old window doesn't come back",
+                rolledFive?.fiveHourPercent == 2 && rolledFive?.sevenDayPercent == 93)
+        // After a reset, use climbs back through figures it showed days ago: those are long gone
+        // from the file, so seeing one again is new.
+        var watched: [(TimeInterval, UsageSnapshot)] = [(0, q(5, 2))]
+        var clock = settle
+        while clock < settle + UsageRecency.goneAfter + 120 {     // days at 100%, watched all along
+            watched.append((clock, q(5, 100)))
+            clock += 60
+        }
+        watched += [(clock, q(5, 2)), (clock + 3, q(5, 100)), (clock + 6, q(5, 2)), (clock + 9, q(5, 100))]
+        let revisit = seen(watched)
+        t.check("a figure gone from the file for a while counts as new when it comes back",
+                revisit?.sevenDayPercent == 2)
 
         // claude-hud's saved snapshot (display.externalUsageWritePath) is a quota source.
         let hud = Data(#"{"updated_at":"2026-11-20T11:54:38.974Z","five_hour":{"used_percentage":27,"resets_at":"2026-11-20T14:10:00.000Z"},"seven_day":{"used_percentage":81.4,"resets_at":"2026-11-22T04:00:00.000Z"}}"#.utf8)
