@@ -17,7 +17,8 @@ or file formats change.
 It refuses (via `scripts/check-main.sh`) when the checkout lacks commits on `origin/main` — install
 from main, or merge main into the branch first. Don't reach for `--force` on the user's behalf:
 it puts already-merged fixes out of the installed pet. When a merged fix "doesn't work", compare
-`shasum ~/Applications/ClaudePet.app/Contents/MacOS/ClaudePet` with the worktrees' `ClaudePet.app`.
+`shasum ~/Applications/ClaudePet.app/Contents/MacOS/ClaudePet` with the worktrees' `ClaudePet.app` —
+a hint, not proof: any later `build-app.sh` in that worktree overwrites its `ClaudePet.app`.
 
 ## Checks before committing
 

@@ -12,7 +12,7 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 PET_DIR="$CLAUDE_DIR/pet"
 APP_DEST="$HOME/Applications/ClaudePet.app"
 
-# Positional: [release|debug] [host|arm64|x86_64]. --force anywhere: install even if this checkout
+# Positional: [release|debug] [host|universal]. --force anywhere: install even if this checkout
 # is missing commits that are on origin/main (see scripts/check-main.sh).
 FORCE=()
 ARGS=()
