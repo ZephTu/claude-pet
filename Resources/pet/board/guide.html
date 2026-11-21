@@ -71,7 +71,7 @@
 <p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每个标签上都带着数字。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是一栏收件箱：上面是还没回答的问题，下面是你的 <code>@me</code> 待办，标签上的数字就是这两样加起来（只有它是亮的橙色，因为只有它在等你）。第四个标签 <b>定时任务</b> 是按时间表自动跑的任务，见<a href="#zh-jobs">定时任务</a>。</p>
 <ul>
 <li><b>加进 Focus</b>：顶部输入框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。新建的任务自动加入 Focus。卡片右上角的 ✕（点两下）把它从 Focus 拿掉，任务本身不变。</li>
-<li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 一直按最近活动排。</li>
+<li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 按「等你 / 干活中 / 空闲」分组，每组里最近有动静的在前。</li>
 
 <li><b>任务卡片</b>直接带着：大字的下一步（旁边是 <b>New session ▾</b>，没有 session 在跑时还有 <b>Resume</b>）、这个任务未回应的问题（可直接回应、送达）、<b>你的</b>待办（可直接勾）；Claude 和别人的待办只显示一句"还有 N 条"，展开看全部。session 列在右栏。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后卡片换成完整的任务详情（和 All 页里展开的一样）；<b>✕</b> 把它移出 Focus（任务本身不变，可以 Undo）。</li>
 <li>右栏只列 Focus 里任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
@@ -386,7 +386,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p><b>Focus | All | Needs you</b> at the top left switches pages (remembered); each tab carries its count. <b>Focus</b> is the workbench: only the tasks you keep in view — it doesn't reset each day; a task stays until you take it off. <b>All</b> is every task (left) and every session (right). <b>Needs you</b> is one column, an inbox: unanswered asks on top, your <code>@me</code> todos below; the number on its tab counts both (it is the only lit one, since only it waits on you). The fourth tab, <b>Scheduled</b>, holds jobs that run on a timetable — see <a href="#en-jobs">Scheduled jobs</a>.</p>
 <ul>
 <li><b>Add to Focus</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. New tasks join automatically. ✕ at a card's top right (two clicks) takes it off Focus; the task stays.</li>
-<li><b>Order</b>: <b>active first</b> by the title (the same setting as in All; remembered) puts tasks with a live session first, most recently active first. Untick it for your own order: a <b>⠿</b> appears at each card's top left — drag it to move the card. The sessions on the right are always most recently active first.</li>
+<li><b>Order</b>: <b>active first</b> by the title (the same setting as in All; remembered) puts tasks with a live session first, most recently active first. Untick it for your own order: a <b>⠿</b> appears at each card's top left — drag it to move the card. The sessions on the right are grouped — waiting on you, working, idle — most recently active first in each.</li>
 
 <li><b>Each task card</b> carries its next step in large type (with <b>New session ▾</b> beside it, and <b>Resume</b> when nothing is live), its unanswered asks (answer and deliver right there) and <b>your</b> todos (tick them); Claude's and others' todos show as one "N more" line — open the card for them. The sessions are in the right column. <b>click a blank part of the card</b> to open the full task, again to fold it (clicks in a text box, checkbox, button, ask or session row don't fold it, nor does selecting text). Opened, the card becomes the full task, the same as an open task in All; <b>✕</b> takes it off Focus (the task stays; Undo brings it back).</li>
 <li>The right column lists only the sessions on the tasks in Focus, plus sessions not on any task yet (to bind them).</li>

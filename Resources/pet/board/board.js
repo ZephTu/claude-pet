@@ -388,8 +388,8 @@ function render() {
   if (!["today", "all", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
   const need = needCount();
   // Each tab carries its count; only Needs you's is lit, because only it asks something of you.
-  const tabN = { today: focusIds().length, all: tasks().filter(isOpen).length, needs: need,
-    jobs: (typeof jui !== "undefined" && jui.data && jui.data.jobs || []).length };
+  // (Scheduled has none: its jobs are only read while that page is showing.)
+  const tabN = { today: focusIds().length, all: tasks().filter(isOpen).length, needs: need };
   $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
     `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
@@ -878,7 +878,7 @@ function focusCard(t) {
       </div>
       ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
       ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
-      ${others || !mine.length ? `<div class="fmore">${mine.length ? "" : "Nothing waiting on you here"}${!mine.length && others ? " · " : ""}${others ? `${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all` : ""}</div>` : ""}
+      ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : "Nothing waiting on you here"}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? `${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all` : ""}</div>` : ""}
     </div>`}
   </div>`;
 }
@@ -888,7 +888,7 @@ function renderTodaySessions() {
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
   return `<div class="vhead"><h2 class="side-h">Sessions on these tasks</h2></div>
-    ${onToday.length ? renderSessions(onToday) : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
+    ${onToday.length ? renderSessions(onToday, "state") : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
     ${loose.length ? `<div class="vhead" style="margin-top:22px"><h2 class="side-h">Not on a task</h2></div>${renderSessions(loose, true)}` : ""}`;
 }
 
@@ -937,11 +937,13 @@ const tildePath = (p) => String(p).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 // "New session" with its options behind ▾: where it opens, skip permissions, stay on board.
 function launchSplit(t) {
   const open = ui.launchMenu === t.id;
+  // The same task can be drawn twice (Focus, and All behind it): each menu gets its own radio group.
+  const group = `place-${t.id}-${(launchSplit.n = (launchSplit.n || 0) + 1)}`;
   return `<span class="launch">
     <button class="btn small primary" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} (${esc(PLACES[launchPlace()])}) — it starts bound, reads the card and reports">New session</button><button class="btn small primary caret-btn ${open ? "on" : ""}" data-action="launch-menu" data-task="${esc(t.id)}" title="Where new sessions open, and how" aria-expanded="${open}">▾</button>
     ${open ? `<div class="menu">
       <div class="mh">Open new sessions in</div>
-      ${Object.entries(PLACES).map(([k, v]) => `<label><input type="radio" name="place-${esc(t.id)}" data-action="launch-place" value="${k}" ${launchPlace() === k ? "checked" : ""}> ${v}</label>`).join("")}
+      ${Object.entries(PLACES).map(([k, v]) => `<label><input type="radio" name="${esc(group)}" data-action="launch-place" value="${k}" ${launchPlace() === k ? "checked" : ""}> ${v}</label>`).join("")}
       <hr>${launchOptions()}
     </div>` : ""}
   </span>`;
@@ -1044,7 +1046,7 @@ function renderTaskBody(t) {
     </div>`;
   const sessRow = (s) => `<div class="bsess">
         ${dot(s)}
-        <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(t.id + " ", "") || s.title || s.project)}</div>
+        <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
@@ -1113,6 +1115,7 @@ const ICON = {
   stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
 };
 
+// plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
 function renderSessions(items = ui.sessions, plain = false) {
   if (!items.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
   const openTasks = tasks().filter(isOpen);
@@ -1166,9 +1169,9 @@ function renderSessions(items = ui.sessions, plain = false) {
       </div>
     </div>`;
   };
-  if (plain) return items.map(card).join("");
+  if (plain === true) return items.map(card).join("");
   // As a list: what waits on you first, then what is working, then the rest — newest first in each.
-  if (ui.sgroupBy !== "project") {
+  if (plain === "state" || ui.sgroupBy !== "project") {
     const newest = (a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
     return [["waiting", "Waiting on you"], ["busy", "Working"], ["", "Idle"]].map(([st, label]) => {
       const group = items.filter((x) => (st ? x.state === st : x.state !== "waiting" && x.state !== "busy")).sort(newest);
@@ -1201,9 +1204,10 @@ function plainText(text) {
   return String(text || "")
     .replace(/```hq-[a-z]+[\s\S]*?(```|$)/g, " ")
     .replace(/```[a-z]*\n?/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\*\*|__|`/g, "")
-    .replace(/^\s*(#+|>)\s*/gm, "")
+    .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))*\)/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/`/g, "")
+    .replace(/^\s*(#{1,6}\s+|>\s?)/gm, "")
     .replace(/\s+/g, " ").trim();
 }
 // A session's project: its task's project if bound, else the project owning its directory.
@@ -2241,6 +2245,7 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "launch": {
+      ui.launchMenu = null;
       const t = taskById(d.task);
       const dir = t && launchDir(t);
       if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
@@ -2363,6 +2368,7 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
+  if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
