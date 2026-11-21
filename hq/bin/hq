@@ -36,11 +36,89 @@ DEFAULT_CATEGORIES = ["feature", "bug", "investigation", "review", "ops", "docs"
 CATEGORY_RE = re.compile(r"^[^\s#\"'\n:,\[\]][^#\"'\n:,\[\]]{0,39}$")
 TODO_TIME_RE = re.compile(r"\s*<!--\s*t:([^>]+?)\s*-->\s*$")   # hidden creation time on a todo line
 TODO_RE = re.compile(r"^(\s*)- \[([ xX\-])\] (.*)$")
-FENCE_RE = re.compile(r"```(hq-asks|hq-resolved|hq-update)[^\n]*\n(.*?)```", re.S)
-# Bookkeeping blocks: what the board and previews leave out of a reply's gist.
-BOOKKEEPING_RE = re.compile(r"```(?:hq-resolved|hq-update)[^\n]*\n.*?```", re.S)
+HQ_KINDS = ("hq-asks", "hq-resolved", "hq-update")
+# A template placeholder such as `<the next concrete action>` or `@owner <text>`: the protocol's own
+# example, echoed back. Never a real value.
+PLACEHOLDER_RE = re.compile(r"<[^<>\n]{1,80}>")
 UPDATE_KEYS = ("status", "next", "state", "todo", "done", "drop", "log", "ref", "workdir", "touch")
 WRITEBACK_MIN_TURN_SECONDS = 120
+LOCK_DIR = os.path.join(HOME_DIR, "state", "locks")
+
+
+# ---------------------------------------------------------------- hq blocks in a reply
+def hq_blocks(text):
+    """The hq-* fenced blocks of a reply: [{kind, body, start, end, trailing}].
+
+    Read the way Markdown reads fences, line by line — not with one regex over the text, which
+    took ```hq-update mentioned mid-sentence, a block quoted inside a ````markdown example, or a
+    value holding ``` as a block (or cut a block short). A block counts only at top level, with
+    its opening fence at the start of a line and its info string exactly the kind. `trailing`:
+    nothing but blank lines and other hq blocks follows it — the end of the reply, where the
+    protocol says bookkeeping goes."""
+    lines = str(text).split("\n")
+    blocks, i, n = [], 0, len(lines)
+    while i < n:
+        m = re.match(r"^( {0,3})(`{3,}|~{3,})(.*)$", lines[i])
+        if not m or (m.group(2)[0] == "`" and "`" in m.group(3)):
+            i += 1                      # not a fence (backtick info strings can't hold a backtick)
+            continue
+        fence, info = m.group(2), m.group(3).strip()
+        j = i + 1
+        while j < n:
+            c = re.match(r"^ {0,3}(`{3,}|~{3,})\s*$", lines[j])
+            if c and c.group(1)[0] == fence[0] and len(c.group(1)) >= len(fence):
+                break
+            j += 1
+        if j < n and info in HQ_KINDS and not m.group(1) and fence[0] == "`":
+            blocks.append({"kind": info, "body": "\n".join(lines[i + 1:j]), "start": i, "end": j})
+        i = j + 1
+    covered = {k for b in blocks for k in range(b["start"], b["end"] + 1)}
+    for b in blocks:
+        b["trailing"] = all(not lines[k].strip() or k in covered for k in range(b["end"] + 1, n))
+    return blocks
+
+
+def strip_hq_blocks(text, kinds=HQ_KINDS):
+    """The reply without its hq blocks of these kinds — the gist a person reads."""
+    lines = str(text).split("\n")
+    drop = {k for b in hq_blocks(text) if b["kind"] in kinds for k in range(b["start"], b["end"] + 1)}
+    return "\n".join(l for k, l in enumerate(lines) if k not in drop).strip()
+
+
+def is_placeholder(value):
+    """`<the next concrete action>`, `@owner <text>`, `<short title> <full URL>`: template, not data."""
+    return bool(PLACEHOLDER_RE.search(value)) and not re.search(
+        r"\w", re.sub(r"@\S+", "", PLACEHOLDER_RE.sub("", value)))
+
+
+# ---------------------------------------------------------------- card lock
+_held = set()
+
+
+@contextlib.contextmanager
+def card_lock(card):
+    """Hooks of several sessions and the board all rewrite TASK.md; each read-change-write holds
+    this so one writer can't put back an old copy over another's change. Re-entrant within a
+    process (apply_update holds it while calling the writers that take it too)."""
+    key = os.path.basename(os.path.dirname(os.path.realpath(card))) or "card"
+    if key in _held:
+        yield
+        return
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    with open(os.path.join(LOCK_DIR, key + ".lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        _held.add(key)
+        try:
+            yield
+        finally:
+            _held.discard(key)
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def ok_workdir(path):
+    """A directory a task may record as where its work happens: never /, home or the HQ root."""
+    return (os.path.isdir(path) and os.path.realpath(path) not in
+            ("/", os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~"))))
 
 
 # ---------------------------------------------------------------- utilities
@@ -166,6 +244,11 @@ def find_card(tid):
 
 
 def set_fields(path, fields):
+    with card_lock(path):
+        _set_fields(path, fields)
+
+
+def _set_fields(path, fields):
     text = open(path, encoding="utf-8").read()
     for k, v in fields.items():
         if isinstance(v, list):
@@ -184,12 +267,13 @@ def set_fields(path, fields):
 
 
 def append_log(path, msg, touch=True):
-    text = open(path, encoding="utf-8").read().rstrip("\n")
-    # Local date and time to the second: a task's log often has many entries in one day.
-    text += f"\n- {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {msg}\n"
-    atomic_write(path, text)
-    if touch:
-        set_fields(path, {})
+    with card_lock(path):
+        text = open(path, encoding="utf-8").read().rstrip("\n")
+        # Local date and time to the second: a task's log often has many entries in one day.
+        text += f"\n- {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {msg}\n"
+        atomic_write(path, text)
+        if touch:
+            set_fields(path, {})
 
 
 # ---------------------------------------------------------------- categories
@@ -513,7 +597,7 @@ def add_ask(card, text, session=None, context=None):
     event = {"type": "open", "id": aid, "task": meta["id"], "text": text.strip(), "session": session}
     if context:
         # The reply that asked — so the board can show why, even after the session is gone.
-        event["context"] = FENCE_RE.sub("", context).strip()[:6000]
+        event["context"] = strip_hq_blocks(context)[:6000]
     append_event(meta["dir"], event)
     return aid
 
@@ -896,8 +980,7 @@ def cmd_bind(args):
     # The session's directory is where this task's work happens: remember it on the card.
     cwd = os.getcwd() if from_inside else (pet_session(sid) or {}).get("cwd")
     workdirs = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
-    if (cwd and os.path.isdir(cwd) and cwd not in workdirs
-            and os.path.realpath(cwd) not in ("/", os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~")))):
+    if cwd and cwd not in workdirs and ok_workdir(cwd):
         fields["workdirs"] = workdirs + [cwd]
     if not meta.get("project"):
         guess = project_for_path(cwd) or project_for_dirs(workdirs)
@@ -956,6 +1039,11 @@ def cmd_set(args):
 
 def cmd_todo(args):
     card = find_card(args.task)
+    with card_lock(card):
+        _cmd_todo(args, card)
+
+
+def _cmd_todo(args, card):
     lines = open(card, encoding="utf-8").read().split("\n")
     todos = card_todos(lines)
     pick = next((x for x in todos if x[1] == args.index), None)
@@ -984,6 +1072,11 @@ def card_todos(lines):
 
 
 def mark_todo(card, lines, pick, state, via):
+    with card_lock(card):
+        _mark_todo(card, lines, pick, state, via)
+
+
+def _mark_todo(card, lines, pick, state, via):
     i, num, t, _ = pick
     mark = {"done": "x", "drop": "-", "open": " "}[state]
     lines[i] = f"{t.group(1)}- [{mark}] {t.group(3)}"
@@ -1000,6 +1093,11 @@ def todo_plain(raw):
 
 def cmd_ref(args):
     card = find_card(args.task)
+    with card_lock(card):
+        _cmd_ref(args, card)
+
+
+def _cmd_ref(args, card):
     meta = parse_card(card)
     refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
     if args.action == "add":
@@ -1019,6 +1117,11 @@ def cmd_addtodo(args):
 
 
 def add_todo(card, text):
+    with card_lock(card):
+        _add_todo(card, text)
+
+
+def _add_todo(card, text):
     lines = open(card, encoding="utf-8").read().split("\n")
     item = f"- [ ] {text.strip()} <!--t:{now_iso()}-->"
     head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办)", l, re.I)), None)
@@ -1040,15 +1143,61 @@ def add_todo(card, text):
 
 
 def update_lines(block):
-    """The lines of an hq-update block as (key, value), with list markers and blank lines dropped."""
+    """The lines of an hq-update block as (key, value), with list markers and blank lines dropped.
+    Forgiving where a model writing in Chinese or quoting values would otherwise lose a round
+    trip: a full-width colon, any case in the key, and one pair of quotes round the value."""
     out = []
     for raw in block.splitlines():
         line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", raw).strip()
         if not line:
             continue
-        m = re.match(r"^([A-Za-z]+)\s*(?::\s*(.*))?$", line)
-        out.append((m.group(1).lower(), (m.group(2) or "").strip()) if m else (None, line))
+        m = re.match(r"^([A-Za-z]+)\s*(?:[:：]\s*(.*))?$", line)
+        if not m:
+            out.append((None, line))
+            continue
+        v = (m.group(2) or "").strip()
+        for a, b in ('""', "''", "“”", "‘’", "「」", "``"):
+            if len(v) >= 2 and v[0] == a and v[-1] == b:
+                v = v[1:-1].strip()
+                break
+        out.append((m.group(1).lower(), v))
     return out
+
+
+STATUS_HEADING_RE = re.compile(
+    r"^##[ \t]*(?:Status|Current state|当前状态|状态)(?:[ \t]*[(（][^\n]*)?[ \t]*\n(.*?)(?=^##\s|\Z)",
+    re.M | re.S | re.I)
+
+
+def todo_owner(raw):
+    o = re.match(r"@(\S+)\s", TODO_TIME_RE.sub("", raw.strip()) + " ")
+    return o.group(1).casefold() if o else None
+
+
+def match_todo(todos, kind, want):
+    """The todo a `done:` / `drop:` line means: (todo, None) to change, (None, None) when it is
+    already settled (a repeat, or ticked on the board meanwhile), (None, problem) otherwise.
+
+    Exact text first, over every todo whatever its state — so a repeated `done: rerun the suite`
+    can't fall through to a substring match and tick `rerun the suite on CI` instead. A
+    substring is tried only when no todo has that exact text, and only among open ones."""
+    owner = todo_owner(want)
+    key = " ".join(todo_plain(want).split()).casefold()
+    mine = [x for x in todos if owner is None or todo_owner(x[2].group(3)) == owner]
+    open_ = [x for x in mine if x[2].group(2) == " "]
+    exact = [x for x in mine if x[3].casefold() == key]
+    if exact:
+        live = [x for x in exact if x[2].group(2) == " "]
+        if not live:
+            return None, None
+        hits = live
+    else:
+        hits = [x for x in open_ if key and key in x[3].casefold()]
+    if len(hits) == 1:
+        return hits[0], None
+    listing = "; ".join(f"\"{x[3]}\"" for x in (hits or open_)[:8]) or "none"
+    return None, (f"`{kind}: {want}` matches {len(hits) or 'no'} open todos — "
+                  f"{'candidates' if hits else 'open todos'}: {listing}")
 
 
 def apply_update(card, block, via="session"):
@@ -1056,76 +1205,101 @@ def apply_update(card, block, via="session"):
     `hq log/set/ref/addtodo/todo` one tool call at a time. Every such call is another model round trip
     that re-reads the whole conversation; the block costs a few output tokens.
 
-    Returns the lines it could not apply, so the Stop hook can send them back once."""
+    All or nothing: the whole block is checked first, and if any line can't be applied nothing
+    is written and the problems are returned, for the Stop hook to send back. Applying the good
+    lines anyway made the natural retry — the whole block again, corrected — add every todo and
+    log line twice. Adding is idempotent too (an open todo with the same text, a log line already
+    there, a ref already listed are skipped), so a block that does arrive twice changes nothing.
+    A block made only of template placeholders is the protocol's example echoed back: ignored."""
+    entries = update_lines(block)
+    if entries and all(v and is_placeholder(v) for _, v in entries):
+        return []
+    with card_lock(card):
+        return _apply_update(card, entries, via)
+
+
+def _apply_update(card, entries, via):
     problems, fields, state = [], {}, []
     adds, marks, logs, refs, dirs = [], [], [], [], []
-    for k, v in update_lines(block):
+    text = open(card, encoding="utf-8").read()
+    lines = text.split("\n")
+    todos = card_todos(lines)
+    picked = set()
+    for k, v in entries:
         if k not in UPDATE_KEYS:
             problems.append(f"not an hq-update line: {v if k is None else k + ': ' + v}")
         elif k == "touch":
             continue
         elif not v:
             problems.append(f"`{k}:` with nothing after it")
+        elif is_placeholder(v):
+            problems.append(f"`{k}: {v}` is the template's placeholder, not a value")
         elif k == "status":
-            if v in STATUSES:
-                fields["status"] = v
+            if v.lower() in STATUSES:
+                fields["status"] = v.lower()
             else:
                 problems.append(f"status must be one of {', '.join(STATUSES)} (got {v!r})")
         elif k == "next":
             fields["next"] = v
         elif k == "state":
-            state.append(v)
+            # A checkbox here would turn into a real todo in the Status section.
+            state.append(re.sub(r"^-\s*\[[ xX\-]\]\s*", "", v))
         elif k == "todo":
             adds.append(v)
         elif k in ("done", "drop"):
-            marks.append((k, v))
+            pick, problem = match_todo(todos, k, v)
+            if problem:
+                problems.append(problem)
+            elif pick and pick[0] not in picked:
+                picked.add(pick[0])
+                marks.append((k, pick))
         elif k == "log":
             logs.append(v)
         elif k == "ref":
             refs.append(v)
         elif k == "workdir":
-            dirs.append(v)
+            d = os.path.normpath(os.path.expanduser(v))
+            if not os.path.isabs(d) or not os.path.isdir(d):
+                problems.append(f"`workdir: {v}` is not an existing absolute path")
+            elif not ok_workdir(d):
+                problems.append(f"`workdir: {v}` — /, the home folder and the HQ root are never a workdir")
+            else:
+                dirs.append(d)
+    if state and not STATUS_HEADING_RE.search(text):
+        problems.append("`state:` — the card has no `## Status` / `## 当前状态` section")
+    if problems:
+        return problems
 
-    for text in adds:
-        add_todo(card, text)
-    for k, want in marks:
-        lines = open(card, encoding="utf-8").read().split("\n")
-        todos = [x for x in card_todos(lines) if x[2].group(2) == " "]
-        key = " ".join(todo_plain(want).split()).casefold()
-        exact = [x for x in todos if x[3].casefold() == key]
-        loose = exact or [x for x in todos if key in x[3].casefold()]
-        if len(loose) == 1:
-            mark_todo(card, lines, loose[0], k, via)
-        else:
-            problems.append(f"`{k}: {want}` matches {'no' if not loose else len(loose)} open todos"
-                            " — quote the todo's text exactly")
+    # Ticks first, against the line numbers checked above; adding todos would shift them.
+    for k, (i, num, t, _) in marks:
+        lines[i] = f"{t.group(1)}- [{'x' if k == 'done' else '-'}] {t.group(3)}"
+    if marks:
+        atomic_write(card, "\n".join(lines))
+        for k, (i, num, t, _) in marks:
+            append_log(card, f"todo #{num} → {k} ({via}): {TODO_TIME_RE.sub('', t.group(3))}", touch=False)
+    for item in adds:
+        have = {(todo_owner(x[2].group(3)), x[3].casefold())
+                for x in card_todos(open(card, encoding="utf-8").read().split("\n")) if x[2].group(2) == " "}
+        if (todo_owner(item), " ".join(todo_plain(item).split()).casefold()) not in have:
+            add_todo(card, item)
     if state:
         text = open(card, encoding="utf-8").read()
-        m = re.search(r"^##\s*(?:Status|Current state|当前状态|状态)\s*\n(.*?)(?=^##\s|\Z)", text, re.M | re.S)
-        if m:
-            atomic_write(card, text[:m.start(1)] + "\n".join(state) + "\n\n" + text[m.end(1):])
-        else:
-            problems.append("`state:` — the card has no Status / 当前状态 section")
+        m = STATUS_HEADING_RE.search(text)
+        atomic_write(card, text[:m.start(1)] + "\n".join(state) + "\n\n" + text[m.end(1):])
     meta = parse_card(card)
     if refs:
         have = meta.get("refs") if isinstance(meta.get("refs"), list) else []
         fields["refs"] = have + [r for r in dict.fromkeys(refs) if r not in have]
     if dirs:
         have = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
-        new = []
-        for d in dirs:
-            d = os.path.expanduser(d)
-            if not os.path.isabs(d) or not os.path.isdir(d):
-                problems.append(f"`workdir: {d}` is not an existing absolute path")
-            elif d not in have and d not in new:
-                new.append(d)
-        if new:
-            fields["workdirs"] = have + new
-    set_fields(card, fields)            # also stamps `updated`, so an empty block is a touch
-    for msg in logs:
-        append_log(card, msg)
-    return problems
-
+        known = {os.path.normpath(h) for h in have}
+        fields["workdirs"] = have + [d for d in dict.fromkeys(dirs) if d not in known]
+    set_fields(card, fields)            # also stamps `updated`, so a `touch` block is a touch
+    logged = open(card, encoding="utf-8").read()
+    for msg in dict.fromkeys(logs):
+        if not re.search(r"^- \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: " + re.escape(msg) + r"\s*$", logged, re.M):
+            append_log(card, msg)
+    return []
 
 def cmd_ask(args):
     if args.action == "add":
@@ -1275,7 +1449,9 @@ def live_sessions():
             entries = transcript_tail(d.get("transcript"), nbytes)
             for o in reversed(entries):
                 if o.get("type") == "assistant":
-                    last = message_text(o)
+                    # A reply that was only bookkeeping (the answer to a write-back nudge) is not
+                    # what the session last said: keep looking.
+                    last = strip_hq_blocks(message_text(o) or "", ("hq-resolved", "hq-update"))
                     if last:
                         break
             if last:
@@ -1291,7 +1467,7 @@ def live_sessions():
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),
             "task": state.get(sid, {}).get("task"),
-            "lastText": BOOKKEEPING_RE.sub("", last or "").strip()[:400],
+            "lastText": (last or "")[:400],
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
     return out
@@ -1483,15 +1659,16 @@ def cmd_history(args):
             continue
         seen.add(path)
         entries = transcript_tail(path, 300_000)
-        last = next((message_text(o) for o in reversed(entries)
-                     if o.get("type") == "assistant" and message_text(o)), "")
+        gists = (strip_hq_blocks(message_text(o) or "", ("hq-resolved", "hq-update"))
+                 for o in reversed(entries) if o.get("type") == "assistant")
+        last = next((g for g in gists if g), "")
         rows.append({
             "sessionId": os.path.basename(path)[:-6],
             "cwd": next((o.get("cwd") for o in reversed(entries) if o.get("cwd")), None),
             "title": session_title(entries),
             "lastAt": dt.datetime.fromtimestamp(os.path.getmtime(path)).astimezone().isoformat(timespec="seconds"),
             "live": live,
-            "lastText": " ".join(BOOKKEEPING_RE.sub("", last).split())[:160],
+            "lastText": " ".join(last.split())[:160],
         })
     rows.sort(key=lambda r: r["lastAt"], reverse=True)
     if args.json:
@@ -1533,6 +1710,12 @@ def last_assistant_text(payload):
     return ""
 
 
+def update_problems_text(meta, problems):
+    return (f"HQ: your hq-update block was NOT applied to {meta['id']} — nothing in it was written:\n"
+            + "\n".join(f"- {p}" for p in problems)
+            + "\nReply with just the whole hq-update block again, corrected.")
+
+
 def emit(event, context):
     if context:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
@@ -1569,6 +1752,8 @@ def hook_main():
         lines = []
         if not s.get("announced", True):
             lines.append("The user bound this session to an HQ task from the board.\n" + protocol(meta))
+        if s.get("update_problems"):
+            lines.append(update_problems_text(meta, s["update_problems"]))
         # An answer goes to the session that asked, once. Another session on the same task
         # doesn't get it — it would act on it too. Only when the asker has left the task (or
         # ended) does the next session on it take the answer over.
@@ -1587,6 +1772,7 @@ def hook_main():
 
         def note_turn(entry):
             entry.update(turn_start=turn_start, announced=True)
+            entry.pop("update_problems", None)
             entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
         update_session(sid, note_turn)
         t = open_asks_text(meta, sid=sid, state=state)
@@ -1597,13 +1783,16 @@ def hook_main():
     elif event == "Stop":
         text = last_assistant_text(payload)
         problems = []
-        for kind, block in FENCE_RE.findall(text):
-            if kind == "hq-update":
-                problems += apply_update(card, block)
+        for b in hq_blocks(text):
+            if b["kind"] == "hq-update":
+                # Only at the end of the reply: one quoted or shown mid-reply is an example.
+                if b["trailing"]:
+                    problems += apply_update(card, b["body"])
                 continue
-            for line in block.splitlines():
+            kind = b["kind"]
+            for line in b["body"].splitlines():
                 line = re.sub(r"^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s*", "", line).strip()
-                if not line:
+                if not line or is_placeholder(line):
                     continue
                 if kind == "hq-asks":
                     add_ask(card, line, sid, context=text)
@@ -1615,12 +1804,14 @@ def hook_main():
                         except SystemExit:
                             pass
         if payload.get("stop_hook_active"):
-            return                      # one nudge per turn, never a loop
+            # One nudge per turn, never a loop. Another Stop hook may have sent the turn back
+            # before this one could: tell the session at its next prompt instead of never.
+            if problems:
+                update_session(sid, lambda e: e.update(update_problems=problems))
+            return
         reasons = []
         if problems:
-            reasons.append(f"HQ: some lines of your hq-update block were not applied to {meta['id']}:\n"
-                           + "\n".join(f"- {p}" for p in problems)
-                           + "\nReply with just a corrected hq-update block holding those lines.")
+            reasons.append(update_problems_text(meta, problems))
         # Write-back guard: a long turn that never touched the card gets one nudge.
         start = s.get("turn_start")
         if (not problems and start and time.time() - start > WRITEBACK_MIN_TURN_SECONDS

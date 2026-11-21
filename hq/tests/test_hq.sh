@@ -198,6 +198,52 @@ PY
 touch -t 200001010000 "$C1"
 [ -z "$(stop sess-1 "$(printf 'nothing new\n```hq-update\ntouch\n```')")" ] && ok "a touch-only block satisfies the write-back guard"
 
+# hq-update review fixes (PR #51): what is a block, all-or-nothing, matching, leniency, locking
+cardof() { cat "$C1"; }
+before="$(cardof)"
+stop sess-1 "$(printf 'The protocol says to write:\n\n```hq-update\nstatus: active | waiting-on-me | blocked | done | abandoned\nnext: <the next concrete action>\nstate: <where it stands>\ntodo: @owner <text>\nlog: <a decision and why>\nref: <short title> <full URL>\n```\n\nand then carry on.')" >/dev/null
+[ "$(cardof)" = "$before" ] && ok "a block shown mid-reply is an example, not an update" || fail "mid-reply example was applied"
+stop sess-1 "$(printf 'ok\n\n```hq-update\nnext: <the next concrete action>\ntodo: @owner <text>\nref: <short title> <full URL>\n```')" >/dev/null
+[ "$(cardof)" = "$before" ] && ok "a trailing block of template placeholders is ignored" || fail "placeholder block applied"
+stop sess-1 "$(printf 'Docs:\n\n````markdown\n```hq-update\ntodo: @me quoted example todo\n```\n````')" >/dev/null
+grep -q "quoted example todo" "$C1" && fail "block inside a 4-backtick fence applied" || ok "a block quoted inside a longer fence is not applied"
+out="$(stop sess-1 "$(printf 'Mentioning ```hq-update``` inline is fine.\n\nHere is the diff:\n```\nx\n```')")"
+[ -z "$out" ] && ok "an inline mention does not swallow the rest of the reply" || fail "inline mention: $out"
+stop sess-1 "$(printf 'ok\n```hq-update\nlog: switched to ```bash``` wrapper\ntodo: @claude after the backticks\n```')" >/dev/null
+grep -q "switched to \`\`\`bash\`\`\` wrapper" "$C1" && grep -q "@claude after the backticks" "$C1" && ok "a value holding \`\`\` does not cut the block short" || fail "a value holding \`\`\` does not cut the block short"
+grep -c "after the backticks" "$C1" | grep -qx 1 || fail "block applied more than once"
+BAD='ok\n```hq-update\nstatus: finished\ntodo: @me only once\nlog: only once too\n```'
+stop sess-1 "$(printf "$BAD")" | grep -q "NOT applied" && ! grep -q "only once" "$C1" && ok "a block with a bad line writes nothing" || fail "a block with a bad line writes nothing"
+stop sess-1 "$(printf 'ok\n```hq-update\nstatus: blocked\ntodo: @me only once\nlog: only once too\n```')" >/dev/null
+stop sess-1 "$(printf 'ok\n```hq-update\nstatus: blocked\ntodo: @me only once\nlog: only once too\n```')" >/dev/null
+[ "$(grep -c "@me only once" "$C1")" = 1 ] && [ "$(grep -c ": only once too$" "$C1")" = 1 ] && ok "the same block twice adds its todo and log once" || fail "the same block twice adds its todo and log once"
+stop sess-1 "$(printf 'ok\n```hq-update\ntodo: @claude rerun lint\ntodo: @claude rerun lint on CI\n```')" >/dev/null
+stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun lint\n```')" >/dev/null
+stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun lint\n```')" >/dev/null
+grep -q -- "- \[x\] @claude rerun lint <" "$C1" && grep -q -- "- \[ \] @claude rerun lint on CI" "$C1" && ok "done on an already-done todo is a no-op, not a substring hit elsewhere" || fail "done on an already-done todo is a no-op, not a substring hit elsewhere"
+stop sess-1 "$(printf 'ok\n```hq-update\ntodo: @claude deploy to staging\ntodo: @claude deploy to prod\n```')" >/dev/null
+out="$(stop sess-1 "$(printf 'ok\n```hq-update\ndone: deploy\n```')")"
+echo "$out" | grep -q "deploy to staging" && echo "$out" | grep -q "deploy to prod" && ok "an ambiguous done lists the candidates" || fail "an ambiguous done lists the candidates"
+stop sess-1 "$(printf 'ok\n```hq-update\nStatus：\"Active\"\nnext: \"wait for the token\"\nlog：选了方案 v2\n```')" >/dev/null
+grep -q "^status: active" "$C1" && grep -q '^next: "wait for the token"' "$C1" && grep -q ": 选了方案 v2$" "$C1" && ok "full-width colon, key case and quoted values are accepted" || fail "full-width colon, key case and quoted values are accepted"
+stop sess-1 "$(printf 'ok\n```hq-update\nstate: - [ ] CI green\n```')" >/dev/null
+grep -q "^CI green$" "$C1" && ok "a checkbox in state: does not become a todo" || fail "a checkbox in state: does not become a todo"
+WD="$T/repo-a"
+stop sess-1 "$(printf 'ok\n```hq-update\nworkdir: %s/\nworkdir: %s\n```' "$WD" "$WD")" >/dev/null
+python3 - "$C1" "$WD" <<'PY' && ok "workdir is normalised and not repeated" || fail "workdir is normalised and not repeated"
+import sys, re, json
+t = open(sys.argv[1]).read(); w = json.loads(re.search(r"^workdirs: (.*)$", t, re.M).group(1))
+assert w.count(sys.argv[2]) == 1 and sys.argv[2] + "/" not in w, w
+PY
+stop sess-1 "$(printf 'ok\n```hq-update\nworkdir: %s\n```' "$HOME")" | grep -q "never a workdir" && ok "home is refused as a workdir, as bind refuses it" || fail "home is refused as a workdir, as bind refuses it"
+python3 -c 'import json; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"ok\n```hq-update\nstatus: nope\n```"}))' | "$HQ" hook >/dev/null
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "status must be one of" && ok "a block refused while another Stop hook held the turn is reported next prompt" || fail "a block refused while another Stop hook held the turn is reported next prompt"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "status must be one of" && fail "refusal reported twice" || ok "and only once"
+for i in 0 1 2 3 4 5; do
+  stop sess-1 "$(printf 'ok\n```hq-update\ntodo: @claude parallel %s\nlog: parallel log %s\n```' $i $i)" >/dev/null &
+done; wait
+[ "$(grep -c "@claude parallel " "$C1")" = 6 ] && [ "$(grep -c ": parallel log " "$C1")" = 6 ] && ok "parallel Stop hooks on one card lose nothing" || fail "parallel Stop hooks on one card lose nothing"
+
 # Two sessions on one task: an answer goes to the session that asked it, and only to it.
 "$HQ" new "Shared work" >/dev/null
 SID="$(basename "$(ls -d "$T"/root/tasks/T-*-shared-work)" | cut -d- -f1-2)"

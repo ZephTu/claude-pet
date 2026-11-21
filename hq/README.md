@@ -94,9 +94,17 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 
    Only the lines that changed. `todo` / `done` / `drop` / `log` / `ref` / `workdir` may
    repeat; `state` lines replace the card's Status (当前状态) section; `done` / `drop` match an
-   open todo by its text (exactly, or a substring that fits only one). A block holding just
-   `touch` stamps the card when nothing changed. Lines that cannot be applied are sent back to
-   the session once, listed, to correct. A turn that runs longer than two minutes without
+   open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
+   that fits only one open todo). A block holding just `touch` stamps the card when nothing
+   changed. Only a block at the end of the reply counts, at the start of a line and outside any
+   other fence; one shown mid-reply, or made of template placeholders (`<…>`), is an example.
+   Keys take a full-width colon too, and one pair of quotes round a value is dropped.
+
+   All or nothing: if any line cannot be applied, nothing in the block is written and the
+   problems (with candidate todos) are sent back once; a todo, log line or ref already on the
+   card is never added twice, so resending the whole block is safe. If another Stop hook ends
+   the turn first, the problems are told at the next prompt instead. Card writes from hooks,
+   the board and the CLI hold a per-card lock (`~/.claude/hq/state/locks/`). A turn that runs longer than two minutes without
    touching the card is sent back once to update it.
 2. **Questions to you are tracked.** When Claude needs a decision, a confirmation or an
    action from you, it ends its reply with a block:

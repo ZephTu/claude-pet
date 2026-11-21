@@ -197,7 +197,7 @@
 <h1 id="zh-link">session 和看板怎么联动</h1>
 <p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
 <ol>
-<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。session 不再一条条跑 <code>hq log</code> / <code>hq set</code> 这些命令，而是在回复末尾写一个 <code>hq-update</code> 块，由 Stop hook 写进卡片。每多一次工具调用就要把整段对话再读一遍，这样能省掉这部分 token。写不进去的行（状态拼错、找不到那条待办……）会退回给 session 改一次。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。
+<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。session 不再一条条跑 <code>hq log</code> / <code>hq set</code> 这些命令，而是在回复末尾写一个 <code>hq-update</code> 块，由 Stop hook 写进卡片。每多一次工具调用就要把整段对话再读一遍，这样能省掉这部分 token。只认回复<b>末尾</b>的那个块——正文中间引用或举例的块不算，模板里 <code>&lt;…&gt;</code> 这样的占位行也不算。块里只要有一行写不进去（状态拼错、找不到那条待办、待办有歧义……），整块都不写，退回给 session 改一次（会列出候选待办）；所以重发整块不会重复添加。同一条待办、日志、ref 已经有了就不再加。冒号用全角也行。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。
 <pre>```hq-update
 status: blocked
 next: 等 infra 给 token
@@ -521,7 +521,7 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <h1 id="en-link">How sessions and the board connect</h1>
 <p>Once bound, three hooks make the session follow these rules:</p>
 <ol>
-<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. Instead of running <code>hq log</code> / <code>hq set</code> … one call at a time, the session ends its reply with an <code>hq-update</code> block and the Stop hook writes it to the card. Every extra tool call re-reads the whole conversation, so this saves those tokens. Lines it cannot apply (a misspelt status, a todo it cannot find, …) are sent back to the session once to fix. A turn longer than two minutes that never touched the card is sent back once to update it.
+<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. Instead of running <code>hq log</code> / <code>hq set</code> … one call at a time, the session ends its reply with an <code>hq-update</code> block and the Stop hook writes it to the card. Every extra tool call re-reads the whole conversation, so this saves those tokens. Only the block at the <b>end</b> of the reply counts — one quoted or shown as an example mid-reply does not, nor do template lines like <code>&lt;…&gt;</code>. If any line cannot be applied (a misspelt status, a todo it cannot find or that matches several, …), nothing in the block is written and it is sent back to the session once to fix, with the candidate todos listed — so resending the whole block never adds anything twice. A todo, log line or ref already on the card is not added again. A turn longer than two minutes that never touched the card is sent back once to update it.
 <pre>```hq-update
 status: blocked
 next: wait for infra's token
