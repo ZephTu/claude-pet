@@ -84,8 +84,8 @@ public struct UsageRecency: Sendable {
     /// A reading not seen for this long has left the file — its session closed or caught up. Seen
     /// again later it is new.
     public static let goneAfter: TimeInterval = 10 * 60
-    /// Right after watching starts (or resumes after a gap of `goneAfter`) every reading in the
-    /// file is first seen within a few seconds, in whatever order the sessions happened to write.
+    /// Right after watching starts every reading in the file is first seen within a few seconds,
+    /// in whatever order the sessions happened to write.
     /// Births in this span say nothing about age, so they count as one; a tie goes to the higher
     /// figures, per window (the old rule), which is right except straight after a reset — and the
     /// first new reading any working session writes settles it.
@@ -107,15 +107,24 @@ public struct UsageRecency: Sendable {
 
     /// Notes one reading of the file.
     public mutating func observe(_ s: UsageSnapshot, now: Date) {
+        // A gap in watching — the lid closed, the Mac asleep — says nothing about which readings
+        // left the file: nobody was writing either. Forgetting them all here made the order start
+        // over, and the tie after it brought a reset's old 100% back. Carry them across instead.
         if let last = lastObserved, now.timeIntervalSince(last) > Self.goneAfter {
-            seen = [:]
-            watchingSince = nil
+            seen = seen.mapValues { (first: $0.first, last: now) }
         }
         if watchingSince == nil { watchingSince = now }
         lastObserved = now
         seen = seen.filter { now.timeIntervalSince($0.value.last) <= Self.goneAfter }
-        let r = Reading(five: s.fiveHourPercent, fiveReset: s.fiveHourResetAt,
-                        week: s.sevenDayPercent, weekReset: s.sevenDayResetAt)
+        // A window that is missing or already over has no figure worth telling apart; its stand-in
+        // reset time (the capture instant) differs on every write, and as part of the key it made
+        // every write a "new" reading — last writer wins. One fixed value for all of them.
+        func window(_ percent: Int, _ reset: Date) -> (Int, Date) {
+            reset > s.capturedAt ? (percent, reset) : (0, .distantPast)
+        }
+        let (five, fiveReset) = window(s.fiveHourPercent, s.fiveHourResetAt)
+        let (week, weekReset) = window(s.sevenDayPercent, s.sevenDayResetAt)
+        let r = Reading(five: five, fiveReset: fiveReset, week: week, weekReset: weekReset)
         seen[r] = (first: seen[r]?.first ?? now, last: now)
         if newest.map({ s.capturedAt >= $0.capturedAt }) ?? true { newest = s }
     }

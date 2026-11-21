@@ -1200,6 +1200,32 @@ struct Runner {
                            (settle + 11, q(14, 2)), (settle + 14, q(0, 100))])
         t.check("a working session's next five-hour tick brings the true weekly figure with it",
                 ticked?.sevenDayPercent == 2 && ticked?.fiveHourPercent == 14)
+        // A reading from the old five-hour window that turns up later still loses: the window
+        // rule decides, not the order (both tie at startup here, and 55 is the higher figure).
+        let oldLater = seen([(0, q(2, 93, fiveAt: 3600 + 5 * 3600)), (3, q(55, 93)), (settle + 5, q(55, 93))])
+        t.check("a reading from an older window loses even when it shows up later",
+                oldLater?.fiveHourPercent == 2)
+        // Asleep for half an hour after a reset, the idle session still open: the order is kept
+        // across the gap, so waking up does not bring the old 100% back.
+        let slept = seen([(0, q(40, 100)), (settle + 10, q(0, 2)), (settle + 12, q(40, 100)),
+                          (settle + 12 + 1800, q(40, 100)), (settle + 15 + 1800, q(0, 2)), (settle + 18 + 1800, q(40, 100))])
+        t.check("a gap in watching (sleep) keeps which reading is newer",
+                slept?.sevenDayPercent == 2 && slept?.fiveHourPercent == 0)
+        let wokeStale = seen([(0, q(31, 89)), (settle + 5, q(55, 93)), (settle + 5 + 1800, q(31, 89))])
+        t.check("the first reading after a gap is not taken as the newest",
+                wokeStale?.fiveHourPercent == 55 && wokeStale?.sevenDayPercent == 93)
+        // A window missing from the statusline (or already over) is stood in for with the capture
+        // time as its reset — a different value on every write. Those must not count as new readings.
+        func noFive(_ week: Int, at: TimeInterval) -> UsageSnapshot {
+            UsageSnapshot(planName: "", fiveHourPercent: 0, sevenDayPercent: week,
+                          fiveHourResetAt: t0.addingTimeInterval(at - 1), sevenDayResetAt: t0.addingTimeInterval(86400),
+                          capturedAt: t0.addingTimeInterval(at), source: "statusline")
+        }
+        let missing = seen([(0, noFive(89, at: 0)), (settle + 5, noFive(93, at: settle + 5)),
+                            (settle + 8, noFive(89, at: settle + 8)), (settle + 11, noFive(93, at: settle + 11)),
+                            (settle + 14, noFive(89, at: settle + 14))])
+        t.check("a missing window does not make every write a new reading",
+                missing?.sevenDayPercent == 93)
         let rolledFive = seen([(0, q(55, 93)), (settle + 5, q(2, 93, fiveAt: 3600 + 5 * 3600)), (settle + 8, q(55, 93))])
         t.check("a new 5-hour window replaces the old figure, and the old window doesn't come back",
                 rolledFive?.fiveHourPercent == 2 && rolledFive?.sevenDayPercent == 93)
@@ -1933,6 +1959,18 @@ struct Runner {
                           sevenDayResetAt: t0.addingTimeInterval(weekIn),
                           capturedAt: t0, source: "statusline")
         }
+
+        // After a manual reset the weekly reset instant stays the same, so the keys said before it
+        // still match: the thresholds the reading is now well below are cleared to warn again.
+        let saidBefore: Set<String> = Set([65, 85, 95].map {
+            QuotaAlarm.key(window: .sevenDay, resetAt: t0.addingTimeInterval(4 * 86400), threshold: $0) })
+        let rearmedAfterReset = QuotaAlarm.rearmed(saidBefore, usage: quotaAt(five: 10, week: 3), now: t0)
+        t.check("a reset clears the weekly thresholds it fell well below", rearmedAfterReset.isEmpty)
+        t.check("and the weekly 65% warns again when it is crossed after the reset",
+                QuotaAlarm.evaluate(usage: quotaAt(five: 10, week: 66), alreadySaid: rearmedAfterReset, now: t0).speak?.threshold == 65)
+        t.check("a reading a point under a line it already crossed does not rearm it",
+                QuotaAlarm.rearmed(saidBefore, usage: quotaAt(five: 10, week: 84), now: t0)
+                    .contains(QuotaAlarm.key(window: .sevenDay, resetAt: t0.addingTimeInterval(4 * 86400), threshold: 85)))
 
         let belowAll = QuotaAlarm.evaluate(usage: quotaAt(five: 40, week: 30),
                                         alreadySaid: [], now: t0)

@@ -454,6 +454,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// every quota write. UsageRecency needs to see each session's reading, and the file flips
     /// between them every few seconds, far faster than the 5 s render.
     private var usageWatch: DispatchSourceFileSystemObject?
+    /// The watch's backstop: a writer that rewrites in place fires no folder event, and a folder
+    /// removed and made again leaves the watch on the old one.
+    private var usageTimer: Timer?
     private var dwellTimer: Timer?
     private var dwellShowing = false
     private var dwellTarget: DwellTarget?
@@ -496,7 +499,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // Sessions take turns writing their own last-known figures into one file; the figure
         // that appeared last is the true one — see UsageRecency.
         let picked = UsageSources.pick(candidates, now: now)
-        var snapshot = picked
+        // Nothing readable this time (a file mid-write, or claude-hud writing null for a window
+        // that ran out): keep what was known rather than blanking the meters until the next write.
+        var snapshot = picked ?? usageRecency.current()
         if let picked, picked.percentagesUsable(now: now) {
             usageRecency.observe(picked, now: now)
             snapshot = usageRecency.current() ?? picked
@@ -517,6 +522,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         source.setCancelHandler { close(fd) }
         source.resume()
         usageWatch = source
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.sampleUsage(now: Date()) }
+        }
     }
 
     private static let quotaSaidKey = "quotaThresholdsSaid"
@@ -536,6 +544,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // paused, since render() substitutes a fixed idle state.
         guard !paused, !dwellShowing else { return }
         let usage = currentUsage()
+        let rearmed = QuotaAlarm.rearmed(quotaSaid, usage: usage, now: now)
+        if rearmed != quotaSaid {
+            quotaSaid = rearmed
+            saveQuotaSaid()
+        }
         let decision = QuotaAlarm.evaluate(usage: usage, alreadySaid: quotaSaid, now: now)
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
