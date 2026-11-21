@@ -63,29 +63,97 @@ public struct UsageSnapshot: Sendable, Equatable {
     }
 }
 
-/// Choosing between readings when more than one source is available.
-/// Several sessions feed one quota file, each with the numbers from its own last API call — an
-/// idle session keeps writing an old, lower reading over a fresh one (the file flips between them
-/// every few seconds). Within one window usage only goes up, so a reading for the same window
-/// that is lower than one already seen is stale.
-public enum UsageHighWater {
-    /// `next`, unless `previous` describes the same window with more used — then the higher
-    /// figure, per window (5-hour and weekly are judged separately). A later reset time is a new
-    /// window and replaces the old one; an earlier one is an old window and is ignored.
-    public static func merge(previous: UsageSnapshot?, next: UsageSnapshot) -> UsageSnapshot {
-        guard let prev = previous else { return next }
-        func pick(_ p: Int, _ pAt: Date, _ n: Int, _ nAt: Date) -> (Int, Date) {
-            if abs(nAt.timeIntervalSince(pAt)) < 120 { return (max(p, n), nAt) }   // same window
-            return nAt > pAt ? (n, nAt) : (p, pAt)
+/// Several sessions take turns writing one quota file, each with the numbers from its OWN last
+/// API call: claude-hud saves whatever the statusline it is rendering was given, and every open
+/// session re-renders its statusline every few seconds. A session that has not called the API for
+/// a while keeps writing what was true back then, and the file flips between the readings.
+///
+/// The reading that is true is the one that appeared LAST. Every API call can produce a new
+/// reading; a session that is not calling the API only ever repeats one that was already there.
+/// So each distinct reading — both windows' figures and reset times together, as one session
+/// wrote them — is remembered with the time it was first seen, and the most recently born wins.
+/// Judging the windows together matters: the weekly figure can sit at 2% for hours, but the
+/// five-hour figure of a working session moves much sooner, and the reading it moves in carries
+/// the true weekly figure with it.
+///
+/// This replaced "keep the highest figure per window", which assumed use only grows within a
+/// window. A reset breaks that: after one, the weekly window kept its reset time (the same window,
+/// by that rule) while its use went from 100% to 2%, and an idle session writing the old 100% won
+/// `max(2, 100)` for as long as it stayed open (2026-11-21).
+public struct UsageRecency: Sendable {
+    /// A reading not seen for this long has left the file — its session closed or caught up. Seen
+    /// again later it is new.
+    public static let goneAfter: TimeInterval = 10 * 60
+    /// Right after watching starts every reading in the file is first seen within a few seconds,
+    /// in whatever order the sessions happened to write.
+    /// Births in this span say nothing about age, so they count as one; a tie goes to the higher
+    /// figures, per window (the old rule), which is right except straight after a reset — and the
+    /// first new reading any working session writes settles it.
+    public static let settleFor: TimeInterval = 60
+
+    struct Reading: Hashable {
+        let five: Int
+        let fiveReset: Date
+        let week: Int
+        let weekReset: Date
+    }
+
+    private var seen: [Reading: (first: Date, last: Date)] = [:]
+    private var watchingSince: Date?
+    private var lastObserved: Date?
+    private var newest: UsageSnapshot?
+
+    public init() {}
+
+    /// Notes one reading of the file.
+    public mutating func observe(_ s: UsageSnapshot, now: Date) {
+        // A gap in watching — the lid closed, the Mac asleep — says nothing about which readings
+        // left the file: nobody was writing either. Forgetting them all here made the order start
+        // over, and the tie after it brought a reset's old 100% back. Carry them across instead.
+        if let last = lastObserved, now.timeIntervalSince(last) > Self.goneAfter {
+            seen = seen.mapValues { (first: $0.first, last: now) }
         }
-        let five = pick(prev.fiveHourPercent, prev.fiveHourResetAt, next.fiveHourPercent, next.fiveHourResetAt)
-        let week = pick(prev.sevenDayPercent, prev.sevenDayResetAt, next.sevenDayPercent, next.sevenDayResetAt)
-        return UsageSnapshot(planName: next.planName, fiveHourPercent: five.0, sevenDayPercent: week.0,
-                             fiveHourResetAt: five.1, sevenDayResetAt: week.1,
-                             capturedAt: max(prev.capturedAt, next.capturedAt), source: next.source)
+        if watchingSince == nil { watchingSince = now }
+        lastObserved = now
+        seen = seen.filter { now.timeIntervalSince($0.value.last) <= Self.goneAfter }
+        // A window that is missing or already over has no figure worth telling apart; its stand-in
+        // reset time (the capture instant) differs on every write, and as part of the key it made
+        // every write a "new" reading — last writer wins. One fixed value for all of them.
+        func window(_ percent: Int, _ reset: Date) -> (Int, Date) {
+            reset > s.capturedAt ? (percent, reset) : (0, .distantPast)
+        }
+        let (five, fiveReset) = window(s.fiveHourPercent, s.fiveHourResetAt)
+        let (week, weekReset) = window(s.sevenDayPercent, s.sevenDayResetAt)
+        let r = Reading(five: five, fiveReset: fiveReset, week: week, weekReset: weekReset)
+        seen[r] = (first: seen[r]?.first ?? now, last: now)
+        if newest.map({ s.capturedAt >= $0.capturedAt }) ?? true { newest = s }
+    }
+
+    /// The reading to show. Nil before any observation.
+    ///
+    /// A reading from an older window (a reset time more than two minutes before the latest seen
+    /// for that window) is out, whatever its age. Of the rest, the one born last; births before
+    /// the settling span ends count as born when it ends, and ties take the higher figure per window.
+    public func current() -> UsageSnapshot? {
+        guard let newest, let since = watchingSince, !seen.isEmpty else { return newest }
+        let latestFive = seen.keys.map(\.fiveReset).max()!
+        let latestWeek = seen.keys.map(\.weekReset).max()!
+        let live = seen.filter {
+            latestFive.timeIntervalSince($0.key.fiveReset) < 120 && latestWeek.timeIntervalSince($0.key.weekReset) < 120
+        }
+        let settled = since.addingTimeInterval(Self.settleFor)
+        let pool = live.isEmpty ? seen : live
+        let youngest = pool.values.map { max($0.first, settled) }.max()!
+        let tied = pool.filter { max($0.value.first, settled) == youngest }.keys
+        let five = tied.max { $0.five < $1.five }!
+        let week = tied.max { $0.week < $1.week }!
+        return UsageSnapshot(planName: newest.planName, fiveHourPercent: five.five, sevenDayPercent: week.week,
+                             fiveHourResetAt: five.fiveReset, sevenDayResetAt: week.weekReset,
+                             capturedAt: newest.capturedAt, source: newest.source)
     }
 }
 
+/// Choosing between readings when more than one source is available.
 public enum UsageSources {
     /// Ranked by how directly each one knows: Claude Code's own statusline is
     /// fed the numbers, claude-hud caches what it was given.

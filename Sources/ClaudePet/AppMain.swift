@@ -182,6 +182,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         loadHidden()
         loadSnoozed()
         loadQuotaSaid()
+        watchUsage()
         loadLabels()
         git.onUpdate = { [weak self] in self?.render() }
         transcripts.onUpdate = { [weak self] in self?.render() }
@@ -459,7 +460,14 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var lastSpoken: [Chatter.Kind: Date] = [:]
     private var lastAnything: Date?
     private var usageCache: (snapshot: UsageSnapshot?, readAt: Date)?
-    private var usageHighWater: UsageSnapshot?
+    private var usageRecency = UsageRecency()
+    /// Fires each time a file lands in ~/.claude/pet itself (not its subfolders) — in practice
+    /// every quota write. UsageRecency needs to see each session's reading, and the file flips
+    /// between them every few seconds, far faster than the 5 s render.
+    private var usageWatch: DispatchSourceFileSystemObject?
+    /// The watch's backstop: a writer that rewrites in place fires no folder event, and a folder
+    /// removed and made again leaves the watch on the old one.
+    private var usageTimer: Timer?
     private var dwellTimer: Timer?
     private var dwellShowing = false
     private var dwellTarget: DwellTarget?
@@ -471,17 +479,21 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude")
     }
 
-    /// The cache is another plugin's file, refreshed every five minutes, so
-    /// re-reading it on every 5s render would be pure waste.
+    /// Re-reading on every 5 s render would be waste: the watcher below keeps `usageRecency` up to
+    /// date between renders, and this only falls back to a read when nothing has arrived lately.
     private func currentUsage() -> UsageSnapshot? {
         let now = Date()
         if let cached = usageCache, now.timeIntervalSince(cached.readAt) < 15 {
             return cached.snapshot
         }
-        // Two possible sources, read independently and never blended. The one
-        // that wins is decided by UsageSources, which puts freshness first: a
-        // reading from a better source that has gone stale still describes a
-        // window that may have rolled over.
+        return sampleUsage(now: now)
+    }
+
+    /// Reads the quota sources once and notes the reading.
+    private func sampleUsage(now: Date) -> UsageSnapshot? {
+        // Up to three sources, read independently and never blended. The one that wins is decided
+        // by UsageSources, which puts freshness first: a reading from a better source that has gone
+        // stale still describes a window that may have rolled over.
         var candidates: [UsageSnapshot] = []
         if let hud = (try? Data(contentsOf: UsageReader.cacheURL(claudeHome: claudeHome)))
             .flatMap(UsageReader.parse) {
@@ -495,13 +507,35 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             .flatMap(StatuslineUsage.decode) {
             candidates.append(line)
         }
-        // Keep the highest reading seen for each window: a session that has been idle writes its
-        // older, lower numbers over fresh ones — see UsageHighWater.
+        // Sessions take turns writing their own last-known figures into one file; the figure
+        // that appeared last is the true one — see UsageRecency.
         let picked = UsageSources.pick(candidates, now: now)
-        let snapshot = picked.map { UsageHighWater.merge(previous: usageHighWater, next: $0) }
-        if let snapshot { usageHighWater = snapshot }
+        // Nothing readable this time (a file mid-write, or claude-hud writing null for a window
+        // that ran out): keep what was known rather than blanking the meters until the next write.
+        var snapshot = picked ?? usageRecency.current()
+        if let picked, picked.percentagesUsable(now: now) {
+            usageRecency.observe(picked, now: now)
+            snapshot = usageRecency.current() ?? picked
+        }
         usageCache = (snapshot, now)
         return snapshot
+    }
+
+    private func watchUsage() {
+        guard usageWatch == nil else { return }
+        try? FileManager.default.createDirectory(at: petHome, withIntermediateDirectories: true)
+        let fd = open(petHome.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { _ = self?.sampleUsage(now: Date()) }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        usageWatch = source
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.sampleUsage(now: Date()) }
+        }
     }
 
     private static let quotaSaidKey = "quotaThresholdsSaid"
@@ -521,6 +555,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // paused, since render() substitutes a fixed idle state.
         guard !paused, !dwellShowing else { return }
         let usage = currentUsage()
+        let rearmed = QuotaAlarm.rearmed(quotaSaid, usage: usage, now: now)
+        if rearmed != quotaSaid {
+            quotaSaid = rearmed
+            saveQuotaSaid()
+        }
         let decision = QuotaAlarm.evaluate(usage: usage, alreadySaid: quotaSaid, now: now)
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,

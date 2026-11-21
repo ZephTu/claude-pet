@@ -24,7 +24,9 @@ enum StatuslineCapture {
 
         if let snapshot = StatuslineUsage.parse(input, now: now) {
             let data = StatuslineUsage.encode(snapshot)
-            if !data.isEmpty { try? data.write(to: StatuslineUsage.cacheURL(petHome: directory)) }
+            // Atomic: the app watches the folder for files landing in it (a rename), and a reader
+            // must never see half a file.
+            if !data.isEmpty { try? data.write(to: StatuslineUsage.cacheURL(petHome: directory), options: .atomic) }
         }
 
         if let insight = SessionInsights.parse(input, now: now) {
