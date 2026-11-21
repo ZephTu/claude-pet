@@ -475,7 +475,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var lastSpoken: [Chatter.Kind: Date] = [:]
     private var lastAnything: Date?
     private var usageCache: (snapshot: UsageSnapshot?, readAt: Date)?
-    private var usageRecency = UsageRecency()
+    /// Which quota reading is newest, learned by watching — and kept in `usage-seen.json` so a
+    /// restart does not have to learn it again (see UsageRecency.saved).
+    private lazy var usageRecency: UsageRecency =
+        (try? Data(contentsOf: usageSeenURL)).flatMap { UsageRecency(saved: $0, now: Date()) } ?? UsageRecency()
+    private var usageSeenURL: URL { petHome.appending(path: "usage-seen.json") }
     /// Fires each time a file lands in ~/.claude/pet itself (not its subfolders) — in practice
     /// every quota write. UsageRecency needs to see each session's reading, and the file flips
     /// between them every few seconds, far faster than the 5 s render.
@@ -529,7 +533,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // that ran out): keep what was known rather than blanking the meters until the next write.
         var snapshot = picked ?? usageRecency.current()
         if let picked, picked.percentagesUsable(now: now) {
-            usageRecency.observe(picked, now: now)
+            if usageRecency.observe(picked, now: now), let data = usageRecency.saved() {
+                // Only when a reading is new: a handful of writes an hour. Landing in the watched
+                // folder brings one more sample, which finds nothing new and writes nothing.
+                try? data.write(to: usageSeenURL, options: .atomic)
+            }
             snapshot = usageRecency.current() ?? picked
         }
         usageCache = (snapshot, now)

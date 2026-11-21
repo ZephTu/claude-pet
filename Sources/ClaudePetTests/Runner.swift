@@ -1200,6 +1200,68 @@ struct Runner {
                            (settle + 11, q(14, 2)), (settle + 14, q(0, 100))])
         t.check("a working session's next five-hour tick brings the true weekly figure with it",
                 ticked?.sevenDayPercent == 2 && ticked?.fiveHourPercent == 14)
+        // Kept across a restart. Saved the way the app saves: only right after a new reading.
+        func learn(_ readings: [(TimeInterval, UsageSnapshot)]) -> Data? {
+            var r = UsageRecency()
+            var data: Data?
+            for (at, reading) in readings where r.observe(reading, now: t0.addingTimeInterval(at)) {
+                data = r.saved()
+            }
+            return data
+        }
+        func resume(_ data: Data?, _ readings: [(TimeInterval, UsageSnapshot)]) -> UsageSnapshot? {
+            guard let data, var r = UsageRecency(saved: data, now: t0.addingTimeInterval(readings.first?.0 ?? 0))
+            else { return nil }
+            for (at, reading) in readings { r.observe(reading, now: t0.addingTimeInterval(at)) }
+            return r.current()
+        }
+        // After a reset the pet learned 2% is newer than the idle session's 100%. Restarted (an
+        // install), it meets both again within seconds — the old one first — and must still know.
+        let resetLearned = learn([(0, q(40, 100)), (settle + 10, q(0, 2)), (settle + 12, q(40, 100))])
+        let restart = settle + 120
+        t.check("after a restart the saved order still shows the newer reading, not the higher",
+                resume(resetLearned, [(restart, q(0, 2)), (restart + 1, q(40, 100))])?.sevenDayPercent == 2)
+        t.check("and after a restart hours later too",
+                resume(resetLearned, [(restart + 3 * 3600, q(0, 2)), (restart + 3 * 3600 + 2, q(40, 100))])?.sevenDayPercent == 2)
+        // The save is written when a reading is new, so its "last seen" times are older than the
+        // last look. A restart ten minutes after that write must not drop the idle session's reading
+        // as gone and then take it for a new one.
+        let idleOld = learn([(0, q(40, 100)), (settle + 1, q(0, 2)), (settle + 100, q(40, 100)),
+                             (settle + 303, q(1, 2)), (settle + 305, q(40, 100))])
+        t.check("a restart ten minutes after the last save still knows the idle reading is old",
+                resume(idleOld, [(settle + 902, q(40, 100)), (settle + 903, q(1, 2))])?.sevenDayPercent == 2)
+        // Readings written while the pet was off are new to it, and arrive in any order: they
+        // settle among themselves (the tie takes the higher) instead of the last to arrive winning.
+        let before = learn([(0, q(30, 50)), (settle + 5, q(45, 55))])
+        let offAt: TimeInterval = 4 * 3600      // spelled out: older compilers (CI) infer Int here
+        let offline = resume(before, [(offAt, q(60, 70)), (offAt + 2, q(50, 65)), (offAt + 4, q(45, 55))])
+        t.check("readings new after a restart tie for a minute instead of the last-arrived winning",
+                offline?.fiveHourPercent == 60 && offline?.sevenDayPercent == 70)
+        // The same after the Mac slept: readings written meanwhile are new and settle among themselves.
+        let woke = seen([(0, q(30, 50)), (settle + 5, q(45, 55)),
+                         (settle + 5 + 3600, q(60, 70)), (settle + 5 + 3602, q(50, 65)), (settle + 5 + 3604, q(45, 55))])
+        t.check("readings new after a sleep tie for a minute instead of the last-arrived winning",
+                woke?.fiveHourPercent == 60 && woke?.sevenDayPercent == 70)
+        // A reset time with a fraction of a second must come back as the same Date, or the same live
+        // reading would count as new after every restart.
+        let fractional = UsageSnapshot(planName: "", fiveHourPercent: 3, sevenDayPercent: 4,
+                                       fiveHourResetAt: t0.addingTimeInterval(3600.123456789),
+                                       sevenDayResetAt: t0.addingTimeInterval(86400.987654321),
+                                       capturedAt: t0, source: "claude-hud")
+        var once = UsageRecency()
+        once.observe(fractional, now: t0)
+        if let data = once.saved(), var back = UsageRecency(saved: data, now: t0.addingTimeInterval(10)) {
+            t.check("a saved reading with sub-second reset times matches the live one after a restart",
+                    !back.observe(fractional, now: t0.addingTimeInterval(10)))
+        } else {
+            t.check("the learned order can be saved and read back", false)
+        }
+        t.check("a save dated in the future is not trusted",
+                once.saved().flatMap { UsageRecency(saved: $0, now: t0.addingTimeInterval(-3600)) } == nil)
+        var firstSight = UsageRecency()
+        t.check("a reading not seen before is reported as new, a repeat is not",
+                firstSight.observe(q(10, 20), now: t0) && !firstSight.observe(q(10, 20), now: t0.addingTimeInterval(5)))
+        t.check("an unreadable save starts from scratch", UsageRecency(saved: Data("nope".utf8)) == nil)
         // A reading from the old five-hour window that turns up later still loses: the window
         // rule decides, not the order (both tie at startup here, and 55 is the higher figure).
         let oldLater = seen([(0, q(2, 93, fiveAt: 3600 + 5 * 3600)), (3, q(55, 93)), (settle + 5, q(55, 93))])
