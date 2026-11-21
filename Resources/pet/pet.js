@@ -78,9 +78,11 @@ function reportLayout() {
    one language is what keeps a row from reading as a mixture. */
 const TEXT = {
   // Group headings.
+  // Sentence case: the headings organise the list, they do not shout.
   needsYou: "Needs you",
   asks: "Asks",
-  finished: "Finished",
+  scheduled: "Scheduled",
+  finished: "Just finished",
   // "Running" is a claim, and a group holding three answered sessions and an
   // idle one is not running anything. It is only used when the group really is
   // all work in flight; otherwise the heading says what the rows have in
@@ -108,7 +110,7 @@ const TEXT = {
   empty: "No live sessions",
   muted: " muted — say something to bring one back",
   droppedTail: " older unread finishes were discarded (queue full)",
-  clear: "clear",
+  clear: "Clear",
   // The alert card.
   approveLabel: "approve",
   allow: "Allow",
@@ -117,7 +119,15 @@ const TEXT = {
   // Quota meters. "used" is stated rather than implied: a bare percentage next
   // to a bar is read as either "how much is gone" or "how much is left", and
   // the two are opposite readings of the same picture.
-  quotaUsed: "used",
+  quotaUsed: "Quota used",
+  // Hover readout labels, left column of its label/value grid.
+  dContext: "context",
+  dContextShort: "ctx",
+  dModel: "model",
+  dTurns: "turns",
+  dTool: "tool",
+  dTurn: "turn",
+  dQuiet: "quiet",
 };
 
 /* ---- The message window ----------------------------------------------------
@@ -386,6 +396,8 @@ window.showQuota = function (rows, fallback) {
     fill.style.width = pct + "%";
     // Colour carries the same warning the pet's own lamp does.
     fill.dataset.level = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+    // The row as well, so the figure can carry the warning too (▲, coral).
+    els[i].dataset.level = fill.dataset.level;
   });
   bubble.hidden = false;
   reportLayout();
@@ -495,9 +507,15 @@ function ageText(seconds) {
   return Math.floor(seconds / 3600) + "h";
 }
 
-/** The age column. */
-function ageHTML(seconds) {
-  return '<span class="age">' + ageText(seconds) + "</span>";
+/**
+ * The age column. A row that can jump carries its ↗ INSIDE the clock: the
+ * arrow is hidden until the row is hovered and then takes the clock's place,
+ * so it costs the row no width of its own. A row with no terminal handle gets
+ * no arrow at all.
+ */
+function ageHTML(seconds, jumpable) {
+  return '<span class="age"><span class="agev">' + ageText(seconds) + "</span>"
+    + (jumpable ? '<span class="jump">↗</span>' : "") + "</span>";
 }
 
 /* A speech bubble, drawn in the text colour: "this many exchanges". */
@@ -601,25 +619,27 @@ function sessionRowHTML(s) {
   const jumpable = s.termHandle ? " jumpable" : "";
   const napped = s.snoozedFor ? " napped" : "";
   // A 6px dot was the whole signal that a row wanted something. It is carried
-  // by a left edge bar and a warm wash as well now — drawn with an inset
-  // shadow and a background, so marking a row costs no width and cannot move
-  // the column beside it. A postponed row gives the emphasis up: it was put
-  // off deliberately, and it must stop competing with the ones that were not.
+  // by the lamp's shape and a wash as well now — a background, so marking a
+  // row costs no width and cannot move the column beside it. A postponed row
+  // gives the emphasis up: it was put off deliberately, and it must stop
+  // competing with the ones that were not.
   const wants = s.state === "waiting" && !s.snoozedFor
     ? (s.urgent ? " needs urgent" : " needs") : "";
+  // Which kind of ask, for the wash: coral for a decision, tabby for a reply.
+  const kind = s.state === "waiting"
+    ? (s.asks === "permission" ? " ask-appr" : " ask-reply") : "";
   // Only a blocked session can be postponed: there is nothing to put off about
   // one that is merely running.
   const clock = s.state === "waiting"
     ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
   return (
-    '<div class="row' + wants + jumpable + napped + '"><div class="line">' +
+    '<div class="row' + wants + kind + jumpable + napped + '"><div class="line">' +
     '<span class="dot ' + dotClass(s) + '"></span>' +
     (s.pinned ? '<span class="pin">\u25c6</span>' : "") +
     '<span class="proj"></span><span class="what"></span>' +
     '<span class="meta">' + metaHTML(s) +
     // See rowAge: which clock this is.
-    ageHTML(rowAge(s)) + "</span>" +
-    (s.termHandle ? '<span class="jump">\u2197</span>' : "") +
+    ageHTML(rowAge(s), !!s.termHandle) + "</span>" +
     clock +
     '<span class="mute" title="Mute this session">\u00d7</span>' +
     "</div>" +
@@ -644,8 +664,7 @@ function finishedRowHTML(f) {
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
     '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
-    ageHTML(f.agoSeconds) +
-    (f.termHandle ? '<span class="jump">\u2197</span>' : "") +
+    ageHTML(f.agoSeconds, !!f.termHandle) +
     '<span class="read" title="Mark as read">\u2713</span>' +
     "</div>" +
     // What Claude said last, so the row can answer "do I need to look?" on its
@@ -667,11 +686,13 @@ function finishedRowHTML(f) {
 // Task statuses worth a word on a session row; "active" is the normal case and says nothing.
 const TASK_STATUS_WORD = { "waiting-on-me": "needs you", blocked: "blocked", done: "done", abandoned: "dropped" };
 
-window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
+window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, jobRows) {
   const muted = hiddenCount || 0;
   const done = finished || [];
   // Questions waiting on the HQ board — the badge counts them, so the list shows them.
   const asks = hqAsks || [];
+  // Scheduled jobs running now, or failed and not yet looked at on the board.
+  const jobs = jobRows || [];
   let footer = "";
   if (dropped > 0) {
     // Losing news quietly is the one thing the queue exists to prevent, so a
@@ -682,7 +703,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
   if (muted) {
     footer += '<div class="muted-note">' + muted + TEXT.muted + "</div>";
   }
-  if (!list.length && !done.length && !asks.length) {
+  if (!list.length && !done.length && !asks.length && !jobs.length) {
     panel.innerHTML = '<div class="empty">' + TEXT.empty + "</div>" + footer;
     hoverRow = null;
     reportLayout();
@@ -735,6 +756,14 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
           + '<span class="asktext"></span><span class="ask-go">\u2197</span></div></div>';
       }).join("");
   }
+  if (jobs.length) {
+    // Shaped like an ask row, and clicked like one: it opens the board, at the Scheduled view.
+    html += heading(TEXT.scheduled, jobs.length)
+      + jobs.map(function () {
+        return '<div class="row hqask jobrow"><div class="line"><span class="tidtag"></span>'
+          + '<span class="asktext"></span><span class="ask-go">\u2197</span></div></div>';
+      }).join("");
+  }
   if (needs.length) {
     html += heading(TEXT.needsYou, needs.length) + needs.map(sessionRowHTML).join("");
   }
@@ -746,7 +775,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
   if (others.length) {
     // One group and nothing to tell it apart from is not a group. A lone
     // "Running" heading above the only rows there are is pure furniture.
-    html += (needs.length || done.length || asks.length
+    html += (needs.length || done.length || asks.length || jobs.length
               ? heading(allRunning ? TEXT.running : TEXT.sessions, others.length)
               : "")
           + others.map(sessionRowHTML).join("");
@@ -770,7 +799,17 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
     }
   });
 
-  panel.querySelectorAll(".row.hqask").forEach(function (row, i) {
+  panel.querySelectorAll(".row.jobrow").forEach(function (row, i) {
+    const j = jobs[i];
+    row.dataset.task = "jobs";
+    const tag = row.querySelector(".tidtag");
+    tag.textContent = j.status === "failed" ? "failed" : "running";
+    tag.classList.add(j.status === "failed" ? "st-blocked" : "st-active");
+    row.querySelector(".asktext").textContent = (j.name || "") + (j.text ? " · " + j.text : "");
+    row.title = "Open the Scheduled view of the task board";
+  });
+
+  panel.querySelectorAll(".row.hqask:not(.jobrow)").forEach(function (row, i) {
     const a = asks[i];
     row.dataset.task = a.task || "";
     row.dataset.askId = a.id || "";
@@ -830,6 +869,12 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
       note.classList.add("name");
     } else {
       note.textContent = s.detail || "";
+      // On an approval the second line is the command being approved: code,
+      // so it sits in a mono chip. Never on an empty line, or the chip would
+      // draw as a blank pill.
+      if (s.state === "waiting" && s.asks === "permission" && s.detail) {
+        note.classList.add("cmd");
+      }
     }
     rows[i].querySelector(".detail").classList
       .toggle("blank", !s.branch && !s.task && !note.textContent);
@@ -1013,48 +1058,47 @@ window.showDetail = function (d) {
     if (d.worktree) span(head, "dtree", d.worktree);
   }
 
+  // The facts, as a label / value grid \u2014 the same reading as the quota card.
+  // A `wide` value spans the rest of the row; the clocks are pairs, which the
+  // crowded strip lays two to a row (see pet.css).
+  const grid = document.createElement("div");
+  grid.className = "dgrid";
+  function pair(label, wide, short) {
+    const key = span(grid, "dkey", label);
+    if (short) key.dataset.short = short;
+    return span(grid, "dval" + (wide ? " wide" : ""), "");
+  }
+
   if (typeof d.context === "number") {
-    const meter = row("qrow");
-    span(meter, "qlabel", "ctx");
+    const meter = pair(TEXT.dContext, true, TEXT.dContextShort);
+    meter.classList.add("dmeter");
     const bar = document.createElement("span");
     bar.className = "qbar";
     const fill = document.createElement("span");
     fill.className = "qfill";
     const pct = Math.max(0, Math.min(100, d.context));
     fill.style.width = pct + "%";
-    // Same warning ramp as the quota meters and the antenna lamp.
+    // Same warning ramp as the quota meters.
     fill.dataset.level = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
     bar.appendChild(fill);
     meter.appendChild(bar);
     span(meter, "qpct", pct + "%");
-    if (d.model) span(meter, "qreset", d.model);
+    meter.dataset.level = fill.dataset.level;
+    if (d.model) span(meter, "dmodel", d.model);
   } else if (d.model) {
-    span(row("dclocks"), "dmodel", d.model);
+    pair(TEXT.dModel, true).textContent = d.model;
   }
 
-  if (d.turns) {
-    const talk = row("dclocks");
-    span(talk, "dval", String(d.turns));
-    span(talk, "dkey", d.turns === 1 ? "turn so far" : "turns so far");
-  }
+  if (d.turns) pair(TEXT.dTurns, true).textContent = String(d.turns);
 
   if (d.turn || d.tool) {
-    const clocks = row("dclocks");
     // The row shows ONE number; this is where it says which one. With a call in
     // flight the row is showing `tool`, so that is named first.
-    if (d.tool) {
-      span(clocks, "dkey", "tool");
-      span(clocks, "dval", d.tool);
-    }
-    if (d.turn) {
-      span(clocks, "dkey", "turn");
-      span(clocks, "dval", d.turn);
-    }
-    if (d.quiet) {
-      span(clocks, "dkey", "quiet");
-      span(clocks, "dval", d.quiet);
-    }
+    if (d.tool) pair(TEXT.dTool).textContent = d.tool;
+    if (d.turn) pair(TEXT.dTurn).textContent = d.turn;
+    if (d.quiet) pair(TEXT.dQuiet).textContent = d.quiet;
   }
+  if (grid.childNodes.length) bubble.appendChild(grid);
 
   // Commands the session left running after its turn ended.
   (d.background || []).slice(0, 3).forEach(function (line) {
@@ -1065,6 +1109,8 @@ window.showDetail = function (d) {
 
   if (d.last) {
     const last = row("dlast");
+    // A failed call is a warning: coral, with a \u25b2 rather than a dot.
+    if (d.lastBad) last.classList.add("bad");
     span(last, "ddot", d.lastBad ? "\u25b2" : "\u25cf").classList
       .add(d.lastBad ? "bad" : "ok");
     span(last, "dtext", d.last);

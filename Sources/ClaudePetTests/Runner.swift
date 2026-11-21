@@ -2362,6 +2362,8 @@ struct Runner {
             t.check("could spawn a fake command shell", false)
         }
 
+        JobTests.run(t)
+
         t.finish()
     }
 }

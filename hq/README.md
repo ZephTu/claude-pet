@@ -74,9 +74,38 @@ Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3
 
 The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`):
 
-1. **The card is the source of truth.** Claude reads it first and writes progress back. A
-   turn that runs longer than two minutes without touching the card is sent back once to
-   update it.
+1. **The card is the source of truth.** Claude reads it first and writes progress back — not
+   with `hq log/set/ref/addtodo/todo` calls (each tool call is another model round trip over
+   the whole conversation; measured at 5–10% of a task session's tokens) but with a block at
+   the end of its reply, which the Stop hook applies:
+
+   ````markdown
+   ```hq-update
+   status: blocked
+   next: wait for infra's token
+   state: build is green; waiting on the token
+   todo: @me send the token request
+   done: rerun the suite
+   log: picked plan v2 because it is cheaper
+   ref: PR #9 https://github.com/org/repo/pull/9
+   workdir: /abs/path/it/started/working/in
+   ```
+   ````
+
+   Only the lines that changed. `todo` / `done` / `drop` / `log` / `ref` / `workdir` may
+   repeat; `state` lines replace the card's Status (当前状态) section; `done` / `drop` match an
+   open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
+   that fits only one open todo). A block holding just `touch` stamps the card when nothing
+   changed. Only a block at the end of the reply counts, at the start of a line and outside any
+   other fence; one shown mid-reply, or made of template placeholders (`<…>`), is an example.
+   Keys take a full-width colon too, and one pair of quotes round a value is dropped.
+
+   All or nothing: if any line cannot be applied, nothing in the block is written and the
+   problems (with candidate todos) are sent back once; a todo, log line or ref already on the
+   card is never added twice, so resending the whole block is safe. If another Stop hook ends
+   the turn first, the problems are told at the next prompt instead. Card writes from hooks,
+   the board and the CLI hold a per-card lock (`~/.claude/hq/state/locks/`). A turn that runs longer than two minutes without
+   touching the card is sent back once to update it.
 2. **Questions to you are tracked.** When Claude needs a decision, a confirmation or an
    action from you, it ends its reply with a block:
 

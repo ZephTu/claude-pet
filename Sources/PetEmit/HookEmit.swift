@@ -59,6 +59,10 @@ enum HookEmit {
 
     static func run(payload: Data) {
         dump(payload)
+        // A scheduled job's Claude run (see JobRunner): nobody is at that session, so the pet
+        // must neither show it nor hold its permission prompts open waiting for an answer. Its
+        // runs are reported from the job's own records instead.
+        if ProcessInfo.processInfo.environment[Jobs.environmentKey] != nil { return }
         guard
             let raw = try? JSONSerialization.jsonObject(with: payload),
             let hook = raw as? [String: Any]

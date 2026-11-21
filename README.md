@@ -45,7 +45,7 @@ With a dozen sessions open across several repos, the hard part stops being the w
 
 <img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view, each with its open questions, todos and sessions; their sessions on the right">
 
-The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
+The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. A fourth tab, **Scheduled**, runs jobs on a timetable (see below). The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
 
 ### Questions, answered in one go
 
@@ -75,6 +75,10 @@ Open a task for the rest of its card:
 
 👁 opens a session's recent conversation; reply from the box at the bottom (paste or drop images too). It arrives exactly as if you had typed it in the terminal — queued if the session is busy.
 
+### Scheduled jobs
+
+The **Scheduled** tab runs a Claude prompt (`claude -p`, skills and MCP tools included) or a shell command on a timetable — every N minutes, daily, weekdays, some days, or cron — and shows every job with its recent runs, the next run, and each run's reply, steps and log. Jobs run under launchd, so they run with the pet closed; a failure gets a notice from the cat. Each job picks a new session every run (keeping only the newest few) or one session it keeps continuing. The tab is in English and Chinese.
+
 **And the small things:** drafts you were typing survive a restart; removing or unbinding anything takes two clicks; the board has a built-in **Guide** in English and Chinese.
 
 HQ is optional and installed after the pet — see [hq/README.md](hq/README.md) for how it works, the `hq` CLI and the card format.
@@ -90,6 +94,8 @@ hq/install.sh --root ~/claude-hq --no-hooks       # the board and CLI only, sett
 ```
 
 **The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
+
+**`scripts/install.sh` installs the checkout it runs in**, so it first fetches `origin/main` (giving up after 20 seconds and using the last fetched copy) and checks that the checkout contains all of it. If not — a feature branch cut before a fix merged — it lists the missing commits and stops; run from an interactive terminal it asks first. `--force` (or `CLAUDE_PET_INSTALL_ANYWAY=1`) installs anyway. Otherwise the installed pet would quietly lose fixes that are already merged.
 
 What it keeps: each session's current state, one record per finished turn (7 days), and **one line of each conversation** — the first line of Claude's last reply. Your prompts are never stored, and the pet makes **no network requests**. The Task Board reads live sessions' recent messages from their local transcripts to show them; nothing is sent anywhere. Details: [docs/pet.md](docs/pet.md#what-it-touches).
 

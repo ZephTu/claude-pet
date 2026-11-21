@@ -272,6 +272,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // counting. Nothing writes a file at that moment, so re-aggregate on a timer.
         startTicker(interval: Self.tickInterval)
 
+        // Scheduled jobs run under launchd, not here; make sure their agents match the jobs
+        // (an upgrade may have moved the runner), and redraw when the board marks failures seen.
+        JobsController.shared.onChange = { [weak self] in self?.render() }
+        Task { await JobsController.shared.syncAgents() }
+
         self.panel = panel
         self.bridge = bridge
         self.watcher = watcher
@@ -309,6 +314,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         let unread = paused ? [] : (completions?.unread ?? [])
         let hq = taskIndex.snapshot(now: now)
+        let jobs = paused ? JobsController.Report() : JobsController.shared.poll(now: now)
         let motion = currentMotion(state, now: now)
         bridge?.push(state, motion: motion)
         // A phase belongs to a session, but the pet shows one figure, so any
@@ -337,7 +343,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              hqAsks: paused ? [] : hq.openAsks.map {
                                  ["id": $0.id, "task": $0.task, "text": $0.text,
                                   "status": hq.statusByTask[$0.task] ?? ""]
-                             })
+                             },
+                             jobs: jobs.rows)
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
@@ -345,7 +352,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let badge = PanelModel.badge(
             needsYou: PanelModel.needsYou(state.sessions)
                 .filter { !Snooze.isSnoozed($0, marks: snoozeMarks, now: now) }.count
-                + (paused ? 0 : hq.openAsks.count),   // questions on the HQ board want an answer too
+                + (paused ? 0 : hq.openAsks.count)    // questions on the HQ board want an answer too
+                + jobs.unseenFailures,                 // and a scheduled job that failed wants a look
             unreadFinishes: PanelModel.completionRows(unread, live: state.sessions).count)
         bridge?.setBadge(badge)
         // What the cat shows is decided here and pushed — see CatSkin.
@@ -356,6 +364,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         blockedOn: state.waitingOn, motion: motion,
                                         struggling: state.sessions.contains(where: Struggle.isStruggling)))
         announceFinishes(state, now: now)
+        for n in jobs.notices {
+            bridge?.notify(n.text, hold: 25, emphasis: n.emphasis, sessionId: "job:" + n.jobId, jumpable: false)
+        }
         // (No daily "pick today's tasks" prompt any more: Focus stays until you change it.)
         if !paused { announceAsks(hq) }
         noticeReturn(state, now: now)
@@ -1169,6 +1180,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// the list, which is where the row is.
     private func openNotice(sessionID: String) {
         bridge?.dismissNotice(sessionID)
+        // A scheduled job's notice: its runs are on the board.
+        if sessionID.hasPrefix("job:") { return showBoard(reveal: "jobs") }
         guard let terminal = latest.first(where: { $0.sessionId == sessionID })?.terminal,
               TerminalTarget.canJump(kind: terminal.kind) else {
             bridge?.setPanelOpen(true)

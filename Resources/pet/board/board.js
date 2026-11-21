@@ -198,9 +198,9 @@ const list = (v) => (Array.isArray(v) ? v : []);
 async function refresh(force) {
   let sig = null;
   try {
-    const [boardText, sessionsText, agentsText, unreadText] = await Promise.all([api("board"), api("sessions"), api("agents"),
-      api("pet").catch(() => "{}")]);
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText;
+    const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
+      api("pet").catch(() => "{}"), ui.mode === "jobs" && typeof loadJobs === "function" ? loadJobs() : ""]);
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
@@ -383,15 +383,20 @@ function render() {
   });
 
   renderCounts();
-  // Three pages, each two columns: Focus (the tasks you keep in view), All, and Needs you
-  // (every unanswered ask and your todos) with its count on the tab.
-  if (!["today", "all", "needs"].includes(ui.mode)) ui.mode = "today";
+  // Four pages, each two columns: Focus (the tasks you keep in view), All, Needs you (every
+  // unanswered ask and your todos) with its count on the tab, and Scheduled (jobs.js).
+  if (!["today", "all", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
   const need = needCount();
-  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"]].map(([m, label]) =>
-    `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${m === "needs" && need ? `<span class="n">${need}</span>` : ""}</button>`).join("");
+  // Each tab carries its count; only Needs you's is lit, because only it asks something of you.
+  // (Scheduled has none: its jobs are only read while that page is showing.)
+  const tabN = { today: focusIds().length, all: tasks().filter(isOpen).length, needs: need };
+  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
+    `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
   $("#all").hidden = ui.mode !== "all";
   $("#needs").hidden = ui.mode !== "needs";
+  $("#jobs").hidden = ui.mode !== "jobs";
+  if (ui.mode === "jobs" && typeof renderJobsView === "function") renderJobsView();   // see jobs.js
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
     $("#today-sessions").innerHTML = renderTodaySessions();
@@ -464,18 +469,18 @@ function needCount() {
 function renderCounts() {
   const all = tasks().filter(isOpen);
   const by = (st) => ui.sessions.filter((x) => x.state === st).length;
-  const tby = (st) => all.filter((t) => t.status === st).length;
   const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
   const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
   const mine = all.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
   const part = (n, label, cls = "") => n ? `<span class="sp ${cls}"><b>${n}</b> ${label}</span>` : "";
+  // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
+  // you (click → Needs you), and the quota on the right.
   $("#counts").innerHTML =
-    `<span class="sgroup" title="Live Claude Code sessions"><span class="dot busy"></span><b>${ui.sessions.length}</b> sessions` +
+    `<span class="sgroup" title="Live Claude Code sessions"><b>${ui.sessions.length}</b> session${ui.sessions.length === 1 ? "" : "s"}` +
       `${part(by("busy"), "working")}${part(by("waiting"), "waiting on you", "warn")}</span>` +
-    `<span class="sgroup" title="Open tasks by status"><b>${all.length}</b> tasks` +
-      `${part(focusIds().length, "in Focus")}${part(tby("blocked"), "blocked", "bad")}${part(tby("waiting-on-me"), "waiting", "warn")}</span>` +
-    `<span class="sgroup jump" data-action="mode" data-m="needs" title="Open Needs you"><b>${asks}</b> asks · <b>${mine}</b> todos` +
-      `${later ? `<span class="sp">${later} for later</span>` : ""}</span>`;
+    (asks || mine || later ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="Open Needs you">` +
+      `${asks ? `<b>${asks}</b> ask${asks === 1 ? "" : "s"}` : ""}${asks && mine ? " · " : ""}${mine ? `<b>${mine}</b> todo${mine === 1 ? "" : "s"}` : ""}` +
+      `${later ? `<span class="sp">${later} for later</span>` : ""}</span>` : "");
   $("#quota").innerHTML = usageChips();
 }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
@@ -495,7 +500,7 @@ function usageChips() {
     const p = Math.round(w.used);
     const r = w.resets_at ? untilText(w.resets_at) : "";
     return `<span class="quota ${p >= 90 ? "hi" : p >= 70 ? "mid" : ""}" title="${long}: ${p}% used${r ? ` · resets in ${r}` : ""}">${label}
-      <span class="qbar"><i style="width:${Math.min(100, p)}%"></i></span><b>${p}%</b>${r ? `<span class="qr">↻ ${r}</span>` : ""}</span>`;
+      <span class="qbar"><i style="width:${Math.min(100, p)}%"></i></span><b>${p}%</b>${r ? `<span class="qr">resets ${r}</span>` : ""}</span>`;
   };
   return one("5h", "5-hour limit", u.five_hour) + one("week", "Weekly limit", u.seven_day);
 }
@@ -506,10 +511,11 @@ function renderAsks() {
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   const later = tasks().filter((t) => laterAsks(t).length);
   const laterHtml = later.map((t) => `<div class="later-of"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${laterLine(t)}</div>`).join("");
-  if (!items.length) return `<h3>Asks</h3><div class="empty">Nothing Claude asked you is unanswered.</div>` + laterHtml;
+  const head = `<div class="vhead"><h1>Needs you</h1></div>`;
+  if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>Claude has nothing waiting on an answer from you.</div>` + laterHtml;
   const byTask = new Map();
   for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
-  return `<h3>Asks · ${items.length}</h3>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
+  return head + `<div class="group-title">Claude is asking <span class="meta">${items.length}</span></div>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
 }
 
 // A task with several open asks answers them together: each answer button only picks, and one
@@ -649,7 +655,7 @@ function renderMyTodos() {
     const ms = since(iso);
     if (!ms) return "";
     const days = (Date.now() - ms) / 86400000;
-    const label = ago(iso).replace(" ago", "").replace("just now", "new");
+    const label = ago(iso).replace(" ago", "");
     return `<span class="age ${days >= STALE_DAYS ? "stale" : ""}" title="Waiting since ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
   };
   // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
@@ -660,23 +666,24 @@ function renderMyTodos() {
     const x = t && t.todos.find((y) => y.i === r.i);
     return x && x.state !== "open";
   });
-  if (!items.length && !recent.length && !legacy.length) return `<h3>Your todos</h3><div class="empty">Nothing waiting on you.</div>`;
-  return `<h3>Your todos · ${items.length + legacy.length}</h3><div class="card">` + legacy.map((t) => `
-    <div class="todo">
+  const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? " · blocked" : ""}</div>`;
+  if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">Your todos</div><div class="empty">Nothing waiting on you.</div>`;
+  return `<div class="group-title">Your todos <span class="meta">${items.length + legacy.length}</span></div><div class="inbox-list">` + legacy.map((t) => `
+    <div class="todo it">
       <span class="box" title="Handled (you can undo)" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
-      <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>
-        <div class="meta">${age(t.waiting_since)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
+      <div class="it-t"><span class="t clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>${src(t)}</div>
+      ${age(t.waiting_since)}
     </div>`).join("") + items.map(([t, x]) => `
-    <div class="todo">
+    <div class="todo it">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
-      <div style="flex:1"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>
-        <div class="meta">${age(x.created)}<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div></div>
-      <button class="btn small ghost" title="Won't do (you can undo)" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
+      <div class="it-t"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>${src(t)}</div>
+      ${age(x.created)}
+      <button class="icon x" title="Won't do (you can undo)" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
     </div>`).join("") + recent.map((r) => `
-    <div class="todo ${r.to === "drop" ? "dropped" : "done"}">
+    <div class="todo it ${r.to === "drop" ? "dropped" : "done"}">
       <span class="box ${r.to === "drop" ? "dropped" : "done"}">${r.to === "drop" ? "–" : "✓"}</span>
-      <div style="flex:1"><span class="t">${esc(r.text)}</span>
-        <div class="meta">${r.to === "drop" ? "won't do" : "done"} ${ago(new Date(r.at).toISOString())} · undo available for an hour · <span class="chip link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
+      <div class="it-t"><span class="t">${esc(r.text)}</span>
+        <div class="meta src">${r.to === "drop" ? "won't do" : "done"} ${ago(new Date(r.at).toISOString())} · undo available for an hour · <span class="tid link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
       <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">Undo</button>
     </div>`).join("") + `</div>`;
 }
@@ -781,21 +788,24 @@ function renderTask(t, mode) {
   const mine = t.waiting_on_me || (t.todos.find((x) => x.state === "open" && x.owner === "me") || {}).text;
   // Row 1: id · title (one line) · badges. Row 2: the subtitle across the full width, two lines max.
   const subText = mine && isOpen(t) ? mine : (t.next && isOpen(t) ? t.next : "");
-  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? "Waiting on you: " : "Next: ") + subText)}">⮑ ${esc(subText)}</div>` : "";
-  return `<div class="task" id="task-${esc(t.id)}">
-    <div class="task-head" data-action="expand" data-task="${esc(t.id)}">
+  // Status is the rail on the row's left edge (and the id's colour); the group heading already
+  // names the project or the status, so the row repeats neither.
+  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? "Waiting on you: " : "Next: ") + subText)}">${esc(subText)}</div>` : "";
+  const busy = liveFor(t.id).some((x) => x.state === "busy");
+  return `<div class="task ${open ? "open" : ""}" id="task-${esc(t.id)}" data-st="${esc(t.status)}">
+    <div class="task-head" data-action="expand" data-task="${esc(t.id)}" title="${esc(STATUS_SHORT[t.status] || t.status)} — click to ${open ? "fold" : "open"}">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
             title="${focusIds().includes(t.id) ? "In Focus — click to take it off" : "Add to Focus"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
-        ${live ? `<span class="badge live" title="live sessions working on it">${live}</span>` : ""}
-        ${mode === "project" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`
-          : t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
-        <span class="meta">${esc(t.category || "")} · ${t.age_days ?? "?"}d</span>
+        ${live ? `<span class="live ${busy ? "" : "idle"}" title="live sessions on it">${busy ? "working" : live === 1 ? "1 session" : `${live} sessions`}</span>` : ""}
+        ${mode === "project" ? (t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : "")
+          : t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
+        <span class="age-d" title="Last updated ${esc(t.updated || "")}">${t.age_days ?? "?"}d</span>
       </div>
-      ${sub}
+      ${open ? "" : sub}
     </div>
     ${open ? renderTaskBody(t) : ""}
   </div>`;
@@ -819,7 +829,7 @@ function renderToday() {
     : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
-  return `<div class="today-h"><h2 class="big">Focus</h2><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
+  return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
       <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
       <span style="flex:1"></span>
       <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to Focus…" value="${esc(draft("todaypick"))}">
@@ -833,46 +843,43 @@ function renderToday() {
 
 function focusCard(t) {
   const asks = openAsks(t);
-  const open = t.todos.filter((x) => x.state === "open").sort((a, b) => (b.owner === "me") - (a.owner === "me"));
+  const open = t.todos.filter((x) => x.state === "open");
+  const mine = open.filter((x) => x.owner === "me");
+  const others = open.length - mine.length;
   const live = liveFor(t.id);
+  const busy = live.some((s) => s.state === "busy");
   const detail = ui.expanded.has(t.id);
   const box = (x) => `<div class="todo">
       <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
-      <span class="t" style="flex:1">${x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : ""}${esc(x.text)}</span>
-      ${doItButton(t, x)}
-      <button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
-  const sess = (s) => `<div class="bsess">
-      ${dot(s)}
-      <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-        <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}${s.lastText ? " · " + esc(s.lastText.slice(0, 60)) : ""}</div></div>
-      <div class="icons">
-        <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
-        ${s.background ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in a terminal">${ICON.attach}</button>`
-          : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
-      </div></div>`;
+      <span class="who me">You</span><span class="t">${esc(x.text)}</span>
+      <button class="icon x" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
+  // No live session: offer to resume the latest one, beside New session.
+  const resume = live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
+    ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">Resume</button>` : ""; })();
   // Clicking the card opens or closes its details, like a row in All; the details themselves
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
-  // Open, the details carry the full todo and session lists, so the card's own short ones step
-  // aside — each shows once.
-  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
+  // Closed, a card is its next step, what it asks you, and your own todos; Claude's todos, the
+  // log and the sessions are one click away (the sessions are also in the right column).
+  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-st="${esc(t.status)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
     <div class="fhead">
       ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder your Focus">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
-      ${t.project ? `<span class="chip">${esc(t.project)}</span>` : ""}
-      <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      <button class="icon" title="Take it off Focus (the task stays)" data-confirm="Unfocus?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      ${live.length ? `<span class="live ${busy ? "" : "idle"}">${busy ? "working" : "idle"}</span>` : ""}
+      ${t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
+      ${t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
+      <button class="icon x" title="Take it off Focus (the task stays)" data-confirm="Unfocus?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
-    ${t.next ? `<div class="fnext"><span class="meta">Next</span> ${inline(t.next)}</div>` : ""}
-    ${asks.length || laterAsks(t).length ? `<div class="fsec">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
-    ${detail ? "" : `${open.length ? `<div class="fsec">${open.map(box).join("")}</div>` : ""}
-    <div class="fsec">${live.map(sess).join("")}
-      <div class="row">${live.length ? "" : `<span class="meta">No live session on this yet.</span>`}
-        <span style="flex:1"></span>
-        ${live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
-          ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">↻ Resume</button>` : ""; })()}
-        <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task (${esc(PLACES[launchPlace()])})">▶ New session</button></div></div>`}
-    ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : ""}
+    ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : `
+    <div class="fbody">
+      <div class="now">
+        <div class="now-t"><div class="k">Next</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">No next step yet</span>`}</div></div>
+        <div class="tools" data-action="none" title="">${resume}${launchSplit(t)}</div>
+      </div>
+      ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
+      ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
+      ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : "Nothing waiting on you here"}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? `${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all` : ""}</div>` : ""}
+    </div>`}
   </div>`;
 }
 
@@ -880,9 +887,9 @@ function renderTodaySessions() {
   const ids = focusIds();
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
-  return `<h2>Sessions on these tasks</h2>
-    ${onToday.length ? renderSessions(onToday, true) : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
-    ${loose.length ? `<h2 style="margin-top:18px">Not on a task</h2>${renderSessions(loose, true)}` : ""}`;
+  return `<div class="vhead"><h2 class="side-h">Sessions on these tasks</h2></div>
+    ${onToday.length ? renderSessions(onToday, "state") : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
+    ${loose.length ? `<div class="vhead" style="margin-top:22px"><h2 class="side-h">Not on a task</h2></div>${renderSessions(loose, true)}` : ""}`;
 }
 
 // ---- related resources: URLs as-is, shorthand (QA-123, repo#45) through hq.json "links" rules
@@ -927,6 +934,32 @@ function secHead(title, t, what, tip, count, extra = "") {
 // A directory as it reads best: the home directory as ~.
 const tildePath = (p) => String(p).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
 
+// "New session" with its options behind ▾: where it opens, skip permissions, stay on board.
+function launchSplit(t) {
+  const open = ui.launchMenu === t.id;
+  // The same task can be drawn twice (Focus, and All behind it): each menu gets its own radio group.
+  const group = `place-${t.id}-${(launchSplit.n = (launchSplit.n || 0) + 1)}`;
+  return `<span class="launch">
+    <button class="btn small primary" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} (${esc(PLACES[launchPlace()])}) — it starts bound, reads the card and reports">New session</button><button class="btn small primary caret-btn ${open ? "on" : ""}" data-action="launch-menu" data-task="${esc(t.id)}" title="Where new sessions open, and how" aria-expanded="${open}">▾</button>
+    ${open ? `<div class="menu">
+      <div class="mh">Open new sessions in</div>
+      ${Object.entries(PLACES).map(([k, v]) => `<label><input type="radio" name="${esc(group)}" data-action="launch-place" value="${k}" ${launchPlace() === k ? "checked" : ""}> ${v}</label>`).join("")}
+      <hr>${launchOptions()}
+    </div>` : ""}
+  </span>`;
+}
+// A log entry's day, as a heading: Today, Yesterday, or the date.
+function logDay(date) {
+  const day = String(date).slice(0, 10);
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const now = new Date();
+  if (day === iso(now)) return "Today";
+  if (day === iso(new Date(now.getTime() - 86400000))) return "Yesterday";
+  const d = new Date(day + "T00:00:00");
+  return isNaN(d) ? day : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+}
+const OWNER_LABEL = (o) => (o === "me" ? "You" : o === "claude" ? "Claude" : o || "");
+
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
   const adding = (what) => ui.adding.has(`${t.id}:${what}`);
@@ -941,10 +974,12 @@ function renderTaskBody(t) {
         <button class="btn small ghost" data-action="cancel-field" data-field="${name}" data-task="${esc(t.id)}">Cancel</button>` : ""}
     </div></div>`;
   };
-  // Open todos first, always shown. Finished ones follow; past FINISHED_SHOWN of them they fold
-  // behind "Show N done" — except ones ticked in the last hour, which stay for an easy undo.
+  // Open todos first — yours, then Claude's, then anyone else's. Finished ones follow; past
+  // FINISHED_SHOWN of them they fold behind "Show N finished" — except ones ticked in the last
+  // hour, which stay for an easy undo.
   const isRecent = (x) => ui.recent.some((r) => r.task === t.id && r.i === x.i && Date.now() - r.at < RECENT_MS);
-  const openTodos = t.todos.filter((x) => x.state === "open");
+  const ownerRank = (x) => (x.owner === "me" ? 0 : x.owner === "claude" ? 1 : x.owner ? 2 : 3);
+  const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
   const finished = t.todos.filter((x) => x.state !== "open");
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
   const shownTodos = openTodos.concat(foldDone ? finished.filter(isRecent) : finished);
@@ -952,83 +987,67 @@ function renderTaskBody(t) {
   const todoRow = (x) => {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
-    const owner = x.owner ? `<span class="owner ${x.owner === "me" ? "me" : ""}">@${esc(x.owner)}</span>` : "";
+    const who = x.owner ? `<span class="who ${x.owner === "me" ? "me" : x.owner === "claude" ? "cl" : ""}">${esc(OWNER_LABEL(x.owner))}</span>` : `<span class="who"></span>`;
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
-      <span class="t" style="flex:1">${owner}${esc(x.text)}</span>
+      ${who}<span class="t">${esc(x.text)}</span>
       ${doItButton(t, x)}
-      ${x.state === "open" ? `<button class="icon" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
+      ${x.state === "open" ? `<button class="icon x" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
-  // "All done" and the finished toggle sit on the Todos heading line, not on lines of their own.
-  const todoState = (!t.todos.length ? `<span class="meta">none</span>` : openTodos.length ? "" : `<span class="meta">all done</span>`) +
+  const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? `${openTodos.length} open` : "all done"}${finished.length ? ` · ${finished.length} finished` : ""}</span>`) +
     (finished.length > FINISHED_SHOWN
       ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
-  const todos = shownTodos.map(todoRow).join("");
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
+  // The log reads newest first, grouped by day, with the time of day beside each entry.
   const logs = logEntries(t);
-  const showLogs = ui.logAll.has(t.id) ? logs : logs.slice(-3);
+  const showLogs = (ui.logAll.has(t.id) ? logs : logs.slice(-3)).slice().reverse();
+  let lastDay = "";
+  const logHtml = showLogs.map((l) => {
+    const day = logDay(l.date);
+    const head = day !== lastDay ? `<li class="day">${esc(day)}</li>` : "";
+    lastDay = day;
+    return `${head}<li class="e"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
+  }).join("");
   const refs = list(t.refs).map(resolveRef);
-  const groups = ["ticket", "pr", "doc", "link", "none"].map((kd) => [kd, refs.filter((r) => r.kind === kd)]).filter(([, r]) => r.length);
-  const resOpen = ui.resOpen.has(t.id);
-  // One line for status / project / category, one for the directories. They are settled once and
-  // rarely change, so they read as plain text; "✎ Edit" turns them into menus and opens `next`
-  // (which already heads the card; sessions read it from the card, so editing it steers them).
-  const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
+  const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
-  const editBtn = `<span style="flex:1"></span>
-      <button class="btn small ghost ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
-        title="${editNext ? "Done editing" : "Edit status, project, category and next"}">${editNext ? "Done" : "✎ Edit"}</button>`;
-  const meta = editNext ? "" : `<div class="metarow">
-      <span class="kv">status <b>${esc(LABEL[t.status] || t.status || "—")}</b></span>
-      <span class="kv">project <b>${esc(t.project || "—")}</b></span>
-      <span class="kv">category <b>${esc(t.category || "—")}</b></span>
-      ${editBtn}
+  // Settled things — status, project, category, directories, links — sit in the right rail as
+  // plain text; "Edit" turns the first three into menus and opens `next` for editing.
+  const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
+  const tools = `<div class="tools">
+      <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
+        title="${editNext ? "Done editing" : "Edit status, project, category and next"}">${editNext ? "Done" : "Edit"}</button>
+      <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="Open the card file">Open card</button>
+      ${launchSplit(t)}
     </div>`;
-  return `<div class="task-body">
-    ${meta}
-    ${editNext ? `<div class="metarow">
-      <label>status <select data-action="set-status" data-task="${esc(t.id)}">
-        ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
-      </select></label>
-      <label>project <select data-action="set-project" data-task="${esc(t.id)}">
-        <option value="" ${t.project ? "" : "selected"}>(no project)</option>
-        ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
-        ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
-      </select></label>
-      <label>category <select data-action="set-category" data-task="${esc(t.id)}">
-        <option value="" ${t.category ? "" : "selected"}>(none)</option>
-        ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
-        ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
-      </select></label>
-      ${editBtn}
-    </div>
-    ${field("next", "next", "the next concrete step")}` : ""}
-    <div class="meta wdirs" title="${esc(dirs.join("\n") || "Added automatically when a session is bound")}">workdirs · ${dirs.length
-        ? dirs.map((x) => esc(tildePath(x))).join(" · ") : "added automatically when a session is bound"}</div>
-
-    ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
-    ${adding("todo") ? `<div class="row nowrap addbox">
-        <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
-        <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
-    ${todos}
-
-    <div class="sec-h"><h3>Sessions</h3>
-      <button class="icon ${adding("bind") ? "on" : ""}" title="Bind a live session" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button>
-      <span style="flex:1"></span>
-      <button class="btn small" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} — it starts bound, reads the card and reports">▶ New session</button>
-      <select class="bind mini place" data-action="launch-place" title="Where new sessions open">
-        ${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}
-      </select>${launchOptions()}</div>
-    ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
-        ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
-            ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
-           <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
-        : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
-    ${live.length ? live.map((s) => `<div class="bsess">
+  const head = editNext ? `<div class="now editing">
+      <div class="metarow">
+        <label>status <select data-action="set-status" data-task="${esc(t.id)}">
+          ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
+        </select></label>
+        <label>project <select data-action="set-project" data-task="${esc(t.id)}">
+          <option value="" ${t.project ? "" : "selected"}>(no project)</option>
+          ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
+        </select></label>
+        <label>category <select data-action="set-category" data-task="${esc(t.id)}">
+          <option value="" ${t.category ? "" : "selected"}>(none)</option>
+          ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
+        </select></label>
+        <span class="spacer"></span>${tools}
+      </div>
+      ${field("next", "Next", "the next concrete step")}
+    </div>`
+    : `<div class="now">
+      <div class="now-t"><div class="k">Next</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">No next step yet — Edit to set one</span>`}</div></div>
+      ${tools}
+    </div>`;
+  const sessRow = (s) => `<div class="bsess">
         ${dot(s)}
-        <div style="flex:1;min-width:0"><div class="stitle">${newTag(s.sessionId)}${esc(s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div></div>
+        <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div></div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
           ${s.background
@@ -1036,30 +1055,54 @@ function renderTaskBody(t) {
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
             : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
           <button class="icon" data-confirm="Unbind?" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
-        </div></div>`).join("")
-      : `<div class="empty">No live session is working on this.</div>`}
-    ${earlierList(t)}
+        </div></div>`;
+  return `<div class="task-body">
+    ${head}
+    <div class="tcols">
+      <div class="tmain">
+        ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
+        ${adding("todo") ? `<div class="row nowrap addbox">
+            <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
+            <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
+        ${shownTodos.length ? `<div class="todos">${shownTodos.map(todoRow).join("")}</div>` : `<div class="empty">No todos.</div>`}
 
-    ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
-    ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
-        <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">Save note</button></div></div>` : ""}
-    ${showLogs.length ? `<div class="logs">${showLogs.map((l) => `<div class="logline"><span class="meta">${esc(l.date)}</span> ${inline(l.text)}</div>`).join("")}</div>` : `<div class="empty">Nothing logged yet.</div>`}
-    ${logs.length > 3 ? `<button class="btn small ghost" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? "Show latest 3" : `Show all ${logs.length}`}</button>` : ""}
-
-    <div class="row foot">
-      <button class="btn small ${resOpen ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${LINK.replace("<svg", '<svg class="ic"')} Resources${refs.length ? ` · ${refs.length}` : ""}</button>
-      <span style="flex:1"></span>
-      <button class="btn small ghost" data-action="open" data-path="${esc(t.path)}">Open card</button>
+        ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
+        ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
+            <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">Save note</button></div></div>` : ""}
+        ${showLogs.length ? `<ol class="logs">${logHtml}</ol>` : `<div class="empty">Nothing logged yet.</div>`}
+        ${logs.length > 3 ? `<button class="btn small ghost more" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? "Show latest 3" : `Show all ${logs.length}`}</button>` : ""}
+      </div>
+      <aside class="trail">
+        <dl class="props">
+          <dt>Status</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
+          <dt>Project</dt><dd>${esc(t.project || "—")}</dd>
+          <dt>Category</dt><dd>${esc(t.category || "—")}</dd>
+          <dt>Folders</dt><dd>${dirs.length ? dirs.map((x) => `<span class="path" title="${esc(x)}">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>`).join("")
+            : `<span class="faint" title="Added automatically when a session is bound">none yet</span>`}</dd>
+          <dt>Links</dt><dd>
+            ${refs.map((r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+              ${resEdit ? `<button class="icon x" title="Remove" data-confirm="Remove?" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`).join("")}
+            <button class="lnk ${resEdit ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${resEdit ? "Done" : refs.length ? "Edit" : "+ Add"}</button>
+          </dd>
+        </dl>
+        ${resEdit ? `<div class="res">
+          <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="URL, or QA-123, repo#45" value="${esc(draft(k("addref")))}">
+            <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
+          ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">Shorthand like QA-123 becomes a link once you add a rule under "links" in hq.json (see Guide).</div>` : ""}
+        </div>` : ""}
+        <div class="rail-sec">
+          <div class="sec-h"><h3>Sessions <span class="meta">${live.length || ""}</span></h3>
+            <button class="icon ${adding("bind") ? "on" : ""}" title="Bind a live session" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button></div>
+          ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
+              ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
+                  ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
+                 <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
+              : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
+          ${live.length ? live.map(sessRow).join("") : `<div class="empty">None live.</div>`}
+          ${earlierList(t)}
+        </div>
+      </aside>
     </div>
-    ${resOpen ? `<div class="res">
-      ${groups.map(([kd, rs]) => `<div class="res-g"><div class="meta">${KIND_LABEL[kd]}</div>${rs.map((r) => `<div class="res-i">
-          ${r.url ? `<a href="#" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
-          <button class="icon" title="Remove" data-confirm="Remove?" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button></div>`).join("")}</div>`).join("")
-        || `<div class="empty">No related tickets, PRs or docs yet.</div>`}
-      <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="Add a URL, or a ticket / PR like QA-123, repo#45" value="${esc(draft(k("addref")))}">
-        <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
-      ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">Tip: shorthand like QA-123 becomes a link once you add a rule under "links" in hq.json (see Guide).</div>` : ""}
-    </div>` : ""}
   </div>`;
 }
 
@@ -1072,6 +1115,7 @@ const ICON = {
   stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
 };
 
+// plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
 function renderSessions(items = ui.sessions, plain = false) {
   if (!items.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
   const openTasks = tasks().filter(isOpen);
@@ -1082,7 +1126,7 @@ function renderSessions(items = ui.sessions, plain = false) {
       (list(b.workdirs).some((w) => s.cwd && s.cwd.startsWith(w)) ? 1 : 0) -
       (list(a.workdirs).some((w) => s.cwd && s.cwd.startsWith(w)) ? 1 : 0));
     const taskCtl = t
-      ? `<span class="chip link" data-action="goto" data-task="${esc(t.id)}" title="${esc(t.title)}">${esc(t.id)}</span>`
+      ? `<span class="tid link" data-task="${esc(t.id)}" data-action="goto" title="${esc(t.title)}">${esc(t.id)}</span>`
       : `<select class="bind mini" data-action="bind-session" data-session="${esc(sid)}" title="Bind this session to a task">
            <option value="">Bind…</option>
            ${sorted.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(x.title)}</option>`).join("")}
@@ -1094,15 +1138,19 @@ function renderSessions(items = ui.sessions, plain = false) {
       : `Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
-    return `<div class="card session">
+    // Title and time on the first line; the task, the project and what it is doing on the second;
+    // its last words (markdown and hq blocks stripped) below, two lines at most. The buttons
+    // appear on hover, over the time.
+    const title = s.title || s.project || sid.slice(0, 8);
+    return `<div class="session">
       ${dot(s)}
       <div class="body">
         <div class="shead">
-          <div class="stitle" title="${esc(s.title || s.project || "")}">${newTag(sid)}${esc(s.title || s.project || sid.slice(0, 8))}</div>
-          ${taskCtl}
+          <div class="stitle" title="${esc(title)}">${newTag(sid)}${esc(t ? title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title : title)}</div>
+          <span class="stime">${ago(s.updatedAt).replace(" ago", "")}</span>
         </div>
         <div class="shead">
-          <div class="meta smeta">${s.background ? `<span class="bgtag">background</span> ` : ""}${ui.sgroupBy !== "project" && sessionProject(s) ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">background</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
             ${s.background
@@ -1112,7 +1160,7 @@ function renderSessions(items = ui.sessions, plain = false) {
             <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
         </div>
-        ${s.lastText ? `<div class="last">${esc(s.lastText)}</div>` : ""}
+        ${plainText(s.lastText) ? `<div class="last">${esc(plainText(s.lastText))}</div>` : ""}
         ${open ? `<div class="send">
           <textarea class="grow" rows="1" data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
             placeholder="${busy ? "Busy — it will queue · paste or drop images" : "Message · paste or drop images"}">${esc(draft("msg:" + sid))}</textarea>
@@ -1121,7 +1169,15 @@ function renderSessions(items = ui.sessions, plain = false) {
       </div>
     </div>`;
   };
-  if (plain || ui.sgroupBy !== "project") return items.map(card).join("");
+  if (plain === true) return items.map(card).join("");
+  // As a list: what waits on you first, then what is working, then the rest — newest first in each.
+  if (plain === "state" || ui.sgroupBy !== "project") {
+    const newest = (a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    return [["waiting", "Waiting on you"], ["busy", "Working"], ["", "Idle"]].map(([st, label]) => {
+      const group = items.filter((x) => (st ? x.state === st : x.state !== "waiting" && x.state !== "busy")).sort(newest);
+      return group.length ? `<div class="group-title">${label} <span class="meta">${group.length}</span></div>${group.map(card).join("")}` : "";
+    }).join("");
+  }
   // By project: same order as the Tasks column (active first if ticked), "No project" last.
   const names = projectNames();
   let order = [...names];
@@ -1143,6 +1199,17 @@ function renderSessions(items = ui.sessions, plain = false) {
   return html;
 }
 
+// A session's last words as plain text: no hq-asks / hq-resolved blocks, code fences, or markdown marks.
+function plainText(text) {
+  return String(text || "")
+    .replace(/```hq-[a-z]+[\s\S]*?(```|$)/g, " ")
+    .replace(/```[a-z]*\n?/g, " ")
+    .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^()\s]*\))*\)/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/`/g, "")
+    .replace(/^\s*(#{1,6}\s+|>\s?)/gm, "")
+    .replace(/\s+/g, " ").trim();
+}
 // A session's project: its task's project if bound, else the project owning its directory.
 function sessionProject(s) {
   const t = s.task && taskById(s.task);
@@ -1565,9 +1632,9 @@ function markdown(text) {
       const lang = nl >= 0 ? part.slice(0, nl).trim() : "";
       const code = nl >= 0 && !/\s/.test(lang) ? part.slice(nl + 1) : part;
       // HQ's own blocks are for people too: a titled list with live links, not a code box.
-      if (lang === "hq-asks" || lang === "hq-resolved") {
+      if (lang === "hq-asks" || lang === "hq-resolved" || lang === "hq-update") {
         const items = code.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
-        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${lang === "hq-asks" ? "Asked you" : "Answers recorded"}</div>
+        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${{ "hq-asks": "Asked you", "hq-resolved": "Answers recorded", "hq-update": "Card updated" }[lang]}</div>
           <ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul></div>`);
         return;
       }
@@ -1854,6 +1921,8 @@ async function resolveAll(taskId) {
 }
 
 document.addEventListener("click", async (ev) => {
+  // The "New session ▾" menu closes on any click outside it.
+  if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
   const el = ev.target.closest("[data-action]");
   if (!el || el.tagName === "SELECT") return;
   const d = el.dataset;
@@ -1977,6 +2046,7 @@ document.addEventListener("click", async (ev) => {
       if (String(window.getSelection() || "").trim()) return;
       ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
       return render();
+    case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
     case "jump": return act("jump", { session: d.session });
     case "unbind": return act("unbind", { session: d.session }, "Unbound");
@@ -2154,7 +2224,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
     case "new-in-project": return openNewTask(d.p);
-    case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return render();
+    case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return d.m === "jobs" ? refresh(true) : render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
       return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off Focus` : `${d.task} added to Focus`);
@@ -2175,6 +2245,7 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "launch": {
+      ui.launchMenu = null;
       const t = taskById(d.task);
       const dir = t && launchDir(t);
       if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
@@ -2297,6 +2368,7 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
+  if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
@@ -2443,7 +2515,6 @@ document.addEventListener("drop", async (ev) => {
   }
 });
 
-$("#refresh").addEventListener("click", refresh);
 function openNewTask(project) {
   ui.newTask = true;
   delete $("#newtask-form").dataset.drawn;
@@ -2453,8 +2524,8 @@ function openNewTask(project) {
   if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
 }
 $("#new-task").addEventListener("click", () => {
-  // The form lives on Focus and All; from Needs you, go to All for it.
-  if (ui.mode === "needs") { ui.mode = "all"; savePref("hq-mode", "all"); }
+  // The form lives on Focus and All; from Needs you or Scheduled, go to All for it.
+  if (ui.mode === "needs" || ui.mode === "jobs") { ui.mode = "all"; savePref("hq-mode", "all"); }
   ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus();
 });
 

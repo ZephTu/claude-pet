@@ -1,6 +1,76 @@
 /* Layout numbers here are mirrored in Sources/ClaudePetCore/PetLayout.swift,
    which drives hit-testing and click-through. Change one, change the other. */
 
+/* ---- Palette ---------------------------------------------------------------
+   Cool slate, not warm brown. Four accents, each with ONE meaning, so a colour
+   seen anywhere in the panel or a bubble says the same thing it says
+   everywhere else:
+
+     tabby  waiting for the user — and nothing else
+     coral  needs an approval, or something failed
+     sage   running, or done
+     sky    links
+
+   The panel, every bubble and the readouts share one material (--glass), so a
+   card that pops up beside the list reads as part of the same surface. The
+   light variant follows the system appearance; WKWebView reports it through
+   prefers-color-scheme like any browser. */
+:root {
+  --glass: rgba(27, 31, 39, 0.92);          /* #1b1f27 */
+  --glass-solid: rgba(27, 31, 39, 0.95);
+  --text: #e8ebf1;
+  --dim: #a4abba;
+  --faint: #8b92a3;
+  --fainter: #6e7688;
+  --lamp-idle: #59606e;
+  --hair: rgba(255, 255, 255, 0.07);
+  --ring: rgba(255, 255, 255, 0.10);
+  --hover: rgba(255, 255, 255, 0.06);
+  --track: rgba(255, 255, 255, 0.12);
+  --chip: rgba(255, 255, 255, 0.07);
+  --ctl-edge: rgba(255, 255, 255, 0.16);
+  --tabby: #f2a541;
+  --tabby-halo: rgba(242, 165, 65, 0.25);
+  --tabby-wash: rgba(242, 165, 65, 0.09);
+  --tabby-wash-hot: rgba(242, 165, 65, 0.15);
+  --coral: #ef6f5a;
+  --coral-wash: rgba(239, 111, 90, 0.11);
+  --coral-wash-hot: rgba(239, 111, 90, 0.17);
+  --sage: #7cc4a4;
+  --sky: #93b4ee;
+  --on-accent: #1a1d24;
+  --on-coral: #ffffff;
+  --round: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --sans: -apple-system, system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --glass: rgba(251, 252, 253, 0.90);     /* #fbfcfd */
+    --glass-solid: rgba(251, 252, 253, 0.95);
+    --text: #1b2030;
+    --dim: #586074;
+    --faint: #6b7386;
+    --fainter: #8b92a3;
+    --lamp-idle: #a3a9b6;
+    --hair: rgba(0, 0, 0, 0.08);
+    --ring: rgba(0, 0, 0, 0.10);
+    --hover: rgba(0, 0, 0, 0.05);
+    --track: rgba(0, 0, 0, 0.10);
+    --chip: rgba(0, 0, 0, 0.06);
+    --ctl-edge: rgba(0, 0, 0, 0.16);
+    --tabby: #c47a0c;
+    --tabby-halo: rgba(214, 138, 24, 0.25);
+    --tabby-wash: rgba(214, 138, 24, 0.10);
+    --tabby-wash-hot: rgba(214, 138, 24, 0.16);
+    --coral: #d24a33;
+    --coral-wash: rgba(210, 74, 51, 0.08);
+    --coral-wash-hot: rgba(210, 74, 51, 0.14);
+    --sage: #2f9a6c;
+    --sky: #3e6fd1;
+  }
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -21,13 +91,10 @@ html, body {
 }
 
 /* Reduced motion. Everything that moves stops; nothing that CARRIES MEANING is
-   allowed to stop with it. The lamp keeps its colour, the badge keeps its
-   count, the panel keeps its text — what goes is the breathing, the typing, the
-   blinking and the pulse. A calm pet must still be a readable one. */
+   allowed to stop with it. The lamp keeps its colour and shape, the badge keeps
+   its count, the panel keeps its text — what goes is the breathing, the typing,
+   the blinking and the pulse. A calm pet must still be a readable one. */
 #stage.calm #pet *, #stage.calm #pet { animation: none !important; }
-/* The lamp pulses to say "look at me"; with motion off it says the same thing
-   by simply staying lit rather than sitting at whatever opacity the animation
-   was paused on. */
 
 /* Mirrored layout: pet on the left, panel on the right. Used when the window
    sits near the left edge of a display, where the panel's usual side would be
@@ -40,8 +107,8 @@ html, body {
    variant from quietly staying on the wrong side of the window. */
 #stage.mirrored #bubble.chat { right: auto; left: 14px; text-align: left; }
 /* The alarm anchors to the same edge as everything else — it just does not wear
-   `.chat`, so it needs saying twice. */
-#stage.mirrored #bubble.alert { right: auto; left: 14px; }
+   `.chat`, so it needs saying twice. Its pointed corner faces the cat. */
+#stage.mirrored #bubble.alert { right: auto; left: 14px; border-radius: 12px 12px 12px 4px; }
 
 /* ---- Giving way to the list -----------------------------------------------
    The bubble hangs above the pet; the list opens to the pet's LEFT and grows
@@ -62,23 +129,38 @@ html, body {
 #stage.crowded #bubble.alert { max-width: 148px; }
 /* The command is the whole reason the card exists, so in the narrow strip it
    wraps rather than truncating. */
-#stage.crowded #bubble.alert .abody { display: block; }
-#stage.crowded #bubble.alert .awhat { white-space: normal; }
+#stage.crowded #bubble.alert .abody { display: block; padding-left: 0; }
 #stage.crowded #bubble.alert .akey { padding-right: 4px; }
+#stage.crowded #bubble.alert .awhat {
+  white-space: normal; overflow-wrap: anywhere;
+  /* Each wrapped line keeps the chip's own rounded ends. */
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
 /* Where it is, on its own line. Side by side the branch is flex:none and took
    the whole strip, leaving the path as "~…" — and the path is the more
    identifying half of the pair. There is height to spare above the bubble, so
    this buys a line rather than a truncation. */
 #stage.crowded #bubble.readout .dpath { display: block; }
 #stage.crowded #bubble.readout .dtree { display: block; }
-/* Three clocks in a 148pt strip do not fit on one line, and the one that falls
-   off the end is `quiet` — which is the one that answers "is this stuck". */
-#stage.crowded #bubble.readout .dclocks { flex-wrap: wrap; }
-/* The context meter keeps all four of its columns; the bar is what gives, since
-   its job is proportion and a short bar still shows proportion. */
-#stage.crowded #bubble.readout .qlabel { width: 20px; }
-#stage.crowded #bubble.readout .qbar   { width: 30px; }
-#stage.crowded #bubble.readout .qpct   { width: 26px; }
+/* The facts grid goes two pairs to a row: one pair per row costs the strip a
+   line it does not have (the card hangs from a fixed floor and grows up). */
+#stage.crowded #bubble.readout .dgrid { grid-template-columns: auto auto auto 1fr; column-gap: 5px; }
+#stage.crowded #bubble.readout .dmeter { gap: 4px; }
+#stage.crowded #bubble.readout .dgrid { font-size: 10.5px; }
+/* The strip is short as well as narrow: the card hangs from BUBBLE_FLOOR and a
+   long path already takes three lines, so the spacing tightens to keep its
+   top inside the window. */
+#stage.crowded #bubble.readout { padding: 7px 10px; line-height: 1.3; }
+#stage.crowded #bubble.readout > * + * { margin-top: 3px; }
+#stage.crowded #bubble.readout .dwhere { font-size: 11.5px; line-height: 1.25; }
+/* "context" is the widest label and sets the label column; in 128pt that
+   column is width the meter needs. */
+#stage.crowded #bubble.readout .dkey[data-short] { font-size: 0; }
+#stage.crowded #bubble.readout .dkey[data-short]::before { content: attr(data-short); font-size: 10.5px; }
+/* The meter keeps all its parts; the bar is what gives, since its job is
+   proportion and a short bar still shows proportion. */
+#stage.crowded #bubble.readout .qbar   { width: 22px; }
+#stage.crowded #bubble.readout .qpct   { width: auto; }
 
 #pet {
   position: absolute;
@@ -111,12 +193,17 @@ html, body {
    were rendered: that is where the cat's own `?`, its warning triangle and its
    z's all live, so a badge there collides with the artwork in three states out
    of five. The left column is empty in every pose. */
+/* Tabby: the count is of things waiting on the user. It turns coral when the
+   pet has escalated to the alarm (mood "urgent"), the same coral as the
+   alarm's own ring. */
 #count {
   position: absolute; left: 14px; top: 10px; min-width: 17px; height: 17px;
-  box-sizing: border-box; padding: 0 4px; border-radius: 9px;
-  background: #e0533c; color: #fff; text-align: center;
-  font: 600 11px/17px -apple-system, system-ui, sans-serif;
+  box-sizing: border-box; padding: 0 5px; border-radius: 9px;
+  background: var(--tabby); color: var(--on-accent); text-align: center;
+  font: 700 11px/17px var(--round);
+  font-variant-numeric: tabular-nums;
 }
+#pet[data-mood="urgent"] #count { background: var(--coral); color: var(--on-coral); }
 #count[hidden] { display: none; }
 
 /* Where the artwork used to paint its question mark: right of the head, above
@@ -125,20 +212,21 @@ html, body {
 #mark {
   position: absolute; right: 13px; top: 25px; width: 20px; height: 20px;
   display: grid; place-items: center;
-  color: #fdf3ec; font: 700 13px/1 -apple-system, system-ui, sans-serif;
+  color: var(--on-accent); font: 700 13px/1 var(--round);
 }
 #mark[data-mark="none"] { display: none; }
-/* "Answer me": a question, so a question mark, on the amber that already means
+/* "Answer me": a question, so a question mark, on the tabby that means
    "it wants you". */
-#mark[data-mark="question"] { background: #e0a63c; border-radius: 50%; }
+#mark[data-mark="question"] { background: var(--tabby); border-radius: 50%; }
 #mark[data-mark="question"]::after { content: "?"; }
 /* "Decide this", and also "that call came back interrupted". One glyph for two
-   situations; the pose is what tells them apart. */
+   situations; the pose is what tells them apart. Coral covers both meanings:
+   an approval, and a failure. */
 #mark[data-mark="warn"] {
-  background: #e0a63c;
+  background: var(--coral);
   clip-path: polygon(50% 4%, 96% 92%, 4% 92%);
 }
-#mark[data-mark="warn"]::after { content: "!"; color: #3a2f22; padding-top: 5px; }
+#mark[data-mark="warn"]::after { content: "!"; color: var(--on-coral); padding-top: 5px; }
 
 /* Sits above the pet, centred on it, and grows UPWARD.
    Anchored by its bottom edge on purpose: a chatter line wraps to two or three
@@ -151,20 +239,22 @@ html, body {
   left: 400px;
   transform: translateX(-50%);
   max-width: 150px;
-  padding: 5px 9px;
+  padding: 6px 10px;
   /* So every max-width below is the width the bubble actually reaches. Without
      it the padding and the border are added on top, and a variant capped at
      250px renders at 272 — which is the difference between "fits in the 480pt
      window" being checkable and being guessed at. */
   box-sizing: border-box;
-  border-radius: 13px;
-  /* A hairline edge, not a shadow. On a pale desktop the dark fill alone has no
+  border-radius: 12px;
+  /* A hairline ring, not a shadow. On a pale desktop the fill alone has no
      boundary at the corners, and a shadow big enough to give it one gets
      clipped by the window. */
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  background: rgba(35, 32, 29, 0.93);
-  color: #f6f4f1;
-  font: 500 11px/1.35 -apple-system, system-ui, sans-serif;
+  border: 1px solid var(--ring);
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  color: var(--text);
+  font: 500 12px/1.4 var(--sans);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -175,7 +265,6 @@ html, body {
 /* Chatter is not an alarm: softer, and it wraps, because a quota line is longer
    than a project name. */
 #bubble.chat {
-  background: rgba(35, 32, 29, 0.88);
   font-weight: 400;
   white-space: normal;
   /* Right-anchored, like the quota readout. Centred on the pet at x=400 in a
@@ -184,9 +273,9 @@ html, body {
   left: auto;
   right: 14px;
   transform: none;
-  /* A chatter line is a sentence, and a sentence set 300px wide in 11px type is
-     a long way for the eye to travel back. The readouts below widen it again —
-     their content is columns, not prose. */
+  /* A chatter line is a sentence, and a sentence set 300px wide is a long way
+     for the eye to travel back. The readouts below widen it again — their
+     content is columns, not prose. */
   max-width: 212px;
   text-align: left;
   line-height: 1.45;
@@ -199,7 +288,8 @@ html, body {
 /* The session's own name, set apart from the words around it: the name is the
    part being reported, the rest is grammar. */
 #bubble .name, .notice-item .name {
-  color: #e8a184;
+  color: var(--text);
+  font-family: var(--round);
   font-weight: 600;
 }
 
@@ -214,44 +304,55 @@ html, body {
   transform: none;
   max-width: 262px;
   text-align: left;
-  padding: 7px 9px;
+  padding: 8px 11px;
 }
 /* Says what the bars are MEASURING. A bare percentage next to a bar is read as
    either "how much is gone" or "how much is left", and those are opposite
    readings of the same picture. */
 .qhead {
-  color: #8a837d; font-size: 9.5px; font-weight: 600;
-  letter-spacing: 0.4px; text-transform: uppercase;
-  padding-bottom: 2px;
+  color: var(--dim); font: 600 11.5px/1.3 var(--round);
+  padding-bottom: 3px;
 }
+/* Label | bar | value | reset: a two-column read (what, how much) with the bar
+   between. Fixed widths, so two rows line up as a grid. */
 .qrow {
   display: flex;
   align-items: center;
-  gap: 5px;
-  line-height: 1.6;
+  gap: 7px;
+  line-height: 1.7;
+  font-size: 11.5px;
   white-space: nowrap;
 }
-.qlabel { width: 30px; flex: none; color: #b5aea8; }
+.qlabel { width: 32px; flex: none; color: var(--faint); }
 /* An explicit width, NOT flex:1. The bubble is shrink-to-fit, so a flex-grow
    track has a basis of zero and the container reserves no space for it — the
    bar renders as a hairline. */
 .qbar {
   width: 68px;
   flex: none;
-  height: 7px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.14);
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
   overflow: hidden;
 }
-.qfill { display: block; height: 100%; border-radius: 3px; background: #6fae9b; }
-/* The same warning ramp as the badge and the alerts, so the colours mean one thing. */
-.qfill[data-level="mid"]  { background: #e0a63c; }
-.qfill[data-level="high"] { background: #e0533c; }
-.qpct   { width: 30px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+.qfill { display: block; height: 100%; border-radius: 2px; background: var(--sage); }
+/* One warning ramp for every meter: comfortable, getting there, nearly out. */
+.qfill[data-level="mid"]  { background: var(--tabby); }
+.qfill[data-level="high"] { background: var(--coral); }
+.qpct {
+  width: 32px; flex: none; text-align: right;
+  font-family: var(--round); font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.qreset {
+  flex: none; color: var(--faint); font-size: 11px;
+  font-family: var(--round);
+  font-variant-numeric: tabular-nums;
+}
 
 /* The hover readout. Four kinds of fact, each given its own weight so the eye
-   can land on one without reading the others. Runs as prose it was a wall of
-   words; the context meter reuses the quota bars outright. */
+   can land on one without reading the others: where (the heading), the
+   label/value grid, then what it last did. */
 /* NAMING: the panel already owns .detail, .warn, .row and .name. A bubble class
    that collides with one of those inherits its layout silently — .detail is
    display:flex, which laid all four of these rows out side by side. Bubble-only
@@ -260,7 +361,8 @@ html, body {
   display: block;
   white-space: normal;
   max-width: 272px;
-  padding: 7px 10px;
+  padding: 8px 11px;
+  font: 400 11px/1.4 var(--sans);
 }
 
 /* ---- Intervention, completion and quota warning ----------------------------
@@ -283,56 +385,71 @@ html, body {
   white-space: normal;
   text-align: left;
   max-width: 250px;
-  padding: 7px 10px;
-  border-color: rgba(224, 83, 60, 0.55);
-  background: rgba(38, 28, 25, 0.95);
+  padding: 8px 11px;
+  /* The pointed corner is the one nearest the cat. */
+  border-radius: 12px 12px 4px 12px;
+  border: 1.5px solid var(--coral);
 }
-.ahead { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-/* `!` for a decision, `?` for a reply — the same two glyphs the pet wears, so
-   the card and the figure cannot disagree about which kind of ask this is. */
+.ahead { display: flex; gap: 7px; align-items: center; min-width: 0; }
+/* The same two lamps the panel rows wear: a coral diamond for a decision, a
+   tabby dot with a halo for a reply — so the card and the list cannot disagree
+   about which kind of ask this is. The `!` / `?` stays in the text for anyone
+   reading it without the picture. */
 .aglyph {
-  flex: none; width: 13px; height: 13px; border-radius: 50%;
-  display: inline-grid; place-items: center;
-  font: 700 9.5px/1 -apple-system, system-ui, sans-serif;
-  color: #3a2f22; background: #e0a63c;
+  flex: none; width: 12px; height: 12px; position: relative;
+  font-size: 0; color: transparent;
 }
-.aglyph[data-ask="permission"] { background: #e0533c; color: #fdf3ec; }
+.aglyph::before {
+  content: ""; position: absolute; left: 2px; top: 2px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--tabby);
+  box-shadow: 0 0 0 3px var(--tabby-halo);
+}
+.aglyph[data-ask="permission"]::before {
+  left: 1.5px; top: 1.5px; width: 9px; height: 9px;
+  border-radius: 2px; background: var(--coral); box-shadow: none;
+  transform: rotate(45deg);
+}
 /* min-width:0 is what actually makes the ellipsis happen: without it a flex
    item refuses to shrink below its content, so the name pushed the card wider
    than its own max-width instead of truncating. */
 .aname {
-  min-width: 0; font-weight: 600; color: #f6f4f1;
+  min-width: 0; font: 600 12.5px/1.35 var(--round); color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .abody {
-  display: flex; gap: 5px; align-items: baseline;
-  margin-top: 2px; padding-left: 19px;         /* 13 glyph + 6 gap */
-  color: #d8d2cb; font-size: 10.5px;
+  display: flex; gap: 6px; align-items: baseline;
+  margin-top: 4px; padding-left: 19px;         /* 12 glyph + 7 gap */
+  color: var(--dim); font-size: 11.5px;
 }
-.akey { flex: none; color: #8a837d; }
-.abuttons { margin-top: 5px; }
+.akey { flex: none; color: var(--faint); }
+/* The command, in a chip: it is code, and it is the thing being decided. */
+.awhat {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 11px/1.45 var(--mono); color: var(--text);
+  background: var(--chip); padding: 0 6px; border-radius: 5px;
+}
+.abuttons { margin-top: 7px; }
 /* Allow / Deny: two plain pills. Allow takes the accent, Deny stays quiet, so
    the safe-looking one is never the one that runs something by accident of
    colour — and neither has a keyboard shortcut. */
 .decide-box { display: inline-flex; gap: 6px; }
 .decide {
-  padding: 1px 8px; border-radius: 9px; font-size: 10px; font-weight: 600;
-  border: 1px solid #6b6560; color: #d8d0c8;
+  padding: 1px 10px; border-radius: 7px;
+  font: 600 11px/1.45 var(--sans);
+  border: 1px solid var(--ctl-edge); color: var(--dim);
 }
-.decide.allow { background: #6fae9b; border-color: #6fae9b; color: #1f2a29; }
-.row.hot .decide.deny, .decide.deny:hover { border-color: #a99f96; }
-.detail.asks { padding-top: 3px; }
+.decide.allow { background: var(--sage); border-color: var(--sage); color: var(--on-accent); }
+.row.hot .decide.deny, .decide.deny:hover { color: var(--text); }
+.detail.asks { padding-top: 5px; }
 /* The alarm bubble ignores the pointer so it never blocks the page, but these
    are buttons: elementFromPoint skips anything with pointer-events:none, so
    without this a click on Allow in the alarm found nothing. */
 #bubble .decide-box { pointer-events: auto; }
-.awhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* A finished turn. Softer than the alarm and it takes itself away — the colour
-   is the panel's own "done" green so the two places agree. */
+/* A finished turn. Softer than the alarm and it takes itself away — a neutral
+   ring, because "done" is news, not a warning. */
 #bubble.notice {
   max-width: 240px;
-  border-color: rgba(103, 164, 152, 0.4);
 }
 /* The finish notices: a column of small bubbles above the pet, newest at the
    bottom. Each looks like #bubble.notice and, like it, takes no clicks.
@@ -344,63 +461,79 @@ html, body {
 }
 #stage.mirrored #notices { right: auto; left: 14px; align-items: flex-start; }
 .notice-item {
-  max-width: 240px; padding: 5px 9px; box-sizing: border-box;
-  border-radius: 13px; border: 1px solid rgba(103, 164, 152, 0.4);
-  background: rgba(35, 32, 29, 0.88); color: #f6f4f1;
-  font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
+  max-width: 240px; padding: 6px 10px; box-sizing: border-box;
+  border-radius: 12px; border: 1px solid var(--ring);
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  color: var(--text);
+  font: 400 12px/1.45 var(--sans);
   animation: notice-in 0.18s ease-out;
 }
-.notice-item .jump { margin-left: 5px; color: #a99f96; }
+.notice-item .jump { margin-left: 5px; color: var(--faint); }
 /* The column ignores the pointer, but each notice is clickable (it opens its
    session), and elementFromPoint skips anything with pointer-events:none. */
 .notice-item { pointer-events: auto; }
 @keyframes notice-in { from { opacity: 0; transform: translateY(4px); } }
 #stage.calm .notice-item { animation: none; }
 
-/* Quota past a threshold. Amber, which is the same "it wants you, but nothing
-   is on fire" the pet's own mark uses. */
+/* Quota past a threshold. Said with a coral ▲ — a warning, not news — so it
+   reads apart from a finish notice by shape as well as colour. */
 #bubble.warn {
   max-width: 240px;
-  border-color: rgba(224, 166, 60, 0.45);
+  border-color: color-mix(in srgb, var(--coral) 55%, transparent);
 }
-#bubble.readout > * + * { margin-top: 3px; }
+#bubble.warn::before { content: "\25b2\00a0"; color: var(--coral); font-size: 10px; }
+#bubble.readout > * + * { margin-top: 5px; }
 .dpath { display: flex; gap: 6px; align-items: baseline; }
 /* Wraps instead of truncating, at the <wbr> after each "/" — see setPath() and
    fitPath() in pet.js. min-width:0 lets it shrink beside the branch in the flex
    (uncrowded) layout instead of pushing the bubble wider. */
 .dwhere {
-  color: #e8e4df; font-weight: 500;
+  color: var(--text);
+  font: 600 12px/1.3 var(--round);
   min-width: 0;
   white-space: normal;
 }
 /* One directory name: never broken at its own hyphens. `anywhere` is only for a
    single name longer than the whole bubble. */
 .dseg { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
-.dtree { flex: none; color: #857c74; font-size: 10px; }
+.dtree { flex: none; color: var(--faint); font-size: 11px; }
 .dtree::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
-.dclocks { display: flex; gap: 5px; align-items: baseline; color: #b5aea8; font-size: 10.5px; }
-.dkey { color: #7d746c; }
-.dval { font-variant-numeric: tabular-nums; }
-.dmodel { color: #b5aea8; font-size: 10.5px; }
+/* Label / value, two columns — the same reading as the quota card. */
+.dgrid {
+  display: grid; grid-template-columns: auto 1fr;
+  column-gap: 10px; row-gap: 1px; align-items: center;
+  white-space: nowrap;
+}
+.dgrid .wide { grid-column: 2 / -1; }
+.dkey { color: var(--faint); }
+.dval {
+  color: var(--text);
+  font-family: var(--round); font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.dmeter { display: flex; align-items: center; gap: 6px; }
+.dmeter .qpct { width: auto; text-align: left; }
+.dmodel { color: var(--dim); font-weight: 400; }
 .dlast {
   display: flex; gap: 5px; align-items: baseline;
-  font-size: 10.5px; color: #8a837d;
+  color: var(--dim);
   overflow: hidden;
 }
 .dlast .dtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The last call failed: the whole line takes the warning, not just its mark. */
+.dlast.bad { color: var(--coral); }
 .ddot { flex: none; font-size: 7px; }
-.ddot.ok  { color: #67a498; }
-.ddot.bad { color: #e0a63c; }
-.ddot.bg  { color: #6fb8ad; font-size: 9px; }
-.qreset {
-  flex: none; color: #8a837d; font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
+.ddot.ok  { color: var(--sage); }
+.ddot.bad { color: var(--coral); font-size: 9px; }
+.ddot.bg  { color: var(--sage); font-size: 10px; }
 
 #pet { cursor: pointer; }
 
 /* Slides out to the LEFT of the pet box, entirely within the window:
-   2 + 232 + 6 = 240 = the pet box's left edge. */
+   2 + 310 = 312, clear of the pet box's left edge at 340. */
 #panel {
   position: absolute;
   left: 2px;
@@ -412,190 +545,221 @@ html, body {
      horizontal scrollbar, and that bar takes vertical space, which reflows the
      whole list — so pointing at a row made the window twitch. */
   overflow-x: hidden;
-  padding: 8px;
+  padding: 6px;
   box-sizing: border-box;
-  border-radius: 11px;
-  background: rgba(28, 26, 24, 0.94);
-  color: #f6f4f1;
-  font: 400 11px/1.45 -apple-system, system-ui, sans-serif;
+  border-radius: 14px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  /* A 1px ring rather than a drop shadow. The panel sits 6px from the window's
+     bottom edge, so any shadow with offset+blur greater than that gets clipped
+     by the edge and renders as a hard-edged slab on the desktop. */
+  box-shadow: 0 0 0 1px var(--hair);
+  color: var(--text);
+  font: 400 12px/1.45 var(--sans);
 }
-/* No box-shadow here. The panel sits 6px from the window's bottom edge, so any
-   shadow with offset+blur greater than that gets clipped by the edge and renders
-   as a hard-edged grey slab on the desktop instead of a soft shadow. The panel
-   is near-opaque dark on its own and needs no help standing out. */
 #panel[hidden] { display: none; }
 
-/* The left inset is the same on EVERY row, whether or not it carries the
-   accent bar below. Paying for the gutter once means marking a row costs no
-   width, cannot move the column beside it, and keeps every dot on one line. */
-.row { padding: 3px 2px 3px 7px; }
-/* Rounded only where something is actually painted. A radius on a row with
-   no fill just curls the ends of the separator above it. */
-.row.hot, .row.needs { border-radius: 5px; }
-.row + .row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+/* Every row the same inset, marked or not, so a wash costs no width and every
+   lamp sits in one column. Rounded, because hover and the washes paint it. */
+.row { padding: 5px 8px; border-radius: 8px; }
+.row + .row { margin-top: 1px; }
 
 /* ---- A row that wants something -------------------------------------------
-   A 6px dot was the entire signal, and at a glance across eight rows it is not
-   one. Three carriers now, so none of them is load-bearing on its own: the bar,
-   the wash, and the words ("Needs approval" / "Awaiting reply") in the status
-   column. Nothing here is colour ONLY.
-
-   Drawn with an inset shadow rather than a border-left because a border is
-   layout: it would shift the dot on marked rows and leave the column ragged. */
-.row.needs {
-  box-shadow: inset 2px 0 0 #e0a63c;
-  background: rgba(224, 166, 60, 0.05);
-}
-/* Waited past StateAggregator.urgentAfter — the same threshold that turns the
-   pet's own badge red, so the panel and the figure never disagree about which
-   session is the urgent one. A step up in weight, not a flash: a row that
-   blinks is unreadable exactly when it most needs reading. */
-.row.needs.urgent {
-  box-shadow: inset 2px 0 0 #e0533c;
-  background: rgba(224, 83, 60, 0.075);
-}
-.row.needs.urgent .dot { background: #e0533c; }
+   Three carriers, so none of them is load-bearing on its own: the lamp's shape
+   (diamond / haloed dot), the wash, and the words ("Needs approval" /
+   "Awaiting reply") in the status column. Nothing here is colour ONLY.
+   An approval washes coral, a reply tabby. */
+.row.needs.ask-appr  { background: var(--coral-wash); }
+.row.needs.ask-reply { background: var(--tabby-wash); }
 /* Hover has to stay visible ON TOP of the wash, so it is a step of the same
-   colour rather than the white overlay that ordinary rows get. */
-.row.needs.hot { background: rgba(224, 166, 60, 0.13); }
-.row.needs.urgent.hot { background: rgba(224, 83, 60, 0.155); }
+   colour rather than the neutral overlay that ordinary rows get. */
+.row.needs.ask-appr.hot  { background: var(--coral-wash-hot); }
+.row.needs.ask-reply.hot { background: var(--tabby-wash-hot); }
+/* Waited past StateAggregator.urgentAfter — the same threshold that escalates
+   the pet itself, so the panel and the figure never disagree about which
+   session is the urgent one. A step up in weight, not a flash: a row that
+   blinks is unreadable exactly when it most needs reading. The words and the
+   clock take the row's own accent. */
+.row.needs.urgent.ask-appr  { background: var(--coral-wash-hot); }
+.row.needs.urgent.ask-reply { background: var(--tabby-wash-hot); }
+.row.needs.urgent.ask-appr.hot  { background: color-mix(in srgb, var(--coral) 24%, transparent); }
+.row.needs.urgent.ask-reply.hot { background: color-mix(in srgb, var(--tabby) 22%, transparent); }
+.row.needs.urgent.ask-appr .what,  .row.needs.urgent.ask-appr .agev  { color: var(--coral); }
+.row.needs.urgent.ask-reply .what, .row.needs.urgent.ask-reply .agev { color: var(--tabby); }
+.row.needs.urgent .agev { font-weight: 700; }
 
-/* A row whose session runs in a terminal we can address. The arrow is a
-   permanent affordance, because the highlight below only appears once the
-   pointer is already over the row. */
+/* A row whose session runs in a terminal we can address. */
 .row.jumpable { cursor: pointer; }
 /* Every row can be muted, so every row gets the hover treatment — not just the
    jumpable ones. */
-.row.hot { background: rgba(255, 255, 255, 0.09); }
-.jump { flex: none; color: #6b6560; font-size: 10px; padding-left: 3px; }
-.row.jumpable.hot .jump { color: #d97757; }
+.row.hot { background: var(--hover); }
+/* The ↗ lives inside the clock and takes its place on hover: the time is what
+   the row is for until the pointer arrives, the jump is what it is for after.
+   Only a jumpable row carries one at all, so a row we cannot open never shows
+   an arrow. Opacity and visibility, never display — appearing must not change
+   the row's width (see .mute). */
+.age { position: relative; }
+.age .jump {
+  position: absolute; right: 0; top: 0;
+  opacity: 0; color: var(--dim); font-family: var(--sans); font-weight: 400;
+}
+.row.jumpable.hot .age .jump { opacity: 1; }
+.row.jumpable.hot .agev { visibility: hidden; }
 
-/* The × appears only on the hovered row: at 232px wide there is no room for a
-   permanent one next to the project name, the tool and the age. */
+/* The × appears only on the hovered row: there is no room for a permanent one
+   next to the project name, the tool and the age. */
 /* Revealed by opacity, never by display.
    These controls appear on hover, and appearing must not change the row's
-   width: the panel is 232pt wide, a wider row raised a horizontal scrollbar,
-   and that bar stole vertical space and reflowed the list — so simply pointing
-   at a row made the whole window twitch. Reserving the space always costs a few
-   points of right margin and removes the entire class of problem. */
+   width: a wider row raised a horizontal scrollbar, and that bar stole vertical
+   space and reflowed the list — so simply pointing at a row made the whole
+   window twitch. Reserving the space always costs a few points of right margin
+   and removes the entire class of problem. */
 .mute {
   flex: none;
   opacity: 0;
-  padding: 0 1px 0 5px;
-  color: #8a837d;
+  padding: 0 0 0 5px;
+  color: var(--faint);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
 }
 .row.hot .mute { opacity: 1; }
-.row.hot .mute:hover { color: #e8624a; }
+.row.hot .mute:hover { color: var(--coral); }
 
 .muted-note {
-  padding: 5px 2px 1px;
-  color: #6b6560;
-  font-size: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  color: var(--faint);
+  font-size: 11px;
+  border-top: 1px solid var(--hair);
 }
 .line {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
-/* Group headings. Small and dim on purpose: they organise the list, they are
-   not themselves news. */
+/* Group headings. Sentence case in the rounded face, dim: they organise the
+   list, they are not themselves news. */
 .group {
-  display: flex; align-items: baseline; gap: 6px;
-  padding: 7px 2px 3px;
-  font-size: 9.5px; font-weight: 600; letter-spacing: 0.4px;
-  text-transform: uppercase; color: #857c74;
+  display: flex; align-items: baseline; gap: 5px;
+  margin-top: 6px;
+  padding: 4px 8px 3px;
+  font: 600 12px/1.3 var(--round);
+  color: var(--dim);
 }
-.group:first-child { padding-top: 1px; }
+.group:first-child { margin-top: 0; padding-top: 2px; }
 /* How many are in this group. This is the panel's summary — put where the
    groups already are, rather than in a separate total pinned to the top, which
    would have to say "1 session" above a list that is one row long. Tabular so
    the heading cannot jog sideways as the number ticks. */
 .gcount {
-  color: #6b6560; font-weight: 500; letter-spacing: 0;
+  font-weight: 500; opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
 .read-all {
-  margin-left: auto; font-weight: 500; letter-spacing: 0;
-  text-transform: none; color: #6b6560; cursor: pointer;
+  margin-left: auto;
+  font: 400 11.5px/1.3 var(--sans);
+  color: var(--faint); cursor: pointer;
 }
-.read-all:hover { color: #d97757; }
+.read-all:hover { color: var(--sky); }
 
-/* A finished row is a record, not a running thing — dimmer than a live row,
-   and it carries a tick rather than a mute. */
-.row.done .proj { color: #c6c8ce; }
-.row.done .what { color: #857c74; flex: none; }
-/* A finished row's name is the part that gives: the turn count and the jump
-   arrow are short and fixed, so the name is what truncates when space runs out.
+/* A finished row is a record, not a running thing, and it carries a tick
+   rather than a mute. */
+.row.done .what { flex: none; }
+/* A finished row's name is the part that gives: the turn count and the clock
+   are short and fixed, so the name is what truncates when space runs out.
    min-width:0 is required — without it a flex item refuses to shrink below its
-   content and pushes the arrow out of the row instead. */
+   content and pushes the clock out of the row instead. */
 .row.done .proj { flex: 1 1 auto; }
-.detail.closed { color: #6b6560; font-style: italic; }
+.detail.closed { color: var(--fainter); font-style: italic; }
 .read {
-  flex: none; color: #6b6560; opacity: 0;
+  flex: none; color: var(--faint); opacity: 0;
   font-size: 11px; padding-left: 4px; cursor: pointer;
 }
 .row.done.hot .read { opacity: 1; }
-.row.done.hot .read:hover { color: #67a498; }
-.muted-note.dropped { color: #e0a63c; }
+.row.done.hot .read:hover { color: var(--sage); }
+.muted-note.dropped { color: var(--coral); }
 
 /* Postponing one blocked session. Shares the hover-reveal behaviour of the mute
    ×, and sits before it: the gentler action is the nearer one. */
 .snooze {
-  flex: none; color: #6b6560; opacity: 0;
+  flex: none; color: var(--faint); opacity: 0;
   font-size: 10px; padding-left: 4px; cursor: pointer;
 }
 .row.hot .snooze { opacity: 1; }
-.row.hot .snooze:hover { color: #e0a63c; }
+.row.hot .snooze:hover { color: var(--tabby); }
 /* A postponed row is dimmed but still there — the item was put off, not
-   dismissed, and the panel is where the user goes to find it again. */
-.row.napped .dot { background: #6b6560; }
-.row.napped .proj { color: #a8a29c; }
-.row.napped .what { color: #e0a63c; }
+   dismissed, and the panel is where the user goes to find it again. Its lamp
+   keeps its shape and loses its colour. */
+.row.napped .dot::before { background: var(--lamp-idle); box-shadow: none; }
+.row.napped .proj { color: var(--dim); }
+.row.napped .what { color: var(--tabby); }
 
-.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.dot.done    { background: #67a498; }
-/* Amber, which is what the pet's own mark uses for "it wants you". The red is
-   kept for a row that has waited past the urgent threshold — see .row.urgent. */
-.dot.waiting { background: #e0a63c; }
-.dot.busy    { background: #d97757; }
-.dot.idle    { background: #6b6560; }
-/* Gone quiet: busy on paper, but nothing heard for a while. Hollow rather
-   than filled — the pet is saying it does not know, not that it is done. */
-.dot.quiet   { background: none; box-shadow: inset 0 0 0 1.5px #8a6a52; }
-
-/* ---- What the dot says beyond its colour ------------------------------------
-   Colour answers "does it want me"; shape and motion answer "what is it doing",
+/* ---- The lamp ---------------------------------------------------------------
+   Colour answers "does it want me"; SHAPE and motion answer "what is it doing",
    so two rows of one colour still read apart, and still do for someone who
-   cannot tell the colours apart. Every motion here stops with the system's
-   Reduce motion (#stage.calm) and the shapes alone carry it. */
-/* Every dot sits in the same 8px slot, so a bigger one never shifts the name. */
-.dot { position: relative; margin: 0 1px; }
+   cannot tell the colours apart:
+
+     running        filled sage dot, breathing
+     idle           grey dot
+     finished       hollow sage ring
+     awaiting reply tabby dot with a soft halo
+     needs approval coral diamond
+     quiet          dashed grey ring — busy on paper, nothing heard
+
+   Every lamp sits in the same 10px slot, so a bigger one never shifts the
+   name; the shape is drawn by ::before, which leaves ::after for the small
+   marks some states add. Every motion here stops with the system's Reduce
+   motion (#stage.calm) and the shapes alone carry it. */
+.dot {
+  position: relative; flex: none; align-self: center;
+  width: 10px; height: 10px; margin-right: 1px;
+}
+.dot::before {
+  content: ""; position: absolute; left: 1px; top: 1px;
+  width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%;
+  background: var(--lamp-idle);
+}
+.dot.busy::before    { background: var(--sage); }
+.dot.idle::before    { background: var(--lamp-idle); }
+.dot.done::before    { background: none; box-shadow: inset 0 0 0 1.5px var(--sage); }
+.dot.waiting.reply::before {
+  background: var(--tabby); box-shadow: 0 0 0 3px var(--tabby-halo);
+}
+.dot.waiting.approve::before {
+  left: 1.5px; top: 1.5px; width: 7px; height: 7px;
+  border-radius: 1.5px; background: var(--coral);
+  transform: rotate(45deg);
+}
+/* Gone quiet: busy on paper, but nothing heard for a while. A broken ring —
+   the pet is saying it does not know, not that it is done. */
+.dot.quiet::before {
+  background: repeating-conic-gradient(var(--faint) 0 50deg, transparent 50deg 90deg);
+  -webkit-mask: radial-gradient(circle, transparent 2.4px, #000 2.7px);
+  mask: radial-gradient(circle, transparent 2.4px, #000 2.7px);
+}
 
 /* Working: breathing, so a live session looks alive next to a stopped one. */
 @keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.dot.busy { animation: dot-breathe 2.4s ease-in-out infinite; }
+.dot.busy::before { animation: dot-breathe 2.4s ease-in-out infinite; }
 
-/* Claude has stopped and an agent it sent off is doing the work: a dashed ring
-   turning slowly — busy, but not Claude's own hands. */
+/* Claude has stopped and an agent it sent off is doing the work: a
+   three-quarter arc turning slowly — busy, but not Claude's own hands. */
 @keyframes dot-turn { to { transform: rotate(360deg); } }
-.dot.busy.agent {
-  width: 8px; height: 8px; margin: 0;
-  /* A three-quarter arc: a conic fill cut to a ring. A bordered circle with one
-     side transparent rendered as two loose dashes at this size. */
-  background: conic-gradient(#d97757 0 270deg, transparent 270deg);
+.dot.busy.agent::before {
+  /* A conic fill cut to a ring. A bordered circle with one side transparent
+     rendered as two loose dashes at this size. */
+  background: conic-gradient(var(--sage) 0 270deg, transparent 270deg);
   -webkit-mask: radial-gradient(circle, transparent 2.3px, #000 2.6px);
+  mask: radial-gradient(circle, transparent 2.3px, #000 2.6px);
   animation: dot-turn 1.6s linear infinite;
 }
 
-/* Working, but the last several calls all failed: a small amber corner. */
+/* Working, but the last several calls all failed: a small coral corner. */
 .dot.busy.struggling::after {
-  content: ""; position: absolute; right: -3px; top: -3px;
-  width: 4px; height: 4px; border-radius: 50%; background: #e0a63c;
-  box-shadow: 0 0 0 1px #2a2623;
+  content: ""; position: absolute; right: -2px; top: -2px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--coral);
 }
 
 /* Turn over, commands still running under it: the idle dot with a heartbeat
@@ -605,28 +769,15 @@ html, body {
   70%  { transform: scale(1.9); opacity: 0; }
   100% { transform: scale(1.9); opacity: 0; }
 }
-.dot.idle.bg { background: #8fa7a2; }
 .dot.idle.bg::after {
-  content: ""; position: absolute; inset: 0; border-radius: 50%;
-  box-sizing: border-box; border: 1px solid #6fb8ad;
+  content: ""; position: absolute; left: 1px; top: 1px; width: 8px; height: 8px;
+  border-radius: 50%; box-sizing: border-box; border: 1px solid var(--sage);
   animation: dot-beat 1.8s ease-out infinite;
 }
-
-/* Wanting a decision: a solid amber dot, a size up, with an exclamation bar.
-   Wanting an answer: the same amber as a ring — something to fill in. */
-.dot.waiting.approve { width: 8px; height: 8px; margin: 0; }
-.dot.waiting.approve::after {
-  content: ""; position: absolute; left: 3.25px; top: 1.5px;
-  width: 1.5px; height: 3.2px; border-radius: 1px; background: #2a2623;
-}
-.dot.waiting.reply {
-  width: 8px; height: 8px; margin: 0; box-sizing: border-box;
-  background: none; box-shadow: inset 0 0 0 1.75px #e0a63c;
-}
-.row.needs.urgent .dot.waiting.reply { background: none; box-shadow: inset 0 0 0 1.75px #e0533c; }
-#stage.calm .dot, #stage.calm .dot::after { animation: none !important; }
+#stage.calm .dot::before, #stage.calm .dot::after { animation: none !important; }
 /* With motion off the heartbeat has to stay visible as a still halo. */
-#stage.calm .dot.idle.bg::after { transform: scale(1.7); opacity: 0.7; }
+#stage.calm .dot.idle.bg::after { transform: scale(1.6); opacity: 0.7; }
+
 /* The name gives before anything else does.
    flex:none here meant a long session name simply made the row wider than the
    panel, which raised a horizontal scrollbar — and that bar takes vertical
@@ -634,6 +785,7 @@ html, body {
    pointer moved between rows. min-width:0 is required: without it a flex item
    refuses to shrink below its content no matter what flex-shrink says. */
 .proj {
+  font-family: var(--round);
   font-weight: 600;
   flex: 0 1 auto;
   min-width: 0;
@@ -643,53 +795,59 @@ html, body {
 }
 /* A pinned row is marked, not restyled: it is still an ordinary session, it is
    just one the user asked to keep near the top. */
-.pin { flex: none; color: #e0a63c; font-size: 7px; }
+.pin { flex: none; color: var(--dim); font-size: 7px; }
 /* The branch only appears when it is not the default one, so it is allowed to
    be quiet — it is a disambiguator, not a headline. */
 .branch {
-  flex: none; color: #857c74; font-size: 9.5px;
+  flex: none; color: var(--faint);
   max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .branch:not(:empty)::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
 .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* What an approval would run: code, in a small mono chip. */
+.note.cmd {
+  font: 11px/1.45 var(--mono); color: var(--text);
+  background: var(--chip); padding: 0 6px; border-radius: 5px;
+}
 /* The HQ task a session is bound to: takes the room the line has, cut only at the edge. */
-.task { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #857c74; }
+.task { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
 .task:empty { display: none; }
-/* Questions from the HQ board, above the sessions; a click opens the board at the task. */
-.row.hqask .line { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.row.hqask .tidtag { flex: none; padding: 0 3px; border-radius: 3px; border: 1px solid rgba(224,166,60,.55);
-  color: #e0a63c; font-size: 10px; line-height: 1.25; }
-.row.hqask .tidtag.st-blocked { color: #e8846e; border-color: rgba(224,83,60,.5); }
-.row.hqask .tidtag.st-active { color: #7fb3aa; border-color: rgba(102,163,153,.5); }
-.row.hqask .asktext { flex: 1; min-width: 0; color: #e8e2dc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row.hqask .ask-go { flex: none; color: #8a837d; }
+/* Questions from the HQ board, above the sessions; a click opens the board at the task.
+   A question for the user, so it wears tabby. */
+.row.hqask .line { display: flex; gap: 7px; align-items: baseline; min-width: 0; }
+.row.hqask .tidtag {
+  flex: none; padding: 0 4px; border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--tabby) 55%, transparent);
+  color: var(--tabby); font: 600 10.5px/1.35 var(--round);
+}
+.row.hqask .tidtag.st-blocked { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 50%, transparent); }
+.row.hqask .tidtag.st-active { color: var(--sage); border-color: color-mix(in srgb, var(--sage) 50%, transparent); }
+.row.hqask .asktext { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.hqask .ask-go { flex: none; color: var(--faint); }
 /* A status word only when the task wants attention. */
-.task .stw.st-waiting-on-me { color: #e0a63c; }
-.task .stw.st-blocked { color: #e8846e; }
-.task .stw.st-done { color: #7fa6d9; }
-.task .stw.st-abandoned { color: #6b6560; }
+.task .stw.st-waiting-on-me { color: var(--tabby); }
+.task .stw.st-blocked { color: var(--coral); }
+.task .stw.st-done { color: var(--sky); }
+.task .stw.st-abandoned { color: var(--fainter); }
 
-/* Dimmer than the project name on purpose: the name is the thing being
-   reported and the status is what is happening to it, so they must not read as
-   two headlines competing for the same row. */
-.what { color: #9a938c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Dimmer and lighter than the project name on purpose: the name is the thing
+   being reported and the status is what is happening to it, so they must not
+   read as two headlines competing for the same row. */
+.what { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Words out of TEXT hold their width; the project name is what gives.
    Without this both columns shrank in proportion to their own content, so
    "Response complete" came out as "Response comp…", "Response com…" and
    "Response c…" on three consecutive rows — three different lengths of the
    same word, none of them a state anybody can recognise. A finished row has
-   always worked this way (.row.done .what below); a live one now matches.
+   always worked this way (.row.done .what above); a live one now matches.
    An activity summary is arbitrary text from the call in flight and keeps the
    old behaviour, because there is no length it can be trusted to fit. */
 .what.fixed { flex: none; }
-/* The words a blocked row shows instead of a bare "needs you" — the one part of
-   the status column that IS the news, so it keeps the warm colour. */
-.row.needs .what { color: #e0a63c; }
-.row.needs.urgent .what { color: #ef8a72; }
 /* Tabular, so a column of ages lines up digit under digit and a row does not
    twitch sideways when 9s becomes 10s. */
 .age  {
-  margin-left: auto; color: #8a837d; flex: none;
+  margin-left: auto; color: var(--fainter); flex: none;
+  font: 500 11px/1.45 var(--round);
   font-variant-numeric: tabular-nums;
 }
 /* Turns, context and age read as one column ("48 · 72% · 2m"), pushed
@@ -699,40 +857,42 @@ html, body {
   margin-left: auto; display: flex; align-items: baseline; flex: none;
 }
 .meta > * + *::before {
-  content: "\00b7"; margin: 0 3px; color: #6b6560;
+  content: "\00b7"; margin: 0 3px; color: var(--fainter);
 }
 .meta .age { margin-left: 0; }
 .turns, .ctx {
-  color: #8a837d; font-variant-numeric: tabular-nums;
+  color: var(--fainter); font: 500 11px/1.45 var(--round);
+  font-variant-numeric: tabular-nums;
 }
 .turns .glyph {
-  width: 9px; height: 9px; margin-right: 2px; vertical-align: -1px; color: #6b6560;
+  width: 9px; height: 9px; margin-right: 2px; vertical-align: -1px; color: var(--fainter);
 }
 /* Nearly full: the next compaction is close, and with it the detail of
-   everything before. Same warm as a row that wants you. */
-.ctx.hot { color: #e0a63c; }
-/* Notification message — design doc section 2 keeps it out of the bubble and
-   shows it only here. */
+   everything before. */
+.ctx.hot { color: var(--coral); }
+/* The second line: what an approval would run, the branch, the bound task, or
+   Claude's own last words. Indented to the name, past the lamp's column. */
 .detail {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   align-items: baseline;
-  color: #8a837d;
-  padding-left: 12px;
-  font-size: 10px;
+  color: var(--faint);
+  padding-left: 17px;
+  margin-top: 1px;
+  font-size: 11px;
   overflow: hidden;
 }
 /* :empty cannot do this any more — the line always holds its two spans even
    when both are blank, so the page marks it instead. */
 .detail.blank { display: none; }
 /* Claude's own last line on a finished row: one line, cut with an ellipsis. */
-.detail.summary { display: block; white-space: nowrap; text-overflow: ellipsis; color: #a99f96; }
+.detail.summary { display: block; white-space: nowrap; text-overflow: ellipsis; color: var(--dim); }
 /* A session name is identity, not chatter, so it reads a shade louder than the
    notification text it replaces. */
-.note.name { color: #a99f96; }
-/* Failing again and again: the same amber the rest of the pet uses for "look here". */
-.note.bad { color: #e0a63c; }
-.empty { color: #8a837d; padding: 4px 2px; }
+.note.name { color: var(--dim); }
+/* Failing again and again. */
+.note.bad { color: var(--coral); }
+.empty { color: var(--dim); padding: 6px 8px; }
 
 /* Cat Life v3: persistent symbol, two gentle scale pulses then a quiet gap.
    The existing calm rule disables this along with the shader motion. */
@@ -744,3 +904,14 @@ html, body {
   0%, 18%, 36%, 100% { transform: scale(1); }
   9%, 27% { transform: scale(1.18); }
 }
+
+/* Nearly out: the figure takes the warning too, in coral with a ▲, so it does
+   not rest on the bar's colour alone. */
+.qrow[data-level="high"] .qpct,
+.dmeter[data-level="high"] .qpct { color: var(--coral); }
+.qrow[data-level="high"] .qpct::before,
+.dmeter[data-level="high"] .qpct::before { content: "\25b2\00a0"; font-size: 8px; vertical-align: 1px; }
+.qrow[data-level="high"] .qpct { width: auto; min-width: 32px; }
+/* In the crowded strip the ▲ would push the model name out of the card; the
+   coral figure still carries it there. */
+#stage.crowded #bubble.readout .dmeter .qpct::before { content: none; }
