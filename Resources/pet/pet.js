@@ -523,18 +523,35 @@ const BUBBLE_SVG = '<svg class="glyph" viewBox="0 0 10 10" aria-hidden="true">'
   + '<path d="M1.5 1.5h7v5h-4.2l-2.3 2v-2h-.5z" fill="none" stroke="currentColor"'
   + ' stroke-width="1" stroke-linejoin="round"/></svg>';
 
+/** 48k, 300k, 1.2M — the same shorthand as ContextBudget.short. */
+function tokensShort(n) {
+  if (n >= 1e6) return (Math.round(n / 1e5) / 10) + "M";
+  return Math.round(n / 1000) + "k";
+}
+
+/**
+ * Context against the auto-compact window: warm from two thirds of it (each turn
+ * re-sends that much, and the pet says so once), hot from 80%.
+ */
+function ctxLevel(pct) {
+  return pct >= 80 ? "hot" : pct >= 67 ? "warm" : "";
+}
+
 /**
  * What the row says about the conversation as a whole, left of the age: how
- * many turns it has had and how full its context is. Both come from the
+ * many turns it has had and how much context it carries. Both come from the
  * transcript (see TranscriptStats), so they are absent until it has been read.
- * Neither carries a word — the bubble and the % sign stand in for one, and the
- * hover readout spells both out.
+ * The context reads "210k·70%": the tokens every turn re-sends, and their share
+ * of the auto-compact window (see ContextBudget) — so 100% means "about to
+ * compact", not "a million tokens". The hover readout spells both out.
  */
 function metaHTML(s) {
   let html = "";
   if (s.turns) html += '<span class="turns">' + BUBBLE_SVG + s.turns + "</span>";
   if (typeof s.context === "number") {
-    html += '<span class="ctx' + (s.context >= 80 ? " hot" : "") + '">' + s.context + "%</span>";
+    const level = ctxLevel(s.context);
+    const tokens = s.contextTokens ? tokensShort(s.contextTokens) + "\u00b7" : "";
+    html += '<span class="ctx' + (level ? " " + level : "") + '">' + tokens + s.context + "%</span>";
   }
   return html;
 }
@@ -1076,13 +1093,17 @@ window.showDetail = function (d) {
     bar.className = "qbar";
     const fill = document.createElement("span");
     fill.className = "qfill";
-    const pct = Math.max(0, Math.min(100, d.context));
-    fill.style.width = pct + "%";
-    // Same warning ramp as the quota meters.
-    fill.dataset.level = pct >= 85 ? "high" : pct >= 60 ? "mid" : "low";
+    const pct = Math.max(0, d.context);
+    fill.style.width = Math.min(100, pct) + "%";
+    // The row's ramp: warm from two thirds of the auto-compact window, hot from 80%.
+    fill.dataset.level = pct >= 80 ? "high" : pct >= 67 ? "mid" : "low";
     bar.appendChild(fill);
     meter.appendChild(bar);
     span(meter, "qpct", pct + "%");
+    // "210k / 300k": the tokens behind the share, and the window it is of.
+    if (d.contextTokens) {
+      span(meter, "dmodel", tokensShort(d.contextTokens) + " / " + tokensShort(d.contextBudget));
+    }
     meter.dataset.level = fill.dataset.level;
     if (d.model) span(meter, "dmodel", d.model);
   } else if (d.model) {
