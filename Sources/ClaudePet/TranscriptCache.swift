@@ -44,7 +44,8 @@ final class TranscriptCache {
                 MainActor.assumeIsolated {
                     self.inFlight.remove(path)
                     self.progress[path] = after
-                    if after.turns != before.turns || after.contextPercent != before.contextPercent {
+                    if after.turns != before.turns || after.contextTokens != before.contextTokens
+                        || after.model != before.model {
                         self.onUpdate?()
                     }
                 }

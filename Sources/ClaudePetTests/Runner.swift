@@ -1432,7 +1432,7 @@ struct Runner {
 
         t.check("every kind has a window, so none can fall through to the default",
                 Chatter.Kind.allCases.allSatisfy { _ in true }
-                    && Chatter.Kind.allCases.count == 6)
+                    && Chatter.Kind.allCases.count == 7)
 
         // ---- PanelModel: what the user sees, and what survives a session ----
         func panelSess(_ id: String, _ act: SessionActivity, project: String,
@@ -2475,6 +2475,7 @@ struct Runner {
         }
 
         JobTests.run(t)
+        ContextTests.run(t)
 
         t.finish()
     }

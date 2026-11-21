@@ -96,6 +96,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private let transcripts = TranscriptCache()
     /// sessionId → turns and context, from the last render.
     private var transcriptStats: [String: TranscriptStats.Progress] = [:]
+    /// sessionId → its context against its auto-compact window, from the last render.
+    private var contextReadings: [String: ContextBudget.Reading] = [:]
+    /// The auto-compact windows from ~/.claude/settings.json, re-read when it changes.
+    private var budgetSettings = ContextBudget.Settings()
+    private var budgetSettingsStamp: Date?
+    /// Which sessions crossed into "long" and are owed a word — see ContextAlarm.
+    private var contextAlarm = ContextAlarm()
     private var labelPrefs: [String: SessionLabels.Prefs] = [:]
     /// The session list stays up instead of being opened per glance.
     private var keepListOpen = false
@@ -226,6 +233,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onPauseToggle: { [weak self] in
                 guard let self else { return }
                 paused.toggle()
+                // What crossed while paused is not news afterwards: start the
+                // context reminders from what is on screen now.
+                contextAlarm = ContextAlarm()
                 render()
             },
             onLoginToggle: { [weak self] in self?.toggleLaunchAtLogin() },
@@ -334,6 +344,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         noticeTransients(state, previous: lastState)
         backgroundShells = findBackgroundShells(state.sessions)
         transcriptStats = transcripts.stats(for: state.sessions)
+        contextReadings = readContext(for: state.sessions, now: now)
+        if !paused { contextAlarm.observe(contextReadings) }
         bridge?.pushSessions(state.sessions, now: now, hiddenCount: state.hiddenCount,
                              background: backgroundShells,
                              completions: unread, titlesByHandle: bridge?.titles ?? [:],
@@ -341,7 +353,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              snoozed: snoozeMarks, prefs: labelPrefs,
                              branches: branches(for: state.sessions),
                              turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
-                             context: contextPercents(for: state.sessions, now: now),
+                             context: contextReadings,
                              tasks: hq.taskBySession, taskStatus: hq.statusBySession,
                              hqAsks: paused ? [] : hq.openAsks.map {
                                  ["id": $0.id, "task": $0.task, "text": $0.text,
@@ -572,10 +584,17 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             saveQuotaSaid()
         }
         let decision = QuotaAlarm.evaluate(usage: usage, alreadySaid: quotaSaid, now: now)
+        let names = sessionNames(state)
+        let contextNote = contextAlarm.due.lazy.compactMap { sid -> Chatter.ContextNote? in
+            guard let session = state.sessions.first(where: { $0.sessionId == sid }),
+                  let reading = self.contextReadings[sid] else { return nil }
+            return Chatter.ContextNote(sessionId: sid, name: names[sid] ?? session.project,
+                                       tokens: reading.tokens)
+        }.first
         guard let line = Chatter.next(
             state: state, previous: lastState, usage: usage, now: now,
-            lastSpoken: lastSpoken, lastAnything: lastAnything, names: sessionNames(state),
-            quotaAlarm: decision.speak
+            lastSpoken: lastSpoken, lastAnything: lastAnything, names: names,
+            quotaAlarm: decision.speak, contextNote: contextNote
         ) else { return }
         // The list is open and carrying this news itself: step aside rather than
         // draw a bubble across its top-right corner. Deliberately BEFORE every
@@ -595,6 +614,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             quotaSaid = QuotaAlarm.pruned(quotaSaid, now: now)
             saveQuotaSaid()
         }
+        if line.kind == .contextLong, let note = contextNote { contextAlarm.said(note.sessionId) }
         bridge?.say(line.text, hold: Self.speechHold, emphasis: line.emphasis,
                     variant: Chatter.bubble(for: line.kind))
         lastSpoken[line.kind] = now
@@ -664,18 +684,37 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(data, forKey: Self.labelsKey)
     }
 
-    /// sessionId → how full its context is. A fresh statusline reading is
-    /// Claude Code's own number and wins; the transcript covers every session
-    /// the statusline has not drawn lately, or at all.
-    private func contextPercents(for sessions: [SessionState], now: Date) -> [String: Int] {
-        var out: [String: Int] = [:]
+    /// sessionId → its context, measured against the auto-compact window its
+    /// model has (see ContextBudget). The transcript's token count wins: it is
+    /// exact and always there. A fresh statusline percentage — a share of the
+    /// model's whole window — covers a session whose transcript has no reply yet.
+    private func readContext(for sessions: [SessionState], now: Date) -> [String: ContextBudget.Reading] {
+        reloadBudgetSettings()
+        var out: [String: ContextBudget.Reading] = [:]
         for session in sessions {
-            let insight = insights[session.sessionId].flatMap { $0.isFresh(now: now) ? $0 : nil }
-            if let percent = insight?.contextPercent ?? transcriptStats[session.sessionId]?.contextPercent {
-                out[session.sessionId] = percent
+            let read = transcriptStats[session.sessionId]
+            let model = read?.model ?? ""
+            let budget = ContextBudget.budget(model: model, settings: budgetSettings)
+            if let read, read.contextTokens > 0 {
+                out[session.sessionId] = ContextBudget.Reading(tokens: read.contextTokens, budget: budget)
+            } else if let insight = insights[session.sessionId], insight.isFresh(now: now),
+                      let percent = insight.contextPercent {
+                // A share of a window this does not know (no model read yet), so
+                // it is shown as it came, not turned into tokens.
+                out[session.sessionId] = ContextBudget.Reading(percentOnly: percent)
             }
         }
         return out
+    }
+
+    /// `/autocompact` writes the user settings file; a stat per render is all
+    /// it costs to notice.
+    private func reloadBudgetSettings() {
+        let url = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".claude/settings.json")
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        guard stamp != budgetSettingsStamp else { return }
+        budgetSettingsStamp = stamp
+        budgetSettings = (try? Data(contentsOf: url)).map(ContextBudget.parse) ?? ContextBudget.Settings()
     }
 
     /// cwd → branch, for the directories currently on screen.
@@ -1180,6 +1219,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             now: Date(), limit: 1).first
         return SessionDetail.detail(session: session, insight: insights[sessionID],
                                     transcript: transcriptStats[sessionID],
+                                    context: contextReadings[sessionID],
                                     lastActivity: recent,
                                     background: backgroundShells[sessionID] ?? [], now: Date())
     }

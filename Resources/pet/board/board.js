@@ -180,11 +180,16 @@ function statusWord(s) {
   if (p.background) return `${p.background} in background`;
   return p.replied ? "Answered" : "Idle";
 }
-// How full a session's context window is, as the pet's list shows it.
+// How much context a session carries, as the pet's list shows it: tokens, and their share of the
+// auto-compact window (ContextBudget) — 100% is "about to compact". Amber from two thirds, red from 80%.
 function ctxTag(s) {
-  const p = ((ui.dots || {})[s.sessionId] || {}).context;
+  const d = (ui.dots || {})[s.sessionId] || {};
+  const p = d.context;
   if (p == null) return "";
-  return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 60 ? "mid" : ""}" title="Context window used">${p}% ctx</span>`;
+  const k = (n) => n >= 999500 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
+  const tokens = d.contextTokens ? `${k(d.contextTokens)} · ` : "";
+  const title = d.contextTokens ? `Context: ${k(d.contextTokens)} of the ${k(d.contextBudget)} auto-compact window — every turn re-sends it` : "Context used";
+  return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 67 ? "mid" : ""}" title="${title}">${tokens}${p}% ctx</span>`;
 }
 // Allow / Deny for a session stuck on a permission prompt — the same answer the pet's alert card
 // gives (pet-emit holds the hook open; first answer wins, terminal or here). Shown only while the

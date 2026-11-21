@@ -20,6 +20,23 @@ public enum Chatter {
         case sessionDone
         case longRun
         case struggling
+        /// A session's context crossed two thirds of its auto-compact window —
+        /// see ContextAlarm.
+        case contextLong
+    }
+
+    /// A session whose context just got long, handed in by the caller (it
+    /// keeps the ContextAlarm, since saying one has to be recorded).
+    public struct ContextNote: Sendable, Equatable {
+        public let sessionId: String
+        public let name: String
+        public let tokens: Int
+
+        public init(sessionId: String, name: String, tokens: Int) {
+            self.sessionId = sessionId
+            self.name = name
+            self.tokens = tokens
+        }
     }
 
     public struct Utterance: Sendable, Equatable {
@@ -113,7 +130,7 @@ public enum Chatter {
 
     public static func bubble(for kind: Kind) -> Bubble {
         switch kind {
-        case .quotaHigh, .quotaResetting, .struggling: return .warn
+        case .quotaHigh, .quotaResetting, .struggling, .contextLong: return .warn
         case .finished, .sessionDone: return .notice
         case .longRun: return .chat
         }
@@ -132,6 +149,9 @@ public enum Chatter {
         // Per kind, not per session: a second session falling into a rut ten
         // minutes later is worth hearing about, the same one every render is not.
         case .struggling: return 10 * 60
+        // Per kind: two sessions crossing together are told about ten minutes
+        // apart, which is soon enough for advice that is not urgent.
+        case .contextLong: return 10 * 60
         }
     }
 
@@ -156,7 +176,8 @@ public enum Chatter {
         lastSpoken: [Kind: Date],
         lastAnything: Date?,
         names: [String: String] = [:],
-        quotaAlarm: QuotaAlarm.Alarm? = nil
+        quotaAlarm: QuotaAlarm.Alarm? = nil,
+        contextNote: ContextNote? = nil
     ) -> Utterance? {
         // The bubble belongs to the alarm while something is actually blocked,
         // and a session waiting on the user is not a moment for small talk.
@@ -201,6 +222,12 @@ public enum Chatter {
             }
         }
 
+        // Not a transition of the state, so it does not need `previous`: the
+        // crossing was found by ContextAlarm.
+        if ready(.contextLong), let note = contextNote {
+            return Utterance(kind: .contextLong, text: contextLine(note), emphasis: note.name)
+        }
+
         guard let previous else { return nil }
 
         // Everything below is a transition, so it needs a previous state to
@@ -222,6 +249,12 @@ public enum Chatter {
         }
 
         return nil
+    }
+
+    /// Each turn re-sends the whole context, so a long one is what spends the
+    /// five-hour quota — the line says so, and what to do about it.
+    public static func contextLine(_ note: ContextNote) -> String {
+        "\(note.name) is carrying \(ContextBudget.short(note.tokens)) of context — /compact or a new session saves quota"
     }
 
     /// One row of the hover readout: a labelled meter.

@@ -359,6 +359,10 @@ final class WebBridge {
             "last": d.last, "lastBad": d.lastBad, "background": d.background,
         ]
         if let percent = d.contextPercent { doc["context"] = percent }
+        if d.contextTokens > 0 {
+            doc["contextTokens"] = d.contextTokens
+            doc["contextBudget"] = d.contextBudget
+        }
         if d.turns > 0 { doc["turns"] = d.turns }
         guard
             let data = try? JSONSerialization.data(withJSONObject: doc),
@@ -400,7 +404,8 @@ final class WebBridge {
     /// two never disagree.
     private(set) var dotState: [String: [String: Any]] = [:]
     private static let dotKeys: Set<String> = ["state", "quiet", "asks", "agent", "struggle", "background",
-                                               "activity", "replied", "context", "askId", "approveText"]
+                                               "activity", "replied", "context", "contextTokens",
+                                               "contextBudget", "askId", "approveText"]
 
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       background: [String: [BackgroundShells.Shell]] = [:],
@@ -411,7 +416,7 @@ final class WebBridge {
                       prefs: [String: SessionLabels.Prefs] = [:],
                       branches: [String: String] = [:],
                       turns: [String: Int] = [:],
-                      context: [String: Int] = [:],
+                      context: [String: ContextBudget.Reading] = [:],
                       tasks: [String: String] = [:],
                       taskStatus: [String: String] = [:],
                       hqAsks: [[String: String]] = [],
@@ -459,7 +464,14 @@ final class WebBridge {
                 item["task"] = task
                 item["taskStatus"] = taskStatus[s.sessionId] ?? ""
             }
-            if let percent = context[s.sessionId] { item["context"] = percent }
+            // Measured against the auto-compact window — see ContextBudget.
+            if let reading = context[s.sessionId] {
+                item["context"] = reading.percent
+                if reading.hasTokens {
+                    item["contextTokens"] = reading.tokens
+                    item["contextBudget"] = reading.budget
+                }
+            }
             // Turn over, commands still running under it — see BackgroundShells.
             if let shells = background[s.sessionId], !shells.isEmpty {
                 item["background"] = shells.count

@@ -22,8 +22,13 @@ public enum SessionDetail {
     public struct Detail: Sendable, Equatable {
         public var path = ""
         public var worktree = ""
-        /// 0-100: the statusline's reading while fresh, else the transcript's.
+        /// Share of the auto-compact window in use (see ContextBudget), past
+        /// 100 when the session is already over it.
         public var contextPercent: Int?
+        /// The tokens behind that share, and the window they are measured
+        /// against; 0 when only a bare percentage was known.
+        public var contextTokens = 0
+        public var contextBudget = 0
         /// Prompts typed into this session so far — see TranscriptStats.
         public var turns = 0
         public var model = ""
@@ -52,6 +57,7 @@ public enum SessionDetail {
         session: SessionState,
         insight: SessionInsight?,
         transcript: TranscriptStats.Progress? = nil,
+        context: ContextBudget.Reading? = nil,
         lastActivity: ActivityEntry?,
         background: [BackgroundShells.Shell] = [],
         now: Date
@@ -64,7 +70,13 @@ public enum SessionDetail {
             d.contextPercent = insight.contextPercent
             d.model = insight.modelName
         }
-        if d.contextPercent == nil { d.contextPercent = transcript?.contextPercent }
+        if let context {
+            d.contextPercent = context.percent
+            d.contextTokens = context.tokens
+            d.contextBudget = context.budget
+        } else if d.contextPercent == nil {
+            d.contextPercent = transcript?.contextPercent
+        }
         d.turns = transcript?.turns ?? 0
 
         d.turn = Chatter.duration(until: now, now: session.since)
