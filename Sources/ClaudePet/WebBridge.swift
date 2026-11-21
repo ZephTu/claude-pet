@@ -48,12 +48,21 @@ final class WebBridge {
 
     /// Call from the navigation delegate's didFinish, before re-rendering.
     /// Clearing the dedup memory here also covers a reload: the page is back at
-    /// its defaults, so whatever we sent before must be sent again.
+    /// its defaults, so whatever we sent before must be sent again. Every
+    /// setter that skips "same as last time" needs its memory cleared here —
+    /// switching skins reloads the page, and a value left behind is never
+    /// re-sent (the page would stay unmirrored while the hit area is mirrored).
     func markReady() {
         isReady = true
         last = nil
+        lastMotion = nil
         lastSessionsPayload = nil
         lastLook = nil
+        lastBadge = nil
+        lastPhase = nil
+        lastCalm = nil
+        lastMirrored = nil
+        lastHoverPoint = nil
     }
 
     func push(_ state: GlobalState, motion: ActivitySummary.Motion? = nil) {
