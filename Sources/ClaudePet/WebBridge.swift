@@ -400,7 +400,7 @@ final class WebBridge {
     /// two never disagree.
     private(set) var dotState: [String: [String: Any]] = [:]
     private static let dotKeys: Set<String> = ["state", "quiet", "asks", "agent", "struggle", "background",
-                                               "activity", "replied", "context"]
+                                               "activity", "replied", "context", "askId"]
 
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       background: [String: [BackgroundShells.Shell]] = [:],

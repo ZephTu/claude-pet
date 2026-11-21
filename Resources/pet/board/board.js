@@ -186,6 +186,18 @@ function ctxTag(s) {
   if (p == null) return "";
   return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 60 ? "mid" : ""}" title="Context window used">${p}% ctx</span>`;
 }
+// Allow / Deny for a session stuck on a permission prompt — the same answer the pet's alert card
+// gives (pet-emit holds the hook open; first answer wins, terminal or here). Only when the pet
+// can answer it: the askId names the exact prompt, so a stale click approves nothing.
+function approveBar(s) {
+  const p = (ui.dots || {})[s.sessionId];
+  if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
+  const btn = (b, label) => `<button class="btn small ${b === "deny" ? "ghost" : ""}" data-action="decide" data-behavior="${b}"
+    data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}">${label}</button>`;
+  // The whole of what is being approved, wrapped — never cut short by an ellipsis.
+  return `<div class="approve"><div class="ap-head"><span class="ap-k">Approve</span>${btn("allow", "Allow")}${btn("deny", "Deny")}</div>
+    <code class="ap-what">${esc(s.waitingOn || "this tool call")}</code></div>`;
+}
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -1047,7 +1059,7 @@ function renderTaskBody(t) {
   const sessRow = (s) => `<div class="bsess">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div></div>
+          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
           ${s.background
@@ -1160,6 +1172,7 @@ function renderSessions(items = ui.sessions, plain = false) {
             <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
         </div>
+        ${approveBar(s)}
         ${plainText(s.lastText) ? `<div class="last">${esc(plainText(s.lastText))}</div>` : ""}
         ${open ? `<div class="send">
           <textarea class="grow" rows="1" data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
@@ -2049,6 +2062,8 @@ document.addEventListener("click", async (ev) => {
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
     case "jump": return act("jump", { session: d.session });
+    case "decide": return act("decide", { session: d.session, ask: d.ask, behavior: d.behavior },
+                              d.behavior === "allow" ? "Allowed" : "Denied");
     case "unbind": return act("unbind", { session: d.session }, "Unbound");
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
