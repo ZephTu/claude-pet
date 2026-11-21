@@ -21,7 +21,7 @@ swift build && .build/debug/ClaudePet           # 或 ./scripts/install.sh
 
 | 位置 | 内容 |
 | --- | --- |
-| `Resources/pet/skins/<皮肤>/assets/<姿势>.png` | 9 张静态图，384² 透明 PNG，也是生成视频的种子图。九张齐了菜单里才能选 |
+| `Resources/pet/skins/<皮肤>/assets/<姿势>.png` | 9 张静态图，384² 透明 PNG，也是生成视频的种子图。九张齐了菜单里才能选。从绿幕原图生成：`swift scripts/skin-assets.swift <皮肤> <原图目录>`（九张共用一个裁剪框，大小才一致） |
 | `Resources/pet/skins/<皮肤>/frames/` | 抽帧结果（`frames.js` + 图集）。没有就只显示静态图 |
 | `scripts/<皮肤>-sheets.json` | 8 张表的动作、秒数、切法和提示词 |
 | `art/<皮肤>/{sheets,videos,anchors}/` | 种子表、视频、循环首帧，不进 git |
