@@ -42,6 +42,7 @@ final class BoardWindow: NSWindow {
         // See PetPanel: handlers go on the view's live configuration copy.
         webView.configuration.userContentController.addScriptMessageHandler(
             bridge, contentWorld: .page, name: "hq")
+        webView.configuration.userContentController.installLanguageScript()
         center()
         setFrameAutosaveName("HQBoard")
         if let url = PetSchemeHandler.url(path: "board/board.html") {
@@ -49,6 +50,12 @@ final class BoardWindow: NSWindow {
         } else {
             NSLog("ClaudePet: board resources missing from bundle")
         }
+    }
+
+    /// The language changed: reload whatever page is showing, in the new one.
+    func reloadForLanguage() {
+        webView.configuration.userContentController.installLanguageScript()
+        webView.reload()
     }
 
     /// Brings the board forward and gives it the keyboard. The pet is an
@@ -130,6 +137,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
     /// prompt that was on screen; one that has since gone away approves nothing.
     static var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
+    /// Sets the app's language ("en", "zh", "auto") — the board's own language switch.
+    static var onLanguage: ((String) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -222,6 +231,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await Self.run(claude, ["stop", str("session")])
             return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
         case "stop-session": return await stopSession(str("session"))
+        case "set-lang":
+            guard ["en", "zh", "auto"].contains(str("lang")), let set = Self.onLanguage else { return (nil, "bad language") }
+            set(str("lang"))
+            return (["ok": true], nil)
         case "agents":
             // Background sessions have no terminal, so the pet's records can't say what they are;
             // `claude agents --json` can.

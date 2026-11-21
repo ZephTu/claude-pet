@@ -686,7 +686,8 @@ next: "run baseline on clusters A/C"
   }
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
-  pick(saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
+  // Opens in the app's language (Settings → Language); the buttons switch just this page.
+  pick(window.PET_LANG || saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
   document.querySelectorAll("[data-lang]").forEach(function (b) {
     b.addEventListener("click", function () { pick(b.dataset.lang); });
   });

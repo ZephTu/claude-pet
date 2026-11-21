@@ -214,6 +214,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         BoardBridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
         }
+        BoardBridge.onLanguage = { [weak self] id in self?.setLanguage(id) }
         // The board shows the same quota reading the pet does — one pick from the same sources.
         BoardBridge.usage = { [weak self] in
             guard let u = self?.currentUsage(), u.percentagesUsable(now: Date()) else { return nil }
@@ -254,7 +255,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             },
             onQuit: { NSApp.terminate(nil) },
             onShowBoard: { [weak self] in self?.showBoard() },
-            onSkin: { [weak panel] id in panel?.setSkin(id) }
+            onSkin: { [weak panel] id in panel?.setSkin(id) },
+            onLanguage: { [weak self] id in self?.setLanguage(id) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
@@ -271,7 +273,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           problem: HealthCollector.quickProblem(petHome: self.petHome),
                           noticeHold: self.noticeHold, noticeCount: self.noticeCount,
                           skin: panel?.skin ?? PetSkins.defaultID,
-                          canShowSkin: { panel?.canShow(skin: $0) ?? false })
+                          canShowSkin: { panel?.canShow(skin: $0) ?? false },
+                          language: UILanguage.stored)
             }
         }
         self.menu = menu
@@ -955,6 +958,17 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         announcedAsks = already.union(ids)
     }
 
+
+    /// Settings → Language, or the board's own switch: "en", "zh", or "auto" to follow the
+    /// system. Menus are built when opened, so only the pages and the open report need redoing.
+    private func setLanguage(_ id: String) {
+        guard id != UILanguage.stored else { return }
+        if id == "en" || id == "zh" { UserDefaults.standard.set(id, forKey: UILanguage.key) }
+        else { UserDefaults.standard.removeObject(forKey: UILanguage.key) }
+        panel?.reloadForLanguage()
+        boardWindow?.reloadForLanguage()
+        if healthWindow?.isVisible == true { showHealth() }
+    }
 
     /// The HQ task board. One window, reused: closing hides it, reopening
     /// refreshes it.

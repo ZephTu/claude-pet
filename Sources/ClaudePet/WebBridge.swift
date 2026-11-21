@@ -605,3 +605,13 @@ final class WebBridge {
         }
     }
 }
+
+extension WKUserContentController {
+    /// Puts `window.PET_LANG` (see UILanguage) in front of every page this view loads,
+    /// replacing the one an earlier language left. These pages have no other user scripts.
+    func installLanguageScript() {
+        removeAllUserScripts()
+        addUserScript(WKUserScript(source: UILanguage.pageScript, injectionTime: .atDocumentStart,
+                                   forMainFrameOnly: true))
+    }
+}

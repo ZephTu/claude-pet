@@ -1,3 +1,8 @@
+// The app's language (Settings → Language), set before this script runs; the page reloads when it
+// changes. T("English", "中文") picks one. Technical terms may stay English in the Chinese.
+const LANG = window.PET_LANG === "zh" ? "zh" : "en";
+const T = (en, zh) => (LANG === "zh" ? zh : en);
+
 const pet = document.getElementById("pet");
 const bubble = document.getElementById("bubble");
 const panel = document.getElementById("panel");

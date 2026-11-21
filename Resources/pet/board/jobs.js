@@ -3,7 +3,7 @@
 // markdown, openPeek…). Jobs themselves are kept and run by the app: see JobsController.swift.
 //
 // Every string here comes from JT, in English and Chinese. The language follows macOS and can be
-// switched in the view; the choice is kept under "hq-lang", for the rest of the board to share.
+// switched in the view — which switches the whole app's language (Settings → Language).
 
 const JT = {
   en: {
@@ -134,11 +134,8 @@ const JT = {
   },
 };
 
-function jlang() {
-  const p = pref("hq-lang", "");
-  if (p === "en" || p === "zh") return p;
-  return /^zh/i.test(navigator.language || "") ? "zh" : "en";
-}
+// The app's language (see LANG in board.js); the EN / 中文 switch here sets it for everything.
+function jlang() { return LANG; }
 function jt(key, vars) {
   // English has a singular; Chinese doesn't need one.
   if (vars && vars.n === 1 && JT[jlang()][key + "1"]) key += "1";
@@ -602,7 +599,7 @@ document.addEventListener("click", async (ev) => {
   const d = el.dataset;
   const job = () => ((jui.data && jui.data.jobs) || []).find((j) => j.id === d.id);
   switch (d.jaction) {
-    case "lang": savePref("hq-lang", d.lang); if (jui.form) drawJobForm(); return renderJobsView();
+    case "lang": if (d.lang !== LANG) api("set-lang", { lang: d.lang }).catch((e) => toast(e.message || String(e), true)); return;
     case "new": return openJobForm(null);
     case "tpl": return openJobForm(jobTemplates()[Number(d.i)]);
     case "edit": return openJobForm(job());

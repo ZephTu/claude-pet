@@ -19,6 +19,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onQuit: () -> Void
     private let onShowBoard: (() -> Void)?
     private let onSkin: ((String) -> Void)?
+    private let onLanguage: ((String) -> Void)?
 
     init(
         onPauseToggle: @escaping () -> Void,
@@ -31,8 +32,10 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onNoticeCount: @escaping (Int) -> Void,
         onQuit: @escaping () -> Void,
         onShowBoard: (() -> Void)? = nil,
-        onSkin: ((String) -> Void)? = nil
+        onSkin: ((String) -> Void)? = nil,
+        onLanguage: ((String) -> Void)? = nil
     ) {
+        self.onLanguage = onLanguage
         self.onShowBoard = onShowBoard
         self.onSkin = onSkin
         self.onNoticeHold = onNoticeHold
@@ -51,13 +54,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
         keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
         noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount,
-        skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true }
+        skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true },
+        language: String = "auto"
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
             shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
             noticeHold: noticeHold, noticeCount: noticeCount,
-            skin: skin, canShowSkin: canShowSkin
+            skin: skin, canShowSkin: canShowSkin, language: language
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -72,7 +76,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
                   noticeHold: TimeInterval = Chatter.noticeHold,
                   noticeCount: Int = Chatter.noticeCount,
                   skin: String = PetSkins.defaultID,
-                  canShowSkin: (String) -> Bool = { _ in true }) -> NSMenu {
+                  canShowSkin: (String) -> Bool = { _ in true },
+                  language: String = "auto") -> NSMenu {
         let menu = NSMenu()
 
         if let problem {
@@ -174,6 +179,21 @@ final class PetMenu: NSObject, NSMenuDelegate {
             options.addItem(character)
             options.addItem(.separator())
         }
+        // Named in both languages, so it can be found whichever one is showing.
+        if onLanguage != nil {
+            let lang = NSMenuItem(title: "Language · 语言", action: nil, keyEquivalent: "")
+            let langs = NSMenu()
+            for choice in UILanguage.choices {
+                let item = NSMenuItem(title: choice.name, action: #selector(pickLanguage(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = choice.id
+                item.state = choice.id == language ? .on : .off
+                langs.addItem(item)
+            }
+            lang.submenu = langs
+            options.addItem(lang)
+            options.addItem(.separator())
+        }
         let health = NSMenuItem(title: "Connection Status…", action: #selector(showHealth),
                                 keyEquivalent: "")
         health.target = self
@@ -203,6 +223,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
     }
     @objc private func pickSkin(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { onSkin?(id) }
+    }
+    @objc private func pickLanguage(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { onLanguage?(id) }
     }
     @objc private func quit() { onQuit() }
     @objc private func showBoard() { onShowBoard?() }

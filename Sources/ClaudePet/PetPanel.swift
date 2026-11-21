@@ -116,6 +116,7 @@ final class PetPanel: NSPanel {
         layoutHandler = handler
 
         webView.navigationDelegate = self
+        webView.configuration.userContentController.installLanguageScript()
         loadPetPage()
 
         // NSWindow.setFrame(_:display:) is NOT called by setFrameOrigin(_:) — verified
@@ -246,6 +247,12 @@ final class PetPanel: NSPanel {
         guard id != skin, canShow(skin: id) else { return }
         skin = id
         UserDefaults.standard.set(id, forKey: Self.skinKey)
+        loadPetPage()
+    }
+
+    /// The language changed: the page is loaded again, in the new one.
+    func reloadForLanguage() {
+        webView.configuration.userContentController.installLanguageScript()
         loadPetPage()
     }
 

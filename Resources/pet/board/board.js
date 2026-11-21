@@ -2,6 +2,13 @@
 // native bridge (BoardWindow.swift); this page holds no state worth keeping.
 "use strict";
 
+// The app's language (Settings → Language in the pet's menu), set before this script runs; the
+// page reloads when it changes. T("English", "中文") picks one — every word the board shows goes
+// through it. Technical terms (session, todo, ask, Resume…) may stay English in the Chinese.
+const LANG = window.PET_LANG === "zh" ? "zh" : "en";
+const T = (en, zh) => (LANG === "zh" ? zh : en);
+document.documentElement.lang = LANG;
+
 const ORDER = ["waiting-on-me", "blocked", "active", "done", "abandoned"];
 const LABEL = {
   "waiting-on-me": "Waiting on you", blocked: "Blocked", active: "Active",
