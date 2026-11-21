@@ -466,7 +466,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// Which quota reading is newest, learned by watching — and kept in `usage-seen.json` so a
     /// restart does not have to learn it again (see UsageRecency.saved).
     private lazy var usageRecency: UsageRecency =
-        (try? Data(contentsOf: usageSeenURL)).flatMap(UsageRecency.init(saved:)) ?? UsageRecency()
+        (try? Data(contentsOf: usageSeenURL)).flatMap { UsageRecency(saved: $0, now: Date()) } ?? UsageRecency()
     private var usageSeenURL: URL { petHome.appending(path: "usage-seen.json") }
     /// Fires each time a file lands in ~/.claude/pet itself (not its subfolders) — in practice
     /// every quota write. UsageRecency needs to see each session's reading, and the file flips

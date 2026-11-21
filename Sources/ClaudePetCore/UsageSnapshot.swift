@@ -84,8 +84,9 @@ public struct UsageRecency: Sendable {
     /// A reading not seen for this long has left the file — its session closed or caught up. Seen
     /// again later it is new.
     public static let goneAfter: TimeInterval = 10 * 60
-    /// Right after watching starts every reading in the file is first seen within a few seconds,
-    /// in whatever order the sessions happened to write.
+    /// Right after watching starts — or resumes: after a restart or a gap in watching — every reading
+    /// the pet does not already know is first seen within a few seconds, in whatever order the
+    /// sessions happened to write.
     /// Births in this span say nothing about age, so they count as one; a tie goes to the higher
     /// figures, per window (the old rule), which is right except straight after a reset — and the
     /// first new reading any working session writes settles it.
@@ -99,64 +100,78 @@ public struct UsageRecency: Sendable {
     }
 
     private var seen: [Reading: (first: Date, last: Date)] = [:]
-    private var watchingSince: Date?
+    /// When the current settling span began: the first observation, and again on resuming.
+    private var settlingSince: Date?
     private var lastObserved: Date?
+    /// Restored from a save and not yet observed: the first observation resumes.
+    private var restored = false
     private var newest: UsageSnapshot?
 
     public init() {}
 
     // MARK: Kept across restarts
 
-    /// What is saved: every reading still remembered, with when it was first and last seen, and
-    /// when watching began. Without it each restart of the pet — every install — met all the
-    /// readings in the file at once, could not tell them apart, and showed the higher figures
-    /// (after a reset, the old 100%) until a working session's figures next moved.
+    /// What is saved: every reading still remembered, with when it was first and last seen.
+    /// Without it each restart of the pet — every install — met all the readings in the file at
+    /// once, could not tell them apart, and showed the higher figures (after a reset, the old 100%)
+    /// until a working session's figures next moved.
     struct Saved: Codable {
         struct Entry: Codable {
             let five: Int, fiveReset: Date, week: Int, weekReset: Date, first: Date, last: Date
         }
         let readings: [Entry]
-        let watchingSince: Date
-        let lastObserved: Date
     }
 
-    /// The order learned so far, for `init(saved:)` after a restart. Nil before anything was seen.
+    /// The order learned so far, for `init(saved:now:)` after a restart. Nil before anything was seen.
     public func saved() -> Data? {
-        guard let since = watchingSince, let last = lastObserved else { return nil }
+        guard settlingSince != nil || restored else { return nil }
         let entries = seen.map { Saved.Entry(five: $0.key.five, fiveReset: $0.key.fiveReset, week: $0.key.week,
                                              weekReset: $0.key.weekReset, first: $0.value.first, last: $0.value.last) }
+        // The default date encoding (seconds since 2001, as Date stores them) reads back to the
+        // same Date bit for bit; seconds since 1970 can lose the last bit, and a reading whose
+        // reset time came back a hair different would no longer match the live one — a "new" birth.
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970     // sub-second: births a moment apart stay apart
         encoder.outputFormatting = .sortedKeys
-        return try? encoder.encode(Saved(readings: entries, watchingSince: since, lastObserved: last))
+        return try? encoder.encode(Saved(readings: entries))
     }
 
-    /// Picks up where a previous run left off. Nil for anything unreadable — then the pet starts
-    /// from scratch, as before. The settling span is long over for what was learned then; a gap
-    /// since is handled by `observe` like any other (the order is carried across it).
-    public init?(saved data: Data) {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .secondsSince1970
-        guard let s = try? decoder.decode(Saved.self, from: data) else { return nil }
+    /// Picks up where a previous run left off. Nil for anything unreadable, or dated in the future
+    /// (a clock set back, a hand-edited file) — then the pet starts from scratch, as before.
+    ///
+    /// The readings keep their order; the first observation then resumes (see `observe`): every
+    /// remembered reading is carried across the time the pet was off, and readings it does not
+    /// know — written while it was off — settle among themselves like any first sighting. Their
+    /// order of arrival right after a restart says nothing, and letting the last-arriving one win
+    /// (as the save first did) picked one at random.
+    public init?(saved data: Data, now: Date = Date()) {
+        guard let s = try? JSONDecoder().decode(Saved.self, from: data),
+              !s.readings.contains(where: { $0.first > now.addingTimeInterval(60) || $0.last > now.addingTimeInterval(60) })
+        else { return nil }
         for e in s.readings {
             seen[Reading(five: e.five, fiveReset: e.fiveReset, week: e.week, weekReset: e.weekReset)] =
                 (first: e.first, last: e.last)
         }
-        watchingSince = s.watchingSince
-        lastObserved = s.lastObserved
+        restored = true
     }
 
     /// Notes one reading of the file. True when it is one not seen before — the moment the order
     /// changes, and so the moment worth saving.
     @discardableResult
     public mutating func observe(_ s: UsageSnapshot, now: Date) -> Bool {
-        // A gap in watching — the lid closed, the Mac asleep — says nothing about which readings
-        // left the file: nobody was writing either. Forgetting them all here made the order start
-        // over, and the tie after it brought a reset's old 100% back. Carry them across instead.
-        if let last = lastObserved, now.timeIntervalSince(last) > Self.goneAfter {
+        // Resuming — the first look after a restart, or after a gap in watching (the lid closed,
+        // the Mac asleep) — says nothing about which readings left the file: nobody was looking.
+        // Forgetting them made the order start over, and the tie after it brought a reset's old
+        // 100% back; judging them by when they were last seen before the gap (a save is written
+        // only when a reading is new, so its times are older still) dropped an idle session's
+        // reading and then took it for a new one. So every remembered reading is carried across,
+        // and a fresh settling span starts for the ones not seen before.
+        let gap = lastObserved.map { now.timeIntervalSince($0) > Self.goneAfter } ?? false
+        if restored || gap {
             seen = seen.mapValues { (first: $0.first, last: now) }
+            settlingSince = now
+            restored = false
         }
-        if watchingSince == nil { watchingSince = now }
+        if settlingSince == nil { settlingSince = now }
         lastObserved = now
         seen = seen.filter { now.timeIntervalSince($0.value.last) <= Self.goneAfter }
         // A window that is missing or already over has no figure worth telling apart; its stand-in
@@ -177,10 +192,11 @@ public struct UsageRecency: Sendable {
     /// The reading to show. Nil before any observation.
     ///
     /// A reading from an older window (a reset time more than two minutes before the latest seen
-    /// for that window) is out, whatever its age. Of the rest, the one born last; births before
-    /// the settling span ends count as born when it ends, and ties take the higher figure per window.
+    /// for that window) is out, whatever its age. Of the rest, the one born last. Readings first
+    /// seen during the current settling span count as born when it ends, so they tie, and a tie
+    /// takes the higher figure per window; readings known from before it keep their own times.
     public func current() -> UsageSnapshot? {
-        guard let newest, let since = watchingSince, !seen.isEmpty else { return newest }
+        guard let newest, let since = settlingSince, !seen.isEmpty else { return newest }
         let latestFive = seen.keys.map(\.fiveReset).max()!
         let latestWeek = seen.keys.map(\.weekReset).max()!
         let live = seen.filter {
@@ -188,8 +204,9 @@ public struct UsageRecency: Sendable {
         }
         let settled = since.addingTimeInterval(Self.settleFor)
         let pool = live.isEmpty ? seen : live
-        let youngest = pool.values.map { max($0.first, settled) }.max()!
-        let tied = pool.filter { max($0.value.first, settled) == youngest }.keys
+        func born(_ first: Date) -> Date { first < since ? first : max(first, settled) }
+        let youngest = pool.values.map { born($0.first) }.max()!
+        let tied = pool.filter { born($0.value.first) == youngest }.keys
         let five = tied.max { $0.five < $1.five }!
         let week = tied.max { $0.week < $1.week }!
         return UsageSnapshot(planName: newest.planName, fiveHourPercent: five.five, sevenDayPercent: week.week,
