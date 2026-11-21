@@ -77,7 +77,8 @@ enum HookEmit {
         // pet-emit` — and recording it would list a session that does not exist, kept alive for
         // as long as the process that ran the test (a whole afternoon, under the "~" project).
         // Checked before SessionEnd too, so such a test cannot remove a real session either.
-        guard let transcript = hook["transcript_path"] as? String, transcript.hasPrefix("/")
+        // Present is enough: a relative path (CLAUDE_CONFIG_DIR set to one) is still a session.
+        guard let transcript = hook["transcript_path"] as? String, !transcript.isEmpty
         else { return }
 
         let directory = sessionsDirectory
@@ -134,8 +135,6 @@ enum HookEmit {
 
         var document: [String: Any] = [
             "sessionId": sessionID,
-            // The pet counts the session's turns from it — see TranscriptStats.
-            "transcript": transcript,
             "project": projectName(fromCWD: cwd),
             "cwd": cwd,
             "state": state,
@@ -145,6 +144,11 @@ enum HookEmit {
             "waitingOn": waitingOn,
             "updatedAt": now,
         ]
+        // The pet counts the session's turns from it — see TranscriptStats. Only a path it can
+        // open without knowing Claude Code's working directory.
+        if transcript.hasPrefix("/") {
+            document["transcript"] = transcript
+        }
         // The pet decides liveness from this, so an idle session stays listed.
         // Resolved before the terminal because Ghostty's handle is the tty, and
         // this pid is the only process still holding one.

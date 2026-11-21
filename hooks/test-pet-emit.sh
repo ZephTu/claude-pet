@@ -19,7 +19,13 @@ pet_emit() {
   if [ $# -gt 0 ]; then "$EMIT_BIN" "$@"; return; fi
   local p; p="$(cat)"
   case "$p" in
-    *'"session_id"'*) case "$p" in *'"transcript_path"'*) ;; *) p="{\"transcript_path\":\"/fixture/session.jsonl\",${p#\{}" ;; esac ;;
+    *'"session_id"'*) case "$p" in
+      *'"transcript_path"'*) ;;
+      '{'*) p="{\"transcript_path\":\"/fixture/session.jsonl\",${p#\{}" ;;
+      # Spliced in blind, this would be invalid JSON that the binary drops silently, and a
+      # "writes nothing" test would then pass for the wrong reason.
+      *) echo "pet_emit: a fixture must start with '{': $p" >&2; fails=$((fails + 1)); return 1 ;;
+    esac ;;
   esac
   printf '%s' "$p" | "$EMIT_BIN"
 }
@@ -129,11 +135,15 @@ before="$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')"
 printf '{"hook_event_name":"UserPromptSubmit","session_id":"x","prompt":"hi"}' | "$EMIT_BIN"
 check "a payload without transcript_path exits 0" "$?" "0"
 check "...and writes no session" "$([ -e "$PET_HOME/sessions/x.json" ] && echo yes || echo no)" "no"
-printf '{"hook_event_name":"PreToolUse","session_id":"x","cwd":"/tmp/x","tool_name":"Bash","transcript_path":"relative.jsonl"}' | "$EMIT_BIN"
-check "...nor does a relative transcript path" "$([ -e "$PET_HOME/sessions/x.json" ] && echo yes || echo no)" "no"
+printf '{"hook_event_name":"PreToolUse","session_id":"x","cwd":"/tmp/x","tool_name":"Bash","transcript_path":""}' | "$EMIT_BIN"
+check "...nor does an empty transcript path" "$([ -e "$PET_HOME/sessions/x.json" ] && echo yes || echo no)" "no"
 printf '{"hook_event_name":"SessionEnd","session_id":"s1"}' | "$EMIT_BIN"
 check "...and a SessionEnd without one removes nothing" "$(field s1 state)" "idle"
 check "...so the session count is unchanged" "$(ls "$PET_HOME/sessions" | wc -l | tr -d ' ')" "$before"
+printf '{"hook_event_name":"SessionStart","session_id":"sRel","cwd":"/w/app","transcript_path":"cfg/projects/sRel.jsonl"}' | "$EMIT_BIN"
+check "a relative transcript path (CLAUDE_CONFIG_DIR) is still a session" "$(field sRel state)" "idle"
+check "...whose path is not kept, the pet could not open it" "$(field sRel transcript)" ""
+rm -f "$PET_HOME/sessions/sRel.json"
 
 # --- an event we do not install must not touch the state ---
 # SubagentStop is real but not one of ours; it stands in for anything a future
