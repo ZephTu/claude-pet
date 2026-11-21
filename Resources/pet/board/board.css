@@ -212,6 +212,7 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .md .tick { color: var(--faint); }
 .hqblock { border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 8px; padding: 6px 12px; margin: 8px 0; background: var(--panel); }
 .hqblock.hq-resolved { border-left-color: var(--teal); }
+.hqblock.hq-update { border-left-color: var(--line); }
 .hqb-t { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
 .hqblock ul { margin: 0; padding-left: 18px; }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }

@@ -171,6 +171,33 @@ touch -t 200001010000 "$T"/root/tasks/T-001-*/TASK.md
 hook '{"session_id":"sess-1","hook_event_name":"Stop","last_assistant_message":"x"}' | grep -q '"decision": "block"' && ok "write-back guard blocks stale card"
 hook '{"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"x"}' | grep -q block && fail "guard looped" || ok "guard does not loop"
 
+# hq-update: card bookkeeping written in the reply, applied by the Stop hook (no tool calls)
+stop() { python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"hook_event_name":"Stop","last_assistant_message":sys.argv[2]}))' "$1" "$2" | "$HQ" hook; }
+C1="$(ls "$T"/root/tasks/T-001-*/TASK.md)"
+hook '{"session_id":"sess-1","hook_event_name":"SessionStart"}' | grep -q 'hq-update' && ok "protocol teaches the hq-update block"
+out="$(stop sess-1 "$(printf 'Fixed it.\n\n```hq-update\nstatus: blocked\nnext: wait for the token\nstate: build is green\nstate: waiting on infra for the token\ntodo: @me send the token request\ntodo: @claude rerun the suite\nlog: picked plan v2 because it is cheaper\nref: PR #9 https://example.com/pr/9\nworkdir: %s\n```' "$T/repo-a")")"
+[ -z "$out" ] && ok "a clean hq-update block does not block the turn" || fail "clean block blocked: $out"
+python3 - "$C1" "$T/repo-a" <<'PY' && ok "hq-update sets status/next/state/todos/log/ref/workdir"
+import sys, re
+t = open(sys.argv[1]).read()
+assert "status: blocked" in t and 'next: "wait for the token"' in t, t
+assert re.search(r"## Status\nbuild is green\nwaiting on infra for the token\n\n## ", t), t
+assert "- [ ] @me send the token request" in t and "- [ ] @claude rerun the suite" in t, t
+assert ": picked plan v2 because it is cheaper" in t and "PR #9 https://example.com/pr/9" in t, t
+assert sys.argv[2] in t, t
+PY
+stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun the suite\ndrop: @me send the token request\n```')" >/dev/null
+grep -q -- "- \[x\] @claude rerun the suite" "$C1" && grep -q -- "- \[-\] @me send the token request" "$C1" && ok "done/drop find the todo by its text"
+out="$(stop sess-1 "$(printf 'ok\n```hq-update\nstatus: finished\ndone: no such todo\nwhatever this is\n```')")"
+echo "$out" | python3 -c 'import json,sys; r=json.load(sys.stdin)["reason"]; assert "status must be one of" in r and "no such todo" in r and "whatever this is" in r, r' && ok "lines it cannot apply are sent back once"
+python3 -c 'import json,sys; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"```hq-update\nstatus: nope\n```"}))' | "$HQ" hook | grep -q block && fail "bad block looped" || ok "a bad block is not sent back twice"
+python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
+import json, sys, time
+p = sys.argv[1]; s = json.load(open(p)); s["sess-1"]["turn_start"] = time.time() - 600; json.dump(s, open(p, "w"))
+PY
+touch -t 200001010000 "$C1"
+[ -z "$(stop sess-1 "$(printf 'nothing new\n```hq-update\ntouch\n```')")" ] && ok "a touch-only block satisfies the write-back guard"
+
 # Two sessions on one task: an answer goes to the session that asked it, and only to it.
 "$HQ" new "Shared work" >/dev/null
 SID="$(basename "$(ls -d "$T"/root/tasks/T-*-shared-work)" | cut -d- -f1-2)"

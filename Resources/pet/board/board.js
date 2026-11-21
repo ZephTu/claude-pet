@@ -1632,9 +1632,9 @@ function markdown(text) {
       const lang = nl >= 0 ? part.slice(0, nl).trim() : "";
       const code = nl >= 0 && !/\s/.test(lang) ? part.slice(nl + 1) : part;
       // HQ's own blocks are for people too: a titled list with live links, not a code box.
-      if (lang === "hq-asks" || lang === "hq-resolved") {
+      if (lang === "hq-asks" || lang === "hq-resolved" || lang === "hq-update") {
         const items = code.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
-        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${lang === "hq-asks" ? "Asked you" : "Answers recorded"}</div>
+        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${{ "hq-asks": "Asked you", "hq-resolved": "Answers recorded", "hq-update": "Card updated" }[lang]}</div>
           <ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul></div>`);
         return;
       }
