@@ -325,9 +325,10 @@ struct Runner {
         t.check("the bubble's area is transparent when hidden", !opaque(320, 130))
 
         // ---- TerminalTarget: jumping back to a session's terminal ----
-        t.check("orca, iterm2, vscode and ghostty are jumpable",
+        t.check("orca, iterm2, vscode, ghostty and Terminal.app are jumpable",
                 TerminalTarget.canJump(kind: "orca") && TerminalTarget.canJump(kind: "iterm2")
-                && TerminalTarget.canJump(kind: "vscode") && TerminalTarget.canJump(kind: "ghostty"))
+                && TerminalTarget.canJump(kind: "vscode") && TerminalTarget.canJump(kind: "ghostty")
+                && TerminalTarget.canJump(kind: "terminal"))
         // An unrecognised terminal degrades to "not clickable" rather than a dead click
         t.check("an unknown or empty kind is not jumpable",
                 !TerminalTarget.canJump(kind: "warp") && !TerminalTarget.canJump(kind: ""))
@@ -434,14 +435,23 @@ struct Runner {
                 TerminalTarget.identify(environment: ["ORCA_TERMINAL_HANDLE": "term_y"])
                 == TerminalRef(kind: "orca", handle: "term_y"))
         t.check("a terminal we cannot address yields no reference",
-                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Apple_Terminal"]) == nil)
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "WarpTerminal"]) == nil)
         // Also caught for real: running under Terminal.app while carrying an inherited
         // Orca handle, where falling back on presence offers a jump to an unrelated tab
-        t.check("a known-but-unsupported terminal does not fall back to an inherited handle",
+        t.check("Terminal.app without a tty does not fall back to an inherited handle",
                 TerminalTarget.identify(environment: [
                     "TERM_PROGRAM": "Apple_Terminal",
                     "ORCA_TERMINAL_HANDLE": "term_stale",
                 ]) == nil)
+        // Terminal.app has no per-tab id; its AppleScript tabs answer to their tty
+        t.check("Terminal.app is identified by tty, ignoring an inherited Orca handle",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Apple_Terminal",
+                                                      "ORCA_TERMINAL_HANDLE": "term_stale"],
+                                        tty: "/dev/ttys000")
+                == TerminalRef(kind: "terminal", handle: "/dev/ttys000"))
+        t.check("Terminal.app refuses a tty that is not a device path",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Apple_Terminal"],
+                                        tty: "/dev/ttys0\"; do shell script \"x") == nil)
         t.check("an empty handle is treated as absent",
                 TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": ""]) == nil)
 
@@ -2477,6 +2487,7 @@ struct Runner {
         JobTests.run(t)
         ContextTests.run(t)
         SkinTests.run(t)
+        IdleTabTests.run(t)
 
         t.finish()
     }

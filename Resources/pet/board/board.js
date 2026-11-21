@@ -22,8 +22,18 @@ const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.
 const projectNames = () => projects().map((p) => p.name);
 const categories = () => (ui.board && Array.isArray(ui.board.categories) ? ui.board.categories : []);
 // Terminals the board can type into; anything else gets Jump only.
-const SENDABLE = { orca: "Orca", iterm2: "iTerm2" };
-const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2" };
+const SENDABLE = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
+const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
+// Can the board deliver a message to this session? A terminal it can type into, or a background
+// session between turns — that one is continued with the message (BoardBridge.sendBackground).
+function canMessage(s) {
+  if (!s) return false;
+  if (SENDABLE[s.terminal && s.terminal.kind]) return true;
+  return Boolean(s.background && s.bgId && s.state !== "busy");
+}
+// What a send needs beyond the text: a background session goes by its short id, and is continued
+// with the board's skip-permissions choice, as a session started from here would be.
+const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
 
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
@@ -351,7 +361,7 @@ function doItButton(t, x) {
 }
 // The live session to hand a task's todo to: one the board can type into, most recently active first.
 function doTarget(t) {
-  return liveFor(t.id).filter((s) => SENDABLE[s.terminal && s.terminal.kind])
+  return liveFor(t.id).filter(canMessage)
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
 }
 async function doTodo(taskId, text) {
@@ -364,7 +374,7 @@ async function doTodo(taskId, text) {
     const s = doTarget(t);
     if (s) {
       const busy = s.state === "busy";
-      await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy });
+      await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy, ...sendExtra(s) });
       ui.handed[key] = { to: s.title || s.project, at: Date.now() };
       toast(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`);
     } else {
@@ -591,7 +601,7 @@ function askCard(t, a, opt = {}) {
 // The live session that raised an ask, if the board can type into its terminal.
 function pushTarget(a) {
   const s = a.session && ui.sessions.find((x) => x.sessionId === a.session);
-  return s && SENDABLE[s.terminal && s.terminal.kind] ? s : null;
+  return canMessage(s) ? s : null;
 }
 // Ticked by default while that session sits idle; a busy one would only queue it.
 function wantPush(a) {
@@ -901,6 +911,7 @@ function focusCard(t) {
         <div class="now-t"><div class="k">Next</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">No next step yet</span>`}</div></div>
         <div class="tools" data-action="none" title="">${resume}${launchSplit(t)}</div>
       </div>
+      ${stillRunning(t)}
       ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
       ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
       ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : "Nothing waiting on you here"}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? `${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all` : ""}</div>` : ""}
@@ -1078,11 +1089,13 @@ function renderTaskBody(t) {
           ${s.background
             ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
-            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>`}
+            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>
+               <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up">${ui.stopArmed === s.sessionId ? "Stop?" : ICON.stop}</button>`}
           <button class="icon" data-confirm="Unbind?" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
         </div></div>`;
   return `<div class="task-body">
     ${head}
+    ${stillRunning(t)}
     <div class="tcols">
       <div class="tmain">
         ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
@@ -1140,9 +1153,56 @@ const ICON = {
   stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
 };
 
+// A finished task whose sessions are still running: say so, with one button to stop them all.
+function stillRunning(t) {
+  const live = isOpen(t) ? [] : liveFor(t.id);
+  if (!live.length) return "";
+  const key = "task:" + t.id;
+  return `<div class="stillrun" data-action="none" title="">
+    <span>${live.length === 1 ? "A session is" : `${live.length} sessions are`} still running on this ${esc(STATUS_SHORT[t.status] || t.status)} task</span>
+    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-task-sessions" data-task="${esc(t.id)}" title="End their Claude Code processes — conversations are kept; Resume picks them up">${ui.stopArmed === key ? "Click again to stop" : live.length === 1 ? "Stop it" : "Stop all"}</button>
+  </div>`;
+}
+// Sessions bound to finished tasks, across the board — the Sessions list offers to stop them.
+const strays = () => ui.sessions.filter((s) => { const t = s.task && taskById(s.task); return t && !isOpen(t); });
+function strayBar() {
+  const xs = strays();
+  if (!xs.length) return "";
+  const key = "strays";
+  return `<div class="stillrun">
+    <span>${xs.length === 1 ? "1 session is" : `${xs.length} sessions are`} still running on finished tasks (${[...new Set(xs.map((s) => s.task))].map(esc).join(", ")})</span>
+    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-strays" title="End their Claude Code processes — conversations are kept">${ui.stopArmed === key ? "Click again to stop" : "Stop them"}</button>
+  </div>`;
+}
+// Ends one live session: a background one with `claude stop`, a terminal one by ending its process.
+async function stopOne(s) {
+  if (s.background && !SENDABLE[s.terminal && s.terminal.kind]) await api("stop", { session: s.bgId || s.sessionId });
+  else await api("stop-session", { session: s.sessionId });
+}
+async function stopMany(list, armKey, what) {
+  if (ui.stopArmed !== armKey) {
+    ui.stopArmed = armKey;
+    render();
+    toast(`Click again to stop ${what} — conversations are kept`);
+    setTimeout(() => { if (ui.stopArmed === armKey) { ui.stopArmed = null; render(); } }, 4000);
+    return;
+  }
+  ui.stopArmed = null;
+  let ok = 0;
+  const errs = [];
+  for (const s of list) {
+    try { await stopOne(s); ok++; } catch (e) { errs.push(`${s.title || s.sessionId.slice(0, 8)}: ${e.message || e}`); }
+  }
+  toast(errs.length ? `Stopped ${ok}; ${errs.join("; ")}` : `Stopped ${ok} session${ok === 1 ? "" : "s"}`, errs.length > 0);
+  await refresh();
+}
+
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
 function renderSessions(items = ui.sessions, plain = false) {
   if (!items.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
+  return (items === ui.sessions ? strayBar() : "") + renderSessionList(items, plain);
+}
+function renderSessionList(items, plain) {
   const openTasks = tasks().filter(isOpen);
   const card = (s) => {
     const t = s.task && taskById(s.task);
@@ -1158,8 +1218,8 @@ function renderSessions(items = ui.sessions, plain = false) {
          </select>`;
     const busy = s.state === "busy";
     const kind = s.terminal && s.terminal.kind;
-    const canSend = Boolean(SENDABLE[kind]);
-    const why = canSend ? "" : s.background ? "A background session has no terminal to type into — Attach to talk to it."
+    const canSend = canMessage(s);
+    const why = canSend ? "" : s.background ? "It is busy in the background — you can message it when its turn ends, or Attach to watch it."
       : `Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
@@ -1181,7 +1241,8 @@ function renderSessions(items = ui.sessions, plain = false) {
             ${s.background
               ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="Attach — open it in a terminal">${ICON.attach}</button>
                  <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
-              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>`}
+              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>
+                 <button class="icon ${ui.stopArmed === sid ? "armed" : ""}" data-action="stop-session" data-session="${esc(sid)}" title="Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up">${ui.stopArmed === sid ? "Stop?" : ICON.stop}</button>`}
             <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
         </div>
@@ -1492,7 +1553,7 @@ function drawPeek(toBottom) {
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
-  const canSend = m.live && Boolean(SENDABLE[s.terminal && s.terminal.kind]);
+  const canSend = m.live && canMessage(s);
   const noSend = m.starting ? "Starting the session — you can type here as soon as it is up" : !m.live ? "This session has ended — history only" : "Not supported in this terminal";
   const msgs = m.msgs;
   const list = msgs === null ? `<div class="empty">Loading…</div>`
@@ -1855,7 +1916,7 @@ async function send(sid) {
   render();
   if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
   try {
-    await api("send", { session: sid, text: message, queue: queued });
+    await api("send", { session: sid, text: message, queue: queued, ...sendExtra(ui.sessions.find((x) => x.sessionId === sid)) });
     delete ui.drafts[key];
     delete ui.atts[sid];
     const withImgs = images.length ? ` with ${images.length} image${images.length === 1 ? "" : "s"}` : "";
@@ -1916,7 +1977,7 @@ async function resolveAll(taskId) {
       const s = xs[0].target;
       try {
         for (const x of xs) if (x.res !== "snooze") await api("delivered", { id: x.a.id, session: sid });
-        await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy") });
+        await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy"), ...sendExtra(s) });
         sent.push(...xs);
         msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
       } catch (e) {
@@ -1987,7 +2048,7 @@ document.addEventListener("click", async (ev) => {
           try {
             // (Later is not an answer: nothing to keep the hook from repeating.)
             if (d.res !== "snooze") await api("delivered", { id: d.id, session: target.sessionId });
-            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy" });
+            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy", ...sendExtra(target) });
             msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
           } catch (e) {
             try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
@@ -2041,8 +2102,9 @@ document.addEventListener("click", async (ev) => {
       const t = taskById(d.task);
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
       try {
-        await api("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "", focus: !stayOnBoard() });
-        toast(stayOnBoard() ? `Resumed — bound to ${d.task}; carry on here` : `Resuming it in ${PLACES[place]} — bound to ${d.task}`);
+        const r = await apiObj("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "", focus: !stayOnBoard() });
+        const tab = r.reused ? `its old ${PLACES[place]} tab` : PLACES[place];
+        toast(stayOnBoard() ? `Resumed in ${tab} — bound to ${d.task}; carry on here` : `Resuming it in ${tab} — bound to ${d.task}`);
         stayWith(d.session, d.name);
       } catch (e) { toast(String(e.message || e), true); }
       delete ui.history[d.task];
@@ -2302,6 +2364,18 @@ document.addEventListener("click", async (ev) => {
       catch (e) { toast(String(e.message || e), true); }
       return;
     }
+    case "stop-session":
+      if (ui.stopArmed !== d.session) {
+        ui.stopArmed = d.session;
+        render();
+        toast("Click stop again to end this session — its conversation is kept; Resume picks it up, in the same tab if it is still open");
+        setTimeout(() => { if (ui.stopArmed === d.session) { ui.stopArmed = null; render(); } }, 4000);
+        return;
+      }
+      ui.stopArmed = null;
+      return act("stop-session", { session: d.session }, "Stopped — its conversation is kept");
+    case "stop-task-sessions": return stopMany(liveFor(d.task), "task:" + d.task, `${d.task}'s sessions`);
+    case "stop-strays": return stopMany(strays(), "strays", "the sessions on finished tasks");
     case "stop":
       // WKWebView shows no confirm() dialog, so confirm with a second click instead.
       if (ui.stopArmed !== d.session) {

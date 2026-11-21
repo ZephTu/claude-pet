@@ -496,8 +496,15 @@ printf '{"hook_event_name":"SessionStart","session_id":"sC","cwd":"/w/app","tran
 check "Cursor's terminal is recorded with the app and the directory" \
   "$(terminal sC)" "vscode com.todesktop.230313mzl4w4u92|/w/app"
 printf '{"hook_event_name":"SessionStart","session_id":"sT","cwd":"/w/app","transcript_path":"/fixture/sT.jsonl"}' \
-  | env -u ORCA_TERMINAL_HANDLE -u ITERM_SESSION_ID TERM_PROGRAM=Apple_Terminal "$EMIT_BIN"
-check "a terminal we cannot address records nothing" "$(terminal sT)" " "
+  | env -u ITERM_SESSION_ID ORCA_TERMINAL_HANDLE=term_stale TERM_PROGRAM=Apple_Terminal "$EMIT_BIN"
+# Terminal.app tabs answer to their tty, resolved from the Claude Code process like Ghostty's.
+# Under a test runner there may or may not be one; an inherited Orca handle is never used.
+case "$(terminal sT)" in
+  " "|"terminal /dev/tty"*) apple_handle="a tty path or nothing" ;;
+  *) apple_handle="$(terminal sT)" ;;
+esac
+check "Terminal.app is addressed by tty or not at all, never by an inherited handle" \
+  "$apple_handle" "a tty path or nothing"
 
 # ---- Ghostty ------------------------------------------------------------------
 # The handle is the Claude Code process's tty, resolved from its pid — the hook

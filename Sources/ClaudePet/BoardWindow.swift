@@ -200,7 +200,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             return await hq(args + ["--", str("title")])
         case "send":
-            let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false)
+            let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false,
+                               bg: str("bg"), skip: body["skip"] as? Bool ?? false)
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
         case "saveImage": return saveImage(dataURL: str("data"))
@@ -220,6 +221,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
             let r = await Self.run(claude, ["stop", str("session")])
             return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
+        case "stop-session": return await stopSession(str("session"))
         case "agents":
             // Background sessions have no terminal, so the pet's records can't say what they are;
             // `claude agents --json` can.
@@ -365,8 +367,105 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
         // The tab keeps the session's own name, as the pet and the board show it.
         let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
+        // A tab this session ran in before — kept by Orca or Terminal across a restart, or left
+        // behind by Stop — is reused rather than opening a second one beside it.
+        if let reused = await resumeInIdleTab(place: into, title: title, dir: dir, command: cmd, focus: focus) {
+            return (["ok": true, "session": session, "where": into, "reused": reused], nil)
+        }
         let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title, focus: focus)
         return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
+    }
+
+    /// The shell line that runs `command` in `dir`, as `openInTerminal` types it.
+    private static func shellLine(dir: String, command: [String]) -> String {
+        var line = "cd \(shq(dir)) && "
+        // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
+        if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(shq(root)) " }
+        return line + command.map(shq).joined(separator: " ")
+    }
+
+    /// Types `command` into a tab titled `title` that sits at a shell prompt with no Claude Code
+    /// session in it, and brings it forward. Returns the tab's handle, or nil when there is no
+    /// such tab (then the caller opens a new one). Only Orca and Terminal.app can tell whether a
+    /// tab is idle; anything uncertain counts as busy, so a running program is never typed into.
+    private func resumeInIdleTab(place: String, title: String, dir: String, command: [String],
+                                 focus: Bool) async -> String? {
+        let line = Self.shellLine(dir: dir, command: command)
+        let occupied = Self.liveTerminalHandles()
+        switch place {
+        case "orca":
+            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else { return nil }
+            let cli = app.appending(path: "Contents/Resources/bin/orca").path
+            let list = await Self.run(cli, ["terminal", "list", "--json"])
+            guard let data = list.out.data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let terms = (root["result"] as? [String: Any])?["terminals"] as? [[String: Any]]
+            else { return nil }
+            guard let handle = IdleTab.orca(terminals: terms, title: title, occupied: occupied) else { return nil }
+            let sent = await Self.run(cli, ["terminal", "send", "--terminal", handle, "--text", line, "--enter", "--json"])
+            guard sent.status == 0, TerminalTarget.orcaSwitchSucceeded(sent.out) else { return nil }
+            if focus {
+                _ = await Self.run(cli, ["terminal", "switch", "--terminal", handle, "--json"])
+                NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate()
+            }
+            return handle
+        case "terminal":
+            guard !NSRunningApplication.runningApplications(withBundleIdentifier: TerminalJump.terminalAppBundleID).isEmpty
+            else { return nil }   // scripting a stopped Terminal would launch it just to look
+            let r = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalListScript])
+            guard r.status == 0, let tty = IdleTab.terminalApp(listing: r.out, title: title, occupied: occupied),
+                  TerminalTarget.isSafeTTYPath(tty) else { return nil }
+            let typed = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalRunScript(tty: tty, line: line, focus: focus)])
+            return typed.status == 0 && typed.out.contains("ok") ? tty : nil
+        default:
+            return nil
+        }
+    }
+
+    /// Terminal handles that a live Claude Code session is recorded in — those tabs are not idle.
+    private static func liveTerminalHandles() -> Set<String> {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions")
+        var out = Set<String>()
+        for f in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        where f.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: f),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let pid = (obj["pid"] as? NSNumber)?.int32Value, ProcessProbe.isClaude(pid: pid),
+                  let handle = (obj["terminal"] as? [String: Any])?["handle"] as? String else { continue }
+            out.insert(handle)
+        }
+        return out
+    }
+
+    /// Ends a terminal session's Claude Code process — what Ctrl-C twice would do in its tab.
+    /// The conversation is kept and Resume picks it up, in the same tab when it is still open.
+    /// The pid comes from the pet's own record and must still be a Claude Code process, so a
+    /// reused pid is never signalled.
+    private func stopSession(_ session: String) async -> (Any?, String?) {
+        guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+        let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pid = (obj["pid"] as? NSNumber)?.int32Value, pid > 1 else {
+            return (nil, "no process recorded for this session")
+        }
+        guard ProcessProbe.isClaude(pid: pid) else { return (nil, "that session is not running any more") }
+        // The process's own command line names its session when the board started it; a
+        // session started by hand may not say, and then the pet's record is all there is.
+        if let args = ProcessProbe.arguments(pid: pid), args.contains("--session-id") || args.contains("--resume"),
+           !args.contains(session) {
+            return (nil, "the recorded process belongs to another session — stop it in its terminal")
+        }
+        kill(pid, SIGTERM)
+        for _ in 0..<30 {
+            if !ProcessProbe.isClaude(pid: pid) { return (["ok": true, "pid": Int(pid)], nil) }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        kill(pid, SIGTERM)   // a second interrupt is how Claude Code is told "really quit"
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        return ProcessProbe.isClaude(pid: pid) ? (nil, "it did not stop — close it in its terminal")
+                                               : (["ok": true, "pid": Int(pid)], nil)
     }
 
     /// Opens a scheduled run's session to carry on talking to it: `claude --resume` in the job's
@@ -437,10 +536,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// the user carries on from the board (its conversation window), not the terminal.
     private func openInTerminal(place: String, dir: String, command: [String], title: String,
                                 focus: Bool = true) async -> (Any?, String?) {
-        // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
-        var line = "cd \(Self.shq(dir)) && "
-        if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(Self.shq(root)) " }
-        line += command.map(Self.shq).joined(separator: " ")
+        let line = Self.shellLine(dir: dir, command: command)
         switch place {
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
@@ -471,7 +567,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             """ : """
             tell application "Terminal"
               \(focus ? "activate" : "")
-              do script "\(esc)"
+              set t to do script "\(esc)"
+              set custom title of t to "\(IdleTab.appleScriptLiteral(title))"
             end tell
             """
             let r = await Self.run("/usr/bin/osascript", ["-e", script])
@@ -553,11 +650,36 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Claude it is indistinguishable from the user typing it.
     /// `queue`: the session is busy, so the message waits in Claude Code's queue until the turn
     /// ends — no turn will start within seconds, so don't sit watching for one.
-    private func send(session: String, text: String, queue: Bool = false) async -> (Any?, String?) {
+    private func send(session: String, text: String, queue: Bool = false, bg: String = "",
+                      skip: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, "empty message") }
-        guard let t = terminal(of: session) else { return (nil, "no terminal recorded for this session") }
+        guard let t = terminal(of: session) else {
+            if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
+            return (nil, "no terminal recorded for this session")
+        }
         switch t.kind {
+        case "terminal":
+            guard TerminalTarget.isSafeTTYPath(t.handle) else { return (nil, "unexpected Terminal tty") }
+            guard !NSRunningApplication.runningApplications(withBundleIdentifier: TerminalJump.terminalAppBundleID).isEmpty
+            else { return (nil, "Terminal is not running") }
+            // Terminal.app types `do script` text into the tab as if from the keyboard. Lines are
+            // joined (a newline would submit early), and the text ends in a carriage return —
+            // the Return key — so the prompt is submitted whatever line ending Terminal adds.
+            let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+            let before = Self.lastPromptAt(session)
+            let r = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalTypeScript(tty: t.handle, text: flat)])
+            guard r.status == 0, r.out.contains("ok") else {
+                return (nil, r.out.contains("notfound") ? "its Terminal tab is gone" :
+                        "Terminal: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
+            }
+            if queue { return (["ok": true, "queued": true], nil) }
+            // Like Orca's --wait-submit: say so if no turn started, instead of claiming it got there.
+            for _ in 0..<25 {
+                if Self.lastPromptAt(session) != before { return (["ok": true], nil) }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            return (nil, "typed into its Terminal tab, but no turn started — check the tab and press Return there")
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
                 return (nil, "Orca is not installed")
@@ -595,6 +717,64 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         default:
             return (nil, "sending to \(t.kind) terminals is not supported yet — use Jump")
         }
+    }
+
+    /// When the session last took a prompt, per the pet's record — changes when a message lands.
+    private static func lastPromptAt(_ session: String) -> String {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
+        return (obj["lastPromptAt"] as? String) ?? ""
+    }
+
+    /// A background session has no terminal to type into. One that is not mid-turn takes the
+    /// message the way `claude --bg --resume` allows: it is stopped (its conversation is kept)
+    /// and continued in the background, under the same id, with the message as its prompt.
+    private func sendBackground(session: String, bgId: String, text: String, busy: Bool,
+                                skip: Bool) async -> (Any?, String?) {
+        guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+                            options: .regularExpression) != nil,
+              bgId.range(of: #"^[0-9a-f]{8}$"#, options: .regularExpression) != nil else { return (nil, "not a session id") }
+        if busy { return (nil, "it is busy — try again when its turn ends") }
+        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        func running() async -> [String: Any]? {
+            let list = await Self.run(claude, ["agents", "--json"])
+            guard let data = list.out.data(using: .utf8),
+                  let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+            return rows.first { ($0["sessionId"] as? String) == session }
+        }
+        if let row = await running() {
+            let st = ((row["status"] as? String) ?? (row["state"] as? String) ?? "").lowercased()
+            if st == "busy" || st == "running" || st == "working" { return (nil, "it is busy — try again when its turn ends") }
+            _ = await Self.run(claude, ["stop", bgId])
+            for _ in 0..<25 {
+                if await running() == nil { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if await running() != nil { return (nil, "it did not stop to take the message — Attach to talk to it") }
+        }
+        var dir = Self.sessionCwd(session)
+        if dir == nil {   // a background session the pet never saw: `claude agents` knows its folder
+            let all = await Self.run(claude, ["agents", "--json", "--all"])
+            if let data = all.out.data(using: .utf8),
+               let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               let cwd = rows.first(where: { ($0["sessionId"] as? String) == session })?["cwd"] as? String,
+               FileManager.default.fileExists(atPath: cwd) { dir = cwd }
+        }
+        guard let dir else { return (nil, "can't tell which folder that session ran in") }
+        // A message that starts with "-" would be read as an option; a leading space keeps it the prompt.
+        let prompt = text.hasPrefix("-") ? " " + text : text
+        let r = await Self.run(claude, ["--bg", "--resume", session] + (skip ? [Self.skipFlag] : []) + [prompt], cwd: dir)
+        guard r.status == 0 else { return (nil, "claude --bg --resume: " + (r.err.isEmpty ? r.out : r.err).prefix(300)) }
+        return (["ok": true, "resumed": true], nil)
+    }
+
+    private static func sessionCwd(_ session: String) -> String? {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cwd = obj["cwd"] as? String, FileManager.default.fileExists(atPath: cwd) else { return nil }
+        return cwd
     }
 
     // MARK: - Process

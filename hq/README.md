@@ -137,8 +137,8 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    answered before going on.
 
    Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board
-   answer is typed straight into the asking session when it is live in Orca or iTerm2 ("send
-   now"); otherwise it is delivered at the start of that session's next turn. With several
+   answer is typed straight into the asking session when it is live in Orca, iTerm2 or Terminal, or is a background
+   session between turns ("send now"); otherwise it is delivered at the start of that session's next turn. With several
    sessions on one task, an answer reaches only the session that asked — the others are not
    told, so they don't act on it too; if the asker has ended or left the task, the next session
    on it to start a turn takes the answer over. Which session was told is recorded on the ask
