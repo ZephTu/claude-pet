@@ -33,6 +33,15 @@ struct Entry {
             StatuslineCapture.record(input)
             exit(StatuslineCapture.forward(input, to: Array(arguments.dropFirst())))
 
+        case "--run-job":
+            // One run of a scheduled job — see JobRunner. Started by the job's LaunchAgent,
+            // or by the board's "Run now" with --manual.
+            guard arguments.count >= 2 else {
+                FileHandle.standardError.write(Data("usage: pet-emit --run-job <id> [--manual]\n".utf8))
+                exit(2)
+            }
+            exit(JobRunner.run(id: arguments[1], trigger: arguments.dropFirst(2).contains("--manual") ? "manual" : "schedule"))
+
         case "--version":
             print(petVersion)
             exit(0)

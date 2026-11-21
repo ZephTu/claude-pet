@@ -35,6 +35,17 @@ if [ -f "$PLIST" ]; then
   echo "==> launch-at-login removed"
 fi
 
+# Scheduled jobs: each has an agent that runs pet-emit, which is about to go. The jobs
+# themselves (~/.claude/pet/jobs) are kept; reinstalling and opening the pet puts the agents back.
+removed_jobs=0
+for job in "$HOME"/Library/LaunchAgents/local.claudepet.job.*.plist; do
+  [ -e "$job" ] || continue
+  launchctl bootout "gui/$(id -u)/$(basename "$job" .plist)" 2>/dev/null || true
+  rm -f "$job"
+  removed_jobs=$((removed_jobs + 1))
+done
+[ "$removed_jobs" -gt 0 ] && echo "==> scheduled jobs switched off ($removed_jobs); they are kept in $PET_DIR/jobs"
+
 rm -rf "$APP_DEST"
 rm -f "$PET_DIR/pet-emit"
 rm -rf "$PET_DIR/sessions"

@@ -80,6 +80,7 @@ const TEXT = {
   // Group headings.
   needsYou: "Needs you",
   asks: "Asks",
+  scheduled: "Scheduled",
   finished: "Finished",
   // "Running" is a claim, and a group holding three answered sessions and an
   // idle one is not running anything. It is only used when the group really is
@@ -667,11 +668,13 @@ function finishedRowHTML(f) {
 // Task statuses worth a word on a session row; "active" is the normal case and says nothing.
 const TASK_STATUS_WORD = { "waiting-on-me": "needs you", blocked: "blocked", done: "done", abandoned: "dropped" };
 
-window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
+window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, jobRows) {
   const muted = hiddenCount || 0;
   const done = finished || [];
   // Questions waiting on the HQ board — the badge counts them, so the list shows them.
   const asks = hqAsks || [];
+  // Scheduled jobs running now, or failed and not yet looked at on the board.
+  const jobs = jobRows || [];
   let footer = "";
   if (dropped > 0) {
     // Losing news quietly is the one thing the queue exists to prevent, so a
@@ -682,7 +685,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
   if (muted) {
     footer += '<div class="muted-note">' + muted + TEXT.muted + "</div>";
   }
-  if (!list.length && !done.length && !asks.length) {
+  if (!list.length && !done.length && !asks.length && !jobs.length) {
     panel.innerHTML = '<div class="empty">' + TEXT.empty + "</div>" + footer;
     hoverRow = null;
     reportLayout();
@@ -735,6 +738,14 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
           + '<span class="asktext"></span><span class="ask-go">\u2197</span></div></div>';
       }).join("");
   }
+  if (jobs.length) {
+    // Shaped like an ask row, and clicked like one: it opens the board, at the Scheduled view.
+    html += heading(TEXT.scheduled, jobs.length)
+      + jobs.map(function () {
+        return '<div class="row hqask jobrow"><div class="line"><span class="tidtag"></span>'
+          + '<span class="asktext"></span><span class="ask-go">\u2197</span></div></div>';
+      }).join("");
+  }
   if (needs.length) {
     html += heading(TEXT.needsYou, needs.length) + needs.map(sessionRowHTML).join("");
   }
@@ -746,7 +757,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
   if (others.length) {
     // One group and nothing to tell it apart from is not a group. A lone
     // "Running" heading above the only rows there are is pure furniture.
-    html += (needs.length || done.length || asks.length
+    html += (needs.length || done.length || asks.length || jobs.length
               ? heading(allRunning ? TEXT.running : TEXT.sessions, others.length)
               : "")
           + others.map(sessionRowHTML).join("");
@@ -770,7 +781,17 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks) {
     }
   });
 
-  panel.querySelectorAll(".row.hqask").forEach(function (row, i) {
+  panel.querySelectorAll(".row.jobrow").forEach(function (row, i) {
+    const j = jobs[i];
+    row.dataset.task = "jobs";
+    const tag = row.querySelector(".tidtag");
+    tag.textContent = j.status === "failed" ? "failed" : "running";
+    tag.classList.add(j.status === "failed" ? "st-blocked" : "st-active");
+    row.querySelector(".asktext").textContent = (j.name || "") + (j.text ? " · " + j.text : "");
+    row.title = "Open the Scheduled view of the task board";
+  });
+
+  panel.querySelectorAll(".row.hqask:not(.jobrow)").forEach(function (row, i) {
     const a = asks[i];
     row.dataset.task = a.task || "";
     row.dataset.askId = a.id || "";

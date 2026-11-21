@@ -198,9 +198,9 @@ const list = (v) => (Array.isArray(v) ? v : []);
 async function refresh(force) {
   let sig = null;
   try {
-    const [boardText, sessionsText, agentsText, unreadText] = await Promise.all([api("board"), api("sessions"), api("agents"),
-      api("pet").catch(() => "{}")]);
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText;
+    const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
+      api("pet").catch(() => "{}"), ui.mode === "jobs" && typeof loadJobs === "function" ? loadJobs() : ""]);
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
@@ -383,15 +383,17 @@ function render() {
   });
 
   renderCounts();
-  // Three pages, each two columns: Focus (the tasks you keep in view), All, and Needs you
-  // (every unanswered ask and your todos) with its count on the tab.
-  if (!["today", "all", "needs"].includes(ui.mode)) ui.mode = "today";
+  // Four pages, each two columns: Focus (the tasks you keep in view), All, Needs you (every
+  // unanswered ask and your todos) with its count on the tab, and Scheduled (jobs.js).
+  if (!["today", "all", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
   const need = needCount();
-  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"]].map(([m, label]) =>
+  $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
     `<button class="${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${m === "needs" && need ? `<span class="n">${need}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
   $("#all").hidden = ui.mode !== "all";
   $("#needs").hidden = ui.mode !== "needs";
+  $("#jobs").hidden = ui.mode !== "jobs";
+  if (ui.mode === "jobs" && typeof renderJobsView === "function") renderJobsView();   // see jobs.js
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
     $("#today-sessions").innerHTML = renderTodaySessions();
@@ -2154,7 +2156,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
     case "new-in-project": return openNewTask(d.p);
-    case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return render();
+    case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return d.m === "jobs" ? refresh(true) : render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
       return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off Focus` : `${d.task} added to Focus`);
@@ -2453,8 +2455,8 @@ function openNewTask(project) {
   if (t) { t.scrollIntoView({ block: "center" }); t.focus(); }
 }
 $("#new-task").addEventListener("click", () => {
-  // The form lives on Focus and All; from Needs you, go to All for it.
-  if (ui.mode === "needs") { ui.mode = "all"; savePref("hq-mode", "all"); }
+  // The form lives on Focus and All; from Needs you or Scheduled, go to All for it.
+  if (ui.mode === "needs" || ui.mode === "jobs") { ui.mode = "all"; savePref("hq-mode", "all"); }
   ui.newTask = true; render(); const t = $("#nt-title"); if (t) t.focus();
 });
 

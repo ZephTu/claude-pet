@@ -32,6 +32,7 @@
   <a href="#zh-start">开始使用</a>
   <a href="#zh-today">三个页面 · Focus</a>
   <a href="#zh-board">All 与 Needs you</a>
+  <a href="#zh-jobs">定时任务</a>
   <a href="#zh-pet">和小猫的联动</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
@@ -67,7 +68,7 @@
 <p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
 
 <h1 id="zh-today">三个页面 · Focus：正在关注的任务</h1>
-<p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每页都是两列。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是所有还没回答的问题（左）和你的 <code>@me</code> 待办（右），标签上的数字就是这两样加起来。</p>
+<p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每页都是两列。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是所有还没回答的问题（左）和你的 <code>@me</code> 待办（右），标签上的数字就是这两样加起来。第四个标签 <b>定时任务</b> 是按时间表自动跑的任务，见<a href="#zh-jobs">定时任务</a>。</p>
 <ul>
 <li><b>加进 Focus</b>：顶部输入框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。新建的任务自动加入 Focus。卡片右上角的 ✕（点两下）把它从 Focus 拿掉，任务本身不变。</li>
 <li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 一直按最近活动排。</li>
@@ -160,6 +161,31 @@
 <li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> 块显示成"Asked you"/"Answers recorded"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
 <li>底部可以直接回复。已经结束的 session 只能看历史。</li>
 </ul>
+<h1 id="zh-jobs">定时任务（Scheduled）</h1>
+<p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随系统语言，右上角 <b>EN / 中文</b> 可以切换。</p>
+<ul>
+<li><b>谁在跑</b>：每个打开的任务对应一个 macOS LaunchAgent（<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>），到点由 launchd 启动 <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code>。所以猫关着也照跑；Mac 睡着时错过的那次，醒来后补跑一次（错过多次也只补一次）。第一次加任务时 macOS 可能提示"已添加后台项目"，这是正常的。</li>
+<li><b>从模板开始</b>：还没有任务时，这一页列出三个模板——<b>每天早上汇总昨晚的 CI</b>（Claude · 每个工作日 09:00）、<b>每小时看 PR 有没有新评论</b>（Claude · 每小时）、<b>每周清一次缓存</b>（Shell · 每周日 03:00）。点一个就打开填好名称、类型、prompt 或命令和时间的新建表单，改一改再保存。</li>
+<li><b>新建 / 编辑</b>：右上角 <b>新建定时任务</b>。表单是一页"左边问题、右边答案"：<b>做什么</b>（顶部切换 <b>Claude prompt</b> / <b>Shell 命令</b>，再填名称和 prompt 或命令）、<b>在哪跑</b>（工作目录，从这里启动，会读这里的 CLAUDE.md；<b>选择…</b> 打开文件夹选择框）、<b>什么时候跑</b>、<b>能做什么</b>（只有 Claude 任务有）、<b>跑完告诉我</b>（连同"开着"开关）、<b>更多</b>（模型、单次最长、额度保护、session 怎么续，写成几句话，空格里直接改）。底部一直停着 <b>取消</b> / <b>保存并立即跑一次</b> / <b>保存</b>。
+  <ul>
+  <li><b>Prompt</b> 每次原样发给 <code>claude -p</code>。和终端里一样，开头写 <code>/技能名 参数</code> 就调用那个技能；不写也行，Claude 会按描述自己挑。你的 MCP 服务器、插件、hooks 照常加载。</li>
+  <li><b>命令</b> 用你的登录 shell 跑（<code>zsh -lic</code>），PATH 和终端里一样。</li>
+  <li><b>能做什么</b>（权限）：跑的时候没人点"允许"，所以先选好——<b>只用已允许的</b>（默认；只用你在设置里已允许的，其他一律拒绝并记在运行结果里）、<b>还能改文件</b>（acceptEdits）、<b>全部允许</b>（跳过所有权限检查，只给完全信任的 prompt 用）。</li>
+  <li><b>Session</b>（在"更多"里）：<b>每次开新 session</b>（默认，干净、便宜；只保留最近 N 次运行的 session，更早的从 <code>~/.claude/projects</code> 删掉，填 1 就只留最新一次）或 <b>每次接着同一个 session</b>（<code>claude -p --resume</code>，适合需要记住上次的任务；上下文用到设定的百分比（默认 50%，按模型的上下文窗口算）时先 <code>/compact</code>；列表里会显示这个 session 现在用了多少上下文）。注意：Claude Code 的 /clear 本身就是开新 session，所以"同一个 session 里先清空再跑"等于"每次新开、只保留 1 次"。</li>
+  <li><b>单次最长</b>：超时就停掉整组进程。</li>
+  <li><b>额度保护</b>：每次跑之前看一眼订阅额度，周额度或 5 小时额度已经用到设定的百分比（默认都是 90%，0 = 不检查）就跳过这次，记成"跳过——周额度已用 94%"，把剩下的额度留给你自己用。额度读数来自猫已有的读数（状态栏）和上一次任务运行时 Claude 报告的额度，取其中较高、且所在窗口还没重置的那个。</li>
+  <li><b>什么时候跑</b>：写成一句话，空格里直接选，比如"[每个工作日] 的 [09:00] 跑一次"。可选每个工作日、每天、每周（点选周几）、每小时、每隔几分钟，或 cron 表达式（分 时 日 月 周，支持 <code>*/15</code>、<code>1-5</code>、<code>MON</code>）。下面用小标签实时列出接下来 3 次的时间；写错了会直接告诉你哪里不对。</li>
+  <li><b>跑完告诉我</b>：失败时（默认）、每次跑完、不提醒。旁边的开关决定保存后任务是否开着。</li>
+  </ul>
+  <b>保存并立即跑一次</b> 保存后马上跑一次，方便试。</li>
+<li><b>列表</b>：标题旁是一共几个、几个开着（有在跑或最近失败的也会写出来）。每个任务一行，行与行之间只有细线：名称和类型标签（Claude / Shell），下面一行淡色写 prompt 或命令 · 工作目录；时间（人话，如"每个工作日 09:00"），下面是"下次 …"或"已暂停"；最近 12 次运行的小竖条（绿 = 成功，越高跑得越久；红 = 失败 / 超时 / 中断，满格；黄 = 成功但有工具被拒绝；蓝 = 运行中；灰色矮条 = 跳过或停止），下面是上次的时间、结果和耗时（失败时标红）；上次用掉的额度（Claude 任务；接着同一个 session 时还有 session 上下文）；开关、<b>立即运行</b>（运行中变成 <b>停止</b>）、<b>编辑</b>、<b>删除</b>（点两下）。关掉的任务名称和时间变淡。最近一次失败时，整行下面摊开一块淡红底的输出最后几行。窗口窄时"用掉的额度"一栏收起。</li>
+<li><b>运行历史</b>：点任务名称展开，列出最近 30 次：开始时间（手动跑的带"手动"标记）、结果、耗时、用掉的额度（这次运行前后周额度、5 小时额度各涨了多少，例如"周 +1%"；不到 1% 时显示"不到周额度的 1%"；悬停能看到按 API 价格折算的美元）、摘要（回复的第一行，或命令输出的最后一行）。上一次还没跑完时到点的那次会记成"跳过"，不会两次抢同一个 session。</li>
+<li><b>详情</b>：一次运行的输入、Claude 的回复（Markdown 排版）或命令的输出、"过程"（每次工具调用和结果，被拒绝的标红）和日志。<b>对话</b> 打开这次运行的完整 session 记录（和看 session 一样）；<b>接着聊</b> 在终端里 <code>claude --resume</code> 这个 session（勾了 stay on board 就留在看板上聊）。</li>
+<li><b>和小猫</b>：定时跑的 Claude session 不会出现在小猫和看板的 session 列表里，也不会让猫举手等你批准（hook 看到 <code>CLAUDE_PET_JOB</code> 就不管它）。任务失败时小猫上方弹出"Scheduled job failed: …"，点一下打开这一页；没看过的失败计入角标，并列在小猫列表的 <b>Scheduled</b> 分组里（运行中的也在这里）。打开这一页就算看过。</li>
+<li><b>文件</b>：每个任务一个目录 <code>~/.claude/pet/jobs/&lt;id&gt;/</code>：<code>job.json</code>（设置）、<code>runs.jsonl</code>（每次开始、结束各一行，保留最近 100 次）、<code>state.json</code>（接着同一个 session 时的 session id 等）、<code>logs/</code>（每次运行的输出；Claude 任务另有 stream-json 记录）。卸载 Claude Pet 会关掉所有任务的 LaunchAgent，但保留这些文件。</li>
+<li><b>读不到文件夹？</b>如果任务要读 <code>~/Documents</code>、桌面等受保护的位置而失败，到"系统设置 → 隐私与安全性"给 pet-emit 授权（"文件与文件夹"或"完全磁盘访问权限"）。</li>
+</ul>
+
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
 <li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
@@ -320,6 +346,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-start">Getting started</a>
   <a href="#en-today">Three pages · Focus</a>
   <a href="#en-board">All and Needs you</a>
+  <a href="#en-jobs">Scheduled jobs</a>
   <a href="#en-pet">With the cat</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
@@ -355,7 +382,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p class="tip">Sessions that were already running when HQ was installed should be restarted once so the hooks load.</p>
 
 <h1 id="en-today">Three pages · Focus</h1>
-<p><b>Focus | All | Needs you</b> at the top left switches pages (remembered); each is two columns. <b>Focus</b> is the workbench: only the tasks you keep in view — it doesn't reset each day; a task stays until you take it off. <b>All</b> is every task (left) and every session (right). <b>Needs you</b> is every unanswered ask (left) and your <code>@me</code> todos (right); the number on its tab counts both.</p>
+<p><b>Focus | All | Needs you</b> at the top left switches pages (remembered); each is two columns. <b>Focus</b> is the workbench: only the tasks you keep in view — it doesn't reset each day; a task stays until you take it off. <b>All</b> is every task (left) and every session (right). <b>Needs you</b> is every unanswered ask (left) and your <code>@me</code> todos (right); the number on its tab counts both. The fourth tab, <b>Scheduled</b>, holds jobs that run on a timetable — see <a href="#en-jobs">Scheduled jobs</a>.</p>
 <ul>
 <li><b>Add to Focus</b>: type an id or title in the box at the top and Add, or click ☆ on a task row in All. New tasks join automatically. ✕ at a card's top right (two clicks) takes it off Focus; the task stays.</li>
 <li><b>Order</b>: <b>active first</b> by the title (the same setting as in All; remembered) puts tasks with a live session first, most recently active first. Untick it for your own order: a <b>⠿</b> appears at each card's top left — drag it to move the card. The sessions on the right are always most recently active first.</li>
@@ -447,6 +474,31 @@ After the status word comes how full the context window is (e.g. <code>64% ctx</
 <li>The <code>hq-asks</code> / <code>hq-resolved</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
 <li>Reply from the box at the bottom. Ended sessions are history-only.</li>
 </ul>
+<h1 id="en-jobs">Scheduled jobs</h1>
+<p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following macOS; <b>EN / 中文</b> at the top right switches it.</p>
+<ul>
+<li><b>What runs them</b>: each job that is on has a macOS LaunchAgent (<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>); launchd starts <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code> on time. So a job runs with the pet closed, and a run missed while the Mac slept happens once when it wakes (once, however many were missed). macOS may say a background item was added the first time — that is expected.</li>
+<li><b>Start from a template</b>: with no jobs yet, the page offers three — <b>Summarise last night's CI every morning</b> (Claude · weekdays 09:00), <b>Check my PRs for new comments every hour</b> (Claude · every hour), <b>Clear caches once a week</b> (Shell · Sun 03:00). A click opens the new-job form with the name, kind, prompt or command and schedule filled in, to adjust and save.</li>
+<li><b>New / Edit</b>: <b>New job</b> at the top right. The form is one page of questions on the left and answers on the right: <b>What</b> (switch between <b>Claude prompt</b> and <b>Shell command</b> at the top, then a name and the prompt or command), <b>Where</b> (the folder it starts in, whose CLAUDE.md it reads; <b>Choose…</b> opens a folder picker), <b>When it runs</b>, <b>What it may do</b> (Claude jobs only), <b>Tell me</b> (with the On switch), and <b>More</b> (model, time limit, quota guard, how the session carries on — written as a few sentences with the blanks to change inline). <b>Cancel</b> / <b>Save and run now</b> / <b>Save</b> stay at the bottom.
+  <ul>
+  <li>The <b>prompt</b> goes to <code>claude -p</code> as written, every run. As in the terminal, start it with <code>/skill-name args</code> to use a skill — or just describe the work and Claude picks one. Your MCP servers, plugins and hooks load as usual.</li>
+  <li>A <b>command</b> runs in your login shell (<code>zsh -lic</code>), with the PATH your terminal has.</li>
+  <li><b>What it may do</b> (permissions): nobody is there to click Allow, so choose now — <b>Only what's allowed</b> (the default; only what your settings already allow; anything else is refused and noted in the run), <b>Also edit files</b> (acceptEdits), <b>Everything</b> (skips every permission check; only for prompts you fully trust).</li>
+  <li><b>Session</b> (under More): each run <b>starts a new session</b> (the default; clean and cheap; only the newest N runs keep their session — older ones are deleted from <code>~/.claude/projects</code>, and 1 keeps only the latest) or <b>continues the same session</b> (<code>claude -p --resume</code>, for work that needs to remember; it is compacted first once its context is as full as the percentage you set — 50% by default, of the model's context window; the list shows how full the session is now). Note: Claude Code's /clear itself starts a new session, so "clear the same session, then run" is "new session every run, keep 1".</li>
+  <li><b>Time limit</b>: past it, the whole process group is stopped.</li>
+  <li><b>Quota guard</b>: before each run it looks at your subscription's limits, and when the weekly or the 5-hour quota is already used past the percentage you set (90% for both by default; 0 = don't check) it skips the run — recorded as "Skipped — weekly quota at 94%" — leaving the rest for your own work. The reading is the higher of the pet's own (from your statusline) and the one Claude reported during the last job run, as long as its window hasn't reset.</li>
+  <li><b>When it runs</b>: one sentence with its blanks inline, e.g. "Run [every weekday] at [09:00]". Choose every weekday, every day, on some days (click the days), every hour, every few minutes, or by cron (minute hour day month weekday; <code>*/15</code>, <code>1-5</code>, <code>MON</code> work). The next three times show below as small chips while you type; a mistake says what is wrong.</li>
+  <li><b>Tell me</b>: when it fails (default), after every run, or never. The switch beside it decides whether the job is on once saved.</li>
+  </ul>
+  <b>Save and run now</b> saves and runs it once, to try it.</li>
+<li><b>The list</b>: next to the title, how many jobs there are and how many are on (and any running or failing). A row per job, separated by hairlines: the name with a Claude / Shell tag, and under it, faintly, the prompt or command · folder; the schedule in words (e.g. "Weekdays 09:00") with "Next …" or "Paused" under it; the last 12 runs as small bars (green = succeeded, taller for longer runs; red = failed / timed out / interrupted, full height; amber = succeeded with a tool refused; blue = running; a short grey stub = skipped or stopped), with the last run's time, result and duration under them (red if it failed); the quota the last run used (Claude jobs; plus the session's context when it continues one session); then the switch, <b>Run now</b> (<b>Stop</b> while it runs), <b>Edit</b> and <b>Delete</b> (two clicks). A job that is off has its name and schedule faded. When the last run failed, its last lines of output show across the row on a faint red ground. In a narrow window the quota column folds away.</li>
+<li><b>Runs</b>: click a job's name for its last 30 runs: when it started (manual runs are marked), result, time taken, quota used (how much the weekly and 5-hour quotas rose during the run, e.g. "week +1%", or "&lt;1% of the week"; hover for the API list price in dollars), and a summary (the reply's first line, or the command's last output line). A run due while the previous one is still going is recorded as skipped, rather than two runs fighting over one session.</li>
+<li><b>Details</b>: one run's input, Claude's reply (rendered) or the command's output, "What it did" (each tool call with its result; refused ones in red) and the log. <b>Conversation</b> opens the run's whole session, as for any session; <b>Continue</b> runs <code>claude --resume</code> on it in a terminal (with stay on board ticked, you carry on here).</li>
+<li><b>With the cat</b>: a scheduled Claude run never shows in the pet's or the board's session lists, and never makes the cat wait for an approval (the hook sees <code>CLAUDE_PET_JOB</code> and leaves it alone). When a job fails, "Scheduled job failed: …" pops up above the cat — a click opens this tab; failures you haven't seen count toward the badge and are listed under <b>Scheduled</b> in the cat's list (running jobs too). Opening this tab counts as seeing them.</li>
+<li><b>Files</b>: one folder per job, <code>~/.claude/pet/jobs/&lt;id&gt;/</code>: <code>job.json</code> (its settings), <code>runs.jsonl</code> (a line when each run starts and ends; the newest 100 runs), <code>state.json</code> (the session id for "same session", …), <code>logs/</code> (each run's output; Claude runs also keep their stream-json). Uninstalling Claude Pet switches every job's agent off and keeps these files.</li>
+<li><b>Can't read a folder?</b> If a job fails reading <code>~/Documents</code>, the Desktop or another protected place, allow pet-emit in System Settings → Privacy &amp; Security (Files and Folders, or Full Disk Access).</li>
+</ul>
+
 <h1 id="en-pet">With the cat</h1>
 <ul>
 <li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>

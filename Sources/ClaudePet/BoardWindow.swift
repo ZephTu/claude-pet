@@ -64,6 +64,8 @@ final class BoardWindow: NSWindow {
         makeKey()
         if task.isEmpty {
             webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
+        } else if task == "jobs" {
+            webView.evaluateJavaScript("window.hqShowJobs && window.hqShowJobs();")
         } else {
             // Ids look like T-123; anything else is not passed into the page.
             let safe = task.range(of: #"^T-\d+$"#, options: .regularExpression) != nil ? task : ""
@@ -236,6 +238,30 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             NSWorkspace.shared.open(url)
             return (["ok": true], nil)
         case "openPath": return openPath(str("path"), cwd: str("cwd"))
+
+        // Scheduled jobs — see JobsController.
+        case "jobs": return (JobsController.shared.list(), nil)
+        case "job-save": return await JobsController.shared.save(body["job"] as? [String: Any] ?? [:])
+        case "job-enable": return await JobsController.shared.setEnabled(str("id"), body["on"] as? Bool ?? false)
+        case "job-delete": return await JobsController.shared.delete(str("id"))
+        case "job-run": return JobsController.shared.runNow(str("id"))
+        case "job-stop": return JobsController.shared.stop(str("id"))
+        case "job-preview": return (JobsController.shared.preview(body["schedule"] as? [String: Any] ?? [:]), nil)
+        case "job-detail": return JobsController.shared.detail(str("id"), run: str("run"))
+        case "job-seen":
+            JobsController.shared.markSeen()
+            return (["ok": true], nil)
+        case "job-resume": return await resumeJob(id: str("id"), session: str("session"), place: str("where"),
+                                                  skip: body["skip"] as? Bool ?? false, focus: body["focus"] as? Bool ?? true)
+        case "pick-folder":
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            if !str("path").isEmpty { panel.directoryURL = URL(fileURLWithPath: (str("path") as NSString).expandingTildeInPath) }
+            guard panel.runModal() == .OK, let url = panel.url else { return (["path": ""], nil) }
+            let home = NSHomeDirectory()
+            return (["path": url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path], nil)
         case "open":
             let path = str("path")
             guard path.hasSuffix("/TASK.md"), FileManager.default.fileExists(atPath: path) else {
@@ -326,6 +352,19 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
         let opened = await openInTerminal(place: into, dir: dir, command: cmd, title: title, focus: focus)
         return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
+    }
+
+    /// Opens a scheduled run's session to carry on talking to it: `claude --resume` in the job's
+    /// folder. Not bound to any task — a job belongs to none.
+    private func resumeJob(id: String, session: String, place: String, skip: Bool, focus: Bool) async -> (Any?, String?) {
+        guard let job = JobsController.shared.store.load(id) else { return (nil, "No such job") }
+        guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
+                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
+        let opened = await openInTerminal(place: place == "bg" ? "terminal" : place, dir: job.directory, command: cmd,
+                                          title: String(("⏱ " + job.name).prefix(60)), focus: focus)
+        return opened.1 == nil ? (["ok": true, "session": session], nil) : opened
     }
 
     private func launch(task: String, title: String, dir rawDir: String, place: String, prompt: String,

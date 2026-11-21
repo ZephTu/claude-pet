@@ -45,7 +45,7 @@ With a dozen sessions open across several repos, the hard part stops being the w
 
 <img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view, each with its open questions, todos and sessions; their sessions on the right">
 
-The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
+The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. A fourth tab, **Scheduled**, runs jobs on a timetable (see below). The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
 
 ### Questions, answered in one go
 
@@ -74,6 +74,10 @@ Open a task for the rest of its card:
 <img src="docs/images/board-peek.png" width="900" alt="The conversation window: the last messages of a session, rendered, with a reply box at the bottom">
 
 👁 opens a session's recent conversation; reply from the box at the bottom (paste or drop images too). It arrives exactly as if you had typed it in the terminal — queued if the session is busy.
+
+### Scheduled jobs
+
+The **Scheduled** tab runs a Claude prompt (`claude -p`, skills and MCP tools included) or a shell command on a timetable — every N minutes, daily, weekdays, some days, or cron — and shows every job with its recent runs, the next run, and each run's reply, steps and log. Jobs run under launchd, so they run with the pet closed; a failure gets a notice from the cat. Each job picks a new session every run (keeping only the newest few) or one session it keeps continuing. The tab is in English and Chinese.
 
 **And the small things:** drafts you were typing survive a restart; removing or unbinding anything takes two clicks; the board has a built-in **Guide** in English and Chinese.
 

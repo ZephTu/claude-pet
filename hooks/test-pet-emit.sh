@@ -480,5 +480,23 @@ esac
 check "a ghostty handle is a tty path or nothing, never the surface id" \
   "$ghostty_handle" "a tty path or nothing"
 
+# --- a scheduled job's Claude run ---
+# Nobody is at that session: the hook writes nothing, so the pet neither shows it nor holds a
+# permission prompt open for it.
+printf '{"hook_event_name":"SessionStart","session_id":"sJob","cwd":"/w/app"}' | CLAUDE_PET_JOB=j1 "$EMIT"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sJob","cwd":"/w/app","tool_name":"Bash"}' | CLAUDE_PET_JOB=j1 "$EMIT"
+check "a scheduled job's session leaves no session file" "$([ -e "$PET_HOME/sessions/sJob.json" ] && echo yes || echo no)" "no"
+
+# --- one run of a scheduled job ---
+mkdir -p "$PET_HOME/jobs/jt"
+printf '{"id":"jt","name":"t","kind":"shell","command":"echo out-$CLAUDE_PET_JOB; exit 4","cwd":"/tmp"}' > "$PET_HOME/jobs/jt/job.json"
+"$EMIT" --run-job jt --manual
+last() { /usr/bin/python3 -c "import json,sys;print(json.loads(open(sys.argv[1]).read().splitlines()[-1]).get(sys.argv[2],''))" "$PET_HOME/jobs/jt/runs.jsonl" "$1"; }
+check "a run records its end" "$(last event)" "end"
+check "…its exit code" "$(last exitCode)" "4"
+check "…as a failure" "$(last status)" "fail"
+check "…with the last output line, which saw CLAUDE_PET_JOB" "$(last summary)" "out-jt"
+check "an unknown job is an error" "$("$EMIT" --run-job nope >/dev/null 2>&1; echo $?)" "2"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
