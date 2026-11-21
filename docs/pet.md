@@ -128,7 +128,7 @@ The cat is animated frame by frame: every pose is a loop cut out of a generated 
 
 If WebGL is unavailable or a texture will not decode, the page shows each pose's still picture instead and tells the app why.
 
-**Settings → Character** switches who the pet is. The cat is the default and the only one every build is sure to have; a second character, a young cultivator (散修), is on the way and is listed greyed out — `(no artwork yet)` — until all nine of its still pictures are in the bundle. Every character plays the same nine poses, so nothing else changes when you switch: the page reloads with the new pictures and picks up where it was. A character with stills but no cut animation yet shows the stills; a saved choice that can no longer be drawn falls back to the cat. How a character's art and videos are made is in `docs/seedance.md`.
+**Settings → Character** switches who the pet is. The cat is the default and the only one every build is sure to have; the second is **Cultivator**, a chibi young cultivator who brews pills at a little furnace. A character whose nine still pictures are not all in the bundle is listed greyed out — `(no artwork yet)`. Every character plays the same nine poses, so nothing else changes when you switch: the page reloads with the new pictures and picks up where it was. A character with stills but no cut animation yet shows the stills; a saved choice that can no longer be drawn falls back to the cat. How a character's art and videos are made is in `docs/seedance.md`.
 
 `ClaudePet --demo` cycles the pet through everything it can show, writing nothing to disk.
 

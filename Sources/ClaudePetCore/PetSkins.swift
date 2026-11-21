@@ -25,7 +25,7 @@ public enum PetSkins {
     /// says the skin is coming without pretending it can be picked.
     public static let all: [Skin] = [
         Skin(id: "cat", name: "Cat"),
-        Skin(id: "cultivator", name: "散修"),
+        Skin(id: "cultivator", name: "Cultivator"),
     ]
 
     /// The cat: the one skin every install is guaranteed to have.
