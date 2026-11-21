@@ -204,6 +204,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
         BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
+        BoardBridge.onDecide = { [weak self] id, ask, behavior in
+            self?.answer(sessionID: id, askId: ask, behavior: behavior)
+        }
         // The board shows the same quota reading the pet does — one pick from the same sources.
         BoardBridge.usage = { [weak self] in
             guard let u = self?.currentUsage(), u.percentagesUsable(now: Date()) else { return nil }

@@ -64,6 +64,30 @@ public enum PermissionSummary {
         return clamp(toolName.isEmpty ? "permission" : toolName)
     }
 
+    /// Longest text `full` returns. Past this a person is not reading it on a board either.
+    public static let fullMaxLength = 2000
+
+    /// Everything the prompt would allow, for a place with room to show it (the board's Approve
+    /// box): the whole command as written, the whole path or URL, and for any other tool its
+    /// name and arguments. Nothing is collapsed or shortened below `fullMaxLength`.
+    public static func full(toolName: String, toolInput: [String: Any]) -> String {
+        var text: String
+        switch toolName {
+        case "Bash" where toolInput["command"] is String:
+            text = toolInput["command"] as! String
+        case "Edit", "Write", "NotebookEdit", "Read":
+            text = toolName + " " + ((toolInput["file_path"] as? String) ?? (toolInput["notebook_path"] as? String) ?? "")
+        case "WebFetch" where toolInput["url"] is String:
+            text = "WebFetch " + (toolInput["url"] as! String)
+        default:
+            let args = (try? JSONSerialization.data(withJSONObject: toolInput, options: [.sortedKeys, .withoutEscapingSlashes]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            text = (toolName.isEmpty ? "permission" : toolName) + (args.isEmpty || args == "{}" ? "" : " " + args)
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.count > fullMaxLength ? String(text.prefix(fullMaxLength - 1)) + "…" : text
+    }
+
     /// Collapses whitespace so a multi-line heredoc does not become a
     /// multi-line bubble.
     static func collapse(_ s: String) -> String {

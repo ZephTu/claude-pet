@@ -165,6 +165,33 @@ enum HookEmit {
             askId = ""
         }
         if !askId.isEmpty { document["askId"] = askId }
+        // The whole of what would be allowed, for the board — carried like the phrase above.
+        let waitingOnFull: String
+        if question || askId.isEmpty {
+            waitingOnFull = ""
+        } else if event == "PermissionRequest" {
+            waitingOnFull = PermissionSummary.full(toolName: toolName, toolInput: toolInput)
+        } else {
+            waitingOnFull = previousField("waitingOnFull", at: path)
+        }
+        if !waitingOnFull.isEmpty { document["waitingOnFull"] = waitingOnFull }
+        // Who holds this prompt's hook open, and until when: the app offers Allow / Deny only
+        // while that is true (SessionState.askAnswerable). Written before the hold starts, so
+        // the app never sees an askId with nobody behind it; carried while the prompt stays up.
+        let holdsAsk = event == "PermissionRequest" && !askId.isEmpty
+            && (ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"] != nil
+                || ProcessProbe.isAnyRunning(named: "ClaudePet"))
+        let askedAt = Date()
+        let holdFor = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
+            .flatMap(TimeInterval.init).map { min($0, PermissionDecision.wait) } ?? PermissionDecision.wait
+        if holdsAsk {
+            document["askHeldBy"] = Int(getpid())
+            document["askHeldUntil"] = iso8601(askedAt.addingTimeInterval(holdFor))
+        } else if !askId.isEmpty, event != "PermissionRequest", let old = readDocument(at: path),
+                  old["askId"] as? String == askId {
+            if let by = old["askHeldBy"] { document["askHeldBy"] = by }
+            if let until = old["askHeldUntil"] { document["askHeldUntil"] = until }
+        }
         // Only a real user prompt updates this. It is what un-hides a session the
         // user muted: the session talking to itself — running tools, finishing a
         // turn — must not count as "we are back in conversation".
@@ -236,11 +263,9 @@ enum HookEmit {
 
         // Only while the app is there to be clicked. A test that sets the wait
         // itself is asking for it regardless.
-        if event == "PermissionRequest", !askId.isEmpty,
-           ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"] != nil
-            || ProcessProbe.isAnyRunning(named: "ClaudePet") {
+        if holdsAsk {
             awaitDecision(sessionID: sessionID, askId: askId, sessionFile: path,
-                          claudePID: pid, askedAt: Date())
+                          claudePID: pid, askedAt: askedAt)
         }
 
         // A finished tool call, with the duration Claude Code measured itself.

@@ -2264,7 +2264,7 @@ struct Runner {
         t.check("a session file carries the prompt's ask", askingSession?.askId == "a1")
         if let askingSession {
             let shown = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
-                                                  approved: { _ in false })
+                                                  approved: { _ in false }, answerable: { _, _ in true })
             t.check("the alarm knows which prompt it can answer",
                     shown.waitingSessionId == "s" && shown.waitingAskId == "a1")
             let settled = StateAggregator.aggregate([askingSession], now: t0, isLive: { _, _ in true },
@@ -2272,6 +2272,56 @@ struct Runner {
             t.check("an answered prompt leaves nothing to answer",
                     settled.sessions.first?.askId == "" && settled.waitingAskId == "")
         }
+
+        // An askId alone is not an answerable prompt: someone has to be holding its hook open.
+        func heldAsk(_ heldBy: Int32, _ until: TimeInterval, state: SessionActivity = .waiting) -> SessionState {
+            SessionState(sessionId: "s", project: "p", cwd: "/tmp", state: state, tool: "Bash", detail: "",
+                         since: t0, updatedAt: t0, askId: "a1",
+                         askHeldBy: heldBy == 0 ? nil : heldBy, askHeldUntil: heldBy == 0 ? nil : t0.addingTimeInterval(until))
+        }
+        let alive: (Int32) -> Bool = { _ in true }
+        t.check("a prompt being held, before its deadline, can be answered from outside",
+                heldAsk(4242, 300).askAnswerable(now: t0, isAlive: alive))
+        t.check("a prompt nobody held (the pet was not running) cannot",
+                !heldAsk(0, 0).askAnswerable(now: t0, isAlive: alive))
+        t.check("a prompt whose hold ran out cannot",
+                !heldAsk(4242, -1).askAnswerable(now: t0, isAlive: alive))
+        t.check("a prompt whose holder is gone cannot",
+                !heldAsk(4242, 300).askAnswerable(now: t0, isAlive: { _ in false }))
+        t.check("a session no longer waiting cannot",
+                !heldAsk(4242, 300, state: .busy).askAnswerable(now: t0, isAlive: alive))
+        let unheld: SessionState = heldAsk(0, 0)
+        t.check("the alarm offers no answer for a prompt nobody holds",
+                StateAggregator.aggregate([unheld], now: t0, isLive: { _, _ in true },
+                                          approved: { _ in false }).waitingAskId == "")
+        let heldFile = Data("""
+        {"sessionId":"s","project":"p","cwd":"/tmp","state":"waiting","tool":"Bash","detail":"",
+         "since":"2026-09-15T10:18:00Z","updatedAt":"2026-09-15T10:18:00Z","askId":"a1",
+         "waitingOn":"rm -rf build/","waitingOnFull":"rm -rf build/ && make release",
+         "askHeldBy":4242,"askHeldUntil":"2026-09-15T10:27:50Z"}
+        """.utf8)
+        let held = SessionState.decode(from: heldFile)
+        t.check("a session file carries who holds the prompt, until when, and the whole command",
+                held?.askHeldBy == 4242 && held?.askHeldUntil != nil
+                    && held?.waitingOnFull == "rm -rf build/ && make release")
+
+        // What the board's Approve box shows: all of it, not the bubble's phrase.
+        let longCommand = "git status && cd ~/x && " + String(repeating: "echo step; ", count: 10) + "rm -rf ~/important/data | sh"
+        t.check("a Bash prompt shows the whole command, uncollapsed",
+                PermissionSummary.full(toolName: "Bash", toolInput: ["command": longCommand]) == longCommand
+                    && PermissionSummary.describe(toolName: "Bash", toolInput: ["command": longCommand]).hasSuffix("…"))
+        t.check("an Edit prompt shows the whole path",
+                PermissionSummary.full(toolName: "Edit", toolInput: ["file_path": "/Users/u/proj/src/a.swift"])
+                    == "Edit /Users/u/proj/src/a.swift")
+        t.check("a WebFetch prompt shows the whole URL",
+                PermissionSummary.full(toolName: "WebFetch", toolInput: ["url": "https://example.com/a/b?c=1"])
+                    == "WebFetch https://example.com/a/b?c=1")
+        t.check("any other tool shows its arguments",
+                PermissionSummary.full(toolName: "mcp__x__delete", toolInput: ["id": 7, "path": "/a/b"])
+                    == #"mcp__x__delete {"id":7,"path":"/a/b"}"#)
+        t.check("a huge argument is capped",
+                PermissionSummary.full(toolName: "Bash", toolInput: ["command": String(repeating: "x", count: 5000)]).count
+                    == PermissionSummary.fullMaxLength)
 
         // ---- Struggle: failing over and over looks like work ----
         func failing(_ id: String, _ n: Int, state st: SessionActivity = .busy) -> SessionState {

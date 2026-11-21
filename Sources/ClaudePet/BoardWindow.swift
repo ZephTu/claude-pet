@@ -126,6 +126,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// What the pet's list draws each session's dot from — the board draws the same dot.
     static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
+    /// Answers a session's permission prompt the way the pet's Allow / Deny does — see
+    /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
+    /// prompt that was on screen; one that has since gone away approves nothing.
+    static var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -222,6 +226,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let claude = await claudePath() else { return ("[]", nil) }
             let r = await Self.run(claude, ["agents", "--json"])
             return (r.status == 0 ? r.out : "[]", nil)
+        case "decide":
+            guard let behavior = PermissionDecision.Behavior(rawValue: str("behavior")),
+                  !str("session").isEmpty, !str("ask").isEmpty else { return (nil, "bad decision") }
+            guard let decide = Self.onDecide else { return (nil, "answer it in the terminal") }
+            // The prompt the click was for must still be the one the pet can answer: a hold that
+            // ended, or a prompt replaced since the board drew it, approves nothing.
+            guard (Self.petDots?()[str("session")]?["askId"] as? String) == str("ask") else {
+                return (nil, "that prompt is no longer waiting here — answer it in the terminal")
+            }
+            decide(str("session"), str("ask"), behavior)
+            return (["ok": true], nil)
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
