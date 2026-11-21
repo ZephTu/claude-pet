@@ -2476,6 +2476,7 @@ struct Runner {
 
         JobTests.run(t)
         ContextTests.run(t)
+        SkinTests.run(t)
 
         t.finish()
     }

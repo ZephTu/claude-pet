@@ -1,11 +1,14 @@
-// 按 scripts/cat-sheets.json 出给 Seedance 的首帧/尾帧和提示词。
+// 按 scripts/<皮肤>-sheets.json 出给 Seedance 的首帧/尾帧和提示词。
 //
-//     swift scripts/cat-seeds.swift [outDir] [green|blue]
+//     swift scripts/skin-seeds.swift <皮肤> [outDir] [green|blue]
 //
-// 一个视频里上、中、下三行各一只猫，各做各的动作，所以视频数是片段数的三分之一。
+// <皮肤> 是 Resources/pet/skins/ 下的目录名，比如 cat、cultivator。outDir 默认
+// art/<皮肤>/sheets。
+//
+// 一个视频里上、中、下三行各一个角色，各做各的动作，所以视频数是片段数的三分之一。
 // 每个视频输出 outDir/<name>-first.png、<name>-last.png（1080×1920，9:16）和
 // <name>.txt（整段提示词，直接复制）。还有 outDir/layout.json，记下三只猫各自在
-// 画布里的位置，cat-frames.swift 抽帧时按它裁回来——裁出来的猫和 App 里现在的
+// 画布里的位置，skin-frames.swift 抽帧时按它裁回来——裁出来的猫和 App 里现在的
 // 猫大小、脚的位置都对得上。
 //
 // 只在出素材时跑，不进 App。
@@ -15,10 +18,15 @@ import ImageIO
 import UniformTypeIdentifiers
 
 let args = CommandLine.arguments
+guard args.count >= 2, args[1].allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" }) else {
+    print("usage: swift scripts/skin-seeds.swift <skin> [outDir] [green|blue]")
+    exit(2)
+}
+let skin = args[1]
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-let assets = root.appendingPathComponent("Resources/pet/skins/cat/assets")
-let out = URL(fileURLWithPath: args.count > 1 ? args[1] : "art/seedance/sheets")
-let background = args.count > 2 ? args[2] : "green"
+let assets = root.appendingPathComponent("Resources/pet/skins/\(skin)/assets")
+let out = URL(fileURLWithPath: args.count > 2 ? args[2] : "art/\(skin)/sheets")
+let background = args.count > 3 ? args[3] : "green"
 
 // 抠像用的底色。纯绿离橘猫、黑卫衣、灰电脑都最远；纯蓝是备选，猫身上同样没有。
 let key: CGColor = background == "blue"
@@ -31,9 +39,13 @@ struct Spec: Decodable {
     let canvas: [Int]
     let common: String
     let sheets: [Sheet]
+    /// 提示词里怎么称呼角色。不写就是猫：「一只小猫」「三只猫」「上方的猫」。
+    let one: String?
+    let three: String?
+    let who: String?
 }
 let spec = try JSONDecoder().decode(
-    Spec.self, from: Data(contentsOf: root.appendingPathComponent("scripts/cat-sheets.json")))
+    Spec.self, from: Data(contentsOf: root.appendingPathComponent("scripts/\(skin)-sheets.json")))
 let width = spec.canvas[0], height = spec.canvas[1]
 
 // 每行高 640。猫是 560² 的正方形，水平居中，上下各留 40：举手、蹦跳有地方去，
@@ -44,7 +56,7 @@ let boxes = (0..<3).map { row in
     CGRect(x: (width - side) / 2, y: row * rowHeight + 40, width: side, height: side)
 }
 
-/// 循环第一帧的抠图，cat-frames.swift 切循环时存的。过渡的首尾帧优先用它：
+/// 循环第一帧的抠图，skin-frames.swift 切循环时存的。过渡的首尾帧优先用它：
 /// 过渡要接上的是循环，不是原图。
 let anchors = out.deletingLastPathComponent().appendingPathComponent("anchors")
 
@@ -81,19 +93,30 @@ func write(_ image: CGImage, _ name: String) throws {
     guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
 }
 
+// 种子图一张不缺才开工：缺一张时 CoreImage 只会在半路抛一个看不出哪个皮肤的错。
+let poses = Set(spec.sheets.flatMap { $0.rows.flatMap { [$0.from, $0.to] } })
+let missing = poses.sorted().filter {
+    !FileManager.default.fileExists(atPath: assets.appendingPathComponent("\($0).png").path)
+}
+guard missing.isEmpty else {
+    print("missing seed pictures in \(assets.path): \(missing.map { "\($0).png" }.joined(separator: ", "))")
+    exit(1)
+}
+
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 let place = ["上方", "中间", "下方"]
+let one = spec.one ?? "一只小猫", three = spec.three ?? "三只猫", who = spec.who ?? "猫"
 for item in spec.sheets {
     // 循环表的首尾帧是原图：循环本身就是从这里切出来的。过渡表用循环的第一帧。
     let transition = item.rows.contains { $0.from != $0.to }
     try write(try sheet(item.rows.map(\.from), anchored: transition), "\(item.name)-first.png")
     try write(try sheet(item.rows.map(\.to), anchored: transition), "\(item.name)-last.png")
-    let lines = item.rows.enumerated().map { "\(place[$0.offset])的猫：\($0.element.action)" }
+    let lines = item.rows.enumerated().map { "\(place[$0.offset])的\(who)：\($0.element.action)" }
     // 只能给首帧的工具（豆包）不保证结尾回到原位，只能在提示词里把话说死；
     // 有尾帧的工具这句也无害。
     let back = item.rows.allSatisfy { $0.from == $0.to }
-        ? "视频最后一秒三只猫都回到和第一帧完全相同的姿势、位置和大小。\n" : ""
-    let prompt = "画面上、中、下三行各有一只小猫，三只猫同时做各自不同的动作，共\(item.duration)秒。\n"
+        ? "视频最后一秒\(three)都回到和第一帧完全相同的姿势、位置和大小。\n" : ""
+    let prompt = "画面上、中、下三行各有\(one)，\(three)同时做各自不同的动作，共\(item.duration)秒。\n"
         + lines.joined(separator: "\n") + "\n" + back + spec.common + "\n"
     try prompt.write(to: out.appendingPathComponent("\(item.name).txt"), atomically: true, encoding: .utf8)
     print("\(item.name): \(item.duration)s  \(item.rows.map { "\($0.from)→\($0.to)" }.joined(separator: " | "))")
@@ -101,7 +124,7 @@ for item in spec.sheets {
 
 let layout: [String: Any] = [
     "background": background,
-    // 三只猫的框，归一化、左上角为原点，抽帧时直接乘视频的宽高。
+    // 三个角色的框，归一化、左上角为原点，抽帧时直接乘视频的宽高。
     "rows": boxes.map { [$0.minX / CGFloat(width), $0.minY / CGFloat(height),
                          $0.width / CGFloat(width), $0.height / CGFloat(height)] },
 ]

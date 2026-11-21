@@ -144,7 +144,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // WebGL can be unavailable, and a texture can fail to decode. The page
         // falls back to still pictures on its own; this only records why.
         panel.onSkinFailed = { why in
-            NSLog("ClaudePet: the cat could not animate, showing stills: \(why)")
+            NSLog("ClaudePet: the pet could not animate, showing stills: \(why)")
         }
         // Follows the system's own Reduce Motion setting rather than keeping a
         // second switch for the same wish.
@@ -253,7 +253,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                 self?.bridge?.setMaxNotices(n)
             },
             onQuit: { NSApp.terminate(nil) },
-            onShowBoard: { [weak self] in self?.showBoard() }
+            onShowBoard: { [weak self] in self?.showBoard() },
+            onSkin: { [weak panel] id in panel?.setSkin(id) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
@@ -268,7 +269,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           keepListOpenOn: self.keepListOpen,
                           problem: HealthCollector.quickProblem(petHome: self.petHome),
-                          noticeHold: self.noticeHold, noticeCount: self.noticeCount)
+                          noticeHold: self.noticeHold, noticeCount: self.noticeCount,
+                          skin: panel?.skin ?? PetSkins.defaultID,
+                          canShowSkin: { panel?.canShow(skin: $0) ?? false })
             }
         }
         self.menu = menu

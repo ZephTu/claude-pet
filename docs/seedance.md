@@ -1,21 +1,47 @@
-# 用 Seedance 给猫做逐帧动画
+# 用 Seedance 给宠物做逐帧动画
 
-一个视频里上、中、下三只猫各做各的动作，循环类视频再用 10 秒装下「循环 + 小动作」两段。
-31 段动画一共 **8 个视频**。
+宠物的每个形象（皮肤）都走同一条流水线：一个视频里上、中、下三个角色各做各的动作，循环类
+视频再用 10 秒装下「循环 + 小动作」两段。31 段动画一共 **8 个视频**。下面以猫为例，换成
+别的皮肤只把命令里的 `cat` 换成皮肤 id（比如 `cultivator`）。
 
 ```bash
-swift scripts/cat-seeds.swift                 # → art/seedance/sheets/
-# …在 Seedance 里生成 8 个视频，存成 art/seedance/videos/<表名>.mp4
-scripts/cat-frames.sh art/seedance/videos     # → Resources/pet/skins/cat/frames/
-swift build && .build/debug/ClaudePet         # 或 ./scripts/install.sh
+swift scripts/skin-seeds.swift cat              # → art/cat/sheets/
+# …在 Seedance 里生成 8 个视频，存成 art/cat/videos/<表名>.mp4
+scripts/skin-frames.sh cat                      # → Resources/pet/skins/cat/frames/
+swift build && .build/debug/ClaudePet           # 或 ./scripts/install.sh
 ```
 
-`art/` 不进 git。要蓝底：`swift scripts/cat-seeds.swift art/seedance/sheets blue`（抽帧时
+`art/` 不进 git。要蓝底：`swift scripts/skin-seeds.swift cat art/cat/sheets blue`（抽帧时
 自动从画面四边判断是绿幕还是蓝幕）。
+
+**以前的目录是 `art/seedance/`**，现在按皮肤分开：已经有猫的视频的话，`mv art/seedance art/cat`
+一次就行，里面的 `sheets/`、`videos/`、`anchors/` 结构不变。
+
+## 每套皮肤由什么组成
+
+| 位置 | 内容 |
+| --- | --- |
+| `Resources/pet/skins/<皮肤>/assets/<姿势>.png` | 9 张静态图，384² 透明 PNG，也是生成视频的种子图。九张齐了菜单里才能选 |
+| `Resources/pet/skins/<皮肤>/frames/` | 抽帧结果（`frames.js` + 图集）。没有就只显示静态图 |
+| `scripts/<皮肤>-sheets.json` | 8 张表的动作、秒数、切法和提示词 |
+| `art/<皮肤>/{sheets,videos,anchors}/` | 种子表、视频、循环首帧，不进 git |
+
+App 里认识哪些皮肤写在 `Sources/ClaudePetCore/PetSkins.swift`（id 和菜单显示名）。九个姿势
+所有皮肤共用（`CatSkin.Pose`），表的排法、时长、切法也最好跟猫一样，这样同一个播放器就能
+放。只有猫有手绘贴图 + 形变网格的退路（`skins/cat/cat-pet.js`，按猫的贴图调过），别的皮肤
+没有帧时直接显示静态图。
+
+`<皮肤>-sheets.json` 的 `common` 段是每条提示词都带的画风和限制；`one` / `three` / `who` 三个
+字段决定提示词怎么称呼角色（猫的是「一只小猫」「三只猫」「猫」，不写就用这三个）。
+
+**绿幕抠像对配色有要求**：抽帧按「绿比红、蓝多出多少」抠背景，多出 0.10 开始变透明。所以
+角色身上不能有偏绿的颜色——偏绿的衣服、碧玉、绿色或青色光效都会被抠成半透明。散修的袍子
+用偏蓝的灰青、玉器用白玉、光效只用金色或白色，就是因为这个。问号、感叹号也不画进图里，
+由程序画在角色旁边。
 
 ## 每个视频怎么生成
 
-`art/seedance/sheets/` 里每张表三个文件：
+`art/<皮肤>/sheets/` 里每张表三个文件：
 
 | 文件 | 用途 |
 | --- | --- |
@@ -26,7 +52,7 @@ swift build && .build/debug/ClaudePet         # 或 ./scripts/install.sh
 | 项 | 设置 |
 | --- | --- |
 | 模式 | 图生视频 · **首尾帧** |
-| 比例 | **9:16**（三只猫竖着排，别的比例会切错，抽帧会警告） |
+| 比例 | **9:16**（三个角色竖着排，别的比例会切错，抽帧会警告） |
 | 分辨率 | 720p 足够（每只猫最后缩到 240px） |
 | 时长 | 按下表；生成成别的时长也能用，切点按比例换算 |
 | 镜头 | 固定 |
@@ -81,23 +107,23 @@ swift build && .build/debug/ClaudePet         # 或 ./scripts/install.sh
 
 **过渡表只用 5 秒。** 过渡只有 3 秒是有用的，后 2 秒只是让模型落稳到尾帧图上，切的时候
 扔掉。如果你的额度是按条数而不是按秒数算，可以改成 10 秒，再在
-`scripts/cat-sheets.json` 里把后半段从 `skip` 改成小动作。
+`scripts/<皮肤>-sheets.json` 里把后半段从 `skip` 改成小动作。
 
 **一张表里的三只猫都要指名道姓。** 模型最常犯的错是让三只猫做一样的动作，所以提示词按
-「上方的猫 / 中间的猫 / 下方的猫」分开写，并且明确说动作互不同步。
+「上方的猫 / 中间的猫 / 下方的猫」分开写（别的皮肤换成 `who` 里的称呼），并且明确说动作互不同步。
 
 ## 改动作
 
-动作、秒数、切法都在 `scripts/cat-sheets.json`。改完重跑 `cat-seeds.swift`，提示词就跟着
+动作、秒数、切法都在 `scripts/<皮肤>-sheets.json`。改完重跑 `skin-seeds.swift <皮肤>`，提示词就跟着
 变。片段名的规则：`<姿势>` 是循环，`<姿势>@<名字>` 是小动作，`<起>_to_<止>` 是过渡。播放器
 在一个姿势里待满 8 秒后，每播完一圈循环有约三分之一的机会插一段小动作；两个姿势之间没有
 直接过渡时，如果 `A_to_idle` 和 `idle_to_B` 都有，会经过 idle 走过去。
 
 ## 拿到视频之后
 
-每次都对整个目录跑 `scripts/cat-frames.sh art/seedance/videos`。这是全量重建：删掉的视频，
+每次都对整个目录跑 `scripts/skin-frames.sh <皮肤>`（默认读 `art/<皮肤>/videos`）。这是全量重建：删掉的视频，
 对应的帧也会被删。它会打印每段剪成了几帧、多长，缺的视频会写 `no video yet`。抠像有绿边
-或者缺块，把那段视频发我看，阈值在 `cat-frames.swift` 的 `key()` 里。
+或者缺块，把那段视频发我看，阈值在 `skin-frames.swift` 的 `key()` 里。
 
 体积参考：一段 5 秒循环约 1.5MB（JPEG 颜色 + PNG 透明度两张图集），一段过渡约 0.5MB，
 整套二十几 MB。
@@ -109,14 +135,14 @@ swift build && .build/debug/ClaudePet         # 或 ./scripts/install.sh
 - **首尾帧不能用原图。** 过渡播完接的是循环，循环是另一个视频里切出来的，表情、大小、
   电脑的样子都跟原图不一样。拿原图当尾帧，过渡最后一帧（原图，张嘴笑）到 working 循环
   第一帧（皱眉闭嘴）差 0.21–0.31，是循环里正常一帧（0.03）的七到十倍，看着就是一下
-  变脸。现在 `cat-frames.swift` 每切出一段循环就把它的第一帧存到 `art/seedance/anchors/`，
-  `cat-seeds.swift` 拼过渡表时优先用它——**所以一定先做完循环、跑一遍抽帧，再出过渡表的
+  变脸。现在 `skin-frames.swift` 每切出一段循环就把它的第一帧存到 `art/<皮肤>/anchors/`，
+  `skin-seeds.swift` 拼过渡表时优先用它——**所以一定先做完循环、跑一遍抽帧，再出过渡表的
   首尾帧**。
 - **接缝分要跟循环比，不能跟原图比。** 跟原图比给同一段打出过 0.034，实际接进循环是
   0.206。现在过渡的接缝分就是「过渡两头 vs 要接的那个循环的第一帧」，超过 0.25 的不进 App。
 - **模型最后一两帧会硬吸到尾帧上**（实测那一步 0.16）。抽帧时把过渡最后几帧逐渐混向
   最后一帧，变成一小段变形（0.034）。
-- **过渡要用带尾帧的 API 生成**（`python3 scripts/seedance.py <表名>`）。豆包 App 只能给
+- **过渡要用带尾帧的 API 生成**（`python3 scripts/seedance.py <皮肤> <表名>`）。豆包 App 只能给
   首帧，终点姿势是模型自己编的。
 - **API 出的视频比输入图整体大约 1.5%**，连钉死的尾帧也是：上下两行的猫会错开 5～6 像素，
   光这一点就让接缝从 0.05 涨到 0.25–0.29。抽帧时会给每段过渡首尾各求一个缩放 + 平移，

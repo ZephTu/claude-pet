@@ -18,6 +18,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onUnmuteAll: () -> Void
     private let onQuit: () -> Void
     private let onShowBoard: (() -> Void)?
+    private let onSkin: ((String) -> Void)?
 
     init(
         onPauseToggle: @escaping () -> Void,
@@ -29,9 +30,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onNoticeHold: @escaping (TimeInterval) -> Void,
         onNoticeCount: @escaping (Int) -> Void,
         onQuit: @escaping () -> Void,
-        onShowBoard: (() -> Void)? = nil
+        onShowBoard: (() -> Void)? = nil,
+        onSkin: ((String) -> Void)? = nil
     ) {
         self.onShowBoard = onShowBoard
+        self.onSkin = onSkin
         self.onNoticeHold = onNoticeHold
         self.onNoticeCount = onNoticeCount
         self.onPauseToggle = onPauseToggle
@@ -47,12 +50,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
         keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
-        noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount
+        noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount,
+        skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true }
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
             shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
-            noticeHold: noticeHold, noticeCount: noticeCount
+            noticeHold: noticeHold, noticeCount: noticeCount,
+            skin: skin, canShowSkin: canShowSkin
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -65,7 +70,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
                   shortcutOn: Bool = false, keepListOpenOn: Bool = false,
                   problem: HealthCheck? = nil,
                   noticeHold: TimeInterval = Chatter.noticeHold,
-                  noticeCount: Int = Chatter.noticeCount) -> NSMenu {
+                  noticeCount: Int = Chatter.noticeCount,
+                  skin: String = PetSkins.defaultID,
+                  canShowSkin: (String) -> Bool = { _ in true }) -> NSMenu {
         let menu = NSMenu()
 
         if let problem {
@@ -148,6 +155,25 @@ final class PetMenu: NSObject, NSMenuDelegate {
         count.submenu = counts
         options.addItem(count)
         options.addItem(.separator())
+
+        // Who the pet is drawn as. A skin whose pictures are not in this build
+        // yet is listed greyed out: no action, so AppKit disables it.
+        if onSkin != nil {
+            let character = NSMenuItem(title: "Character", action: nil, keyEquivalent: "")
+            let skins = NSMenu()
+            for option in PetSkins.all {
+                let ready = canShowSkin(option.id)
+                let item = NSMenuItem(title: ready ? option.name : "\(option.name) (no artwork yet)",
+                                      action: ready ? #selector(pickSkin(_:)) : nil, keyEquivalent: "")
+                item.target = self
+                item.representedObject = option.id
+                item.state = option.id == skin ? .on : .off
+                skins.addItem(item)
+            }
+            character.submenu = skins
+            options.addItem(character)
+            options.addItem(.separator())
+        }
         let health = NSMenuItem(title: "Connection Status…", action: #selector(showHealth),
                                 keyEquivalent: "")
         health.target = self
@@ -174,6 +200,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
     }
     @objc private func pickCount(_ sender: NSMenuItem) {
         if let n = sender.representedObject as? Int { onNoticeCount(n) }
+    }
+    @objc private func pickSkin(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { onSkin?(id) }
     }
     @objc private func quit() { onQuit() }
     @objc private func showBoard() { onShowBoard?() }

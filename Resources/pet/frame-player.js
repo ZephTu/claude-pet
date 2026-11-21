@@ -1,6 +1,6 @@
-/* Claude Pet cat, frame-by-frame. Plays the clips scripts/cat-frames.swift cut
- * out of the Seedance videos, and walks between poses through the transition
- * clips instead of cutting.
+/* Claude Pet, frame-by-frame, for any skin. Plays the clips
+ * scripts/skin-frames.swift cut out of the Seedance videos, and walks between
+ * poses through the transition clips instead of cutting.
  *
  * Same surface as CatPet (ready / setState / setPaused / setReducedMotion /
  * setStrength / dispose), so pet.js swaps one for the other and nothing else
@@ -52,7 +52,7 @@ class CatFrames {
   /**
    * @param {HTMLCanvasElement} canvas
    * @param {{size:number,fps:number,clips:Object}} manifest  window.CAT_FRAMES
-   * @param {string} base  where the atlases live, e.g. "skins/cat/frames/"
+   * @param {string} base  where the atlases live, e.g. "skins/<id>/frames/"
    * @param {Object<string,string>} stills  pose → still picture, the same map CatPet takes
    */
   constructor(canvas, manifest, base, stills, options = {}) {
