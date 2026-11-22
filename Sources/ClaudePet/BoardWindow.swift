@@ -399,12 +399,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         return opened.1 == nil ? (["ok": true, "session": session, "where": into], nil) : opened
     }
 
-    /// The shell line that runs `command` in `dir`, as `openInTerminal` types it.
+    /// The shell line that runs `command` in `dir`, as `openInTerminal` types it. The shell exits
+    /// after it, so when the session ends — Stop, /exit, Ctrl-C twice — its tab closes instead of
+    /// piling up at a prompt (Orca and iTerm2 close a tab whose shell exits; Terminal.app does when
+    /// its profile says "close if the shell exited cleanly", hence `exit 0`). The `;` also runs it
+    /// after a failed `cd`, so a tab the board opened never lingers.
     private static func shellLine(dir: String, command: [String]) -> String {
         var line = "cd \(shq(dir)) && "
         // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
         if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(shq(root)) " }
-        return line + command.map(shq).joined(separator: " ")
+        return line + command.map(shq).joined(separator: " ") + "; exit 0"
     }
 
     /// Types `command` into a tab titled `title` that sits at a shell prompt with no Claude Code
@@ -585,7 +589,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     /// Ends a terminal session's Claude Code process — what Ctrl-C twice would do in its tab.
-    /// The conversation is kept and Resume picks it up, in the same tab when it is still open.
+    /// The conversation is kept and Resume picks it up. A tab the board opened closes with it
+    /// (see `shellLine`); one you started yourself stays at its prompt, and Resume reuses it.
     /// The pid comes from the pet's own record and must still be a Claude Code process, so a
     /// reused pid is never signalled.
     private func stopSession(_ session: String) async -> (Any?, String?) {
