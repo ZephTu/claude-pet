@@ -2490,6 +2490,7 @@ struct Runner {
         ContextTests.run(t)
         SkinTests.run(t)
         IdleTabTests.run(t)
+        SessionControlTests.run(t)
         LanguageTests.run(t)
 
         print("\n-- language")

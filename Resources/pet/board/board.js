@@ -36,7 +36,9 @@ const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", ite
 function canMessage(s) {
   if (!s) return false;
   if (SENDABLE[s.terminal && s.terminal.kind]) return true;
-  return Boolean(s.background && s.bgId && s.state !== "busy");
+  // "waiting" is still mid-turn (a permission prompt or question is open): continuing it now
+  // would stop that turn and throw the pending step away.
+  return Boolean(s.background && s.bgId && s.state !== "busy" && s.state !== "waiting");
 }
 // What a send needs beyond the text: a background session goes by its short id, and is continued
 // with the board's skip-permissions choice, as a session started from here would be.

@@ -464,11 +464,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, L("no process recorded for this session", "没有记录这个 session 的进程"))
         }
         guard ProcessProbe.isClaude(pid: pid) else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
-        // The process's own command line names its session when the board started it; a
-        // session started by hand may not say, and then the pet's record is all there is.
-        if let args = ProcessProbe.arguments(pid: pid), args.contains("--session-id") || args.contains("--resume"),
-           !args.contains(session) {
-            return (nil, L("the recorded process belongs to another session — stop it in its terminal", "记录的进程属于另一个 session — 请在它的终端里停掉"))
+        // Claude Code's own file for the pid names the session it is on now (it follows /clear,
+        // and a reused pid has its new owner's file); the command line is the fallback.
+        let sessionsFile = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")
+        guard SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf: sessionsFile),
+                                              arguments: ProcessProbe.arguments(pid: pid)) else {
+            return (nil, L("that process is on another session now — stop it in its terminal", "这个进程现在已经是另一个 session 了 — 请在它的终端里停掉"))
         }
         kill(pid, SIGTERM)
         for _ in 0..<30 {
@@ -671,6 +672,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
         }
+        // Typing into a tab whose session has ended would hand the message to the shell as a
+        // command. The board's list can be seconds old, so check the process itself.
+        if let pid = Self.recordedPid(session) {
+            guard ProcessProbe.isClaude(pid: pid),
+                  SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf:
+                      FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")),
+                                                  arguments: ProcessProbe.arguments(pid: pid))
+            else { return (nil, L("that session is not running any more — Resume it first", "这个 session 已经不在运行了 — 先 Resume 它")) }
+        }
         switch t.kind {
         case "terminal":
             guard TerminalTarget.isSafeTTYPath(t.handle) else { return (nil, L("unexpected Terminal tty", "Terminal 的 tty 不对劲")) }
@@ -732,6 +742,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    /// The Claude Code process the pet recorded for the session, if it recorded one.
+    private static func recordedPid(_ session: String) -> Int32? {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let pid = (obj["pid"] as? NSNumber)?.int32Value, pid > 1 else { return nil }
+        return pid
+    }
+
     /// When the session last took a prompt, per the pet's record — changes when a message lands.
     private static func lastPromptAt(_ session: String) -> String {
         let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
@@ -750,21 +769,29 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
               bgId.range(of: #"^[0-9a-f]{8}$"#, options: .regularExpression) != nil else { return (nil, L("not a session id", "不是有效的 session id")) }
         if busy { return (nil, L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试")) }
         guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
-        func running() async -> [String: Any]? {
+        func listing() async -> SessionControl.Listing {
             let list = await Self.run(claude, ["agents", "--json"])
-            guard let data = list.out.data(using: .utf8),
-                  let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
-            return rows.first { ($0["sessionId"] as? String) == session }
+            return SessionControl.listing(exitStatus: list.status, output: list.out, session: session)
         }
-        if let row = await running() {
-            let st = ((row["status"] as? String) ?? (row["state"] as? String) ?? "").lowercased()
-            if st == "busy" || st == "running" || st == "working" { return (nil, L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试")) }
+        // Resuming a session that is still running starts a second copy of it, so "can't tell"
+        // is never read as "not running".
+        switch await listing() {
+        case .unknown:
+            return (nil, L("couldn't check whether it is running (claude agents failed) — try again", "没法确认它是否在运行（claude agents 失败）— 请再试一次"))
+        case .absent:
+            break
+        case .running(let st):
+            guard SessionControl.betweenTurns(st) else {
+                return (nil, st == "waiting" ? L("it is waiting on a prompt in its turn — Attach to answer it", "它在等一个确认或回答，这一轮还没结束 — 用 Attach 去回答")
+                                             : L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试"))
+            }
             _ = await Self.run(claude, ["stop", bgId])
+            var stopped = false
             for _ in 0..<25 {
-                if await running() == nil { break }
+                if await listing() == .absent { stopped = true; break }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
-            if await running() != nil { return (nil, L("it did not stop to take the message — Attach to talk to it", "它没有停下来接收消息 — 用 Attach 和它对话")) }
+            if !stopped { return (nil, L("it did not stop to take the message — Attach to talk to it", "它没有停下来接收消息 — 用 Attach 和它对话")) }
         }
         var dir = Self.sessionCwd(session)
         if dir == nil {   // a background session the pet never saw: `claude agents` knows its folder
