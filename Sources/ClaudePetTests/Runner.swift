@@ -2491,6 +2491,7 @@ struct Runner {
         SkinTests.run(t)
         IdleTabTests.run(t)
         SessionControlTests.run(t)
+        OrcaPlaceTests.run(t)
         LanguageTests.run(t)
 
         print("\n-- language")

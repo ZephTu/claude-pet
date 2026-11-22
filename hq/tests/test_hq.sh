@@ -87,7 +87,32 @@ grep -q "category 'defect' → 'perf'" "$T"/root/tasks/T-002-*/TASK.md && ok "re
 "$HQ" category remove perf --to '' >/dev/null && grep -q "^category: *$" "$T"/root/tasks/T-002-*/TASK.md && ok "remove --to '' leaves tasks uncategorized"
 "$HQ" category add 'a#b' 2>/dev/null && fail "bad category accepted" || ok "category names are validated"
 "$HQ" ref add T-001 "https://example.com/doc" && "$HQ" ref add T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc","QA-1"]' && ok "ref add"
-"$HQ" ref remove T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc"]' && ok "ref remove"
+"$HQ" ref remove T-001 "QA-1" >/dev/null && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc"]' && ok "ref remove"
+"$HQ" ref add T-001 "doc v2 https://example.com/doc/" && "$HQ" board --json | python3 -c 'import json,sys; r=json.load(sys.stdin)["tasks"][0]["refs"]; assert r==["doc v2 https://example.com/doc/"], r' && ok "ref add with a known URL replaces the title in place"
+"$HQ" ref add T-001 "QA-2" && "$HQ" ref remove T-001 "https://example.com/doc" >/dev/null && "$HQ" board --json | python3 -c 'import json,sys; r=json.load(sys.stdin)["tasks"][0]["refs"]; assert r==["QA-2"], r' && ok "ref remove by URL drops every entry with it"
+refs() { "$HQ" board --json | python3 -c 'import json,sys; print(json.dumps([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="T-001"][0]["refs"], ensure_ascii=False))'; }
+"$HQ" ref add T-001 "compare https://a.example/x https://b.example/y" && "$HQ" ref add T-001 "x https://a.example/x" && "$HQ" ref add T-001 "y https://b.example/y" \
+  && [ "$(refs)" = '["QA-2", "compare https://a.example/x https://b.example/y", "x https://a.example/x", "y https://b.example/y"]' ] && ok "a ref with two URLs is keyed by its whole text, not its first link" || fail "multi-URL ref merged: $(refs)"
+"$HQ" ref remove T-001 "https://a.example/x" >/dev/null && [ "$(refs)" = '["QA-2", "compare https://a.example/x https://b.example/y", "y https://b.example/y"]' ] && ok "removing a link leaves a two-URL ref that mentions it" || fail "multi-URL ref removed: $(refs)"
+"$HQ" ref add T-001 "compare  https://a.example/x   https://b.example/y" && "$HQ" ref add T-001 "QA-2 " && [ "$(refs)" = '["QA-2", "compare  https://a.example/x   https://b.example/y", "y https://b.example/y"]' ] && ok "refs without one URL match with whitespace collapsed" || fail "whitespace key: $(refs)"
+"$HQ" ref remove T-001 "compare https://a.example/x https://b.example/y" >/dev/null && "$HQ" ref remove T-001 "y https://b.example/y" >/dev/null && [ "$(refs)" = '["QA-2"]' ] || fail "cleanup: $(refs)"
+"$HQ" ref add T-001 "see https://example.com/p/1)." && "$HQ" ref add T-001 "p1 https://example.com/p/1/;" && "$HQ" ref add T-001 "p1 merged https://example.com/p/1" \
+  && [ "$(refs)" = '["QA-2", "p1 merged https://example.com/p/1"]' ] && ok "trailing / ) . , ; : don't split a link's key" || fail "punctuation split keys: $(refs)"
+"$HQ" ref add T-001 "full-width https://example.com/p/1）。" && [ "$(refs)" = '["QA-2", "full-width https://example.com/p/1）。"]' ] && ok "full-width punctuation after a URL is not part of it" || fail "full-width: $(refs)"
+# remove prints what went; restore puts every entry back where it was
+C001="$(ls "$T"/root/tasks/T-001-*/TASK.md)"
+python3 - "$C001" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"^refs: .*$", 'refs: ["old https://example.com/r", "QA-2", "new https://example.com/r/"]', s, count=1, flags=re.M)
+open(p, "w", encoding="utf-8").write(s)
+PY2
+out="$("$HQ" ref remove T-001 "new https://example.com/r/")"
+[ "$out" = '{"removed": [{"i": 0, "ref": "old https://example.com/r"}, {"i": 2, "ref": "new https://example.com/r/"}]}' ] && [ "$(refs)" = '["QA-2"]' ] && ok "ref remove prints every entry it removed as JSON" || fail "remove output: $out / $(refs)"
+"$HQ" ref restore T-001 "$out" && [ "$(refs)" = '["old https://example.com/r", "QA-2", "new https://example.com/r/"]' ] && ok "ref restore puts them all back in their places" || fail "restore: $(refs)"
+"$HQ" ref restore T-001 "$out" && [ "$(refs)" = '["old https://example.com/r", "QA-2", "new https://example.com/r/"]' ] && ok "restoring again changes nothing" || fail "second restore: $(refs)"
+"$HQ" ref restore T-001 "not json" 2>/dev/null && fail "restore took junk" || ok "restore refuses anything but remove's JSON"
+"$HQ" ref remove T-001 "https://example.com/r" >/dev/null && [ "$(refs)" = '["QA-2"]' ] || fail "cleanup: $(refs)"
 # projects: auto-assign by directory, rename / guarded remove like categories
 mkdir -p "$T/proj-x/sub"
 "$HQ" project add projx --path "$T/proj-x" && "$HQ" project list | grep -q "^projx" && ok "project add"
@@ -188,6 +213,8 @@ assert sys.argv[2] in t, t
 PY
 stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun the suite\ndrop: @me send the token request\n```')" >/dev/null
 grep -q -- "- \[x\] @claude rerun the suite" "$C1" && grep -q -- "- \[-\] @me send the token request" "$C1" && ok "done/drop find the todo by its text"
+stop sess-1 "$(printf 'ok\n```hq-update\nref: PR #9 (merged) https://example.com/pr/9\n```')" >/dev/null
+grep -q "PR #9 (merged) https://example.com/pr/9" "$C1" && [ "$(grep -o "example.com/pr/9" "$C1" | wc -l | tr -d ' ')" = 1 ] && ok "hq-update ref with a known URL renames it instead of adding a duplicate" || fail "ref duplicated: $(grep refs "$C1")"
 out="$(stop sess-1 "$(printf 'ok\n```hq-update\nstatus: finished\ndone: no such todo\nwhatever this is\n```')")"
 echo "$out" | python3 -c 'import json,sys; r=json.load(sys.stdin)["reason"]; assert "status must be one of" in r and "no such todo" in r and "whatever this is" in r, r' && ok "lines it cannot apply are sent back once"
 python3 -c 'import json,sys; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"```hq-update\nstatus: nope\n```"}))' | "$HQ" hook | grep -q block && fail "bad block looped" || ok "a bad block is not sent back twice"

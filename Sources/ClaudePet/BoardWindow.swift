@@ -355,6 +355,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// The user's choice on the board: sessions it starts or resumes skip Claude Code's permission prompts.
     private static let skipFlag = "--dangerously-skip-permissions"
 
+    /// Sessions a Resume is under way for, and those whose woken Orca tab is still watched after
+    /// Resume answered (see resumeInOrcaPlace): a second Resume of one is turned away.
+    private static var resuming = Set<String>()
+    private static var watching = Set<String>()
+
     /// Picks up an earlier session of a task where it left off: `claude --resume <id>` in the
     /// directory it ran in (Claude Code keeps a conversation under that directory), bound to the
     /// task again. A background place opens a terminal instead — there is nothing to attach to.
@@ -367,6 +372,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
             return (nil, L("no such directory: \(dir)", "没有这个目录：\(dir)"))
         }
+        // A second Resume of the same session while the first is still at it (a double click)
+        // would wake, type or open a tab twice — and run the session twice.
+        guard !Self.resuming.contains(session), !Self.watching.contains(session) else {
+            return (nil, L("Already resuming this session — give it a moment", "正在续上这个 session，稍等一下"))
+        }
+        Self.resuming.insert(session)
+        defer { Self.resuming.remove(session) }
         guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
         let bound = await hq(["bind", task, "--session=\(session)"])
         if let err = bound.1 { return (nil, err) }
@@ -374,6 +386,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
         // The tab keeps the session's own name, as the pet and the board show it.
         let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
+        // Orca knows which tab it has this session in, asleep after a restart too — go back there.
+        if into == "orca", let back = await resumeInOrcaPlace(session: session, dir: dir, command: cmd, focus: focus) {
+            return back
+        }
         // A tab this session ran in before — kept by Orca or Terminal across a restart, or left
         // behind by Stop — is reused rather than opening a second one beside it.
         if let reused = await resumeInIdleTab(place: into, title: title, dir: dir, command: cmd, focus: focus) {
@@ -429,17 +445,141 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    /// Resumes a session in the Orca tab Orca has it in, or nil when Orca has no usable tab for
+    /// it (then the caller looks for an idle tab by title, or opens one). Orca may have it in
+    /// several panes; `OrcaPlace.choose` picks one. After a restart a tab sleeps until its
+    /// workspace is opened, and Orca then resumes the session in it by itself — so a sleeping
+    /// tab is woken and nothing is typed (typing too would run the session twice), unless it
+    /// wakes to a bare prompt and stays there (Stop had ended it before the restart). A tab Stop
+    /// left at a shell prompt gets the resume command; one that already runs the session is only
+    /// brought forward; one another session or program runs in is left alone.
+    private func resumeInOrcaPlace(session: String, dir: String, command: [String],
+                                   focus: Bool) async -> (Any?, String?)? {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else { return nil }
+        let cli = app.appending(path: "Contents/Resources/bin/orca").path
+        let asked = await Self.run(cli, ["agent", "show", session, "--json"], timeout: Self.orcaTimeout)
+        guard let id = OrcaPlace.orcaSessionID(showOutput: asked.out) else { return nil }
+        let shown = await Self.run(cli, ["agent", "show", "orca_session_id:\(id)", "--json"], timeout: Self.orcaTimeout)
+        let places = OrcaPlace.places(showOutput: shown.out)
+        guard !places.isEmpty else { return nil }
+        func terminals() async -> [[String: Any]]? {
+            let list = await Self.run(cli, ["terminal", "list", "--json"], timeout: Self.orcaTimeout)
+            guard list.status == 0, let data = list.out.data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return (root["result"] as? [String: Any])?["terminals"] as? [[String: Any]]
+        }
+        func bringForward(_ handle: String) async {
+            guard focus else { return }
+            _ = await Self.run(cli, ["terminal", "switch", "--terminal", handle, "--json"], timeout: Self.orcaTimeout)
+            NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate()
+        }
+        let line = Self.shellLine(dir: dir, command: command)
+        /// Types the resume command; an error when Orca doesn't confirm it — falling back to
+        /// another tab then could type it twice.
+        func type(_ handle: String) async -> String? {
+            let sent = await Self.run(cli, ["terminal", "send", "--terminal", handle, "--text", line, "--enter", "--json"],
+                                      timeout: Self.orcaSendTimeout)
+            guard sent.status == 0, TerminalTarget.orcaSwitchSucceeded(sent.out) else {
+                return L("Orca didn't confirm typing the resume command into the session's tab — check that tab before trying again",
+                         "Orca 没确认把续上的命令输进这个 session 的标签页——先看看那个标签页再重试")
+            }
+            return nil
+        }
+        guard let terms = await terminals() else {
+            return (nil, L("Couldn't read Orca's terminals — try Resume again", "读不到 Orca 的终端列表——再点一次 Resume 试试"))
+        }
+        let done: (String, Bool) -> (Any?, String?) = { handle, woke in
+            var r: [String: Any] = ["ok": true, "session": session, "where": "orca", "reused": handle]
+            if woke { r["woke"] = true }
+            return (r, nil)
+        }
+        let woken: OrcaPlace.Place
+        switch OrcaPlace.choose(places: places, terminals: terms, session: session, recorded: Self.liveSessionsByHandle()) {
+        case .bringForward(_, let handle)?:
+            await bringForward(handle)
+            return done(handle, false)
+        case .type(_, let handle)?:
+            if let err = await type(handle) { return (nil, err) }
+            await bringForward(handle)
+            return done(handle, false)
+        case nil:
+            return nil   // every tab it is in runs something else
+        case .wake(let place)?:
+            woken = place
+        }
+        // Asleep: opening its workspace wakes the tab, and Orca resumes the session in it.
+        let woke = await Self.run(cli, ["worktree", "activate", "--worktree", OrcaPlace.worktreeSelector(woken), "--json"],
+                                  timeout: Self.orcaSendTimeout)
+        guard woke.status == 0, TerminalTarget.orcaSwitchSucceeded(woke.out) else {
+            return (nil, L("This session sleeps in an Orca tab the board can't wake — open its workspace in Orca and Orca resumes it there",
+                           "这个 session 在 Orca 一个休眠的标签页里，board 叫不醒——在 Orca 里打开它所在的工作区，Orca 会在原标签页里恢复它"))
+        }
+        /// Polls the woken tab for up to 10 s: brought forward once it is live, and given the
+        /// resume command if it stays at a bare prompt (see OrcaPlace.WakeWatch). Answers the
+        /// tab's handle when one was seen, and the error if typing failed.
+        func watch() async -> (handle: String?, error: String?) {
+            var w = OrcaPlace.WakeWatch()
+            var seen: String?
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let terms = await terminals() else { continue }
+                let step = w.step(places: places, woken: woken, terminals: terms, session: session,
+                                  recorded: Self.liveSessionsByHandle())
+                switch step {
+                case .arrived(let h):
+                    if h != seen { await bringForward(h) }
+                    return (h, nil)
+                case .type(let h):
+                    if h != seen { await bringForward(h) }
+                    return (h, await type(h))   // once
+                case .wait(let h?) where h != seen:
+                    seen = h
+                    await bringForward(h)
+                case .wait:
+                    continue
+                }
+            }
+            return (seen, nil)
+        }
+        // Staying on the board: nothing to switch to, so answer now. The watch still has to run
+        // (a tab that wakes to a bare prompt needs the command), so it carries on in the
+        // background, and a second Resume of the session is turned away until it is over.
+        guard focus else {
+            Self.watching.insert(session)
+            Task { @MainActor in
+                _ = await watch()
+                Self.watching.remove(session)
+            }
+            return (["ok": true, "session": session, "where": "orca", "woke": true], nil)
+        }
+        let watched = await watch()
+        if let err = watched.error { return (nil, err) }
+        if let h = watched.handle { return done(h, true) }
+        return (["ok": true, "session": session, "where": "orca", "woke": true], nil)
+    }
+
+    /// Orca CLI calls on Resume's path get this long before they are ended — a hung Orca must
+    /// not leave Resume (and its in-flight guard) stuck. `terminal send` waits up to 5 s itself
+    /// to see the line submitted, and waking a workspace can take a while, so those get longer.
+    private static let orcaTimeout: TimeInterval = 5
+    private static let orcaSendTimeout: TimeInterval = 10
+
     /// Terminal handles that a live Claude Code session is recorded in — those tabs are not idle.
-    private static func liveTerminalHandles() -> Set<String> {
+    private static func liveTerminalHandles() -> Set<String> { Set(liveSessionsByHandle().keys) }
+
+    /// Which Claude Code session the pet records live in each terminal handle — Orca's own
+    /// `agentIdentity` names only the provider, so this is how Resume tells its session's tab
+    /// from one another session runs in.
+    private static func liveSessionsByHandle() -> [String: String] {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions")
-        var out = Set<String>()
+        var out: [String: String] = [:]
         for f in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         where f.pathExtension == "json" {
             guard let data = try? Data(contentsOf: f),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let pid = (obj["pid"] as? NSNumber)?.int32Value, ProcessProbe.isClaude(pid: pid),
                   let handle = (obj["terminal"] as? [String: Any])?["handle"] as? String else { continue }
-            out.insert(handle)
+            out[handle] = (obj["sessionId"] as? String) ?? f.deletingPathExtension().lastPathComponent
         }
         return out
     }
@@ -883,7 +1023,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private struct Result: Sendable { let status: Int32; let out: String; let err: String }
     private final class DataBox: @unchecked Sendable { var value = Data() }
 
-    private nonisolated static func run(_ tool: String, _ args: [String], cwd: String? = nil) async -> Result {
+    /// Runs a tool to the end. With a `timeout`, a tool still running then is ended (SIGTERM,
+    /// then SIGKILL a second later) and answers whatever it printed, with its signal status.
+    private nonisolated static func run(_ tool: String, _ args: [String], cwd: String? = nil,
+                                        timeout: TimeInterval? = nil) async -> Result {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()
@@ -905,6 +1048,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 p.standardError = err
                 do {
                     try p.run()
+                    if let timeout {
+                        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+                            guard p.isRunning else { return }
+                            p.terminate()
+                            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+                                if p.isRunning { kill(p.processIdentifier, SIGKILL) }
+                            }
+                        }
+                    }
                     // Drain both pipes while the child runs, or a full one blocks it forever.
                     let errData = DataBox()
                     let drained = DispatchGroup()

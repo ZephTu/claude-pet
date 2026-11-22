@@ -62,7 +62,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -361,7 +361,7 @@ function earlierList(t) {
         <div class="meta">${T("ended", "已结束")} · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
       <div class="icons">
         <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="${T("Read its conversation", "看它的对话")}">${ICON.peek}</button>
-        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
+        <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r))}" ${ui.resuming.has(r.sessionId) ? "disabled" : ""}>↻ Resume</button>
         <button class="icon" data-confirm="${T("Remove?", "移除？")}" data-action="forget-session" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" title="${T("Remove it from this task's sessions (the conversation itself is kept)", "从这个任务的 session 列表里去掉（对话本身保留）")}">✕</button>
       </div></div>`).join("") +
     (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? T("Show fewer", "收起") : T(`Show all ${rows.length}`, `显示全部 ${rows.length} 个`)}</button>` : "");
@@ -939,7 +939,7 @@ function focusCard(t) {
       <button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   // No live session: offer to resume the latest one, beside New session.
   const resume = live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
-    ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">Resume</button>` : ""; })();
+    ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}" ${ui.resuming.has(r.sessionId) ? "disabled" : ""}>Resume</button>` : ""; })();
   // Clicking the card opens or closes its details, like a row in All; the details themselves
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
   // Closed, a card is its next step, what it asks you, and your own todos; Claude's todos, the
@@ -988,8 +988,20 @@ function kindOfUrl(u) {
   if (/\/wiki\/|confluence|docs\.google|notion\.(so|site)|\.md(\b|$)|claude\.ai\/artifact/i.test(u)) return "doc";
   return "link";
 }
+const REF_URL_RE = /https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/g;
+// Python's str.split() whitespace, so a collapsed key here is the one hq makes.
+const PY_SPACE = /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+// Which refs are the same — exactly hq's ref_key: a ref with one literal URL is that URL minus
+// trailing `/).,;:`; anything else (no URL, a ticket key, or two or more URLs) is its text with
+// whitespace collapsed. Never the URL a links rule builds: hq doesn't know those.
+function refKey(ref) {
+  const text = String(ref);
+  const urls = text.match(REF_URL_RE) || [];
+  if (urls.length === 1) return urls[0].replace(/[\/).,;:]+$/, "");
+  return text.split(PY_SPACE).filter(Boolean).join(" ");
+}
 function resolveRef(ref) {
-  const url = (String(ref).match(/https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/) || [])[0];
+  const url = (String(ref).match(new RegExp(REF_URL_RE.source)) || [])[0];
   if (url) {
     const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
     return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
@@ -1094,7 +1106,9 @@ function renderTaskBody(t) {
     lastDay = day;
     return `${head}<li class="e"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
   }).join("");
-  const refs = list(t.refs).map(resolveRef);
+  // One entry per link: a card may still hold the same URL under two titles (written before hq
+  // merged them), and the later title is the one to show.
+  const refs = [...new Map(list(t.refs).map((ref) => [refKey(ref), resolveRef(ref)])).values()];
   const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
   // Settled things — status, project, category, directories, links — sit in the right rail as
@@ -2154,15 +2168,21 @@ document.addEventListener("click", async (ev) => {
     }
     case "hist-all": ui.histAll.has(d.task) ? ui.histAll.delete(d.task) : ui.histAll.add(d.task); return render();
     case "resume": {
+      // Locked while its request is out (waking an Orca tab can take seconds), so a second click
+      // can't resume the session twice.
+      if (ui.resuming.has(d.session)) return;
       const t = taskById(d.task);
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
+      ui.resuming.add(d.session);
+      render();
       try {
         const r = await apiObj("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "", focus: !stayOnBoard() });
-        const tab = r.reused ? T(`its old ${PLACES[place]} tab`, `原来的 ${PLACES[place]} 标签页`) : PLACES[place];
+        const tab = r.reused || r.woke ? T(`its old ${PLACES[place]} tab`, `原来的 ${PLACES[place]} 标签页`) : PLACES[place];
         toast(stayOnBoard() ? T(`Resumed in ${tab} — bound to ${d.task}; carry on here`, `已在${tab}里续上——绑定到 ${d.task}；在这里接着干`) : T(`Resuming it in ${tab} — bound to ${d.task}`, `正在${tab}里续上——绑定到 ${d.task}`));
         stayWith(d.session, d.name);
-      } catch (e) { toast(String(e.message || e), true); }
+      } catch (e) { toast(String(e.message || e), true); } finally { ui.resuming.delete(d.session); }
       delete ui.history[d.task];
+      render();
       setTimeout(() => refresh(), 2500);
       return;
     }
@@ -2295,8 +2315,15 @@ document.addEventListener("click", async (ev) => {
     case "ref-remove": {
       const ref = d.ref;
       try {
-        await api("ref", { action: "remove", task: d.task, ref });
-        toast(T("Removed", "已移除"), false, () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复")));
+        // ✕ removes every entry with this link; hq prints them ({"removed": [{i, ref}, …]}) and
+        // Undo puts them all back where they were. An older hq prints nothing: re-add this one.
+        const out = await api("ref", { action: "remove", task: d.task, ref });
+        let removed = null;
+        try { removed = JSON.parse(out).removed; } catch (e) { /* older hq */ }
+        const undo = Array.isArray(removed) && removed.length
+          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(removed) }, T("Restored", "已恢复"))
+          : () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复"));
+        toast(T("Removed", "已移除"), false, undo);
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
