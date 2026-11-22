@@ -29,6 +29,10 @@ import Foundation
 ///    its scripting interface answers to, and tty is the one field the shell's
 ///    environment and the scripting interface both carry.
 ///
+///  - **terminal** is macOS's own Terminal.app, also through AppleScript and the
+///    same Automation permission. Its shells carry no per-tab id at all, but its
+///    scripting `tab` objects have a `tty`, so it is addressed like Ghostty.
+///
 /// Every failure path is silent-but-logged on purpose. A jump that does not work
 /// must never take the pet down or block the UI, and there is no good way to
 /// surface an error from a borderless accessory panel.
@@ -39,6 +43,7 @@ enum TerminalJump {
         case "iterm2": jumpITerm(sessionID: handle)
         case "vscode": jumpEditor(handle: handle)
         case "ghostty": jumpGhostty(tty: handle)
+        case "terminal": jumpTerminalApp(tty: handle)
         default: NSLog("ClaudePet: unknown terminal kind \(kind)")
         }
     }
@@ -48,6 +53,7 @@ enum TerminalJump {
     private static let orcaBundleID = "com.stablyai.orca"
     private static let iTermBundleID = "com.googlecode.iterm2"
     private static let ghosttyBundleID = "com.mitchellh.ghostty"
+    static let terminalAppBundleID = "com.apple.Terminal"
 
     private static func jumpOrca(handle: String) {
         guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: orcaBundleID) else {
@@ -146,6 +152,45 @@ enum TerminalJump {
             }
             activate(bundleID: ghosttyBundleID)
         }
+    }
+
+    // MARK: - Terminal.app
+
+    private static func jumpTerminalApp(tty: String) {
+        guard TerminalTarget.isSafeTTYPath(tty) else {
+            NSLog("ClaudePet: refusing to script Terminal with a suspicious tty")
+            return
+        }
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: terminalAppBundleID).isEmpty else {
+            NSLog("ClaudePet: Terminal is not running")
+            return
+        }
+        run(URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", terminalAppSelectScript(tty: tty)]) { ok, stdout in
+            guard ok, stdout.contains("ok") else {
+                NSLog("ClaudePet: Terminal tab not found for this session")
+                return
+            }
+            activate(bundleID: terminalAppBundleID)
+        }
+    }
+
+    /// Selects the Terminal.app tab on `tty` and brings its window to the front.
+    /// The caller has checked `tty` with `isSafeTTYPath`.
+    static func terminalAppSelectScript(tty: String) -> String {
+        """
+        tell application "Terminal"
+          repeat with w in windows
+            repeat with t in tabs of w
+              if tty of t is "\(tty)" then
+                set selected of t to true
+                set index of w to 1
+                return "ok"
+              end if
+            end repeat
+          end repeat
+        end tell
+        return "notfound"
+        """
     }
 
     // MARK: - VS Code, Cursor and the like

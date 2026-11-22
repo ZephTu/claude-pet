@@ -42,6 +42,10 @@ public enum TerminalTarget {
             // a uuid the shell never sees. Both do agree on tty, and a tty is
             // reassigned only after the tab that held it is gone.
             return isSafeTTYPath(tty) ? TerminalRef(kind: "ghostty", handle: tty) : nil
+        case "Apple_Terminal":
+            // Terminal.app exports no per-tab id at all, but its AppleScript `tab` objects
+            // carry a `tty` property — the same field Ghostty is addressed by.
+            return isSafeTTYPath(tty) ? TerminalRef(kind: "terminal", handle: tty) : nil
         case "vscode":
             // VS Code and everything forked from it — Cursor, Windsurf — say
             // "vscode" here. Which one it actually is comes from the app.
@@ -62,7 +66,7 @@ public enum TerminalTarget {
     /// written by a future pet-emit this binary predates — makes the row
     /// non-clickable rather than giving the user a dead click.
     public static func canJump(kind: String) -> Bool {
-        kind == "orca" || kind == "iterm2" || kind == "vscode" || kind == "ghostty"
+        kind == "orca" || kind == "iterm2" || kind == "vscode" || kind == "ghostty" || kind == "terminal"
     }
 
     // MARK: - Ghostty

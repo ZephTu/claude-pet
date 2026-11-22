@@ -19,7 +19,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 
 - **Click the cat** for the session list, grouped by what wants you first: *Needs you* (approvals, questions), *Finished* (turns you have not looked at, each with the first line of Claude's last reply), *Running*.
 - **Allow or Deny** a permission prompt from the list without going back to the terminal — whichever answer comes first, there or here, counts.
-- **Jump to the terminal tab** a session runs in (↗): Orca, iTerm2, Ghostty 1.4+, and VS Code / Cursor (to the window).
+- **Jump to the terminal tab** a session runs in (↗): Orca, iTerm2, Terminal, Ghostty 1.4+, and VS Code / Cursor (to the window).
 - **Finish bubbles** name the session that just finished and what it said; a count by the cat's ear says how many are unread.
 - **Hover the cat** for your 5-hour and weekly quota; **hover a row** for its path, context use, model and the last tool call. Each row shows its context as `210k·70%`: the tokens, and their share of the auto-compact window (what `/autocompact` set, read from user settings only); the cat speaks up when a session crosses two thirds of it.
 - **Mute, postpone, rename or pin** a session from its row. A muted one comes back the next time you type into it.
@@ -33,7 +33,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 - **An Esc interrupt sends no signal.** Claude Code emits no hook for it, so the pet reads Claude Code's own session status instead: such a turn shows *No recent activity* about 10 seconds later (90 seconds if that status is unavailable) rather than "finished".
 - **A turn waiting on a background agent isn't "finished".** It is shown as waiting, and reported done only when the agent wakes the session again.
 - **Multiple-choice questions** (`AskUserQuestion`) can't be answered from the pet — the picks are the answer, so the row takes you to the terminal.
-- **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca and iTerm2 only. Background `claude --bg` sessions have no terminal at all.
+- **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Terminal, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca, iTerm2 and Terminal, plus background `claude --bg` sessions between turns (the board continues them with the message). Stop works for both; Resume reuses an idle tab of the same name.
 - **Quota, context and model need your statusline.** Claude Code hands them only to the statusline command; [claude-hud](https://github.com/jarrodwatts/claude-hud) or `pet-emit --statusline` has to save them ([how](docs/pet.md#optional-reading-quota-from-your-statusline)). Without that, everything else works.
 - **macOS 14+ only**, and not signed by an Apple Developer ID (the installer strips the quarantine flag; Gatekeeper may still ask). Click-through is a rectangle, not the cat's outline. Animating costs about 7% of one core and 310 MB.
 
@@ -53,7 +53,7 @@ A session ends its reply with the questions it needs answered; they become **ask
 
 <img src="docs/images/board-asks.gif" width="700" alt="Three questions from one session: an answer is picked for each, with a note on the first and the third turned into a todo, then all three are sent at once">
 
-The answer goes straight into the session that asked (Orca and iTerm2), or reaches it at the start of its next turn. With several sessions on one task, only the one that asked is told.
+The answer goes straight into the session that asked (Orca, iTerm2, Terminal, or a background session between turns), or reaches it at the start of its next turn. With several sessions on one task, only the one that asked is told.
 
 ### Every task and every session
 

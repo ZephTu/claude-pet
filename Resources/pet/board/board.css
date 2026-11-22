@@ -915,3 +915,9 @@ main.single { grid-template-columns: 1fr; }
 .dot.quiet { box-shadow: none; border: 1.5px dashed var(--faint); }
 /* Switch knobs are white in both themes, like the system's. */
 .switch span, .jswitch::after { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+
+/* A finished task (or the sessions list) with Claude Code sessions still running on it. */
+.stillrun { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line)); border-radius: 8px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--panel-2)); font-size: 12px; color: var(--text); }
+.stillrun .btn { flex: none; }
