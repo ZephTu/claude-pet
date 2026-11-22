@@ -1097,6 +1097,33 @@ def cmd_ref(args):
         _cmd_ref(args, card)
 
 
+REF_URL_RE = re.compile(r"https?://[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+")
+
+
+def ref_key(ref):
+    """What makes two refs the same: the link they point to, not their title — "smoke #9 URL" and
+    "smoke #9 (passed) URL" are one ref. A ref without a URL (a ticket key) is its own text."""
+    m = REF_URL_RE.search(str(ref))
+    return m.group(0).rstrip("/") if m else " ".join(str(ref).split())
+
+
+def merge_refs(have, new):
+    """`have` with `new` added, one entry per link. A new ref whose link is already there replaces
+    that entry in place (the newer title wins); duplicates already in `have` collapse the same way."""
+    out, at = [], {}
+    for r in list(have) + list(new):
+        r = str(r).strip()
+        if not r:
+            continue
+        k = ref_key(r)
+        if k in at:
+            out[at[k]] = r
+        else:
+            at[k] = len(out)
+            out.append(r)
+    return out
+
+
 def _cmd_ref(args, card):
     meta = parse_card(card)
     refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
@@ -1104,12 +1131,15 @@ def _cmd_ref(args, card):
         ref = args.ref.strip()
         if not ref or "\n" in ref:
             die("empty ref")
-        if ref not in refs:
-            set_fields(card, {"refs": refs + [ref]})
+        merged = merge_refs(refs, [ref])
+        if merged != refs:
+            set_fields(card, {"refs": merged})
     else:
-        if args.ref not in refs:
+        # Removing a link removes every entry pointing at it, so no older duplicate shows up again.
+        key = ref_key(args.ref)
+        if not any(ref_key(r) == key for r in refs):
             die(f"{args.task} has no ref {args.ref!r}")
-        set_fields(card, {"refs": [r for r in refs if r != args.ref]})
+        set_fields(card, {"refs": [r for r in refs if ref_key(r) != key]})
 
 
 def cmd_addtodo(args):
@@ -1289,7 +1319,9 @@ def _apply_update(card, entries, via):
     meta = parse_card(card)
     if refs:
         have = meta.get("refs") if isinstance(meta.get("refs"), list) else []
-        fields["refs"] = have + [r for r in dict.fromkeys(refs) if r not in have]
+        merged = merge_refs(have, refs)
+        if merged != have:
+            fields["refs"] = merged
     if dirs:
         have = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
         known = {os.path.normpath(h) for h in have}

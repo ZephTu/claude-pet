@@ -180,7 +180,8 @@ card whose category is not in the list (e.g. hand-edited) still shows, marked "n
 
 `refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
 ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
-board shows the title (cut to a few words). The board shows them under **Resources**,
+board shows the title (cut to a few words). A card lists each link once: adding a ref whose URL is
+already there replaces that entry's title, and removing one removes every entry with that URL. The board shows them under **Resources**,
 grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tried in order:
 
 ```json

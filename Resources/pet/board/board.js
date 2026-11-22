@@ -1067,7 +1067,9 @@ function renderTaskBody(t) {
     lastDay = day;
     return `${head}<li class="e"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
   }).join("");
-  const refs = list(t.refs).map(resolveRef);
+  // One entry per link: a card may still hold the same URL under two titles (written before hq
+  // merged them), and the later title is the one to show.
+  const refs = [...new Map(list(t.refs).map(resolveRef).map((r) => [r.url ? r.url.replace(/\/+$/, "") : r.ref, r])).values()];
   const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
   // Settled things — status, project, category, directories, links — sit in the right rail as

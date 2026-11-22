@@ -88,6 +88,8 @@ grep -q "category 'defect' → 'perf'" "$T"/root/tasks/T-002-*/TASK.md && ok "re
 "$HQ" category add 'a#b' 2>/dev/null && fail "bad category accepted" || ok "category names are validated"
 "$HQ" ref add T-001 "https://example.com/doc" && "$HQ" ref add T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc","QA-1"]' && ok "ref add"
 "$HQ" ref remove T-001 "QA-1" && "$HQ" board --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["refs"]==["https://example.com/doc"]' && ok "ref remove"
+"$HQ" ref add T-001 "doc v2 https://example.com/doc/" && "$HQ" board --json | python3 -c 'import json,sys; r=json.load(sys.stdin)["tasks"][0]["refs"]; assert r==["doc v2 https://example.com/doc/"], r' && ok "ref add with a known URL replaces the title in place"
+"$HQ" ref add T-001 "QA-2" && "$HQ" ref remove T-001 "https://example.com/doc" && "$HQ" board --json | python3 -c 'import json,sys; r=json.load(sys.stdin)["tasks"][0]["refs"]; assert r==["QA-2"], r' && ok "ref remove by URL drops every entry with it"
 # projects: auto-assign by directory, rename / guarded remove like categories
 mkdir -p "$T/proj-x/sub"
 "$HQ" project add projx --path "$T/proj-x" && "$HQ" project list | grep -q "^projx" && ok "project add"
@@ -188,6 +190,8 @@ assert sys.argv[2] in t, t
 PY
 stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun the suite\ndrop: @me send the token request\n```')" >/dev/null
 grep -q -- "- \[x\] @claude rerun the suite" "$C1" && grep -q -- "- \[-\] @me send the token request" "$C1" && ok "done/drop find the todo by its text"
+stop sess-1 "$(printf 'ok\n```hq-update\nref: PR #9 (merged) https://example.com/pr/9\n```')" >/dev/null
+grep -q "PR #9 (merged) https://example.com/pr/9" "$C1" && [ "$(grep -o "example.com/pr/9" "$C1" | wc -l | tr -d ' ')" = 1 ] && ok "hq-update ref with a known URL renames it instead of adding a duplicate" || fail "ref duplicated: $(grep refs "$C1")"
 out="$(stop sess-1 "$(printf 'ok\n```hq-update\nstatus: finished\ndone: no such todo\nwhatever this is\n```')")"
 echo "$out" | python3 -c 'import json,sys; r=json.load(sys.stdin)["reason"]; assert "status must be one of" in r and "no such todo" in r and "whatever this is" in r, r' && ok "lines it cannot apply are sent back once"
 python3 -c 'import json,sys; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"```hq-update\nstatus: nope\n```"}))' | "$HQ" hook | grep -q block && fail "bad block looped" || ok "a bad block is not sent back twice"
