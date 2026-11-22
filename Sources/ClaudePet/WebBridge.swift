@@ -491,7 +491,7 @@ final class WebBridge {
             // Going round in circles: said on the row's second line, where the
             // notification text would otherwise go — see Struggle.
             if Struggle.isStruggling(s) {
-                item["struggle"] = "\(s.failStreak) failed in a row"
+                item["struggle"] = L("\(s.failStreak) failed in a row", "连续失败 \(s.failStreak) 次")
                     + (s.failTarget.isEmpty ? "" : " · " + s.failTarget)
             }
             // "It answered and is waiting on the next instruction" is a fact
@@ -603,5 +603,15 @@ final class WebBridge {
                 NSLog("ClaudePet: JS push failed: \(error.localizedDescription)")
             }
         }
+    }
+}
+
+extension WKUserContentController {
+    /// Puts `window.PET_LANG` (see UILanguage) in front of every page this view loads,
+    /// replacing the one an earlier language left. These pages have no other user scripts.
+    func installLanguageScript() {
+        removeAllUserScripts()
+        addUserScript(WKUserScript(source: UILanguage.pageScript, injectionTime: .atDocumentStart,
+                                   forMainFrameOnly: true))
     }
 }

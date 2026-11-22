@@ -70,7 +70,7 @@ public enum ActivitySummary {
 
     /// What to show when several calls are in flight at once.
     public static func concurrent(_ count: Int) -> String {
-        count > 1 ? "\(count) tools running" : ""
+        count > 1 ? L("\(count) tools running", "\(count) 个工具在跑") : ""
     }
 
     /// A shell command reduced to the part that identifies it.

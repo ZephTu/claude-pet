@@ -42,6 +42,7 @@ final class BoardWindow: NSWindow {
         // See PetPanel: handlers go on the view's live configuration copy.
         webView.configuration.userContentController.addScriptMessageHandler(
             bridge, contentWorld: .page, name: "hq")
+        webView.configuration.userContentController.installLanguageScript()
         center()
         setFrameAutosaveName("HQBoard")
         if let url = PetSchemeHandler.url(path: "board/board.html") {
@@ -49,6 +50,12 @@ final class BoardWindow: NSWindow {
         } else {
             NSLog("ClaudePet: board resources missing from bundle")
         }
+    }
+
+    /// The language changed: reload whatever page is showing, in the new one.
+    func reloadForLanguage() {
+        webView.configuration.userContentController.installLanguageScript()
+        webView.reload()
     }
 
     /// Brings the board forward and gives it the keyboard. The pet is an
@@ -168,7 +175,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(["todo", str("task"), index, str("state"), "--via=board"] + text)
         case "set":
             let fields = (body["fields"] as? [String]) ?? []
-            guard !fields.isEmpty else { return (nil, "no fields") }
+            guard !fields.isEmpty else { return (nil, L("no fields", "没有要改的字段")) }
             return await hq(["set", str("task")] + fields)
         case "log": return await hq(["log", str("task"), "--", str("message")])
         case "focus":
@@ -176,7 +183,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "scan": return await hq(["scan", "--json"])
         case "scan-apply":
             let only = ((body["names"] as? [String]) ?? []).joined(separator: ",")
-            guard !only.isEmpty else { return (nil, "nothing selected") }
+            guard !only.isEmpty else { return (nil, L("nothing selected", "什么都没选")) }
             return await hq(["scan", "--apply-projects", "--only=\(only)"])
         case "project":
             let action = str("action")
@@ -218,7 +225,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                                     command: [await claudePath() ?? "claude", "attach", str("session")],
                                                     title: "attach " + str("session").prefix(8))
         case "stop":
-            guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+            guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
             let r = await Self.run(claude, ["stop", str("session")])
             return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
         case "stop-session": return await stopSession(str("session"))
@@ -230,17 +237,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (r.status == 0 ? r.out : "[]", nil)
         case "decide":
             guard let behavior = PermissionDecision.Behavior(rawValue: str("behavior")),
-                  !str("session").isEmpty, !str("ask").isEmpty else { return (nil, "bad decision") }
-            guard let decide = Self.onDecide else { return (nil, "answer it in the terminal") }
+                  !str("session").isEmpty, !str("ask").isEmpty else { return (nil, L("bad decision", "无效的决定")) }
+            guard let decide = Self.onDecide else { return (nil, L("answer it in the terminal", "请到终端里回应")) }
             // The prompt the click was for must still be the one the pet can answer: a hold that
             // ended, or a prompt replaced since the board drew it, approves nothing.
             guard (Self.petDots?()[str("session")]?["askId"] as? String) == str("ask") else {
-                return (nil, "that prompt is no longer waiting here — answer it in the terminal")
+                return (nil, L("that prompt is no longer waiting here — answer it in the terminal", "这个请求已经不在这里等了 — 请到终端里回应"))
             }
             decide(str("session"), str("ask"), behavior)
             return (["ok": true], nil)
         case "jump":
-            guard let t = terminal(of: str("session")) else { return (nil, "no terminal recorded for this session") }
+            guard let t = terminal(of: str("session")) else { return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端")) }
             TerminalJump.jump(kind: t.kind, handle: t.handle)
             Self.onSeen?(str("session"))
             return (["ok": true], nil)
@@ -251,7 +258,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "openURL":
             guard let url = URL(string: str("url")),
                   let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme)
-            else { return (nil, "only web links can be opened") }
+            else { return (nil, L("only web links can be opened", "只能打开网页链接")) }
             NSWorkspace.shared.open(url)
             return (["ok": true], nil)
         case "openPath": return openPath(str("path"), cwd: str("cwd"))
@@ -282,12 +289,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "open":
             let path = str("path")
             guard path.hasSuffix("/TASK.md"), FileManager.default.fileExists(atPath: path) else {
-                return (nil, "not a task card")
+                return (nil, L("not a task card", "不是任务卡"))
             }
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
             return (["ok": true], nil)
         default:
-            return (nil, "unknown operation")
+            return (nil, L("unknown operation", "未知操作"))
         }
     }
 
@@ -297,19 +304,19 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// message — Claude Code reads an image from a path in the prompt.
     private func saveImage(dataURL: String) -> (Any?, String?) {
         let types = ["image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"]
-        guard dataURL.hasPrefix("data:"), let comma = dataURL.firstIndex(of: ",") else { return (nil, "not an image") }
+        guard dataURL.hasPrefix("data:"), let comma = dataURL.firstIndex(of: ",") else { return (nil, L("not an image", "不是图片")) }
         let header = dataURL[dataURL.index(dataURL.startIndex, offsetBy: 5)..<comma]   // image/png;base64
         let mime = String(header.split(separator: ";").first ?? "")
-        guard header.hasSuffix(";base64"), let ext = types[mime] else { return (nil, "unsupported image type \(mime)") }
-        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) else { return (nil, "bad image data") }
-        guard data.count <= 20 * 1024 * 1024 else { return (nil, "image is larger than 20 MB") }
+        guard header.hasSuffix(";base64"), let ext = types[mime] else { return (nil, L("unsupported image type \(mime)", "不支持的图片类型 \(mime)")) }
+        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) else { return (nil, L("bad image data", "图片数据有误")) }
+        guard data.count <= 20 * 1024 * 1024 else { return (nil, L("image is larger than 20 MB", "图片超过 20 MB")) }
         let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/attachments")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyyMMdd-HHmmss"
         let name = "\(fmt.string(from: Date()))-\(UUID().uuidString.prefix(6).lowercased()).\(ext)"
         let url = dir.appending(path: name)
-        do { try data.write(to: url) } catch { return (nil, "could not save the image: \(error.localizedDescription)") }
+        do { try data.write(to: url) } catch { return (nil, L("could not save the image: \(error.localizedDescription)", "图片没能保存：\(error.localizedDescription)")) }
         return (["path": url.path], nil)
     }
 
@@ -354,13 +361,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private func resume(task: String, session: String, dir rawDir: String, place: String, skip: Bool,
                         name: String = "", focus: Bool = true) async -> (Any?, String?) {
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
-                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+                            options: .regularExpression) != nil else { return (nil, L("not a session id", "不是有效的 session id")) }
         let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
-            return (nil, "no such directory: \(dir)")
+            return (nil, L("no such directory: \(dir)", "没有这个目录：\(dir)"))
         }
-        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
         let bound = await hq(["bind", task, "--session=\(session)"])
         if let err = bound.1 { return (nil, err) }
         let into = place == "bg" ? "terminal" : place
@@ -443,20 +450,20 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// reused pid is never signalled.
     private func stopSession(_ session: String) async -> (Any?, String?) {
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
-                            options: .regularExpression) != nil else { return (nil, "not a session id") }
+                            options: .regularExpression) != nil else { return (nil, L("not a session id", "不是有效的 session id")) }
         let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
         guard let data = try? Data(contentsOf: file),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pid = (obj["pid"] as? NSNumber)?.int32Value, pid > 1 else {
-            return (nil, "no process recorded for this session")
+            return (nil, L("no process recorded for this session", "没有记录这个 session 的进程"))
         }
-        guard ProcessProbe.isClaude(pid: pid) else { return (nil, "that session is not running any more") }
+        guard ProcessProbe.isClaude(pid: pid) else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
         // Claude Code's own file for the pid names the session it is on now (it follows /clear,
         // and a reused pid has its new owner's file); the command line is the fallback.
         let sessionsFile = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")
         guard SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf: sessionsFile),
                                               arguments: ProcessProbe.arguments(pid: pid)) else {
-            return (nil, "that process is on another session now — stop it in its terminal")
+            return (nil, L("that process is on another session now — stop it in its terminal", "这个进程现在已经是另一个 session 了 — 请在它的终端里停掉"))
         }
         kill(pid, SIGTERM)
         for _ in 0..<30 {
@@ -465,17 +472,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         kill(pid, SIGTERM)   // a second interrupt is how Claude Code is told "really quit"
         try? await Task.sleep(nanoseconds: 1_000_000_000)
-        return ProcessProbe.isClaude(pid: pid) ? (nil, "it did not stop — close it in its terminal")
+        return ProcessProbe.isClaude(pid: pid) ? (nil, L("it did not stop — close it in its terminal", "它没有停下 — 请在它的终端里关掉"))
                                                : (["ok": true, "pid": Int(pid)], nil)
     }
 
     /// Opens a scheduled run's session to carry on talking to it: `claude --resume` in the job's
     /// folder. Not bound to any task — a job belongs to none.
     private func resumeJob(id: String, session: String, place: String, skip: Bool, focus: Bool) async -> (Any?, String?) {
-        guard let job = JobsController.shared.store.load(id) else { return (nil, "No such job") }
+        guard let job = JobsController.shared.store.load(id) else { return (nil, L("No such job", "没有这个任务")) }
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
-                            options: .regularExpression) != nil else { return (nil, "not a session id") }
-        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+                            options: .regularExpression) != nil else { return (nil, L("not a session id", "不是有效的 session id")) }
+        guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
         let opened = await openInTerminal(place: place == "bg" ? "terminal" : place, dir: job.directory, command: cmd,
                                           title: String(("⏱ " + job.name).prefix(60)), focus: focus)
@@ -487,9 +494,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let dir = (rawDir as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else {
-            return (nil, "no such directory: \(dir)")
+            return (nil, L("no such directory: \(dir)", "没有这个目录：\(dir)"))
         }
-        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+        guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
         let name = String("\(task) \(title)".prefix(60))
         if place == "bg" { return await launchBackground(claude: claude, task: task, name: name, dir: dir, prompt: prompt, skip: skip) }
         let sid = UUID().uuidString.lowercased()
@@ -541,7 +548,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch place {
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
-                return (nil, "Orca is not installed")
+                return (nil, L("Orca is not installed", "没有安装 Orca"))
             }
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             // In the Orca workspace for that folder when there is one, else in the current one.
@@ -575,7 +582,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await Self.run("/usr/bin/osascript", ["-e", script])
             return r.status == 0 ? (["ok": true], nil) : (nil, "\(place): " + (r.err.isEmpty ? r.out : r.err).prefix(300))
         default:
-            return (nil, "unknown place to open: \(place)")
+            return (nil, L("unknown place to open: \(place)", "不知道要在哪里打开：\(place)"))
         }
     }
 
@@ -589,13 +596,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         if let r = path.range(of: #":\d+(:\d+)?$"#, options: .regularExpression) { path.removeSubrange(r) }
         if path.hasPrefix("~") { path = (path as NSString).expandingTildeInPath }
         if !path.hasPrefix("/") {
-            guard !cwd.isEmpty else { return (nil, "relative path and no working directory") }
+            guard !cwd.isEmpty else { return (nil, L("relative path and no working directory", "是相对路径，但没有工作目录")) }
             path = (cwd as NSString).appendingPathComponent(path)
         }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
-            return (nil, "not found: \(url.path)")
+            return (nil, L("not found: \(url.path)", "找不到：\(url.path)"))
         }
         // A path from a conversation is shown in Finder, not opened, if opening it could run
         // something: apps, installers, scripts, executables, link files, and any bundle.
@@ -622,11 +629,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Runs hq and hands its stdout back as text; the page parses JSON itself.
     private func hq(_ args: [String]) async -> (Any?, String?) {
         guard FileManager.default.isExecutableFile(atPath: hqPath) else {
-            return (nil, "HQ is not installed — run hq/install.sh --root <dir>")
+            return (nil, L("HQ is not installed — run hq/install.sh --root <dir>", "没有安装 HQ — 运行 hq/install.sh --root <dir>"))
         }
         let r = await Self.run(hqPath, args)
         if r.status != 0 {
-            return (nil, r.err.isEmpty ? "hq exited \(r.status)" : r.err.trimmingCharacters(in: .whitespacesAndNewlines))
+            return (nil, r.err.isEmpty ? L("hq exited \(r.status)", "hq 退出码 \(r.status)") : r.err.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return (r.out, nil)
     }
@@ -654,10 +661,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private func send(session: String, text: String, queue: Bool = false, bg: String = "",
                       skip: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return (nil, "empty message") }
+        guard !text.isEmpty else { return (nil, L("empty message", "消息是空的")) }
         guard let t = terminal(of: session) else {
             if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
-            return (nil, "no terminal recorded for this session")
+            return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
         }
         // Typing into a tab whose session has ended would hand the message to the shell as a
         // command. The board's list can be seconds old, so check the process itself.
@@ -666,13 +673,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                   SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf:
                       FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")),
                                                   arguments: ProcessProbe.arguments(pid: pid))
-            else { return (nil, "that session is not running any more — Resume it first") }
+            else { return (nil, L("that session is not running any more — Resume it first", "这个 session 已经不在运行了 — 先 Resume 它")) }
         }
         switch t.kind {
         case "terminal":
-            guard TerminalTarget.isSafeTTYPath(t.handle) else { return (nil, "unexpected Terminal tty") }
+            guard TerminalTarget.isSafeTTYPath(t.handle) else { return (nil, L("unexpected Terminal tty", "Terminal 的 tty 不对劲")) }
             guard !NSRunningApplication.runningApplications(withBundleIdentifier: TerminalJump.terminalAppBundleID).isEmpty
-            else { return (nil, "Terminal is not running") }
+            else { return (nil, L("Terminal is not running", "Terminal 没有在运行")) }
             // Terminal.app types `do script` text into the tab as if from the keyboard. Lines are
             // joined (a newline would submit early), and the text ends in a carriage return —
             // the Return key — so the prompt is submitted whatever line ending Terminal adds.
@@ -680,7 +687,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let before = Self.lastPromptAt(session)
             let r = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalTypeScript(tty: t.handle, text: flat)])
             guard r.status == 0, r.out.contains("ok") else {
-                return (nil, r.out.contains("notfound") ? "its Terminal tab is gone" :
+                return (nil, r.out.contains("notfound") ? L("its Terminal tab is gone", "它的 Terminal 标签页已经没了") :
                         "Terminal: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
             }
             if queue { return (["ok": true, "queued": true], nil) }
@@ -689,10 +696,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 if Self.lastPromptAt(session) != before { return (["ok": true], nil) }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
-            return (nil, "typed into its Terminal tab, but no turn started — check the tab and press Return there")
+            return (nil, L("typed into its Terminal tab, but no turn started — check the tab and press Return there", "已经输入到它的 Terminal 标签页，但没有开始新一轮 — 去那个标签页看看，在那里按回车"))
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
-                return (nil, "Orca is not installed")
+                return (nil, L("Orca is not installed", "没有安装 Orca"))
             }
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
@@ -701,7 +708,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                  : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)
-            guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, "unexpected iTerm2 session id") }
+            guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
             // write text presses Return after each line, which would submit a
             // multi-line message early, so lines are joined.
             let flat = text.components(separatedBy: .newlines).joined(separator: " ")
@@ -723,9 +730,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return "notfound"
             """
             let r = await Self.run("/usr/bin/osascript", ["-e", script])
-            return r.out.contains("ok") ? (["ok": true], nil) : (nil, "iTerm2 session not found")
+            return r.out.contains("ok") ? (["ok": true], nil) : (nil, L("iTerm2 session not found", "找不到 iTerm2 session"))
         default:
-            return (nil, "sending to \(t.kind) terminals is not supported yet — use Jump")
+            return (nil, L("sending to \(t.kind) terminals is not supported yet — use Jump", "还不支持给 \(t.kind) 终端发消息 — 请用跳转"))
         }
     }
 
@@ -753,9 +760,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                 skip: Bool) async -> (Any?, String?) {
         guard session.range(of: #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#,
                             options: .regularExpression) != nil,
-              bgId.range(of: #"^[0-9a-f]{8}$"#, options: .regularExpression) != nil else { return (nil, "not a session id") }
-        if busy { return (nil, "it is busy — try again when its turn ends") }
-        guard let claude = await claudePath() else { return (nil, "can't find the claude command") }
+              bgId.range(of: #"^[0-9a-f]{8}$"#, options: .regularExpression) != nil else { return (nil, L("not a session id", "不是有效的 session id")) }
+        if busy { return (nil, L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试")) }
+        guard let claude = await claudePath() else { return (nil, L("can't find the claude command", "找不到 claude 命令")) }
         func listing() async -> SessionControl.Listing {
             let list = await Self.run(claude, ["agents", "--json"])
             return SessionControl.listing(exitStatus: list.status, output: list.out, session: session)
@@ -764,13 +771,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         // is never read as "not running".
         switch await listing() {
         case .unknown:
-            return (nil, "couldn't check whether it is running (claude agents failed) — try again")
+            return (nil, L("couldn't check whether it is running (claude agents failed) — try again", "没法确认它是否在运行（claude agents 失败）— 请再试一次"))
         case .absent:
             break
         case .running(let st):
             guard SessionControl.betweenTurns(st) else {
-                return (nil, st == "waiting" ? "it is waiting on a prompt in its turn — Attach to answer it"
-                                             : "it is busy — try again when its turn ends")
+                return (nil, st == "waiting" ? L("it is waiting on a prompt in its turn — Attach to answer it", "它在等一个确认或回答，这一轮还没结束 — 用 Attach 去回答")
+                                             : L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试"))
             }
             _ = await Self.run(claude, ["stop", bgId])
             var stopped = false
@@ -778,7 +785,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 if await listing() == .absent { stopped = true; break }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
-            if !stopped { return (nil, "it did not stop to take the message — Attach to talk to it") }
+            if !stopped { return (nil, L("it did not stop to take the message — Attach to talk to it", "它没有停下来接收消息 — 用 Attach 和它对话")) }
         }
         var dir = Self.sessionCwd(session)
         if dir == nil {   // a background session the pet never saw: `claude agents` knows its folder
@@ -788,7 +795,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                let cwd = rows.first(where: { ($0["sessionId"] as? String) == session })?["cwd"] as? String,
                FileManager.default.fileExists(atPath: cwd) { dir = cwd }
         }
-        guard let dir else { return (nil, "can't tell which folder that session ran in") }
+        guard let dir else { return (nil, L("can't tell which folder that session ran in", "不知道那个 session 是在哪个文件夹运行的")) }
         // A message that starts with "-" would be read as an option; a leading space keeps it the prompt.
         let prompt = text.hasPrefix("-") ? " " + text : text
         let r = await Self.run(claude, ["--bg", "--resume", session] + (skip ? [Self.skipFlag] : []) + [prompt], cwd: dir)

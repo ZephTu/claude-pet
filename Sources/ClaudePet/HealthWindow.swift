@@ -20,7 +20,7 @@ final class HealthWindow: NSPanel {
     }
 
     convenience init(checks: [HealthCheck], onCopy: @escaping () -> Void) {
-        self.init(title: "Connection status", checks: checks, plainLines: nil, onCopy: onCopy)
+        self.init(title: L("Connection status", "连接状态"), checks: checks, plainLines: nil, onCopy: onCopy)
     }
 
     private init(title: String, checks: [HealthCheck], plainLines: [String]?,
@@ -62,7 +62,7 @@ final class HealthWindow: NSPanel {
         stack.addArrangedSubview(Self.title(title))
         if let plainLines {
             if plainLines.isEmpty {
-                stack.addArrangedSubview(Self.plain("Nothing recorded yet.", dim: true))
+                stack.addArrangedSubview(Self.plain(L("Nothing recorded yet.", "还没有记录。"), dim: true))
             } else {
                 for line in plainLines { stack.addArrangedSubview(Self.plain(line, dim: false)) }
             }
@@ -182,7 +182,7 @@ final class HealthWindow: NSPanel {
     }
 
     private static func buttons(target: HealthWindow, canCopy: Bool) -> NSView {
-        let close = NSButton(title: "Close", target: target, action: #selector(closeTapped))
+        let close = NSButton(title: L("Close", "关闭"), target: target, action: #selector(closeTapped))
         close.bezelStyle = .rounded
         close.controlSize = .small
 
@@ -190,7 +190,7 @@ final class HealthWindow: NSPanel {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         var views: [NSView] = [spacer]
         if canCopy {
-            let copy = NSButton(title: "Copy", target: target, action: #selector(copyTapped))
+            let copy = NSButton(title: L("Copy", "复制"), target: target, action: #selector(copyTapped))
             copy.bezelStyle = .rounded
             copy.controlSize = .small
             views.append(copy)

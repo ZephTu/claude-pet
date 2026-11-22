@@ -30,6 +30,7 @@ public enum Struggle {
     /// "tg-server: 4 failed in a row — Bash npm test"
     public static func line(_ session: SessionState, name: String) -> String {
         let what = session.failTarget.isEmpty ? "" : " — " + session.failTarget
-        return "\(name): \(session.failStreak) failed in a row\(what)"
+        return L("\(name): \(session.failStreak) failed in a row\(what)",
+                 "\(name)：连续失败 \(session.failStreak) 次\(what)")
     }
 }

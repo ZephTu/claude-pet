@@ -1,3 +1,8 @@
+// The app's language (Settings → Language), set before this script runs; the page reloads when it
+// changes. T("English", "中文") picks one. Technical terms may stay English in the Chinese.
+const LANG = window.PET_LANG === "zh" ? "zh" : "en";
+const T = (en, zh) => (LANG === "zh" ? zh : en);
+
 const pet = document.getElementById("pet");
 const bubble = document.getElementById("bubble");
 const panel = document.getElementById("panel");
@@ -73,61 +78,84 @@ function reportLayout() {
    translation a change to this object instead of a hunt through DOM string
    concatenation.
 
-   The panel is English throughout on purpose. Project names, branches and tool
-   calls arrive in whatever the repository uses, so the surrounding chrome being
-   one language is what keeps a row from reading as a mixture. */
+   The chrome is one language (Settings → Language, see T at the top), so a row
+   does not read as a mixture beyond what the data itself brings: project names,
+   branches and tool calls arrive in whatever the repository uses. Counts that
+   sit inside a phrase are functions, because the number does not go in the same
+   place in both languages. */
 const TEXT = {
   // Group headings.
   // Sentence case: the headings organise the list, they do not shout.
-  needsYou: "Needs you",
-  asks: "Asks",
-  scheduled: "Scheduled",
-  finished: "Just finished",
+  needsYou: T("Needs you", "等你处理"),
+  asks: T("Asks", "问题"),
+  scheduled: T("Scheduled", "定时任务"),
+  finished: T("Just finished", "刚完成"),
   // "Running" is a claim, and a group holding three answered sessions and an
   // idle one is not running anything. It is only used when the group really is
   // all work in flight; otherwise the heading says what the rows have in
   // common, which is nothing more than being sessions.
-  running: "Running",
-  sessions: "Sessions",
+  running: T("Running", "运行中"),
+  sessions: T("Sessions", "其他 session"),
   // Row status, first line.
-  approval: "Needs approval",
-  reply: "Awaiting reply",
-  working: "Working",
-  quiet: "No recent activity",
+  approval: T("Needs approval", "等你授权"),
+  reply: T("Awaiting reply", "等你回答"),
+  working: T("Working", "干活中"),
+  quiet: T("No recent activity", "没有动静"),
   // Short on purpose. "Response complete" is 17 characters in a column that
   // shares ~200pt with the project name, and it pushed the name — the row's
   // first anchor — down to less width than the status word had. It also got
   // truncated to a different length on every row, because both columns were
   // shrinking in proportion to their own content.
-  complete: "Answered",
-  inBackground: " in background",
-  idle: "Idle",
-  later: "later — ",
-  done: "done",
-  turns: " turns",
+  complete: T("Answered", "已回答"),
+  inBackground: (n) => T(n + " in background", "后台 " + n + " 个"),
+  idle: T("Idle", "空闲"),
+  // A postponed row: `left` is how long until it comes back, e.g. "12m".
+  later: (left) => T("later — " + left, left + "后提醒"),
+  done: T("done", "完成"),
+  turns: (n) => T(n + " turns", n + " 轮"),
   // Second lines and footers.
-  closed: "session closed",
-  empty: "No live sessions",
-  muted: " muted — say something to bring one back",
-  droppedTail: " older unread finishes were discarded (queue full)",
-  clear: "Clear",
+  closed: T("session closed", "session 已关闭"),
+  empty: T("No live sessions", "没有运行中的 session"),
+  muted: (n) => T(n + " muted — say something to bring one back",
+                  "已静音 " + n + " 个 session，有新动静时会回来"),
+  dropped: (n) => T(n + " older unread finishes were discarded (queue full)",
+                    "队列已满，丢掉了 " + n + " 条较早的未读完成"),
+  clear: T("Clear", "清空"),
   // The alert card.
-  approveLabel: "approve",
-  allow: "Allow",
-  deny: "Deny",
-  replyBody: "waiting on your reply",
+  approveLabel: T("approve", "授权"),
+  allow: T("Allow", "允许"),
+  deny: T("Deny", "拒绝"),
+  replyBody: T("waiting on your reply", "等你回答"),
   // Quota meters. "used" is stated rather than implied: a bare percentage next
   // to a bar is read as either "how much is gone" or "how much is left", and
   // the two are opposite readings of the same picture.
-  quotaUsed: "Quota used",
+  quotaUsed: T("Quota used", "额度已用"),
   // Hover readout labels, left column of its label/value grid.
   dContext: "context",
   dContextShort: "ctx",
-  dModel: "model",
-  dTurns: "turns",
-  dTool: "tool",
-  dTurn: "turn",
-  dQuiet: "quiet",
+  dModel: T("model", "模型"),
+  dTurns: T("turns", "轮数"),
+  dTool: T("tool", "工具"),
+  dTurn: T("turn", "本轮"),
+  dQuiet: T("quiet", "静默"),
+  // Row tooltips and buttons.
+  snoozeTip: T("Remind me later", "稍后提醒"),
+  muteTip: T("Mute this session", "静音这个 session"),
+  readTip: T("Mark as read", "标为已读"),
+  readAllTip: T("Mark all as read", "全部标为已读"),
+  // Scheduled-job rows: the tag on the left, and where a click goes.
+  jobFailed: T("failed", "失败"),
+  jobRunning: T("running", "运行中"),
+  jobTip: T("Open the Scheduled view of the task board", "打开看板的定时任务页"),
+  askTip: (task) => task
+    ? T("Open the task board at " + task, "打开看板，定位到 " + task)
+    : T("Open the task board at this task", "打开看板，定位到这个任务"),
+  closedRow: T("that session's terminal is gone — cleared the row instead",
+               "那个 session 的终端已经关了，改为清掉这一行"),
+  // The age column's units.
+  sec: T("s", "秒"),
+  min: T("m", "分"),
+  hour: T("h", "时"),
 };
 
 /* ---- The message window ----------------------------------------------------
@@ -502,9 +530,9 @@ window.hush = function () {
 window.setMood("idle", null);
 
 function ageText(seconds) {
-  if (seconds < 60) return seconds + "s";
-  if (seconds < 3600) return Math.floor(seconds / 60) + "m";
-  return Math.floor(seconds / 3600) + "h";
+  if (seconds < 60) return seconds + TEXT.sec;
+  if (seconds < 3600) return Math.floor(seconds / 60) + TEXT.min;
+  return Math.floor(seconds / 3600) + TEXT.hour;
 }
 
 /**
@@ -587,7 +615,7 @@ function whatText(s) {
   const ours = (text) => ({ text: text, fixed: true });
   // A postponed item says when it is coming back, so "later" stays a promise
   // rather than becoming "never".
-  if (s.snoozedFor) return ours(TEXT.later + s.snoozedFor);
+  if (s.snoozedFor) return ours(TEXT.later(s.snoozedFor));
   // Blocked splits in two, and they are not the same interruption: one wants a
   // decision, the other wants typing. The row used to say "needs you" for both,
   // directly under a heading that already said "Needs you".
@@ -612,7 +640,7 @@ function whatText(s) {
   // The turn is over but something it started is still running. Said instead
   // of "Idle"/"Answered" rather than after it: the dot already says it is
   // resting, and the longer phrase squeezed the name to three letters.
-  if (s.background) return ours(s.background + TEXT.inBackground);
+  if (s.background) return ours(TEXT.inBackground(s.background));
   return ours(s.replied ? TEXT.complete : TEXT.idle);
 }
 
@@ -648,7 +676,7 @@ function sessionRowHTML(s) {
   // Only a blocked session can be postponed: there is nothing to put off about
   // one that is merely running.
   const clock = s.state === "waiting"
-    ? '<span class="snooze" title="Remind me later">\u23f1</span>' : "";
+    ? '<span class="snooze" title="' + TEXT.snoozeTip + '">\u23f1</span>' : "";
   return (
     '<div class="row' + wants + kind + jumpable + napped + '"><div class="line">' +
     '<span class="dot ' + dotClass(s) + '"></span>' +
@@ -658,7 +686,7 @@ function sessionRowHTML(s) {
     // See rowAge: which clock this is.
     ageHTML(rowAge(s), !!s.termHandle) + "</span>" +
     clock +
-    '<span class="mute" title="Mute this session">\u00d7</span>' +
+    '<span class="mute" title="' + TEXT.muteTip + '">\u00d7</span>' +
     "</div>" +
     '<div class="detail"><span class="task"></span><span class="branch"></span><span class="note"></span></div>'
     // A permission the pet can answer itself gets its own line of buttons.
@@ -680,9 +708,9 @@ function finishedRowHTML(f) {
     '<div class="row done' + (f.closed ? " gone" : "") + jumpable + '"><div class="line">' +
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
-    '<span class="what">' + (f.count > 1 ? f.count + TEXT.turns : TEXT.done) + "</span>" +
+    '<span class="what">' + (f.count > 1 ? TEXT.turns(f.count) : TEXT.done) + "</span>" +
     ageHTML(f.agoSeconds, !!f.termHandle) +
-    '<span class="read" title="Mark as read">\u2713</span>' +
+    '<span class="read" title="' + TEXT.readTip + '">\u2713</span>' +
     "</div>" +
     // What Claude said last, so the row can answer "do I need to look?" on its
     // own. Filled by textContent below: it is Claude's words, not ours.
@@ -701,7 +729,13 @@ function finishedRowHTML(f) {
  * @param {number} dropped unread finishes discarded to stay under the cap
  */
 // Task statuses worth a word on a session row; "active" is the normal case and says nothing.
-const TASK_STATUS_WORD = { "waiting-on-me": "needs you", blocked: "blocked", done: "done", abandoned: "dropped" };
+// Keyed by the card's status id; only the value is shown. Same words as the board's status names.
+const TASK_STATUS_WORD = {
+  "waiting-on-me": T("needs you", "等你处理"),
+  blocked: T("blocked", "阻塞"),
+  done: T("done", "已完成"),
+  abandoned: T("dropped", "已放弃"),
+};
 
 window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, jobRows) {
   const muted = hiddenCount || 0;
@@ -715,10 +749,10 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, job
     // Losing news quietly is the one thing the queue exists to prevent, so a
     // forced discard is stated rather than absorbed.
     footer +=
-      '<div class="muted-note dropped">' + dropped + TEXT.droppedTail + "</div>";
+      '<div class="muted-note dropped">' + TEXT.dropped(dropped) + "</div>";
   }
   if (muted) {
-    footer += '<div class="muted-note">' + muted + TEXT.muted + "</div>";
+    footer += '<div class="muted-note">' + TEXT.muted(muted) + "</div>";
   }
   if (!list.length && !done.length && !asks.length && !jobs.length) {
     panel.innerHTML = '<div class="empty">' + TEXT.empty + "</div>" + footer;
@@ -786,7 +820,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, job
   }
   if (done.length) {
     html += heading(TEXT.finished, done.length,
-                    '<span class="read-all" title="Mark all as read">' + TEXT.clear + "</span>")
+                    '<span class="read-all" title="' + TEXT.readAllTip + '">' + TEXT.clear + "</span>")
           + done.map(finishedRowHTML).join("");
   }
   if (others.length) {
@@ -820,10 +854,10 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, job
     const j = jobs[i];
     row.dataset.task = "jobs";
     const tag = row.querySelector(".tidtag");
-    tag.textContent = j.status === "failed" ? "failed" : "running";
+    tag.textContent = j.status === "failed" ? TEXT.jobFailed : TEXT.jobRunning;
     tag.classList.add(j.status === "failed" ? "st-blocked" : "st-active");
     row.querySelector(".asktext").textContent = (j.name || "") + (j.text ? " · " + j.text : "");
-    row.title = "Open the Scheduled view of the task board";
+    row.title = TEXT.jobTip;
   });
 
   panel.querySelectorAll(".row.hqask:not(.jobrow)").forEach(function (row, i) {
@@ -834,7 +868,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, job
     tag.textContent = a.task || "";
     if (a.status) tag.classList.add("st-" + a.status);
     row.querySelector(".asktext").textContent = a.text || "";
-    row.title = "Open the task board at " + (a.task || "this task");
+    row.title = TEXT.askTip(a.task || "");
   });
 
   const rows = panel.querySelectorAll(".row:not(.done):not(.hqask)");
@@ -914,7 +948,7 @@ window.setSessions = function (list, hiddenCount, finished, dropped, hqAsks, job
  * something, and the line is here so it does not look like nothing happened.
  */
 window.explainClosedRow = function () {
-  window.say("that session's terminal is gone — cleared the row instead", 4000);
+  window.say(TEXT.closedRow, 4000);
 };
 
 /**

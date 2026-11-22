@@ -62,7 +62,7 @@
 <ol>
 <li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。它会先列出要做的每一项改动，确认后才执行；只想要看板、不想动 Claude 的设置，加 <code>--no-hooks</code>。需要 <code>python3</code>。详见<a href="#zh-files">安装会改什么</a>。</li>
 <li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。</li>
-<li>在 Sessions 栏给正在跑的 session 选一个任务绑定，或点 <b>New task</b> 新建任务并顺手绑定。</li>
+<li>在 Sessions 栏给正在跑的 session 选一个任务绑定，或点 <b>新建任务</b> 新建任务并顺手绑定。</li>
 <li>之后就在看板上处理 <b>Needs you</b> 里的事情，在 Sessions 栏直接给 session 发消息。</li>
 </ol>
 <p class="tip">装好 HQ 之前就已经开着的 session，最好重开一次，hook 才会生效。</p>
@@ -71,9 +71,9 @@
 <p>顶栏左边的 <b>Focus · All · Needs you</b> 切换三个页面（会记住），每个标签上都带着数字。<b>Focus</b> 是工作台，只放你正在关注的任务——不按天清空，一直留着直到你把它拿掉；<b>All</b> 是所有任务（左）和所有 session（右）；<b>Needs you</b> 是一栏收件箱：上面是还没回答的问题，下面是你的 <code>@me</code> 待办，标签上的数字就是这两样加起来（只有它是亮的橙色，因为只有它在等你）。第四个标签 <b>定时任务</b> 是按时间表自动跑的任务，见<a href="#zh-jobs">定时任务</a>。</p>
 <ul>
 <li><b>加进 Focus</b>：顶部输入框输入编号或标题后点 Add；或者在 All 里点任务行上的 ☆。新建的任务自动加入 Focus。卡片右上角的 ✕（点两下）把它从 Focus 拿掉，任务本身不变。</li>
-<li><b>排序</b>：标题旁的 <b>active first</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 按「等你 / 干活中 / 空闲」分组，每组里最近有动静的在前。</li>
+<li><b>排序</b>：标题旁的 <b>活跃的在前</b>（和 All 里的是同一个设置，会记住）勾上时，有 session 在跑的任务排最上面，最近有动静的在前；不勾时按你自己的顺序，卡片左上角出现 <b>⠿</b>，按住拖动就能调整顺序。右边的 session 按「等你 / 干活中 / 空闲」分组，每组里最近有动静的在前。</li>
 
-<li><b>任务卡片</b>直接带着：大字的下一步（旁边是 <b>New session ▾</b>，没有 session 在跑时还有 <b>Resume</b>）、这个任务未回应的问题（可直接回应、送达）、<b>你的</b>待办（可直接勾）；Claude 和别人的待办只显示一句"还有 N 条"，展开看全部。session 列在右栏。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后卡片换成完整的任务详情（和 All 页里展开的一样）；<b>✕</b> 把它移出 Focus（任务本身不变，可以 Undo）。</li>
+<li><b>任务卡片</b>直接带着：大字的下一步（旁边是 <b>新 session ▾</b>，没有 session 在跑时还有 <b>Resume</b>）、这个任务未回应的问题（可直接回应、送达）、<b>你的</b>待办（可直接勾）；Claude 和别人的待办只显示一句"还有 N 条"，展开看全部。session 列在右栏。<b>点卡片的空白处</b>展开完整的任务详情，再点收起（点输入框、勾选框、按钮、问题卡片或 session 行不会展开/收起，选中文字也不会）。展开后卡片换成完整的任务详情（和 All 页里展开的一样）；<b>✕</b> 把它移出 Focus（任务本身不变，可以 Undo）。</li>
 <li>右栏只列 Focus 里任务的 session，以及还没绑定任务的 session（方便顺手绑定）。</li>
 <li>Focus 列表存在任务根目录的 <code>focus.json</code>（以前按天存的旧文件会自动沿用最近一天的列表）。命令行：<code>hq focus</code>、<code>hq focus add|remove T-012</code>、<code>hq focus order T-3 T-1 …</code>（排序）。</li>
 </ul>
@@ -81,14 +81,15 @@
 <h1 id="zh-board">All 与 Needs you</h1>
 <h2>顶栏</h2>
 <ul>
-<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>New task</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
 <li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
+<li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
 <li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、active first。</li>
 <li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>resets</b> 后面是多久后重置。和悬停在小猫身上看到的是同一份数据。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存下来：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/hud-usage.json"</code>（必须写绝对路径）；或者用 <code>pet-emit --statusline</code> 包一层你的状态栏命令（见仓库的 docs/pet.zh-CN.md）。没有新鲜的数据就不显示。每个开着的 session 都会写入它自己最后一次调用 API 时的数字，所以显示的是<b>最后出现</b>的那组读数，不是最大的那组：手动重置额度之后会跟着降下来。合盖睡眠、重启小猫后新旧顺序依然记得；只有小猫从没见过的读数（第一次运行，或它关着、睡着期间新写进来的）一开始分不出新旧，会先显示较高的那组，等某个正在工作的 session 的数字再变一次就对了。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
 
-<li><b>New task</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
+<li><b>新建任务</b>：新建任务，选分类，工作目录可以手填或从建议里选（也可以不填，绑定 session 时会自动记上），并可立即绑定一个 session。</li>
 <li><b>?</b>：打开本说明。</li>
 <li><b>删除 / 解绑都要点两下</b>：解绑 session、从任务移除以前的 session、删关联链接、待办的 ✕（不做）、Focus 卡片的 ✕、删项目目录、删空的项目或分类——第一下按钮变成红色的"Unbind?""Remove?"等，4 秒内再点一下才执行，不点就恢复原样。</li>
 </ul>
@@ -97,20 +98,20 @@
 <li><b>Asks</b>：所有还没回应的问题，最早的排在最上面。session 把同一个还没回应的问题再问一遍时，不会多出一条。每条可以先在说明框里写几句（多行也行，最多显示 5 行，超出滚动），再选回答：
 <table>
 <tr><th>按钮</th><th>含义</th></tr>
-<tr><td><b>Yes</b></td><td>好 / 可以 / 按你的建议来。<b>写了说明</b>就表示"我的回答就是说明里的内容"（如"A+C"、"跑一次"），session 收到的是 "Answer: …"</td></tr>
-<tr><td><b>No</b></td><td>不做 / 不要；说明里可以写原因或者换成什么</td></tr>
-<tr><td><b>To todo</b></td><td>这不是要回答的问题，是我自己要去做的事（比如"PR 合并后把消息发给 Ping"）：在这个任务里加一条 <code>@me</code> 待办（说明会接在后面），问题关掉，并告诉 session 我会自己做、别再问。Undo 会把这条待办标成已放弃并重新打开问题</td></tr>
-<tr><td><b>Later</b></td><td>先不回答：<b>问题留着</b>，从 Needs you 和小猫的红点里隐去，<b>第二天</b>自动回来；session 会收到"用户稍后再答，先做不依赖它的事"。被推迟的问题收在一行"N for later · back tomorrow"里，点开可以直接回答</td></tr>
-<tr><td><b>⋯ → No context</b></td><td>不了解背景、答不上来，先归档（不常用，收在 ⋯ 里）</td></tr>
+<tr><td><b>可以</b>（Yes）</td><td>好 / 可以 / 按你的建议来。<b>写了说明</b>就表示"我的回答就是说明里的内容"（如"A+C"、"跑一次"），session 收到的是 "Answer: …"</td></tr>
+<tr><td><b>不要</b>（No）</td><td>不做 / 不要；说明里可以写原因或者换成什么</td></tr>
+<tr><td><b>转待办</b>（To todo）</td><td>这不是要回答的问题，是我自己要去做的事（比如"PR 合并后把消息发给 Ping"）：在这个任务里加一条 <code>@me</code> 待办（说明会接在后面），问题关掉，并告诉 session 我会自己做、别再问。Undo 会把这条待办标成已放弃并重新打开问题</td></tr>
+<tr><td><b>稍后</b>（Later）</td><td>先不回答：<b>问题留着</b>，从 Needs you 和小猫的红点里隐去，<b>第二天</b>自动回来；session 会收到"用户稍后再答，先做不依赖它的事"。被推迟的问题收在一行"N 条稍后再答 · 明天回来"里，点开可以直接回答</td></tr>
+<tr><td><b>⋯ → 不了解背景</b>（No context）</td><td>不了解背景、答不上来，先归档（不常用，收在 ⋯ 里）</td></tr>
 </table>
-<b>送达</b>：提出问题的 session 还在运行、而且在 Orca、iTerm2 或 Terminal 里（或者是两轮之间的后台 session）时，按钮下方有 <b>send to ‹session› now</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。消息里只带问题编号和问题开头的几个字（如 <code>T-012.3 "再跑一次 release_test 验证删机器吗？参…": Do — 不用了</code>），不把整条问题再发一遍，省 token 也好读；只发编号不行，因为 session 自己并不知道编号。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
+<b>送达</b>：提出问题的 session 还在运行、而且在 Orca、iTerm2 或 Terminal 里（或者是两轮之间的后台 session）时，按钮下方有 <b>现在发给 ‹session›</b>（session 空闲时默认勾上）：回应会立刻作为一条消息发给它，它马上接着干。消息里只带问题编号和问题开头的几个字（如 <code>T-012.3 "再跑一次 release_test 验证删机器吗？参…": Do — 不用了</code>），不把整条问题再发一遍，省 token 也好读；只发编号不行，因为 session 自己并不知道编号。不勾、或者 session 不在线时，回应在它<b>下一轮</b>开始时送达。已经发出去的消息无法撤回，Undo 只会重新打开这个问题。<br>
 <b>一个任务有好几个 session 时</b>：回应只送给提问的那个 session，同一任务下的其他 session 收不到，不会两边做同一件事；它们看到的"未回应的问题"里，别人问的会标注 "asked by another session on this task"。只有提问的 session 已经结束或者解绑了，回应才交给这个任务下一个开始新一轮的 session（只交给一个）。<br>
 <b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
-<b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下整个按钮填上颜色（Yes 绿、No 红、Later 黄、No context 灰、To todo 蓝；再点取消，可以改选），不会马上发出；在某条的说明框里打字会自动选上 Yes（删光文字就取消；你手动选过的不会被改）；每条都选好后，点底部的 <b>Send N answers</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>send to ‹session› now</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
+<b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下整个按钮填上颜色（可以 绿、不要 红、稍后 黄、不了解背景 灰、转待办 蓝；再点取消，可以改选），不会马上发出；在某条的说明框里打字会自动选上"可以"（删光文字就取消；你手动选过的不会被改）；每条都选好后，点底部的 <b>发送 N 个回答</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>现在发给 ‹session›</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>Needs you 是一栏：上面是 <b>Claude is asking</b>（没有问题时只剩一行"Claude has nothing waiting on an answer from you."），下面是 <b>Your todos</b>（放了 3 天以上的，右边的时间变成橙色）。分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在 All 页的任务列表里定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
-<li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>Undo</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。勾选按待办的<b>文字</b>认准是哪一条：看板刷新前 session 在前面插了新待办也不会勾错；那条待办已被删掉或改写时会提示你刷新。</li>
+<li><b>点错了可以撤销</b>：勾选、✕、回应、Handled 之后，底部会出现带 <b>撤销</b> 的提示（8 秒）；勾掉的待办还会划线留在列表里 <b>1 小时</b>，旁边有 Undo。更久之后要反悔，点开任务，在方框上再点一下即可恢复；每次改动都记在任务卡的日志里。勾选按待办的<b>文字</b>认准是哪一条：看板刷新前 session 在前面插了新待办也不会勾错；那条待办已被删掉或改写时会提示你刷新。</li>
 </ul>
 <h2>上下文窗口</h2>
 <p>回答"这一项到底是什么、从哪来、去哪看"：</p>
@@ -118,12 +119,12 @@
 <li><b>问题（ask）</b>：显示提出这个问题的那条 Claude 回复原文，以及是哪个 session 提的；可以直接打开那个 session 的对话。（这个功能上线之前记录的问题没有原文，可以打开对话去看。）</li>
 <li><b>待办</b>：显示任务的状态、下一步、任务卡全文（含日志）。</li>
 <li>都会列出这个任务相关的 session：<b>正在运行</b>的可以看对话、跳转；<b>已经结束</b>的也能点 <b>History</b> 查看历史对话。</li>
-<li><b>Show task</b> 在 All 页的任务列表里定位并展开这个任务；<b>Open card</b> 用编辑器打开任务卡。</li>
+<li><b>Show task</b> 在 All 页的任务列表里定位并展开这个任务；<b>打开任务卡</b> 用编辑器打开任务卡。</li>
 </ul>
 <h2>Tasks（All 的左列）</h2>
 <ul>
 <li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
-  <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"No open tasks"和 <b>+ New task</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"No project"固定在最后）；勾选 <b>active first</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>No project</b>。</li>
+  <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"没有进行中的任务"和 <b>+ 新建任务</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"无项目"固定在最后）；勾选 <b>活跃的在前</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>无项目</b>。</li>
   <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
 <li><b>Collapse all / Expand all</b>：按项目分组时一键收起或展开所有项目组；按状态分组时一键收起所有点开的任务。</li>
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
@@ -134,15 +135,15 @@
 <p>点开一个任务：</p>
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
-<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>展开的任务分两栏：左边是要做的事（待办、日志），右边一栏是这件事的属性，平时是纯文字。顶部"下一步"旁边的 <b>Edit</b> 把 status / project / category 变成三个下拉框（选了就保存），同时出现 next 输入框，改完点 <b>Done</b> 收起。Folders 是工作目录（只显示最后一级，悬停看全路径）；Links 见下面的 Resources</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
-<tr><td><b>next</b></td><td>展开后最上面那块大字就是它，右边是 <b>Edit</b>、<b>Open card</b>、<b>New session ▾</b> 三个按钮；点 <b>Edit</b> 才出现它的输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>Save</b> / <b>Cancel</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
+<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>展开的任务分两栏：左边是要做的事（待办、日志），右边一栏是这件事的属性，平时是纯文字。顶部"下一步"旁边的 <b>编辑</b> 把 status / project / category 变成三个下拉框（选了就保存），同时出现 next 输入框，改完点 <b>Done</b> 收起。Folders 是工作目录（只显示最后一级，悬停看全路径）；Links 见下面的 Resources</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
+<tr><td><b>next</b></td><td>展开后最上面那块大字就是它，右边是 <b>编辑</b>、<b>打开任务卡</b>、<b>新 session ▾</b> 三个按钮；点 <b>编辑</b> 才出现它的输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>保存</b> / <b>取消</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
-<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做（显示成 <b>You</b> / <b>Claude</b> / 人名）。方框 = 做完，✕（鼠标移上去才出现）= 不做。未完成的排前面，你的在最前，然后是 Claude 的；已完成的超过 3 条时收起到 <b>Show N finished</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。<code>@claude</code> 的待办有 <b>▶ Do it</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队）；没有就按 New session 的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
-<tr><td><b>Sessions ＋</b></td><td>在右栏。点 ＋ 选一个正在运行的 session 绑定。已绑定的一行一个，鼠标移上去出现 👁 ↗ 和解绑 ✕。下面的 <b>Earlier sessions</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字；Orca 或 Terminal 里还留着同名、停在 shell 提示符、没有 session 在跑的标签页时——比如重启电脑后 Orca 恢复的标签页、或 Stop 之后的标签页——就在那个标签页里续上，不另开新的）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Focus 卡片上没有 session 在跑时，也有一个 Resume 续上最近那个。<b>skip permissions</b> 和 <b>stay on board</b> 在 <b>New session ▾</b> 的小箭头菜单里，<b>skip permissions</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ Do it 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问。<b>stay on board</b>（同样记住选择，默认不勾）：勾上后，新开、续上、▶ Do it 时终端标签页在后台打开、不切过去，看板直接弹出这个 session 的对话窗口——先显示 starting…，session 起来后就能在里面看回复、发消息（发消息仍限 Orca / iTerm2 / Terminal）。要授权的操作在小猫的列表里 Allow / Deny，或者配合 skip permissions 一起用</td><td>你</td></tr>
-<tr><td><b>New session ▾</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。任务卡还是空的（没有 next、待办和日志）时不会根据标题猜，只提一条问题——接下来要做什么——你在这条问题里回复就行。右边的小箭头 ▾ 打开菜单，选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>Background</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
+<tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做（显示成 <b>You</b> / <b>Claude</b> / 人名）。方框 = 做完，✕（鼠标移上去才出现）= 不做。未完成的排前面，你的在最前，然后是 Claude 的；已完成的超过 3 条时收起到 <b>显示 N 条已结束的</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。<code>@claude</code> 的待办有 <b>▶ 去做</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队）；没有就按"新 session"的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
+<tr><td><b>Sessions ＋</b></td><td>在右栏。点 ＋ 选一个正在运行的 session 绑定。已绑定的一行一个，鼠标移上去出现 👁 ↗ 和解绑 ✕。下面的 <b>以前的 session</b> 列出这个任务以前用过、已经结束的 session（标题、多久前、最后一句话），👁 看它的对话，<b>↻ Resume</b> 在它原来的目录里用 <code>claude --resume</code> 接着干，并重新绑定到这个任务（终端标签页用它原来的名字；Orca 或 Terminal 里还留着同名、停在 shell 提示符、没有 session 在跑的标签页时——比如重启电脑后 Orca 恢复的标签页、或 Stop 之后的标签页——就在那个标签页里续上，不另开新的）；<b>✕</b>（点两下）把它从这个任务的 session 列表里去掉，对话本身不删。Focus 卡片上没有 session 在跑时，也有一个 Resume 续上最近那个。<b>跳过权限确认</b> 和 <b>留在看板上</b> 在 <b>新 session ▾</b> 的小箭头菜单里，<b>跳过权限确认</b>（记住你的选择，默认不勾）：勾上后，看板新开、续上、▶ 去做 起的 session 都带 <code>--dangerously-skip-permissions</code>，Claude 跑命令、改文件前不再停下来问。<b>留在看板上</b>（同样记住选择，默认不勾）：勾上后，新开、续上、▶ 去做 时终端标签页在后台打开、不切过去，看板直接弹出这个 session 的对话窗口——先显示 starting…，session 起来后就能在里面看回复、发消息（发消息仍限 Orca / iTerm2 / Terminal）。要授权的操作在小猫的列表里 Allow / Deny，或者配合 skip permissions 一起用</td><td>你</td></tr>
+<tr><td><b>新 session ▾</b></td><td>在任务的工作目录（没有则用项目目录）里新开一个 Claude Code session，名字是"编号 标题"，<b>一启动就绑定到这个任务</b>，读卡后用三行汇报现状、下一步和需要你的事，然后等你指示。任务卡还是空的（没有 next、待办和日志）时不会根据标题猜，只提一条问题——接下来要做什么——你在这条问题里回复就行。右边的小箭头 ▾ 打开菜单，选开在哪里（会记住）：<b>Orca / iTerm2 / Terminal</b> 新开一个标签页；<b>后台</b> 不开窗口，在后台运行。默认是你大多数 session 所在的终端</td><td>你</td></tr>
 <tr><td><b>Log ＋</b></td><td>任务的"记忆"：关键决定、发现、给下一个接手者的备注。最新的在上面，按天分组（Today / Yesterday / 日期），每条前面是几点几分（悬停看完整时间）；默认显示最近 3 条</td><td>你写备注；session 绑定后会读它，并把决定写进去；勾选待办等操作自动记一笔</td></tr>
-<tr><td><b>Links</b>（Resources）</td><td>相关的工单、PR、文档，作为可点击的链接列在右栏 Links 里；点 <b>Edit</b>（没有链接时是 <b>+ Add</b>）出现输入框和每条的 ✕，可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
-<tr><td><b>Open card</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
+<tr><td><b>Links</b>（Resources）</td><td>相关的工单、PR、文档，作为可点击的链接列在右栏 Links 里；点 <b>编辑</b>（没有链接时是 <b>+ Add</b>）出现输入框和每条的 ✕，可以添加、删除（删了能 Undo）</td><td>你；session 会把用到的工单、PR、文档以链接形式记进来</td></tr>
+<tr><td><b>打开任务卡</b></td><td>用默认编辑器打开任务卡文件</td><td></td></tr>
 </table>
 <h2>Sessions（All 的右列）</h2>
 <ul>
@@ -150,8 +151,8 @@
 <li>每张卡三行：状态点和名字，右边是 <b>Bind…</b>（绑定到任务；绑定后显示任务编号，点它定位任务）；项目和状态，右边三个图标；最后一条回复。<br>
 状态文字后面是这个会话带着多少 context（如 <code>210k · 70% ctx</code>），和小猫列表里的一样：前面是 token 数——每一轮都要把这么多重新送给模型一次，会话越长越费 5 小时额度；百分比是相对<b>自动 compact 门槛</b>算的：门槛是你用 <code>/autocompact 200k</code> 设的值（只读用户级 <code>~/.claude/settings.json</code>，项目里的设置不算；没设就是模型的整个窗口）。100% 就是门槛本身，Claude Code 通常在到达之前就会压缩。到门槛的 2/3（67%）起变色，这时小猫会提醒一次“可以 /compact 或开新会话”；80% 起变红。提醒只在会话<b>越过</b> 2/3 那一刻发：小猫启动或暂停恢复时已经超过的会话不提醒；压缩到门槛一半以下、再次越过时，会再提醒一次。<b>状态点和状态文字都和小猫列表里的完全一样</b>（状态文字如 "Working"、正在跑的命令、"1 in background"、"Answered"；圆点悬停有说明）：绿色呼吸 = 在干活；转圈的弧 = 在等它派出去的 agent；绿色带珊瑚红小角 = 在干活但最近几次调用都失败了；灰绿色带向外扩散的圈 = 这一轮结束了，但它启动的命令 / 进程还在后台跑；珊瑚红菱形 = 等你授权；橙色空心圈 = 等你回答；灰色 = 空闲；灰色虚线圈 = 那一轮被打断了（Claude Code 自己说 idle），或很久没有动静。系统开了"减少动态效果"时不动，只靠形状区分。</li>
 <li><b>在看板上批准</b>：session 卡在权限确认上（珊瑚红菱形）时，它那一行会出现 <b>Approve</b> 框：下面是它要做的事的<b>完整</b>内容（整条命令、完整路径或网址、其他工具的参数），右上是 <b>Allow</b> / <b>Deny</b>。<b>Allow 要点两下</b>：第一下变成 <b>Allow?</b>，在同一个确认上再点一下才批准，6 秒内不点就取消——看板几秒刷新一次，行的位置可能变，这样点不到别人的确认上；鼠标停在 Approve 框上时看板也不会刷新。Deny 点一下就生效。和小猫弹出来的 Allow / Deny 是同一个机制：终端里的确认框照常出现，谁先回答算谁的；你在终端先答了，这边的点击就不起作用。只在小猫还挂着这个确认时显示——小猫没在运行时弹出的确认，或者已经等了将近 10 分钟（挂起时间到了）的确认，只能回终端答。同一个 session 同时有好几个确认（比如几个 subagent 一起要权限）时，这里只能回答最新的那一个，其余的回终端答。</li>
-<li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>Stop</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。<b>两轮之间可以直接发消息</b>：看板先停掉它，再用 <code>claude --bg --resume</code> 带着你的消息在原目录里接着跑（id 不变，沿用看板的 skip permissions 设置）；它正在跑一轮时不能发，等这一轮结束或 Attach 进去。</li>
-<li><b>停止终端里的 session</b>：终端里的 session 一行也有 <b>Stop</b>（方块图标，点两次确认）：结束它的 Claude Code 进程，对话保留，标签页留在 shell 提示符。之后 <b>↻ Resume</b> 会<b>优先回到这个标签页</b>，不再另开一个。<b>任务已完成还有 session 在跑</b>：这个任务的卡片顶上会出现黄色提示条，<b>Stop all</b>（点两次）把它们全部停掉；右栏 Sessions 顶上也会汇总所有挂在已完成任务上的 session，<b>Stop them</b> 一次停完。</li>
+<li><b>后台 session</b>（带蓝色 background 标记）没有终端：<b>Attach</b>（终端图标）在你选的终端里打开 <code>claude attach</code>，就能直接交互；<b>停止</b>（方块图标，点两次确认）停止它，对话保留，之后 Attach 可以继续。<b>两轮之间可以直接发消息</b>：看板先停掉它，再用 <code>claude --bg --resume</code> 带着你的消息在原目录里接着跑（id 不变，沿用看板的 skip permissions 设置）；它正在跑一轮时不能发，等这一轮结束或 Attach 进去。</li>
+<li><b>停止终端里的 session</b>：终端里的 session 一行也有 <b>停止</b>（方块图标，点两次确认）：结束它的 Claude Code 进程，对话保留，标签页留在 shell 提示符。之后 <b>↻ Resume</b> 会<b>优先回到这个标签页</b>，不再另开一个。<b>任务已完成还有 session 在跑</b>：这个任务的卡片顶上会出现黄色提示条，<b>全部停止</b>（点两次）把它们全部停掉；右栏 Sessions 顶上也会汇总所有挂在已完成任务上的 session，<b>全部停止</b> 一次停完。</li>
 <li>图标：<b>👁 Peek</b> 打开对话窗口；<b>↗ Jump</b> 跳到它所在的终端；<b>💬 Message</b> 展开消息框（默认收起，写了草稿会保持展开；空着时按 Esc 收起）。</li>
 <li>消息：点 <b>Send</b> 才发送，回车只是换行；发送过程中按钮显示 <b>Sending…</b> 并锁定，不会重复发送；效果和你在终端里亲手输入完全一样。session 空闲时，按钮等到 Claude 开始处理（最多 5 秒）才恢复；session 正忙时消息会排队，终端一接收就恢复，提示"Delivered — queued…"（不会干等 5 秒）。<b>图片</b>：在输入框里 Cmd+V 粘贴截图，或把图片拖进输入框（PNG / JPEG / GIF / WebP，≤ 20MB），会显示缩略图（✕ 去掉）；发送时图片存成本地文件、路径附在消息末尾，Claude 会读取它。<b>草稿会保留</b>：消息框、ask 说明框、待办、新建任务表单等输入框里没发出去的文字、加进去的图片，以及多条 ask 里已经选好的回答，都存在本机，看板刷新、关掉窗口、桌宠重启后都还在；发送或回应后才清掉，对应的 ask 在别处被回应了也会自动清掉。支持 Orca、iTerm2、Terminal 里的 session，以及两轮之间的后台 session；其他终端的 💬 是灰的，悬停会说明原因。</li>
 <li><b>红色 new 标记</b> = 小猫的红点：这个 session 干完了一轮，你还没看过结果。下面这些都算"看过"，标记和小猫的红点一起消失：👁 打开对话、↗ 跳到终端、从看板给它发消息（包括回应 ask 时勾了 send to … now）、在终端里直接给它发下一条。只是打开看板、扫到摘要、展开任务卡片不算。</li>
@@ -165,7 +166,7 @@
 <li>底部可以直接回复。已经结束的 session 只能看历史。</li>
 </ul>
 <h1 id="zh-jobs">定时任务（Scheduled）</h1>
-<p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随系统语言，右上角 <b>EN / 中文</b> 可以切换。</p>
+<p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随右键 <b>Settings → Language · 语言</b> 的设置。</p>
 <ul>
 <li><b>谁在跑</b>：每个打开的任务对应一个 macOS LaunchAgent（<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>），到点由 launchd 启动 <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code>。所以猫关着也照跑；Mac 睡着时错过的那次，醒来后补跑一次（错过多次也只补一次）。第一次加任务时 macOS 可能提示"已添加后台项目"，这是正常的。</li>
 <li><b>从模板开始</b>：还没有任务时，这一页列出三个模板——<b>每天早上汇总昨晚的 CI</b>（Claude · 每个工作日 09:00）、<b>每小时看 PR 有没有新评论</b>（Claude · 每小时）、<b>每周清一次缓存</b>（Shell · 每周日 03:00）。点一个就打开填好名称、类型、prompt 或命令和时间的新建表单，改一改再保存。</li>
@@ -411,6 +412,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count); the filter box, <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
 <li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks and todos (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
+<li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
 <li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, active first.</li>
 <li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>resets</b> how long until each resets. It is the same reading the pet shows when you hover it. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/hud-usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>; or wrap your statusline command in <code>pet-emit --statusline</code> (see docs/pet.md in the repo). With no fresh reading, nothing is shown. Every open session writes the figures from its own last API call, so what shows is the reading that appeared <b>last</b>, not the highest — after a quota reset it comes down with it. Which is newer survives sleep and restarts; only readings the pet has never seen (its first run, or ones written while it was off or asleep) it cannot order at once, and it shows the higher one until a working session's figures next move.</li>
 <li><b>Filter tasks…</b> by id, title or refs.</li>
@@ -491,7 +493,7 @@ After the status word comes how much context the session carries (e.g. <code>210
 <li>Reply from the box at the bottom. Ended sessions are history-only.</li>
 </ul>
 <h1 id="en-jobs">Scheduled jobs</h1>
-<p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following macOS; <b>EN / 中文</b> at the top right switches it.</p>
+<p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following right-click <b>Settings → Language · 语言</b>.</p>
 <ul>
 <li><b>What runs them</b>: each job that is on has a macOS LaunchAgent (<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>); launchd starts <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code> on time. So a job runs with the pet closed, and a run missed while the Mac slept happens once when it wakes (once, however many were missed). macOS may say a background item was added the first time — that is expected.</li>
 <li><b>Start from a template</b>: with no jobs yet, the page offers three — <b>Summarise last night's CI every morning</b> (Claude · weekdays 09:00), <b>Check my PRs for new comments every hour</b> (Claude · every hour), <b>Clear caches once a week</b> (Shell · Sun 03:00). A click opens the new-job form with the name, kind, prompt or command and schedule filled in, to adjust and save.</li>
@@ -686,7 +688,8 @@ next: "run baseline on clusters A/C"
   }
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
-  pick(saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
+  // Opens in the app's language (Settings → Language); the buttons switch just this page.
+  pick(window.PET_LANG || saved || ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
   document.querySelectorAll("[data-lang]").forEach(function (b) {
     b.addEventListener("click", function () { pick(b.dataset.lang); });
   });

@@ -3,7 +3,7 @@
 // markdown, openPeek…). Jobs themselves are kept and run by the app: see JobsController.swift.
 //
 // Every string here comes from JT, in English and Chinese. The language follows macOS and can be
-// switched in the view; the choice is kept under "hq-lang", for the rest of the board to share.
+// switched in the view — which switches the whole app's language (Settings → Language).
 
 const JT = {
   en: {
@@ -134,11 +134,8 @@ const JT = {
   },
 };
 
-function jlang() {
-  const p = pref("hq-lang", "");
-  if (p === "en" || p === "zh") return p;
-  return /^zh/i.test(navigator.language || "") ? "zh" : "en";
-}
+// The app's language (see LANG in board.js), set in right-click Settings → Language.
+function jlang() { return LANG; }
 function jt(key, vars) {
   // English has a singular; Chinese doesn't need one.
   if (vars && vars.n === 1 && JT[jlang()][key + "1"]) key += "1";
@@ -243,8 +240,6 @@ function summaryText(r) {
 const quotaNowText = (q) => (q && (q.week != null || q.fiveHour != null))
   ? jt("quotaNow", { w: q.week != null ? q.week + "%" : "?", f: q.fiveHour != null ? q.fiveHour + "%" : "?" }) : jt("quotaUnknown");
 const costText = (r) => (r.costUSD != null ? "$" + r.costUSD.toFixed(r.costUSD < 0.1 ? 3 : 2) : "—");
-const langSeg = () => `<span class="seg jlang" role="group" aria-label="Language">${[["en", "EN"], ["zh", "中文"]].map(([l, label]) =>
-  `<button class="${jlang() === l ? "on" : ""}" aria-pressed="${jlang() === l}" data-jaction="lang" data-lang="${l}">${label}</button>`).join("")}</span>`;
 
 // The empty page's starting points: each opens the form filled in.
 function jobTemplates() {
@@ -273,7 +268,6 @@ function renderJobsView() {
       <h1>${jt("tab")}</h1>
       <span class="jsub">${jobs.length ? `${jt("count", { n: jobs.length })} · ${jt("on", { n: nOn })}${nRun ? ` · <span class="jrun">${jt("runningN", { n: nRun })}</span>` : ""}${nFail ? ` · <span class="jfail">${jt("failingN", { n: nFail })}</span>` : ""}` : ""}</span>
       <span class="spacer"></span>
-      ${langSeg()}
       <button class="btn primary" data-jaction="new">${jt("newJob")}</button>
     </div>
     <p class="jintro">${jt("intro")}</p>
@@ -455,7 +449,7 @@ function drawJobForm() {
     : `<div>${jt("m_limit", { limit })}</div>`}</div>`;
 
   box.innerHTML = `<div class="jsheet">
-    <div class="jhead"><h1>${f.id ? jt("editTitle") : jt("newTitle")}</h1><span class="spacer"></span>${langSeg()}</div>
+    <div class="jhead"><h1>${f.id ? jt("editTitle") : jt("newTitle")}</h1></div>
     ${qrow(jt("q_what"), "", what)}
     ${qrow(jt("q_where"), jt("q_whereS"), where)}
     ${qrow(jt("when"), "", when)}
@@ -602,7 +596,6 @@ document.addEventListener("click", async (ev) => {
   const d = el.dataset;
   const job = () => ((jui.data && jui.data.jobs) || []).find((j) => j.id === d.id);
   switch (d.jaction) {
-    case "lang": savePref("hq-lang", d.lang); if (jui.form) drawJobForm(); return renderJobsView();
     case "new": return openJobForm(null);
     case "tpl": return openJobForm(jobTemplates()[Number(d.i)]);
     case "edit": return openJobForm(job());

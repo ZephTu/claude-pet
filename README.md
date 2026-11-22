@@ -20,6 +20,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 - **Click the cat** for the session list, grouped by what wants you first: *Needs you* (approvals, questions), *Finished* (turns you have not looked at, each with the first line of Claude's last reply), *Running*.
 - **Allow or Deny** a permission prompt from the list without going back to the terminal — whichever answer comes first, there or here, counts.
 - **Jump to the terminal tab** a session runs in (↗): Orca, iTerm2, Terminal, Ghostty 1.4+, and VS Code / Cursor (to the window).
+- **English or 中文**: right-click → Settings → Language · 语言 switches the menus, the session list, the Task Board and its guide (or follows the system).
 - **Finish bubbles** name the session that just finished and what it said; a count by the cat's ear says how many are unread.
 - **Hover the cat** for your 5-hour and weekly quota; **hover a row** for its path, context use, model and the last tool call. Each row shows its context as `210k·70%`: the tokens, and their share of the auto-compact window (what `/autocompact` set, read from user settings only); the cat speaks up when a session crosses two thirds of it.
 - **Mute, postpone, rename or pin** a session from its row. A muted one comes back the next time you type into it.

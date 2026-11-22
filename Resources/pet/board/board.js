@@ -2,21 +2,28 @@
 // native bridge (BoardWindow.swift); this page holds no state worth keeping.
 "use strict";
 
+// The app's language (Settings → Language in the pet's menu), set before this script runs; the
+// page reloads when it changes. T("English", "中文") picks one — every word the board shows goes
+// through it. Technical terms (session, todo, ask, Resume…) may stay English in the Chinese.
+const LANG = window.PET_LANG === "zh" ? "zh" : "en";
+const T = (en, zh) => (LANG === "zh" ? zh : en);
+document.documentElement.lang = LANG;
+
 const ORDER = ["waiting-on-me", "blocked", "active", "done", "abandoned"];
 const LABEL = {
-  "waiting-on-me": "Waiting on you", blocked: "Blocked", active: "Active",
-  done: "Done", abandoned: "Abandoned",
+  "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"),
+  done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃"),
 };
 // How an ask can be answered. Most asks are "should I?" or "A or B — I suggest A", so Yes ("go
 // ahead / as you suggest", or with a note: "my answer is the note") comes first. "Later" keeps the
 // ask open and out of sight until tomorrow. "No context" is rare and sits behind ⋯.
 const RESOLUTIONS = [
-  ["do", "Yes", "Yes — go ahead, or as you suggested. With a note, the note is your answer (\"A+C\", \"run it once\")"],
-  ["drop", "No", "No — don't do it. A note can say why, or what instead"],
-  ["todo", "To todo", "Something I'll do myself — make it an @me todo on this task and close the ask"],
-  ["snooze", "Later", "Not now — keep the question, but hide it until tomorrow: it leaves Needs you and the cat's badge, and the session is told you'll answer later"],
+  ["do", T("Yes", "可以"), T("Yes — go ahead, or as you suggested. With a note, the note is your answer (\"A+C\", \"run it once\")", "可以——去做，或按你的建议来。写了说明，说明就是你的回答（如“A+C”“跑一次”）")],
+  ["drop", T("No", "不要"), T("No — don't do it. A note can say why, or what instead", "不要——别做。说明里可以写原因，或者换成什么")],
+  ["todo", T("To todo", "转待办"), T("Something I'll do myself — make it an @me todo on this task and close the ask", "这是我自己要去做的事——在这个任务里加一条 @me 待办，并关掉这个问题")],
+  ["snooze", T("Later", "稍后"), T("Not now — keep the question, but hide it until tomorrow: it leaves Needs you and the cat's badge, and the session is told you'll answer later", "先不答——问题留着，但藏到明天：它会离开 Needs you 和小猫的角标，session 会被告知你稍后再答")],
 ];
-const MORE_RESOLUTIONS = [["archive", "No context", "I can't answer this — park it"]];
+const MORE_RESOLUTIONS = [["archive", T("No context", "不了解背景"), T("I can't answer this — park it", "我答不了——先归档")]];
 // Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
 const projectNames = () => projects().map((p) => p.name);
@@ -50,7 +57,7 @@ const ui = {
 // ------------------------------------------------------------------ bridge
 async function api(op, args = {}) {
   const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hq;
-  if (!h) throw new Error("Open this page from Claude Pet (Task Board…)");
+  if (!h) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
   return h.postMessage(Object.assign({ op }, args));
 }
 async function apiJSON(op, args) { return JSON.parse(await api(op, args)); }
@@ -71,20 +78,32 @@ async function act(op, args, ok) {
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
   { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// The static labels in board.html are English; in Chinese they are set here once (the page
+// reloads when the language changes).
+if (LANG === "zh") {
+  $("#search").placeholder = "筛选任务";
+  $("#new-task").textContent = "新建任务";
+  $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
+  $("#guide").title = "使用说明：HQ 怎么用";
+  $("#all .vhead h1").textContent = "所有任务";
+  $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前";
+  $("#activefirst-cb").nextSibling.nodeValue = " 活跃的在前";
+  $("#show-closed").nextSibling.nodeValue = " 显示已关闭";
+}
 function ago(iso) {
   if (!iso) return "";
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (isNaN(s)) return "";
-  if (s < 90) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400 * 2) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+  if (s < 90) return T("just now", "刚刚");
+  if (s < 3600) return T(`${Math.round(s / 60)}m ago`, `${Math.round(s / 60)} 分钟前`);
+  if (s < 86400 * 2) return T(`${Math.round(s / 3600)}h ago`, `${Math.round(s / 3600)} 小时前`);
+  return T(`${Math.round(s / 86400)}d ago`, `${Math.round(s / 86400)} 天前`);
 }
 function toast(msg, bad, undo) {
   const t = $("#toast");
   ui.undoFn = undo || null;
   t.innerHTML = `<span>${esc(msg)}</span>` +
-    (undo ? ` <button class="btn small" data-action="undo-toast">Undo</button>` : "");
+    (undo ? ` <button class="btn small" data-action="undo-toast">${T("Undo", "撤销")}</button>` : "");
   t.className = bad ? "bad" : "";
   t.hidden = false;
   clearTimeout(toast.timer);
@@ -97,7 +116,7 @@ const FINISHED_SHOWN = 3;
 const STALE_DAYS = 3;       // a todo older than this shows its age in amber   // finished todos shown on a task before they fold
 const TODO_STATE = { open: "open", done: "done", dropped: "drop", drop: "drop" };
 async function changeTodo(task, i, to, from, text) {
-  const label = { done: "Done", drop: "Won't do", open: "Reopened" }[to] || to;
+  const label = { done: T("Done", "已完成"), drop: T("Won't do", "不做"), open: T("Reopened", "已恢复") }[to] || to;
   try {
     await api("todo", { task, index: i, state: to, text });
     if (to !== "open") ui.recent = ui.recent.filter((r) => !(r.task === task && r.i === i))
@@ -110,7 +129,7 @@ async function changeTodo(task, i, to, from, text) {
 async function undoTodo(task, i) {
   const r = ui.recent.find((x) => x.task === task && x.i === i);
   ui.recent = ui.recent.filter((x) => x !== r);
-  await act("todo", { task, index: i, state: r ? r.from : "open", text: r ? r.text : "" }, "Undone");
+  await act("todo", { task, index: i, state: r ? r.from : "open", text: r ? r.text : "" }, T("Undone", "已撤销"));
 }
 const tasks = () => (ui.board ? ui.board.tasks : []);
 const taskById = (id) => tasks().find((t) => t.id === id);
@@ -158,14 +177,14 @@ function laterLine(t) {
   if (!later.length) return "";
   const open = ui.showLater.has(t.id);
   return `<button class="btn small ghost later-toggle" data-action="show-later" data-task="${esc(t.id)}"
-      title="Questions you put off with Later. They come back by themselves tomorrow; open them to answer now">${open ? "Hide" : `${later.length} for later · back tomorrow`}</button>` +
+      title="${T("Questions you put off with Later. They come back by themselves tomorrow; open them to answer now", "你选了“稍后”的问题。明天会自己回来；点开可以现在就回答")}">${open ? T("Hide", "收起") : T(`${later.length} for later · back tomorrow`, `${later.length} 条稍后再答 · 明天回来`)}</button>` +
     (open ? later.map((a) => askCard(t, a)).join("") : "");
 }
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
 // The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
 // a reply (from here or its terminal) clears it, same as in the pet's list.
 const newTag = (sid) => (ui.unread && ui.unread[sid]
-  ? `<span class="newtag" title="Finished — not looked at yet. Peek, Jump or reply to clear it.">new</span>` : "");
+  ? `<span class="newtag" title="${T("Finished — not looked at yet. Peek, Jump or reply to clear it.", "干完了一轮，你还没看。Peek、Jump 或回复它就会消失。")}">${T("new", "新")}</span>` : "");
 // A session's dot, drawn exactly as in the pet's list (pet.js dotClass — keep the two in step):
 // colour says whether it wants you, shape and motion what it is doing. Sessions the pet doesn't
 // list (a `claude --bg` one, say) fall back to their plain state.
@@ -177,20 +196,20 @@ function dotClass(s) {
   if (p.state === "busy") return p.agent ? "busy agent" : p.struggle ? "busy struggling" : "busy";
   return p.background ? "idle bg" : "idle";
 }
-const DOT_TIP = { quiet: "Gone quiet — nothing heard for a while", "waiting approve": "Waiting for your approval",
-  "waiting reply": "Waiting for your answer", "busy agent": "Waiting on an agent it sent off",
-  "busy struggling": "Working — the last several calls failed", busy: "Working", "idle bg": "Turn over — something it started is still running in the background", idle: "Idle" };
+const DOT_TIP = { quiet: T("Gone quiet — nothing heard for a while", "没动静了——有一阵子没有消息"), "waiting approve": T("Waiting for your approval", "等你授权"),
+  "waiting reply": T("Waiting for your answer", "等你回答"), "busy agent": T("Waiting on an agent it sent off", "在等它派出去的 agent"),
+  "busy struggling": T("Working — the last several calls failed", "在干活——最近几次调用都失败了"), busy: T("Working", "在干活"), "idle bg": T("Turn over — something it started is still running in the background", "这一轮结束了——它启动的东西还在后台跑"), idle: T("Idle", "空闲") };
 // A session's status word, as the pet's list says it (pet.js row status — keep in step): what it
 // is running, "1 in background", "Answered"… Sessions the pet doesn't list fall back to the state.
 function statusWord(s) {
   const p = (ui.dots || {})[s.sessionId];
-  if (!p) return s.state || "?";
-  if (p.state === "waiting") return p.asks === "permission" ? "Needs approval" : "Awaiting reply";
+  if (!p) return LANG === "zh" ? ({ busy: "在干活", waiting: "等你", idle: "空闲" }[s.state] || s.state || "?") : s.state || "?";
+  if (p.state === "waiting") return p.asks === "permission" ? T("Needs approval", "等你授权") : T("Awaiting reply", "等你回答");
   if (p.activity) return p.activity;
-  if (p.quiet) return "No recent activity";
-  if (p.state === "busy") return "Working";
-  if (p.background) return `${p.background} in background`;
-  return p.replied ? "Answered" : "Idle";
+  if (p.quiet) return T("No recent activity", "最近没有动静");
+  if (p.state === "busy") return T("Working", "在干活");
+  if (p.background) return T(`${p.background} in background`, `${p.background} 个在后台跑`);
+  return p.replied ? T("Answered", "已回复") : T("Idle", "空闲");
 }
 // How much context a session carries, as the pet's list shows it: tokens, and their share of the
 // auto-compact window (ContextBudget) — 100% is "about to compact". Amber from two thirds, red from 80%.
@@ -200,7 +219,7 @@ function ctxTag(s) {
   if (p == null) return "";
   const k = (n) => n >= 999500 ? `${Math.round(n / 1e5) / 10}M` : `${Math.round(n / 1000)}k`;
   const tokens = d.contextTokens ? `${k(d.contextTokens)} · ` : "";
-  const title = d.contextTokens ? `Context: ${k(d.contextTokens)} of the ${k(d.contextBudget)} auto-compact window — every turn re-sends it` : "Context used";
+  const title = d.contextTokens ? T(`Context: ${k(d.contextTokens)} of the ${k(d.contextBudget)} auto-compact window — every turn re-sends it`, `上下文：${k(d.contextTokens)}，自动 compact 门槛是 ${k(d.contextBudget)}——每一轮都要重新发送一次`) : T("Context used", "已用上下文");
   return ` · <span class="ctx ${p >= 80 ? "hi" : p >= 67 ? "mid" : ""}" title="${title}">${tokens}${p}% ctx</span>`;
 }
 // Allow / Deny for a session stuck on a permission prompt — the same answer the pet's alert card
@@ -216,11 +235,11 @@ function approveBar(s) {
   if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
   const armed = ui.allowArmed && ui.allowArmed.ask === p.askId;
   const data = `data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}"`;
-  return `<div class="approve"><div class="ap-head"><span class="ap-k">Approve</span>
+  return `<div class="approve"><div class="ap-head"><span class="ap-k">${T("Approve", "批准")}</span>
       <button class="btn small ${armed ? "armed" : ""}" data-action="decide" data-behavior="allow" ${data}
-        title="${armed ? "Click again to allow it" : "Allow — click twice"}">${armed ? "Allow?" : "Allow"}</button>
-      <button class="btn small ghost" data-action="decide" data-behavior="deny" ${data}>Deny</button></div>
-    <code class="ap-what">${esc(p.approveText || s.waitingOn || "this tool call")}</code></div>`;
+        title="${armed ? T("Click again to allow it", "再点一下就允许") : T("Allow — click twice", "允许——要点两下")}">${armed ? T("Allow?", "允许？") : T("Allow", "允许")}</button>
+      <button class="btn small ghost" data-action="decide" data-behavior="deny" ${data}>${T("Deny", "拒绝")}</button></div>
+    <code class="ap-what">${esc(p.approveText || s.waitingOn || T("this tool call", "这次工具调用"))}</code></div>`;
 }
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
@@ -280,7 +299,7 @@ function mergeBackground(sessions, agents) {
 }
 
 // Where "New session" opens: the user's choice, else the terminal most sessions run in.
-const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: "Background" };
+const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: T("Background", "后台") };
 // Sessions the board starts or resumes skip Claude Code's permission prompts — the user's choice,
 // remembered; off unless ticked.
 const skipPerms = () => pref("hq-skip-perms", "0") === "1";
@@ -288,10 +307,10 @@ const skipPerms = () => pref("hq-skip-perms", "0") === "1";
 // background, and its conversation window opens here instead — carry on from the board.
 const stayOnBoard = () => pref("hq-stay", "0") === "1";
 function launchOptions() {
-  return `<label class="skipperm" title="Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files">
-    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> skip permissions</label>
-    <label class="skipperm" title="Open the session's terminal tab in the background and keep working here, in its conversation window">
-    <input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}> stay on board</label>`;
+  return `<label class="skipperm" title="${T("Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files", "新开和续上的 session 带 --dangerously-skip-permissions：Claude 跑命令、改文件前不再停下来问")}">
+    <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> ${T("skip permissions", "跳过权限确认")}</label>
+    <label class="skipperm" title="${T("Open the session's terminal tab in the background and keep working here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干")}">
+    <input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}> ${T("stay on board", "留在看板上")}</label>`;
 }
 // After starting or resuming a session with "stay on board": its conversation window, which
 // fills in as the session comes up.
@@ -316,21 +335,22 @@ function earlierSessions(t) {
   const live = new Set(ui.sessions.map((s) => s.sessionId));
   return ((ui.history[t.id] || {}).rows || []).filter((r) => !r.live && !live.has(r.sessionId));
 }
-const resumeTip = (r) => `Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`;
+const resumeTip = (r) => T(`Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`,
+  `续上它：在 ${r.cwd || "它原来的目录"} 里 claude --resume${skipPerms() ? "（跳过权限确认）" : ""}，开在 ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`);
 function earlierList(t) {
   const rows = earlierSessions(t);
   if (!rows.length) return "";
   const shown = ui.histAll.has(t.id) ? rows : rows.slice(0, 3);
-  return `<div class="meta past-h">Earlier sessions</div>` + shown.map((r) => `<div class="bsess past">
+  return `<div class="meta past-h">${T("Earlier sessions", "以前的 session")}</div>` + shown.map((r) => `<div class="bsess past">
       <span class="dot idle"></span>
       <div style="flex:1;min-width:0"><div class="stitle">${esc(r.title || r.sessionId.slice(0, 8))}</div>
-        <div class="meta">ended · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
+        <div class="meta">${T("ended", "已结束")} · ${ago(r.lastAt)}${r.lastText ? " · " + esc(r.lastText.slice(0, 90)) : ""}</div></div>
       <div class="icons">
-        <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="Read its conversation">${ICON.peek}</button>
+        <button class="icon" data-action="peek" data-session="${esc(r.sessionId)}" title="${T("Read its conversation", "看它的对话")}">${ICON.peek}</button>
         <button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r))}">↻ Resume</button>
-        <button class="icon" data-confirm="Remove?" data-action="forget-session" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" title="Remove it from this task's sessions (the conversation itself is kept)">✕</button>
+        <button class="icon" data-confirm="${T("Remove?", "移除？")}" data-action="forget-session" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" title="${T("Remove it from this task's sessions (the conversation itself is kept)", "从这个任务的 session 列表里去掉（对话本身保留）")}">✕</button>
       </div></div>`).join("") +
-    (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? "Show fewer" : `Show all ${rows.length}`}</button>` : "");
+    (rows.length > 3 ? `<button class="btn small ghost" data-action="hist-all" data-task="${esc(t.id)}">${ui.histAll.has(t.id) ? T("Show fewer", "收起") : T(`Show all ${rows.length}`, `显示全部 ${rows.length} 个`)}</button>` : "");
 }
 function launchPlace() {
   const saved = pref("hq-launch", "");
@@ -352,14 +372,14 @@ function doItButton(t, x) {
   if (x.state !== "open" || x.owner !== "claude") return "";
   const key = `${t.id}|${x.text}`;
   const h = ui.handed[key];
-  if (ui.handing.has(key)) return `<button class="btn small ghost doit" disabled>Handing…</button>`;
+  if (ui.handing.has(key)) return `<button class="btn small ghost doit" disabled>${T("Handing…", "交接中…")}</button>`;
   if (h && Date.now() - h.at < HANDED_MS) {
-    return `<button class="btn small ghost doit" title="Handed to ${esc(h.to)} ${ago(new Date(h.at).toISOString())} — click to hand it over again" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
+    return `<button class="btn small ghost doit" title="${esc(T(`Handed to ${h.to} ${ago(new Date(h.at).toISOString())} — click to hand it over again`, `${ago(new Date(h.at).toISOString())}交给了 ${h.to}——再点一下会再交一次`))}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
   }
   const s = doTarget(t);
-  const tip = s ? `Send it to ${s.title || s.project} as a message${s.state === "busy" ? " (busy — it will queue)" : ""}`
-    : "No session on this task can take a message — start one that does this todo";
-  return `<button class="btn small doit" title="${esc(tip)}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">▶ Do it</button>`;
+  const tip = s ? T(`Send it to ${s.title || s.project} as a message${s.state === "busy" ? " (busy — it will queue)" : ""}`, `作为一条消息发给 ${s.title || s.project}${s.state === "busy" ? "（正忙——会排队）" : ""}`)
+    : T("No session on this task can take a message — start one that does this todo", "这个任务没有能收消息的 session——新开一个来做这条待办");
+  return `<button class="btn small doit" title="${esc(tip)}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">▶ ${T("Do it", "去做")}</button>`;
 }
 // The live session to hand a task's todo to: one the board can type into, most recently active first.
 function doTarget(t) {
@@ -378,15 +398,15 @@ async function doTodo(taskId, text) {
       const busy = s.state === "busy";
       await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy, ...sendExtra(s) });
       ui.handed[key] = { to: s.title || s.project, at: Date.now() };
-      toast(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`);
+      toast(T(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`, `${busy ? "已排队发给" : "已发给"} ${s.title || s.project}`));
     } else {
       const dir = launchDir(t);
-      if (!dir) throw new Error("This task has no directory yet — bind a session or give the project a directory first");
+      if (!dir) throw new Error(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或给项目设一个目录"));
       const place = launchPlace();
       const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms(), focus: !stayOnBoard() });
       stayWith(r && r.session, `${t.id} ${t.title}`);
-      ui.handed[key] = { to: "a new session", at: Date.now() };
-      toast(`Started a session on ${t.id} (${PLACES[place]}) to do it`);
+      ui.handed[key] = { to: T("a new session", "新 session"), at: Date.now() };
+      toast(T(`Started a session on ${t.id} (${PLACES[place]}) to do it`, `已在 ${t.id} 上新开一个 session（${PLACES[place]}）去做`));
       setTimeout(() => refresh(), 2500);
     }
   } catch (e) { toast(String(e.message || e), true); }
@@ -428,7 +448,7 @@ function render() {
   // (Scheduled has none: its jobs are only read while that page is showing.)
   const tabN = { today: focusIds().length, all: tasks().filter(isOpen).length, needs: need };
   $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
-    `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="Unanswered asks and your todos"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
+    `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="${T("Unanswered asks and your todos", "未回应的问题和你的待办")}"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
   $("#all").hidden = ui.mode !== "all";
   $("#needs").hidden = ui.mode !== "needs";
@@ -447,14 +467,14 @@ function render() {
     $("#newtask-form").dataset.drawn = "1";
   }
   $("#groupby").innerHTML = ["project", "status"].map((g) =>
-    `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? "Project" : "Status"}</button>`).join("");
+    `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? T("Project", "项目") : T("Status", "状态")}</button>`).join("");
   $("#activefirst").hidden = ui.groupBy !== "project";
   $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
-    `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? "List" : "Project"}</button>`).join("");
+    `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? T("List", "列表") : T("Project", "项目")}</button>`).join("");
   // One button: by project it folds / unfolds every group; by status it closes open task cards.
   const anyOpen = ui.groupBy === "project" ? projectGroupKeys().some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
-  $("#foldall").textContent = anyOpen ? "Collapse all" : "Expand all";
-  $("#foldall").title = ui.groupBy === "project" ? "Fold or unfold every project group" : "Close every open task";
+  $("#foldall").textContent = anyOpen ? T("Collapse all", "全部收起") : T("Expand all", "全部展开");
+  $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project group", "收起或展开所有项目组") : T("Close every open task", "收起所有展开的任务");
   $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
   $("#activefirst input").checked = ui.activeFirst;
   renderSettings();
@@ -513,11 +533,11 @@ function renderCounts() {
   // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
   // you (click → Needs you), and the quota on the right.
   $("#counts").innerHTML =
-    `<span class="sgroup" title="Live Claude Code sessions"><b>${ui.sessions.length}</b> session${ui.sessions.length === 1 ? "" : "s"}` +
-      `${part(by("busy"), "working")}${part(by("waiting"), "waiting on you", "warn")}</span>` +
-    (asks || mine || later ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="Open Needs you">` +
-      `${asks ? `<b>${asks}</b> ask${asks === 1 ? "" : "s"}` : ""}${asks && mine ? " · " : ""}${mine ? `<b>${mine}</b> todo${mine === 1 ? "" : "s"}` : ""}` +
-      `${later ? `<span class="sp">${later} for later</span>` : ""}</span>` : "");
+    `<span class="sgroup" title="${T("Live Claude Code sessions", "正在运行的 Claude Code session")}"><b>${ui.sessions.length}</b> ${T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session")}` +
+      `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
+    (asks || mine || later ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
+      `${asks ? `<b>${asks}</b> ${T(`ask${asks === 1 ? "" : "s"}`, "个问题")}` : ""}${asks && mine ? " · " : ""}${mine ? `<b>${mine}</b> ${T(`todo${mine === 1 ? "" : "s"}`, "条待办")}` : ""}` +
+      `${later ? `<span class="sp">${T(`${later} for later`, `${later} 条稍后再答`)}</span>` : ""}</span>` : "");
   $("#quota").innerHTML = usageChips();
 }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
@@ -525,9 +545,9 @@ function renderCounts() {
 function untilText(iso) {
   const m = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
   if (isNaN(m)) return "";
-  if (m < 60) return `${m}m`;
-  if (m < 24 * 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
-  return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+  if (m < 60) return T(`${m}m`, `${m}分钟`);
+  if (m < 24 * 60) return T(`${Math.floor(m / 60)}h ${m % 60}m`, `${Math.floor(m / 60)}小时${m % 60}分`);
+  return T(`${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`, `${Math.floor(m / 1440)}天${Math.floor((m % 1440) / 60)}小时`);
 }
 function usageChips() {
   const u = ui.usage;
@@ -536,10 +556,10 @@ function usageChips() {
     if (!w || w.used == null) return "";
     const p = Math.round(w.used);
     const r = w.resets_at ? untilText(w.resets_at) : "";
-    return `<span class="quota ${p >= 90 ? "hi" : p >= 70 ? "mid" : ""}" title="${long}: ${p}% used${r ? ` · resets in ${r}` : ""}">${label}
-      <span class="qbar"><i style="width:${Math.min(100, p)}%"></i></span><b>${p}%</b>${r ? `<span class="qr">resets ${r}</span>` : ""}</span>`;
+    return `<span class="quota ${p >= 90 ? "hi" : p >= 70 ? "mid" : ""}" title="${T(`${long}: ${p}% used${r ? ` · resets in ${r}` : ""}`, `${long}：已用 ${p}%${r ? ` · ${r}后重置` : ""}`)}">${label}
+      <span class="qbar"><i style="width:${Math.min(100, p)}%"></i></span><b>${p}%</b>${r ? `<span class="qr">${T(`resets ${r}`, `${r}后重置`)}</span>` : ""}</span>`;
   };
-  return one("5h", "5-hour limit", u.five_hour) + one("week", "Weekly limit", u.seven_day);
+  return one(T("5h", "5小时"), T("5-hour limit", "5 小时额度"), u.five_hour) + one(T("week", "每周"), T("Weekly limit", "每周额度"), u.seven_day);
 }
 
 function renderAsks() {
@@ -549,10 +569,10 @@ function renderAsks() {
   const later = tasks().filter((t) => laterAsks(t).length);
   const laterHtml = later.map((t) => `<div class="later-of"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${laterLine(t)}</div>`).join("");
   const head = `<div class="vhead"><h1>Needs you</h1></div>`;
-  if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>Claude has nothing waiting on an answer from you.</div>` + laterHtml;
+  if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>${T("Claude has nothing waiting on an answer from you.", "Claude 没有在等你回答的问题。")}</div>` + laterHtml;
   const byTask = new Map();
   for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
-  return head + `<div class="group-title">Claude is asking <span class="meta">${items.length}</span></div>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
+  return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")} <span class="meta">${items.length}</span></div>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
 }
 
 // A task with several open asks answers them together: each answer button only picks, and one
@@ -565,12 +585,12 @@ function renderAskGroup(t, asks) {
   const allPush = target && asks.every((a) => wantPush(a));
   return `<div class="askgroup">${asks.map((a) => askCard(t, a, { group: true, sharedTarget: Boolean(target) })).join("")}
     <div class="askbar">
-      <span class="meta">${picked} of ${asks.length} answered</span>
-      ${target ? `<label class="push" title="Type all the answers into that session as one message, so it carries on now">
+      <span class="meta">${T(`${picked} of ${asks.length} answered`, `已选 ${picked} / ${asks.length}`)}</span>
+      ${target ? `<label class="push" title="${T("Type all the answers into that session as one message, so it carries on now", "把所有回答合成一条消息发给那个 session，让它马上接着干")}">
         <input type="checkbox" data-action="push-group" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${allPush ? "checked" : ""}>
-        send to <b>${esc(target.title || target.project)}</b> now${target.state === "busy" ? " (busy — it will queue)" : ""}</label>` : `<span style="flex:1"></span>`}
+        ${T("send to", "现在发给")} <b>${esc(target.title || target.project)}</b>${T(" now", "")}${target.state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>` : `<span style="flex:1"></span>`}
       <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" ${picked && !sending ? "" : "disabled"}
-        title="Record every answer you picked${target ? " and send them in one message" : ""}">${sending ? "Sending…" : picked ? `Send ${picked} answer${picked === 1 ? "" : "s"}` : "Send answers"}</button>
+        title="${T(`Record every answer you picked${target ? " and send them in one message" : ""}`, `记下你选好的每个回答${target ? "，并合成一条消息发出" : ""}`)}">${sending ? T("Sending…", "发送中…") : picked ? T(`Send ${picked} answer${picked === 1 ? "" : "s"}`, `发送 ${picked} 个回答`) : T("Send answers", "发送回答")}</button>
     </div></div>`;
 }
 // The one live session every ask in a group came from, if the board can type into it.
@@ -585,18 +605,18 @@ function askCard(t, a, opt = {}) {
   return `
     <div class="card ask ${pick ? "picked" : ""}">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
-      <div class="ask-text clickable" title="Show where this came from" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
+      <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       <div class="row askrow">
-        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="note · paste images" title="Optional note — your answer in words, or why; paste or drop screenshots too">${esc(draft("note:" + a.id))}</textarea>
+        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
         ${RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []).map(([r, label, tip]) => opt.group
-          ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)} — pick, then Send below" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
+          ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)}${T(" — pick, then Send below", "——先选，再点下面的发送")}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
           : `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
-        ${ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="More answers: No context — I can't answer this, park it" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
+        ${ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
       </div>
       ${attachStrip(attKey)}
-      ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="Type your answer into that session so it carries on now, instead of waiting for your next message there">
+      ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="${T("Type your answer into that session so it carries on now, instead of waiting for your next message there", "把回答直接发给那个 session，让它马上接着干，不用等你在那边发下一条消息")}">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
-        send to <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b> now${pushTarget(a).state === "busy" ? " (busy — it will queue)" : ""}</label>` : ""}
+        ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>` : ""}
     </div>`;
 }
 
@@ -692,8 +712,8 @@ function renderMyTodos() {
     const ms = since(iso);
     if (!ms) return "";
     const days = (Date.now() - ms) / 86400000;
-    const label = ago(iso).replace(" ago", "");
-    return `<span class="age ${days >= STALE_DAYS ? "stale" : ""}" title="Waiting since ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
+    const label = ago(iso).replace(" ago", "").replace(/前$/, "");
+    return `<span class="age ${days >= STALE_DAYS ? "stale" : ""}" title="${T("Waiting since", "开始等待于")} ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
   };
   // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
   // reopen from the task itself — every change is also in the card's log.
@@ -703,36 +723,36 @@ function renderMyTodos() {
     const x = t && t.todos.find((y) => y.i === r.i);
     return x && x.state !== "open";
   });
-  const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? " · blocked" : ""}</div>`;
-  if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">Your todos</div><div class="empty">Nothing waiting on you.</div>`;
-  return `<div class="group-title">Your todos <span class="meta">${items.length + legacy.length}</span></div><div class="inbox-list">` + legacy.map((t) => `
+  const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? T(" · blocked", " · 阻塞中") : ""}</div>`;
+  if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">${T("Your todos", "你的待办")}</div><div class="empty">${T("Nothing waiting on you.", "没有在等你的事。")}</div>`;
+  return `<div class="group-title">${T("Your todos", "你的待办")} <span class="meta">${items.length + legacy.length}</span></div><div class="inbox-list">` + legacy.map((t) => `
     <div class="todo it">
-      <span class="box" title="Handled (you can undo)" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
-      <div class="it-t"><span class="t clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>${src(t)}</div>
+      <span class="box" title="${T("Handled (you can undo)", "处理好了（可以撤销）")}" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
+      <div class="it-t"><span class="t clickable" title="${T("Show context", "查看上下文")}" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>${src(t)}</div>
       ${age(t.waiting_since)}
     </div>`).join("") + items.map(([t, x]) => `
     <div class="todo it">
-      <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
-      <div class="it-t"><span class="t clickable" title="Show context" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>${src(t)}</div>
+      <span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
+      <div class="it-t"><span class="t clickable" title="${T("Show context", "查看上下文")}" data-action="ctx" data-kind="todo" data-task="${esc(t.id)}" data-i="${x.i}">${esc(x.text)}</span>${src(t)}</div>
       ${age(x.created)}
-      <button class="icon x" title="Won't do (you can undo)" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
+      <button class="icon x" title="${T("Won't do (you can undo)", "不做（可以撤销）")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>
     </div>`).join("") + recent.map((r) => `
     <div class="todo it ${r.to === "drop" ? "dropped" : "done"}">
       <span class="box ${r.to === "drop" ? "dropped" : "done"}">${r.to === "drop" ? "–" : "✓"}</span>
       <div class="it-t"><span class="t">${esc(r.text)}</span>
-        <div class="meta src">${r.to === "drop" ? "won't do" : "done"} ${ago(new Date(r.at).toISOString())} · undo available for an hour · <span class="tid link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
-      <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">Undo</button>
+        <div class="meta src">${r.to === "drop" ? T("won't do", "不做") : T("done", "已完成")} ${ago(new Date(r.at).toISOString())} · ${T("undo available for an hour", "1 小时内可以撤销")} · <span class="tid link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
+      <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">${T("Undo", "撤销")}</button>
     </div>`).join("") + `</div>`;
 }
 
 function renderWaitingUnused() {
   const items = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
   if (!items.length) return "";
-  return `<h3>Waiting on you · ${items.length}</h3>` + items.map((t) => `
+  return `<h3>${T("Waiting on you", "等你处理")} · ${items.length}</h3>` + items.map((t) => `
     <div class="card">
       <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div>
-      <div class="ask-text clickable" title="Show context" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</div>
-      <div class="row"><button class="btn small" data-action="clear-waiting" data-task="${esc(t.id)}">Handled</button></div>
+      <div class="ask-text clickable" title="${T("Show context", "查看上下文")}" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</div>
+      <div class="row"><button class="btn small" data-action="clear-waiting" data-task="${esc(t.id)}">${T("Handled", "处理好了")}</button></div>
     </div>`).join("");
 }
 
@@ -772,7 +792,7 @@ function renderTasks() {
   const visible = tasks().filter((t) => (ui.showClosed || isOpen(t)) &&
     (!f || `${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)));
   if (!tasks().length) return renderOnboarding();
-  if (!visible.length) return `<div class="empty">No tasks${f ? " match" : ""}.</div>`;
+  if (!visible.length) return `<div class="empty">${f ? T("No tasks match.", "没有匹配的任务。") : T("No tasks.", "没有任务。")}</div>`;
   let html = "";
   if (ui.groupBy === "project") {
     const names = projectNames();
@@ -792,18 +812,18 @@ function renderTasks() {
       const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
       const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
       const movable = Boolean(name) && names.includes(name);
-      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}" title="Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}"
+      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
           ${movable ? `draggable="true" data-drag-project="${esc(name)}"` : ""}>
-        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || "No project")} <span class="meta">${group.length}</span>
-        ${activity[name] ? `<span class="act" title="Latest session activity in this project">● ${ago(new Date(activity[name]).toISOString())}</span>` : ""}
-        ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}${live ? `<span class="badge live" title="live sessions">${live}</span>` : ""}
-        ${name && !names.includes(name) ? `<span class="meta">not in list</span>` : ""}
+        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || T("No project", "无项目"))} <span class="meta">${group.length}</span>
+        ${activity[name] ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● ${ago(new Date(activity[name]).toISOString())}</span>` : ""}
+        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}
+        ${name && !names.includes(name) ? `<span class="meta">${T("not in list", "不在列表里")}</span>` : ""}
         ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
       if (!shut) {
         const closed = tasks().filter((t) => (t.project || "") === name && !isOpen(t)).length;
         html += group.length ? group.map((t) => renderTask(t, "project")).join("")
-          : `<div class="empty proj-empty">No open tasks${closed && !ui.showClosed ? ` (${closed} closed)` : ""}.
-              <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ New task</button></div>`;
+          : `<div class="empty proj-empty">${T("No open tasks", "没有进行中的任务")}${closed && !ui.showClosed ? T(` (${closed} closed)`, `（${closed} 个已关闭）`) : ""}${T(".", "。")}
+              <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ ${T("New task", "新建任务")}</button></div>`;
       }
     }
     return html;
@@ -817,7 +837,7 @@ function renderTasks() {
   return html;
 }
 
-const STATUS_SHORT = { "waiting-on-me": "Waiting on you", blocked: "Blocked", active: "Active", done: "Done", abandoned: "Abandoned" };
+const STATUS_SHORT = { "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"), done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃") };
 function renderTask(t, mode) {
   const asks = openAsks(t).length;
   const live = liveFor(t.id).length;
@@ -827,20 +847,20 @@ function renderTask(t, mode) {
   const subText = mine && isOpen(t) ? mine : (t.next && isOpen(t) ? t.next : "");
   // Status is the rail on the row's left edge (and the id's colour); the group heading already
   // names the project or the status, so the row repeats neither.
-  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? "Waiting on you: " : "Next: ") + subText)}">${esc(subText)}</div>` : "";
+  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? T("Waiting on you: ", "等你处理：") : T("Next: ", "下一步：")) + subText)}">${esc(subText)}</div>` : "";
   const busy = liveFor(t.id).some((x) => x.state === "busy");
   return `<div class="task ${open ? "open" : ""}" id="task-${esc(t.id)}" data-st="${esc(t.status)}">
-    <div class="task-head" data-action="expand" data-task="${esc(t.id)}" title="${esc(STATUS_SHORT[t.status] || t.status)} — click to ${open ? "fold" : "open"}">
+    <div class="task-head" data-action="expand" data-task="${esc(t.id)}" title="${esc(STATUS_SHORT[t.status] || t.status)}${T(` — click to ${open ? "fold" : "open"}`, `——点击${open ? "收起" : "展开"}`)}">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
       <div class="tright">
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
-            title="${focusIds().includes(t.id) ? "In Focus — click to take it off" : "Add to Focus"}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
-        ${asks ? `<span class="badge" title="open asks">${asks}</span>` : ""}
-        ${live ? `<span class="live ${busy ? "" : "idle"}" title="live sessions on it">${busy ? "working" : live === 1 ? "1 session" : `${live} sessions`}</span>` : ""}
+            title="${focusIds().includes(t.id) ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
+        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}
+        ${live ? `<span class="live ${busy ? "" : "idle"}" title="${T("live sessions on it", "在做这个任务的 session")}">${busy ? T("working", "在干活") : T(live === 1 ? "1 session" : `${live} sessions`, `${live} 个 session`)}</span>` : ""}
         ${mode === "project" ? (t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : "")
           : t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
-        <span class="age-d" title="Last updated ${esc(t.updated || "")}">${t.age_days ?? "?"}d</span>
+        <span class="age-d" title="${T("Last updated", "最后更新")} ${esc(t.updated || "")}">${t.age_days ?? "?"}${T("d", "天")}</span>
       </div>
       ${open ? "" : sub}
     </div>
@@ -866,16 +886,16 @@ function renderToday() {
     : mine;
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
-  return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${picked.length} task${picked.length === 1 ? "" : "s"}</span>
-      <label class="toggle af" title="Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All."><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> active first</label>
+  return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${T(`${picked.length} task${picked.length === 1 ? "" : "s"}`, `${picked.length} 个任务`)}</span>
+      <label class="toggle af" title="${T("Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All.", "有 session 在跑的任务排最前，最近有动静的在前。不勾：按你自己的顺序——按住 ⠿ 拖动卡片调整。和 All 里是同一个设置。")}"><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> ${T("active first", "活跃的在前")}</label>
       <span style="flex:1"></span>
-      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="Add a task to Focus…" value="${esc(draft("todaypick"))}">
+      <input class="note pick" list="today-pick" data-key="todaypick" placeholder="${T("Add a task to Focus…", "把任务加进 Focus…")}" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
-      <button class="btn small" data-action="today-add">Add</button></div>
+      <button class="btn small" data-action="today-add">${T("Add", "添加")}</button></div>
     ${draftNew}
     ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
-      <b>Nothing in Focus yet.</b>
-      <div class="meta" style="margin-top:4px">Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.</div></div>`}`;
+      <b>${T("Nothing in Focus yet.", "Focus 里还没有任务。")}</b>
+      <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`}`;
 }
 
 function focusCard(t) {
@@ -887,9 +907,9 @@ function focusCard(t) {
   const busy = live.some((s) => s.state === "busy");
   const detail = ui.expanded.has(t.id);
   const box = (x) => `<div class="todo">
-      <span class="box" title="Mark done (you can undo)" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
-      <span class="who me">You</span><span class="t">${esc(x.text)}</span>
-      <button class="icon x" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
+      <span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
+      <span class="who me">${T("You", "你")}</span><span class="t">${esc(x.text)}</span>
+      <button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
   // No live session: offer to resume the latest one, beside New session.
   const resume = live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
     ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}">Resume</button>` : ""; })();
@@ -897,26 +917,26 @@ function focusCard(t) {
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
   // Closed, a card is its next step, what it asks you, and your own todos; Claude's todos, the
   // log and the sessions are one click away (the sessions are also in the right column).
-  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-st="${esc(t.status)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? "Click to fold" : "Click for details"}">
+  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-st="${esc(t.status)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? T("Click to fold", "点击收起") : T("Click for details", "点击展开详情")}">
     <div class="fhead">
-      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="Drag to reorder your Focus">⠿</span>`}
+      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="${T("Drag to reorder your Focus", "拖动调整 Focus 的顺序")}">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
-      ${live.length ? `<span class="live ${busy ? "" : "idle"}">${busy ? "working" : "idle"}</span>` : ""}
+      ${live.length ? `<span class="live ${busy ? "" : "idle"}">${busy ? T("working", "在干活") : T("idle", "空闲")}</span>` : ""}
       ${t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
       ${t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
-      <button class="icon x" title="Take it off Focus (the task stays)" data-confirm="Unfocus?" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
+      <button class="icon x" title="${T("Take it off Focus (the task stays)", "从 Focus 拿掉（任务本身不变）")}" data-confirm="${T("Unfocus?", "拿掉？")}" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : `
     <div class="fbody">
       <div class="now">
-        <div class="now-t"><div class="k">Next</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">No next step yet</span>`}</div></div>
+        <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet", "还没有下一步")}</span>`}</div></div>
         <div class="tools" data-action="none" title="">${resume}${launchSplit(t)}</div>
       </div>
       ${stillRunning(t)}
       ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
       ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
-      ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : "Nothing waiting on you here"}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? `${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all` : ""}</div>` : ""}
+      ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : T("Nothing waiting on you here", "这里没有在等你的事")}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? T(`${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all`, `还有 ${others} 条是 Claude 或别人的待办——展开看全部`) : ""}</div>` : ""}
     </div>`}
   </div>`;
 }
@@ -925,16 +945,16 @@ function renderTodaySessions() {
   const ids = focusIds();
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
-  return `<div class="vhead"><h2 class="side-h">Sessions on these tasks</h2></div>
-    ${onToday.length ? renderSessions(onToday, "state") : `<div class="empty">None yet — start one from a task, or bind one below.</div>`}
-    ${loose.length ? `<div class="vhead" style="margin-top:22px"><h2 class="side-h">Not on a task</h2></div>${renderSessions(loose, true)}` : ""}`;
+  return `<div class="vhead"><h2 class="side-h">${T("Sessions on these tasks", "这些任务的 session")}</h2></div>
+    ${onToday.length ? renderSessions(onToday, "state") : `<div class="empty">${T("None yet — start one from a task, or bind one below.", "还没有——从任务上新开一个，或者绑定下面的一个。")}</div>`}
+    ${loose.length ? `<div class="vhead" style="margin-top:22px"><h2 class="side-h">${T("Not on a task", "未绑定任务")}</h2></div>${renderSessions(loose, true)}` : ""}`;
 }
 
 // ---- related resources: URLs as-is, shorthand (QA-123, repo#45) through hq.json "links" rules
 // Titles are cut to a few words; the full title and the URL are in the tooltip.
 const REF_LABEL_MAX = 36;
 const shortLabel = (t) => (t.length > REF_LABEL_MAX ? t.slice(0, REF_LABEL_MAX).replace(/[\s\-–:,，]+\S*$/, "") + "…" : t);
-const KIND_LABEL = { ticket: "Tickets", pr: "Pull requests", doc: "Docs", link: "Links", none: "Not linked" };
+const KIND_LABEL = { ticket: T("Tickets", "工单"), pr: "Pull requests", doc: T("Docs", "文档"), link: T("Links", "链接"), none: T("Not linked", "未链接") };
 function kindOfUrl(u) {
   if (/github\.com\/[^/]+\/[^/]+\/(pull|merge_requests)\/|gitlab\.[^/]+\/.+\/merge_requests\//.test(u)) return "pr";
   if (/\/browse\/[A-Z][A-Z0-9]+-\d+|linear\.app\/|\/issues\/\d+|\/jira\//i.test(u)) return "ticket";
@@ -978,9 +998,9 @@ function launchSplit(t) {
   // The same task can be drawn twice (Focus, and All behind it): each menu gets its own radio group.
   const group = `place-${t.id}-${(launchSplit.n = (launchSplit.n || 0) + 1)}`;
   return `<span class="launch">
-    <button class="btn small primary" data-action="launch" data-task="${esc(t.id)}" title="Start a Claude Code session on this task in ${esc(launchDir(t) || "(no directory yet)")} (${esc(PLACES[launchPlace()])}) — it starts bound, reads the card and reports">New session</button><button class="btn small primary caret-btn ${open ? "on" : ""}" data-action="launch-menu" data-task="${esc(t.id)}" title="Where new sessions open, and how" aria-expanded="${open}">▾</button>
+    <button class="btn small primary" data-action="launch" data-task="${esc(t.id)}" title="${esc(T(`Start a Claude Code session on this task in ${launchDir(t) || "(no directory yet)"} (${PLACES[launchPlace()]}) — it starts bound, reads the card and reports`, `在 ${launchDir(t) || "（还没有目录）"} 里为这个任务新开一个 Claude Code session（${PLACES[launchPlace()]}）——一启动就绑定，读卡后汇报`))}">${T("New session", "新 session")}</button><button class="btn small primary caret-btn ${open ? "on" : ""}" data-action="launch-menu" data-task="${esc(t.id)}" title="${T("Where new sessions open, and how", "新 session 开在哪里、怎么开")}" aria-expanded="${open}">▾</button>
     ${open ? `<div class="menu">
-      <div class="mh">Open new sessions in</div>
+      <div class="mh">${T("Open new sessions in", "新 session 开在")}</div>
       ${Object.entries(PLACES).map(([k, v]) => `<label><input type="radio" name="${esc(group)}" data-action="launch-place" value="${k}" ${launchPlace() === k ? "checked" : ""}> ${v}</label>`).join("")}
       <hr>${launchOptions()}
     </div>` : ""}
@@ -991,12 +1011,12 @@ function logDay(date) {
   const day = String(date).slice(0, 10);
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const now = new Date();
-  if (day === iso(now)) return "Today";
-  if (day === iso(new Date(now.getTime() - 86400000))) return "Yesterday";
+  if (day === iso(now)) return T("Today", "今天");
+  if (day === iso(new Date(now.getTime() - 86400000))) return T("Yesterday", "昨天");
   const d = new Date(day + "T00:00:00");
-  return isNaN(d) ? day : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+  return isNaN(d) ? day : d.toLocaleDateString(T("en-US", "zh-CN"), { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
-const OWNER_LABEL = (o) => (o === "me" ? "You" : o === "claude" ? "Claude" : o || "");
+const OWNER_LABEL = (o) => (o === "me" ? T("You", "你") : o === "claude" ? "Claude" : o || "");
 
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
@@ -1008,8 +1028,8 @@ function renderTaskBody(t) {
     const dirty = d !== undefined && d !== v;
     return `<div class="field"><label>${label}</label><div class="row nowrap">
       <input data-key="${k(name)}" data-field="${name}" data-task="${esc(t.id)}" value="${esc(d ?? v)}" placeholder="${esc(placeholder)}">
-      ${dirty ? `<button class="btn small primary" data-action="save-field" data-field="${name}" data-task="${esc(t.id)}">Save</button>
-        <button class="btn small ghost" data-action="cancel-field" data-field="${name}" data-task="${esc(t.id)}">Cancel</button>` : ""}
+      ${dirty ? `<button class="btn small primary" data-action="save-field" data-field="${name}" data-task="${esc(t.id)}">${T("Save", "保存")}</button>
+        <button class="btn small ghost" data-action="cancel-field" data-field="${name}" data-task="${esc(t.id)}">${T("Cancel", "取消")}</button>` : ""}
     </div></div>`;
   };
   // Open todos first — yours, then Claude's, then anyone else's. Finished ones follow; past
@@ -1027,14 +1047,14 @@ function renderTaskBody(t) {
     const next = x.state === "open" ? "done" : "open";
     const who = x.owner ? `<span class="who ${x.owner === "me" ? "me" : x.owner === "claude" ? "cl" : ""}">${esc(OWNER_LABEL(x.owner))}</span>` : `<span class="who"></span>`;
     return `<div class="todo ${x.state}">
-      <span class="box ${x.state}" title="${x.state === "open" ? "Mark done" : "Reopen"}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
+      <span class="box ${x.state}" title="${x.state === "open" ? T("Mark done", "标为完成") : T("Reopen", "恢复")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       ${who}<span class="t">${esc(x.text)}</span>
       ${doItButton(t, x)}
-      ${x.state === "open" ? `<button class="icon x" title="Won't do" data-confirm="Won't do?" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
+      ${x.state === "open" ? `<button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
-  const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? `${openTodos.length} open` : "all done"}${finished.length ? ` · ${finished.length} finished` : ""}</span>`) +
+  const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
     (finished.length > FINISHED_SHOWN
-      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? "Hide finished" : `Show ${hiddenDone} finished`}</button>` : "");
+      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? T("Hide finished", "收起已结束的") : T(`Show ${hiddenDone} finished`, `显示 ${hiddenDone} 条已结束的`)}</button>` : "");
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
   // The log reads newest first, grouped by day, with the time of day beside each entry.
@@ -1055,90 +1075,90 @@ function renderTaskBody(t) {
   const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
   const tools = `<div class="tools">
       <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
-        title="${editNext ? "Done editing" : "Edit status, project, category and next"}">${editNext ? "Done" : "Edit"}</button>
-      <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="Open the card file">Open card</button>
+        title="${editNext ? T("Done editing", "改完了") : T("Edit status, project, category and next", "修改状态、项目、分类和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
+      <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Open the card file", "用编辑器打开任务卡文件")}">${T("Open card", "打开任务卡")}</button>
       ${launchSplit(t)}
     </div>`;
   const head = editNext ? `<div class="now editing">
       <div class="metarow">
-        <label>status <select data-action="set-status" data-task="${esc(t.id)}">
+        <label>${T("status", "状态")} <select data-action="set-status" data-task="${esc(t.id)}">
           ${ORDER.map((s) => `<option value="${s}" ${s === t.status ? "selected" : ""}>${LABEL[s]}</option>`).join("")}
         </select></label>
-        <label>project <select data-action="set-project" data-task="${esc(t.id)}">
-          <option value="" ${t.project ? "" : "selected"}>(no project)</option>
+        <label>${T("project", "项目")} <select data-action="set-project" data-task="${esc(t.id)}">
+          <option value="" ${t.project ? "" : "selected"}>${T("(no project)", "（无项目）")}</option>
           ${projectNames().map((c) => `<option value="${esc(c)}" ${c === t.project ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} (not in list)</option>` : ""}
+          ${t.project && !projectNames().includes(t.project) ? `<option value="${esc(t.project)}" selected>${esc(t.project)} ${T("(not in list)", "（不在列表里）")}</option>` : ""}
         </select></label>
-        <label>category <select data-action="set-category" data-task="${esc(t.id)}">
-          <option value="" ${t.category ? "" : "selected"}>(none)</option>
+        <label>${T("category", "分类")} <select data-action="set-category" data-task="${esc(t.id)}">
+          <option value="" ${t.category ? "" : "selected"}>${T("(none)", "（不分类）")}</option>
           ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} (not in list)</option>` : ""}
+          ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} ${T("(not in list)", "（不在列表里）")}</option>` : ""}
         </select></label>
         <span class="spacer"></span>${tools}
       </div>
-      ${field("next", "Next", "the next concrete step")}
+      ${field("next", T("Next", "下一步"), T("the next concrete step", "下一个具体的步骤"))}
     </div>`
     : `<div class="now">
-      <div class="now-t"><div class="k">Next</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">No next step yet — Edit to set one</span>`}</div></div>
+      <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div></div>
       ${tools}
     </div>`;
   const sessRow = (s) => `<div class="bsess">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">background</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}</div>
+          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}</div>
         <div class="icons">
-          <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="Peek — open the conversation">${ICON.peek}</button>
+          <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
           ${s.background
-            ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="Attach — open it in ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
-               <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
-            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="Jump to its terminal">${ICON.jump}</button>
-               <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up">${ui.stopArmed === s.sessionId ? "Stop?" : ICON.stop}</button>`}
-          <button class="icon" data-confirm="Unbind?" data-action="unbind" data-session="${esc(s.sessionId)}" title="Unbind from this task">✕</button>
+            ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Attach — open it in", "Attach——在这里打开：")} ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
+               <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
+            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+               <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
+          <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
         </div></div>`;
   return `<div class="task-body">
     ${head}
     ${stillRunning(t)}
     <div class="tcols">
       <div class="tmain">
-        ${secHead("Todos", t, "todo", "Add a todo", null, todoState)}
+        ${secHead(T("Todos", "待办"), t, "todo", T("Add a todo", "加一条待办"), null, todoState)}
         ${adding("todo") ? `<div class="row nowrap addbox">
-            <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="e.g. @me send the reply to …   (@me = you, @claude, or a name)" value="${esc(draft(k("addtodo")))}">
-            <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">Add</button></div>` : ""}
-        ${shownTodos.length ? `<div class="todos">${shownTodos.map(todoRow).join("")}</div>` : `<div class="empty">No todos.</div>`}
+            <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
+            <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>` : ""}
+        ${shownTodos.length ? `<div class="todos">${shownTodos.map(todoRow).join("")}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
 
-        ${secHead("Log", t, "log", "Add a note — the task's memory; bound sessions read it", logs.length || null)}
-        ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="A decision, a finding, a note for whoever picks this up next">${esc(draft(k("log")))}</textarea>
-            <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">Save note</button></div></div>` : ""}
-        ${showLogs.length ? `<ol class="logs">${logHtml}</ol>` : `<div class="empty">Nothing logged yet.</div>`}
-        ${logs.length > 3 ? `<button class="btn small ghost more" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? "Show latest 3" : `Show all ${logs.length}`}</button>` : ""}
+        ${secHead(T("Log", "日志"), t, "log", T("Add a note — the task's memory; bound sessions read it", "加一条备注——任务的记忆；绑定的 session 会读它"), logs.length || null)}
+        ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="${T("A decision, a finding, a note for whoever picks this up next", "一个决定、一个发现、给下一个接手者的备注")}">${esc(draft(k("log")))}</textarea>
+            <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">${T("Save note", "保存备注")}</button></div></div>` : ""}
+        ${showLogs.length ? `<ol class="logs">${logHtml}</ol>` : `<div class="empty">${T("Nothing logged yet.", "还没有日志。")}</div>`}
+        ${logs.length > 3 ? `<button class="btn small ghost more" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? T("Show latest 3", "只看最近 3 条") : T(`Show all ${logs.length}`, `显示全部 ${logs.length} 条`)}</button>` : ""}
       </div>
       <aside class="trail">
         <dl class="props">
-          <dt>Status</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
-          <dt>Project</dt><dd>${esc(t.project || "—")}</dd>
-          <dt>Category</dt><dd>${esc(t.category || "—")}</dd>
-          <dt>Folders</dt><dd>${dirs.length ? dirs.map((x) => `<span class="path" title="${esc(x)}">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>`).join("")
-            : `<span class="faint" title="Added automatically when a session is bound">none yet</span>`}</dd>
-          <dt>Links</dt><dd>
+          <dt>${T("Status", "状态")}</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
+          <dt>${T("Project", "项目")}</dt><dd>${esc(t.project || "—")}</dd>
+          <dt>${T("Category", "分类")}</dt><dd>${esc(t.category || "—")}</dd>
+          <dt>${T("Folders", "目录")}</dt><dd>${dirs.length ? dirs.map((x) => `<span class="path" title="${esc(x)}">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>`).join("")
+            : `<span class="faint" title="${T("Added automatically when a session is bound", "绑定 session 时会自动加上")}">${T("none yet", "还没有")}</span>`}</dd>
+          <dt>${T("Links", "链接")}</dt><dd>
             ${refs.map((r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
-              ${resEdit ? `<button class="icon x" title="Remove" data-confirm="Remove?" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`).join("")}
-            <button class="lnk ${resEdit ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${resEdit ? "Done" : refs.length ? "Edit" : "+ Add"}</button>
+              ${resEdit ? `<button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`).join("")}
+            <button class="lnk ${resEdit ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${resEdit ? T("Done", "完成") : refs.length ? T("Edit", "编辑") : T("+ Add", "+ 添加")}</button>
           </dd>
         </dl>
         ${resEdit ? `<div class="res">
-          <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="URL, or QA-123, repo#45" value="${esc(draft(k("addref")))}">
-            <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">Add</button></div>
-          ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">Shorthand like QA-123 becomes a link once you add a rule under "links" in hq.json (see Guide).</div>` : ""}
+          <div class="row nowrap"><input class="note" data-key="${k("addref")}" data-task="${esc(t.id)}" data-enter="addref" placeholder="${T("URL, or QA-123, repo#45", "网址，或 QA-123、repo#45")}" value="${esc(draft(k("addref")))}">
+            <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>
+          ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">${T("Shorthand like QA-123 becomes a link once you add a rule under \"links\" in hq.json (see Guide).", "在 hq.json 的 \"links\" 里加上规则后，QA-123 这样的简写就会变成链接（见说明）。")}</div>` : ""}
         </div>` : ""}
         <div class="rail-sec">
           <div class="sec-h"><h3>Sessions <span class="meta">${live.length || ""}</span></h3>
-            <button class="icon ${adding("bind") ? "on" : ""}" title="Bind a live session" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button></div>
+            <button class="icon ${adding("bind") ? "on" : ""}" title="${T("Bind a live session", "绑定一个正在运行的 session")}" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button></div>
           ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
-              ? `<select class="bind" data-key="${k("bindpick")}"><option value="">Choose a live session…</option>
-                  ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? " · now on " + esc(s.task) : ""}</option>`).join("")}</select>
-                 <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">Bind</button>`
-              : `<span class="empty">No other live sessions.</span>`}</div>` : ""}
-          ${live.length ? live.map(sessRow).join("") : `<div class="empty">None live.</div>`}
+              ? `<select class="bind" data-key="${k("bindpick")}"><option value="">${T("Choose a live session…", "选一个正在运行的 session…")}</option>
+                  ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? T(" · now on ", " · 现在在 ") + esc(s.task) : ""}</option>`).join("")}</select>
+                 <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">${T("Bind", "绑定")}</button>`
+              : `<span class="empty">${T("No other live sessions.", "没有别的正在运行的 session。")}</span>`}</div>` : ""}
+          ${live.length ? live.map(sessRow).join("") : `<div class="empty">${T("None live.", "没有在跑的。")}</div>`}
           ${earlierList(t)}
         </div>
       </aside>
@@ -1161,8 +1181,8 @@ function stillRunning(t) {
   if (!live.length) return "";
   const key = "task:" + t.id;
   return `<div class="stillrun" data-action="none" title="">
-    <span>${live.length === 1 ? "A session is" : `${live.length} sessions are`} still running on this ${esc(STATUS_SHORT[t.status] || t.status)} task</span>
-    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-task-sessions" data-task="${esc(t.id)}" title="End their Claude Code processes — conversations are kept; Resume picks them up">${ui.stopArmed === key ? "Click again to stop" : live.length === 1 ? "Stop it" : "Stop all"}</button>
+    <span>${T(`${live.length === 1 ? "A session is" : `${live.length} sessions are`} still running on this ${esc(STATUS_SHORT[t.status] || t.status)} task`, `这个任务${esc(STATUS_SHORT[t.status] || t.status)}，还有 ${live.length} 个 session 在跑`)}</span>
+    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-task-sessions" data-task="${esc(t.id)}" title="${T("End their Claude Code processes — conversations are kept; Resume picks them up", "结束它们的 Claude Code 进程——对话保留，之后可以 Resume 续上")}">${ui.stopArmed === key ? T("Click again to stop", "再点一下停止") : live.length === 1 ? T("Stop it", "停止") : T("Stop all", "全部停止")}</button>
   </div>`;
 }
 // Sessions bound to finished tasks, across the board — the Sessions list offers to stop them.
@@ -1172,8 +1192,8 @@ function strayBar() {
   if (!xs.length) return "";
   const key = "strays";
   return `<div class="stillrun">
-    <span>${xs.length === 1 ? "1 session is" : `${xs.length} sessions are`} still running on finished tasks (${[...new Set(xs.map((s) => s.task))].map(esc).join(", ")})</span>
-    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-strays" title="End their Claude Code processes — conversations are kept">${ui.stopArmed === key ? "Click again to stop" : "Stop them"}</button>
+    <span>${T(`${xs.length === 1 ? "1 session is" : `${xs.length} sessions are`} still running on finished tasks`, `有 ${xs.length} 个 session 还挂在已结束的任务上在跑`)} (${[...new Set(xs.map((s) => s.task))].map(esc).join(", ")})</span>
+    <button class="btn small ${ui.stopArmed === key ? "armed" : ""}" data-action="stop-strays" title="${T("End their Claude Code processes — conversations are kept", "结束它们的 Claude Code 进程——对话保留")}">${ui.stopArmed === key ? T("Click again to stop", "再点一下停止") : T("Stop them", "全部停止")}</button>
   </div>`;
 }
 // Ends one live session: a background one with `claude stop`, a terminal one by ending its process.
@@ -1185,7 +1205,7 @@ async function stopMany(list, armKey, what) {
   if (ui.stopArmed !== armKey) {
     ui.stopArmed = armKey;
     render();
-    toast(`Click again to stop ${what} — conversations are kept`);
+    toast(T(`Click again to stop ${what} — conversations are kept`, `再点一下停止${what}——对话保留`));
     setTimeout(() => { if (ui.stopArmed === armKey) { ui.stopArmed = null; render(); } }, 4000);
     return;
   }
@@ -1195,13 +1215,13 @@ async function stopMany(list, armKey, what) {
   for (const s of list) {
     try { await stopOne(s); ok++; } catch (e) { errs.push(`${s.title || s.sessionId.slice(0, 8)}: ${e.message || e}`); }
   }
-  toast(errs.length ? `Stopped ${ok}; ${errs.join("; ")}` : `Stopped ${ok} session${ok === 1 ? "" : "s"}`, errs.length > 0);
+  toast(errs.length ? T(`Stopped ${ok}; ${errs.join("; ")}`, `已停止 ${ok} 个；${errs.join("；")}`) : T(`Stopped ${ok} session${ok === 1 ? "" : "s"}`, `已停止 ${ok} 个 session`), errs.length > 0);
   await refresh();
 }
 
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
 function renderSessions(items = ui.sessions, plain = false) {
-  if (!items.length) return `<div class="empty">No live Claude Code sessions (Claude Pet sees sessions started after it was installed).</div>`;
+  if (!items.length) return `<div class="empty">${T("No live Claude Code sessions (Claude Pet sees sessions started after it was installed).", "没有正在运行的 Claude Code session（Claude Pet 只看得到它安装之后启动的 session）。")}</div>`;
   return (items === ui.sessions ? strayBar() : "") + renderSessionList(items, plain);
 }
 function renderSessionList(items, plain) {
@@ -1214,15 +1234,16 @@ function renderSessionList(items, plain) {
       (list(a.workdirs).some((w) => s.cwd && s.cwd.startsWith(w)) ? 1 : 0));
     const taskCtl = t
       ? `<span class="tid link" data-task="${esc(t.id)}" data-action="goto" title="${esc(t.title)}">${esc(t.id)}</span>`
-      : `<select class="bind mini" data-action="bind-session" data-session="${esc(sid)}" title="Bind this session to a task">
-           <option value="">Bind…</option>
+      : `<select class="bind mini" data-action="bind-session" data-session="${esc(sid)}" title="${T("Bind this session to a task", "把这个 session 绑定到任务")}">
+           <option value="">${T("Bind…", "绑定…")}</option>
            ${sorted.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} ${esc(x.title)}</option>`).join("")}
          </select>`;
     const busy = s.state === "busy";
     const kind = s.terminal && s.terminal.kind;
     const canSend = canMessage(s);
-    const why = canSend ? "" : s.background ? "It is busy in the background — you can message it when its turn ends, or Attach to watch it."
-      : `Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`;
+    const why = canSend ? "" : s.background ? T("It is busy in the background — you can message it when its turn ends, or Attach to watch it.", "它正在后台干活——等这一轮结束再发消息，或者 Attach 进去看。")
+      : T(`Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`,
+          `看板还不支持给${kind ? ` ${TERMINAL_NAME[kind] || kind} 终端` : "这个 session 的终端"}发消息——用 Jump 打开它。`);
     // The message box only takes room when asked for (or while it holds a draft).
     const open = canSend && (ui.msgOpen.has(sid) || Boolean(draft("msg:" + sid)) || Boolean((ui.atts[sid] || []).length));
     // Title and time on the first line; the task, the project and what it is doing on the second;
@@ -1234,25 +1255,25 @@ function renderSessionList(items, plain) {
       <div class="body">
         <div class="shead">
           <div class="stitle" title="${esc(title)}">${newTag(sid)}${esc(t ? title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title : title)}</div>
-          <span class="stime">${ago(s.updatedAt).replace(" ago", "")}</span>
+          <span class="stime">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
         </div>
         <div class="shead">
-          <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">background</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)}${s.waitingOn ? " · waiting: " + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">${T("background", "后台")}</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)}${s.waitingOn ? T(" · waiting: ", " · 在等：") + esc(s.waitingOn) : ""}</div>
           <div class="icons">
-            <button class="icon" data-action="peek" data-session="${esc(sid)}" title="Peek — open the recent conversation">${ICON.peek}</button>
+            <button class="icon" data-action="peek" data-session="${esc(sid)}" title="${T("Peek — open the recent conversation", "Peek——打开最近的对话")}">${ICON.peek}</button>
             ${s.background
-              ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="Attach — open it in a terminal">${ICON.attach}</button>
-                 <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="Stop this background session (its conversation is kept)">${ui.stopArmed === (s.bgId || s.sessionId) ? "Stop?" : ICON.stop}</button>`
-              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="Jump to its terminal">${ICON.jump}</button>
-                 <button class="icon ${ui.stopArmed === sid ? "armed" : ""}" data-action="stop-session" data-session="${esc(sid)}" title="Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up">${ui.stopArmed === sid ? "Stop?" : ICON.stop}</button>`}
-            <span title="${esc(canSend ? (open ? "Hide the message box" : "Message this session") : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
+              ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="${T("Attach — open it in a terminal", "Attach——在终端里打开")}">${ICON.attach}</button>
+                 <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
+              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+                 <button class="icon ${ui.stopArmed === sid ? "armed" : ""}" data-action="stop-session" data-session="${esc(sid)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === sid ? T("Stop?", "停止？") : ICON.stop}</button>`}
+            <span title="${esc(canSend ? (open ? T("Hide the message box", "收起消息框") : T("Message this session", "给这个 session 发消息")) : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
         </div>
         ${approveBar(s)}
         ${plainText(s.lastText) ? `<div class="last">${esc(plainText(s.lastText))}</div>` : ""}
         ${open ? `<div class="send">
           <textarea class="grow" rows="1" data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
-            placeholder="${busy ? "Busy — it will queue · paste or drop images" : "Message · paste or drop images"}">${esc(draft("msg:" + sid))}</textarea>
+            placeholder="${busy ? T("Busy — it will queue · paste or drop images", "正忙——会排队 · 可粘贴或拖入图片") : T("Message · paste or drop images", "消息 · 可粘贴或拖入图片")}">${esc(draft("msg:" + sid))}</textarea>
           ${sendButton(sid, true)}
         </div>${attachStrip(sid)}` : ""}
       </div>
@@ -1262,7 +1283,7 @@ function renderSessionList(items, plain) {
   // As a list: what waits on you first, then what is working, then the rest — newest first in each.
   if (plain === "state" || ui.sgroupBy !== "project") {
     const newest = (a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-    return [["waiting", "Waiting on you"], ["busy", "Working"], ["", "Idle"]].map(([st, label]) => {
+    return [["waiting", T("Waiting on you", "等你")], ["busy", T("Working", "在干活")], ["", T("Idle", "空闲")]].map(([st, label]) => {
       const group = items.filter((x) => (st ? x.state === st : x.state !== "waiting" && x.state !== "busy")).sort(newest);
       return group.length ? `<div class="group-title">${label} <span class="meta">${group.length}</span></div>${group.map(card).join("")}` : "";
     }).join("");
@@ -1280,8 +1301,8 @@ function renderSessionList(items, plain) {
     if (!group.length) continue;
     const key = name || "(none)";
     const shut = ui.scollapsed.has(key);
-    html += `<div class="group-title proj" data-action="scollapse" data-key="${esc(key)}" title="Click to ${shut ? "expand" : "collapse"}">
-      <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || "No project")}
+    html += `<div class="group-title proj" data-action="scollapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}`, `点击${shut ? "展开" : "收起"}`)}">
+      <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || T("No project", "无项目"))}
       <span class="meta">${group.length}</span></div>`;
     if (!shut) html += group.map(card).join("");
   }
@@ -1323,17 +1344,17 @@ function renderNewTask() {
   const v = (k, d = "") => ui.drafts["nt:" + k] ?? d;
   const cat = v("cat", dflt), proj = v("proj"), sess = v("session");
   return `<div class="card">
-    <div class="field"><label>title</label><input id="nt-title" data-key="nt:title" placeholder="What is this task?" value="${esc(v("title"))}"></div>
-    <div class="field"><label>project</label><select id="nt-proj" data-key="nt:proj"><option value="">(auto from the workdir)</option>${projectNames().map((c) =>
+    <div class="field"><label>${T("title", "标题")}</label><input id="nt-title" data-key="nt:title" placeholder="${T("What is this task?", "这个任务是做什么的？")}" value="${esc(v("title"))}"></div>
+    <div class="field"><label>${T("project", "项目")}</label><select id="nt-proj" data-key="nt:proj"><option value="">${T("(auto from the workdir)", "（按工作目录自动归属）")}</option>${projectNames().map((c) =>
       `<option value="${esc(c)}" ${c === proj ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><label>category</label><select id="nt-cat" data-key="nt:cat"><option value="" ${cat ? "" : "selected"}>(none)</option>${cats.map((c) =>
+    <div class="field"><label>${T("category", "分类")}</label><select id="nt-cat" data-key="nt:cat"><option value="" ${cat ? "" : "selected"}>${T("(none)", "（不分类）")}</option>${cats.map((c) =>
       `<option value="${esc(c)}" ${c === cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
-    <div class="field"><label>workdir</label><input id="nt-dir" data-key="nt:dir" list="nt-dirs" value="${esc(v("dir"))}" placeholder="optional — type a path or pick one; binding a session adds its directory">
+    <div class="field"><label>${T("workdir", "工作目录")}</label><input id="nt-dir" data-key="nt:dir" list="nt-dirs" value="${esc(v("dir"))}" placeholder="${T("optional — type a path or pick one; binding a session adds its directory", "可不填——输入路径或从建议里选；绑定 session 时会自动加上它的目录")}">
       <datalist id="nt-dirs">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
-    <div class="field"><label>bind session</label><select id="nt-session" data-key="nt:session"><option value="">—</option>
+    <div class="field"><label>${T("bind session", "绑定 session")}</label><select id="nt-session" data-key="nt:session"><option value="">—</option>
       ${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}" ${s.sessionId === sess ? "selected" : ""}>${esc(s.title || s.project)}</option>`).join("")}</select></div>
-    <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-action="cancel-new">Cancel</button>
-      <button class="btn primary" data-action="create">Create</button></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-action="cancel-new">${T("Cancel", "取消")}</button>
+      <button class="btn primary" data-action="create">${T("Create", "创建")}</button></div>
   </div>`;
 }
 
@@ -1341,7 +1362,7 @@ function clearNewTaskDrafts() { for (const k of Object.keys(ui.drafts)) if (k.st
 
 // ---- Settings: one window for what used to crowd the top bar — projects, categories, and how
 // the board starts sessions. Open on any page (⚙); Esc, Done or a click outside closes it.
-const SETTINGS_TABS = [["projects", "Projects"], ["categories", "Categories"], ["sessions", "Sessions"]];
+const SETTINGS_TABS = [["projects", T("Projects", "项目")], ["categories", T("Categories", "分类")], ["sessions", "Sessions"]];
 function renderSettings() {
   const box = $("#settings");
   if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
@@ -1350,10 +1371,10 @@ function renderSettings() {
   const scroll = prev && prev.dataset.tab === tab ? prev.scrollTop : 0;
   const body = tab === "projects" ? renderProjects() : tab === "categories" ? renderCategories() : renderSessionSettings();
   // Keep the cursor if a box in here is being typed in (the window is rebuilt with the board).
-  box.innerHTML = `<div class="panel" role="dialog" aria-label="Settings">
-    <div class="phead"><div class="stitle">Settings</div>
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Settings", "设置")}">
+    <div class="phead"><div class="stitle">${T("Settings", "设置")}</div>
       <span class="seg">${SETTINGS_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-action="settings-tab" data-tab="${k}">${label}</button>`).join("")}</span>
-      <span style="flex:1"></span><button class="btn small" data-action="close-settings">Done</button></div>
+      <span style="flex:1"></span><button class="btn small" data-action="close-settings">${T("Done", "完成")}</button></div>
     <div class="settings-body" data-tab="${tab}">${body}</div></div>`;
   box.hidden = false;
   box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
@@ -1362,13 +1383,13 @@ function closeSettings() { ui.settings = null; ui.projRemove = {}; ui.catRemove 
 function renderSessionSettings() {
   const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
   return `<div class="set-list">
-    ${row("New sessions open in", "Where ▶ New session, ↻ Resume and ▶ Do it open a session",
+    ${row(T("New sessions open in", "新 session 开在"), T("Where ▶ New session, ↻ Resume and ▶ Do it open a session", "▶ 新 session、↻ Resume 和 ▶ 去做 在哪里开 session"),
       `<select class="bind" data-action="launch-place">${Object.entries(PLACES).map(([k, v]) => `<option value="${k}" ${launchPlace() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
-    ${row("Skip permissions", "Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files",
+    ${row(T("Skip permissions", "跳过权限确认 (skip permissions)"), T("Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files", "新开和续上的 session 带 --dangerously-skip-permissions：Claude 跑命令、改文件前不再停下来问"),
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
-    ${row("Stay on board", "Open the session's terminal tab in the background and carry on here, in its conversation window",
+    ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
-    ${row("Active first", "Tasks (and project groups) with a live session come first, most recently active first. Off: your own order",
+    ${row(T("Active first", "活跃的在前"), T("Tasks (and project groups) with a live session come first, most recently active first. Off: your own order", "有 session 在跑的任务（和项目组）排最前，最近有动静的在前。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
   </div>`;
 }
@@ -1381,43 +1402,43 @@ function renderProjects() {
     const n = tasks().filter((t) => t.project === pr.name).length;
     if (ui.projRemove[pr.name]) {
       const key = "projto:" + pr.name;
-      return `<div class="cat-row removing"><span>Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(pr.name)}</b> to</span>
-        <select class="bind" data-key="${esc(key)}"><option value="">(no project)</option>
+      return `<div class="cat-row removing"><span>${T(`Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(pr.name)}</b> to`, `把 <b>${esc(pr.name)}</b> 里的 ${n} 个任务移到`)}</span>
+        <select class="bind" data-key="${esc(key)}"><option value="">${T("(no project)", "（无项目）")}</option>
           ${ps.filter((x) => x.name !== pr.name).map((x) => `<option value="${esc(x.name)}" ${ui.drafts[key] === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
-        <button class="btn small res-drop" data-action="proj-remove-confirm" data-p="${esc(pr.name)}">Move &amp; remove</button>
-        <button class="btn small ghost" data-action="proj-remove-cancel" data-p="${esc(pr.name)}">Cancel</button></div>`;
+        <button class="btn small res-drop" data-action="proj-remove-confirm" data-p="${esc(pr.name)}">${T("Move &amp; remove", "移走并删除")}</button>
+        <button class="btn small ghost" data-action="proj-remove-cancel" data-p="${esc(pr.name)}">${T("Cancel", "取消")}</button></div>`;
     }
     const nk = "projname:" + pr.name;
     const dirty = ui.drafts[nk] !== undefined && ui.drafts[nk] !== pr.name;
     return `<div class="proj-row" draggable="true" data-drag-project="${esc(pr.name)}">
       <div class="row nowrap">
-        <span class="grip" title="Drag to reorder">⠿</span>
-        <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="Edit to rename (tasks are updated)">
-        ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">Save</button>` : ""}
-        <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-        <button class="icon" title="Remove this project" ${tasks().some((x) => x.project === pr.name) ? "" : `data-confirm="Remove?"`} data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
+        <span class="grip" title="${T("Drag to reorder", "拖动调整顺序")}">⠿</span>
+        <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="${T("Edit to rename (tasks are updated)", "修改即改名（任务卡会同步更新）")}">
+        ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">${T("Save", "保存")}</button>` : ""}
+        <span class="meta">${T(`${n} task${n === 1 ? "" : "s"}`, `${n} 个任务`)}</span>
+        <button class="icon" title="${T("Remove this project", "删除这个项目")}" ${tasks().some((x) => x.project === pr.name) ? "" : `data-confirm="${T("Remove?", "删除？")}"`} data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
       </div>
       <div class="proj-paths">${pr.paths.map((x) => `<div class="res-i"><span class="meta">${esc(x)}</span>
-          <button class="icon" title="Remove this directory" data-confirm="Remove?" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
-        || `<div class="meta">No directory — tasks are only assigned by hand.</div>`}
-        ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="a directory whose tasks belong here" value="${esc(draft("projpath:" + pr.name))}">
-          <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">Add</button></div>`
-          : `<button class="btn small ghost" data-action="toggle-add" data-what="proj" data-task="${esc(pr.name)}" title="Add a directory">+ directory</button>`}</div>
+          <button class="icon" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
+        || `<div class="meta">${T("No directory — tasks are only assigned by hand.", "没有目录——任务只能手动归到这里。")}</div>`}
+        ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}" value="${esc(draft("projpath:" + pr.name))}">
+          <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">${T("Add", "添加")}</button></div>`
+          : `<button class="btn small ghost" data-action="toggle-add" data-what="proj" data-task="${esc(pr.name)}" title="${T("Add a directory", "加一个目录")}">${T("+ directory", "+ 目录")}</button>`}</div>
     </div>`;
   }).join("");
   return `<div class="card">
-    <div class="row"><b>Projects</b><span class="meta">a task's directory picks its project · drag ⠿ to reorder</span>
-      <span style="flex:1"></span><button class="btn small" data-action="close-projects">Done</button></div>
+    <div class="row"><b>${T("Projects", "项目")}</b><span class="meta">${T("a task's directory picks its project · drag ⠿ to reorder", "任务按目录归到项目 · 拖动 ⠿ 调整顺序")}</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-projects">${T("Done", "完成")}</button></div>
     <datalist id="proj-dirs">${dirs.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
-    ${rows || `<div class="empty">No projects yet.</div>`}
+    ${rows || `<div class="empty">${T("No projects yet.", "还没有项目。")}</div>`}
     <div class="proj-row"><div class="row nowrap">
-      <input class="note" data-key="projnew" placeholder="new project name" value="${esc(draft("projnew"))}">
-      <input class="note" list="proj-dirs" data-key="projnewpath" placeholder="its directory (optional)" value="${esc(draft("projnewpath"))}">
-      <button class="btn small primary" data-action="proj-add">Add</button></div></div>
-    ${unassigned ? `<div class="row" style="margin-top:6px"><span class="meta">${unassigned} task(s) have no project.</span>
-      <button class="btn small" data-action="proj-auto">Assign by directory</button></div>` : ""}
-    <div class="row" style="margin-top:8px"><button class="btn small" data-action="scan">Suggest from sessions</button>
-      <span class="meta">finds repositories and directories your Claude Code sessions worked in</span></div>
+      <input class="note" data-key="projnew" placeholder="${T("new project name", "新项目的名字")}" value="${esc(draft("projnew"))}">
+      <input class="note" list="proj-dirs" data-key="projnewpath" placeholder="${T("its directory (optional)", "它的目录（可不填）")}" value="${esc(draft("projnewpath"))}">
+      <button class="btn small primary" data-action="proj-add">${T("Add", "添加")}</button></div></div>
+    ${unassigned ? `<div class="row" style="margin-top:6px"><span class="meta">${T(`${unassigned} task(s) have no project.`, `${unassigned} 个任务没有项目。`)}</span>
+      <button class="btn small" data-action="proj-auto">${T("Assign by directory", "按目录归属")}</button></div>` : ""}
+    <div class="row" style="margin-top:8px"><button class="btn small" data-action="scan">${T("Suggest from sessions", "从 session 推荐")}</button>
+      <span class="meta">${T("finds repositories and directories your Claude Code sessions worked in", "找出你的 Claude Code session 干过活的仓库和目录")}</span></div>
     ${renderScan()}
   </div>`;
 }
@@ -1425,26 +1446,26 @@ function renderProjects() {
 // ---- onboarding: suggest projects from the sessions already on this machine (hq scan)
 function renderScan() {
   if (!ui.scan) return "";
-  if (ui.scan === "loading") return `<div class="empty">Scanning your Claude Code sessions…</div>`;
+  if (ui.scan === "loading") return `<div class="empty">${T("Scanning your Claude Code sessions…", "正在扫描你的 Claude Code session…")}</div>`;
   const fresh = ui.scan.projects.filter((p) => !p.existing);
-  if (!fresh.length) return `<div class="empty">Every directory your sessions worked in already belongs to a project.</div>`;
+  if (!fresh.length) return `<div class="empty">${T("Every directory your sessions worked in already belongs to a project.", "你的 session 干过活的每个目录都已经属于某个项目了。")}</div>`;
   return `<div class="res" style="margin-top:6px">
-    <div class="meta" style="margin-bottom:4px">${ui.scan.sessions.length} sessions in the last ${ui.scan.days} days. Pick the projects to create (skip personal or throwaway folders):</div>
+    <div class="meta" style="margin-bottom:4px">${T(`${ui.scan.sessions.length} sessions in the last ${ui.scan.days} days. Pick the projects to create (skip personal or throwaway folders):`, `最近 ${ui.scan.days} 天有 ${ui.scan.sessions.length} 个 session。勾选要创建的项目（个人或临时的目录可以跳过）：`)}</div>
     ${fresh.map((p) => `<label class="scan-i"><input type="checkbox" data-action="scan-pick" data-name="${esc(p.name)}" ${ui.scanPick.has(p.name) ? "checked" : ""}>
-      <b>${esc(p.name)}</b> <span class="meta">${p.count} session${p.count === 1 ? "" : "s"} · ${ago(p.last)} · ${esc(p.path)}</span></label>`).join("")}
-    <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="scan-apply" ${ui.scanPick.size ? "" : "disabled"}>Create ${ui.scanPick.size || ""} project${ui.scanPick.size === 1 ? "" : "s"}</button>
-      <button class="btn small ghost" data-action="scan-close">Close</button></div>
+      <b>${esc(p.name)}</b> <span class="meta">${T(`${p.count} session${p.count === 1 ? "" : "s"}`, `${p.count} 个 session`)} · ${ago(p.last)} · ${esc(p.path)}</span></label>`).join("")}
+    <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="scan-apply" ${ui.scanPick.size ? "" : "disabled"}>${T(`Create ${ui.scanPick.size || ""} project${ui.scanPick.size === 1 ? "" : "s"}`, `创建 ${ui.scanPick.size || ""} 个项目`)}</button>
+      <button class="btn small ghost" data-action="scan-close">${T("Close", "关闭")}</button></div>
   </div>`;
 }
 function renderOnboarding() {
   return `<div class="card onboard">
-    <h4>Start from the sessions you already have</h4>
+    <h4>${T("Start from the sessions you already have", "从已有的 session 开始")}</h4>
     <ol>
-      <li><b>Projects.</b> Find the repositories and folders your Claude Code sessions worked in, and pick which become projects.
-        <div class="row" style="margin-top:4px"><button class="btn small primary" data-action="scan-open">Suggest projects</button></div></li>
-      <li><b>Tasks.</b> In any Claude Code session, run <code>/hq-onboard</code>. Claude reads your recent sessions, drafts task cards (status, next step, your todos, links), shows you the list and creates nothing until you confirm. Live sessions get bound to their tasks.
-        <div class="row" style="margin-top:4px"><button class="btn small" data-action="copy-onboard">Copy /hq-onboard</button></div></li>
-      <li>Adjust anything here afterwards — or start fresh with <b>+ New task</b>.</li>
+      <li>${T(`<b>Projects.</b> Find the repositories and folders your Claude Code sessions worked in, and pick which become projects.`, `<b>项目。</b>找出你的 Claude Code session 干过活的仓库和目录，挑出哪些成为项目。`)}
+        <div class="row" style="margin-top:4px"><button class="btn small primary" data-action="scan-open">${T("Suggest projects", "推荐项目")}</button></div></li>
+      <li>${T(`<b>Tasks.</b> In any Claude Code session, run <code>/hq-onboard</code>. Claude reads your recent sessions, drafts task cards (status, next step, your todos, links), shows you the list and creates nothing until you confirm. Live sessions get bound to their tasks.`, `<b>任务。</b>在任意 Claude Code session 里运行 <code>/hq-onboard</code>。Claude 会读你最近的 session，起草任务卡（状态、下一步、你的待办、链接），列给你看，你确认之前不会创建任何东西。正在运行的 session 会绑定到对应的任务。`)}
+        <div class="row" style="margin-top:4px"><button class="btn small" data-action="copy-onboard">${T("Copy /hq-onboard", "复制 /hq-onboard")}</button></div></li>
+      <li>${T(`Adjust anything here afterwards — or start fresh with <b>+ New task</b>.`, `之后在这里随便改——或者直接用 <b>+ 新建任务</b> 从头开始。`)}</li>
     </ol>
   </div>`;
 }
@@ -1460,32 +1481,32 @@ function renderCategories() {
       const key = "catto:" + c;
       const others = cats.filter((x) => x !== c);
       return `<div class="cat-row removing">
-        <span>Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(c)}</b> to</span>
+        <span>${T(`Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(c)}</b> to`, `把 <b>${esc(c)}</b> 里的 ${n} 个任务移到`)}</span>
         <select class="bind" data-key="${esc(key)}">
-          <option value="" ${!ui.drafts[key] ? "selected" : ""}>(none)</option>
+          <option value="" ${!ui.drafts[key] ? "selected" : ""}>${T("(none)", "（不分类）")}</option>
           ${others.map((x) => `<option value="${esc(x)}" ${ui.drafts[key] === x ? "selected" : ""}>${esc(x)}</option>`).join("")}
         </select>
-        <button class="btn small res-drop" data-action="cat-remove-confirm" data-cat="${esc(c)}">Move &amp; remove</button>
-        <button class="btn small ghost" data-action="cat-remove-cancel" data-cat="${esc(c)}">Cancel</button>
+        <button class="btn small res-drop" data-action="cat-remove-confirm" data-cat="${esc(c)}">${T("Move &amp; remove", "移走并删除")}</button>
+        <button class="btn small ghost" data-action="cat-remove-cancel" data-cat="${esc(c)}">${T("Cancel", "取消")}</button>
       </div>`;
     }
     return `<div class="cat-row">
-      <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="Edit and press Enter to rename (tasks are updated)">
-      <span class="meta">${n} task${n === 1 ? "" : "s"}</span>
-      <button class="btn small ghost" ${categoryCount(c) ? "" : `data-confirm="Remove?"`} data-action="cat-remove" data-cat="${esc(c)}" title="Remove this category">✕</button>
+      <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="${T("Edit and press Enter to rename (tasks are updated)", "修改后按回车改名（任务卡会同步更新）")}">
+      <span class="meta">${T(`${n} task${n === 1 ? "" : "s"}`, `${n} 个任务`)}</span>
+      <button class="btn small ghost" ${categoryCount(c) ? "" : `data-confirm="${T("Remove?", "删除？")}"`} data-action="cat-remove" data-cat="${esc(c)}" title="${T("Remove this category", "删除这个分类")}">✕</button>
     </div>`;
   }).join("");
   const unlisted = used.map((c) => `<div class="cat-row"><span class="chip">${esc(c)}</span>
-      <span class="meta">on ${categoryCount(c)} card(s) but not in the list</span>
-      <button class="btn small" data-action="cat-adopt" data-cat="${esc(c)}">Add to list</button></div>`).join("");
+      <span class="meta">${T(`on ${categoryCount(c)} card(s) but not in the list`, `${categoryCount(c)} 张任务卡在用，但不在列表里`)}</span>
+      <button class="btn small" data-action="cat-adopt" data-cat="${esc(c)}">${T("Add to list", "加进列表")}</button></div>`).join("");
   return `<div class="card">
-    <div class="row"><b>Categories</b><span class="meta">this board's list, saved in hq.json</span>
-      <span style="flex:1"></span><button class="btn small" data-action="close-cats">Done</button></div>
-    <div class="meta" style="margin:4px 0 8px">Rename: edit a name and press Enter — every task using it is updated.
-      Removing a category that tasks use asks where to move them.</div>
-    ${rows || `<div class="empty">No categories yet.</div>`}
+    <div class="row"><b>${T("Categories", "分类")}</b><span class="meta">${T("this board's list, saved in hq.json", "这个看板的分类列表，存在 hq.json 里")}</span>
+      <span style="flex:1"></span><button class="btn small" data-action="close-cats">${T("Done", "完成")}</button></div>
+    <div class="meta" style="margin:4px 0 8px">${T(`Rename: edit a name and press Enter — every task using it is updated.
+      Removing a category that tasks use asks where to move them.`, `改名：改好名字按回车——所有用到它的任务都会更新。删除有任务在用的分类时，会先问这些任务移到哪里。`)}</div>
+    ${rows || `<div class="empty">${T("No categories yet.", "还没有分类。")}</div>`}
     ${unlisted}
-    <div class="cat-row"><input class="note" data-key="catnew" data-enter="addcat" placeholder="new category — Enter to add" value="${esc(draft("catnew"))}"></div>
+    <div class="cat-row"><input class="note" data-key="catnew" data-enter="addcat" placeholder="${T("new category — Enter to add", "新分类——回车添加")}" value="${esc(draft("catnew"))}"></div>
   </div>`;
 }
 
@@ -1495,7 +1516,7 @@ function renderCategories() {
 async function act2(op, args) {
   try {
     const r = await api(op, args);
-    if (r && r.revealed) toast("Shown in Finder (not opened: it could run code)");
+    if (r && r.revealed) toast(T("Shown in Finder (not opened: it could run code)", "已在访达中显示（没有直接打开：它可能会运行代码）"));
   } catch (e) { toast(String(e.message || e), true); }
 }
 async function copyText(text, msg) {
@@ -1556,29 +1577,29 @@ function drawPeek(toBottom) {
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   const canSend = m.live && canMessage(s);
-  const noSend = m.starting ? "Starting the session — you can type here as soon as it is up" : !m.live ? "This session has ended — history only" : "Not supported in this terminal";
+  const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
-  const list = msgs === null ? `<div class="empty">Loading…</div>`
-    : !msgs.length ? `<div class="empty">${m.found === false ? "No transcript found for this session on this machine." : "No messages yet."}</div>`
+  const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
+    : !msgs.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : msgs.map((x, i) => `<div class="pmsg ${x.role}">
-        <div class="pwho">${x.role === "user" ? "You" : "Claude"} · ${ago(x.ts)}
-          <button class="btn small ghost" data-action="copy-msg" data-i="${i}" title="Copy this message">Copy</button></div>
+        <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · ${ago(x.ts)}
+          <button class="btn small ghost" data-action="copy-msg" data-i="${i}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text)}</div>
       </div>`).join("");
   const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + m.sid);
-  box.innerHTML = `<div class="panel" role="dialog" aria-label="Conversation">
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
-      ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="Back">←</button>` : ""}
-      <div><div class="stitle">${esc(m.title)}${m.live ? "" : m.starting ? ` <span class="chip">starting…</span>` : ` <span class="chip">ended</span>`}</div><div class="meta">${esc(m.project || "")} · last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close</div></div>
+      ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
+      <div><div class="stitle">${esc(m.title)}${m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`}</div><div class="meta">${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}</div></div>
       <span style="flex:1"></span>
-      <button class="btn small" data-action="copy-all">Copy all</button>
+      <button class="btn small" data-action="copy-all">${T("Copy all", "全部复制")}</button>
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
-      <button class="btn small ghost" data-action="close-modal" title="Close (Esc)">✕</button>
+      <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="peek-body">${list}</div>
-    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? "Starting the session…" : !m.live ? "This session has ended." : "Messaging isn't supported for this session's terminal yet — use Jump."}">
+    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
-        placeholder="${canSend ? "Reply to this session — paste or drop images too" : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
+        placeholder="${canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
       ${sendButton(m.sid, canSend)}
     </div>${canSend ? attachStrip(m.sid) : ""}
   </div>`;
@@ -1605,10 +1626,10 @@ function drawContext() {
   const m = ui.modal;
   const t = taskById(m.task);
   const box = $("#modal");
-  if (!t) { closePeek(); return toast("That task is gone", true); }
+  if (!t) { closePeek(); return toast(T("That task is gone", "这个任务已经不在了"), true); }
   const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
   const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
-  const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : "Your todo";
+  const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : T("Your todo", "你的待办");
   const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
   const live = ui.sessions.filter((s) => s.task === t.id);
   const liveIds = new Set(live.map((s) => s.sessionId.slice(0, 8)));
@@ -1618,37 +1639,38 @@ function drawContext() {
     `<button class="btn small" data-action="ctx-peek" data-session="${esc(sid)}">${label}</button>` +
     (isLive ? ` <button class="btn small ghost" data-action="jump" data-session="${esc(sid)}">Jump</button>` : "");
   const origin = !ask ? "" : `<section class="ctx-sec">
-      <h4>Where it came from</h4>
-      <div class="meta">Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}</div>
-      ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, "Open that conversation", Boolean(askSession))}</div>` : ""}
+      <h4>${T("Where it came from", "从哪里来的")}</h4>
+      <div class="meta">${T(`Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}`,
+        `${ask.session ? `在${askSession ? ` <b>${esc(askSession.title || askSession.project)}</b>（运行中）` : ` session ${esc(ask.session.slice(0, 8))}（已结束）`}里，` : ""}${ago(ask.ts)}提出`)}</div>
+      ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, T("Open that conversation", "打开那段对话"), Boolean(askSession))}</div>` : ""}
       ${ask.context ? `<div class="md quote">${markdown(ask.context)}</div>`
-        : `<div class="empty">The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.</div>`}
+        : `<div class="empty">${T("The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.", "提出这个问题的那条回复没有记录下来（这个功能加上之前的 ask）——打开上面的对话看。")}</div>`}
     </section>`;
-  box.innerHTML = `<div class="panel" role="dialog" aria-label="Context">
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Context", "上下文")}">
     <div class="phead">
       <div><div class="meta">${heading} · <span class="chip link" data-action="ctx-goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${esc(t.title)}</div>
         <div class="stitle ctx-title">${esc(text || "")}</div></div>
       <span style="flex:1"></span>
-      <button class="btn small" data-action="ctx-goto" data-task="${esc(t.id)}">Show task</button>
-      <button class="btn small" data-action="open" data-path="${esc(t.path)}">Open card</button>
-      <button class="btn small ghost" data-action="close-modal" title="Close (Esc)">✕</button>
+      <button class="btn small" data-action="ctx-goto" data-task="${esc(t.id)}">${T("Show task", "看任务")}</button>
+      <button class="btn small" data-action="open" data-path="${esc(t.path)}">${T("Open card", "打开任务卡")}</button>
+      <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="peek-body">
       ${origin}
       <section class="ctx-sec">
-        <h4>Task</h4>
-        <div class="meta">${esc(LABEL[t.status] || t.status)} · ${esc(t.category || "no category")} · updated ${t.age_days ?? "?"}d ago</div>
-        ${t.next ? `<div style="margin-top:4px">Next: ${inline(t.next)}</div>` : ""}
-        ${t.waiting_on_me ? `<div style="color:var(--amber)">Waiting on you: ${inline(t.waiting_on_me)}</div>` : ""}
+        <h4>${T("Task", "任务")}</h4>
+        <div class="meta">${esc(LABEL[t.status] || t.status)} · ${esc(t.category || T("no category", "未分类"))} · ${T(`updated ${t.age_days ?? "?"}d ago`, `${t.age_days ?? "?"} 天前更新`)}</div>
+        ${t.next ? `<div style="margin-top:4px">${T("Next: ", "下一步：")}${inline(t.next)}</div>` : ""}
+        ${t.waiting_on_me ? `<div style="color:var(--amber)">${T("Waiting on you: ", "等你：")}${inline(t.waiting_on_me)}</div>` : ""}
       </section>
       <section class="ctx-sec">
-        <h4>Sessions on this task</h4>
-        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}${ctxTag(s)}</span>${sessBtn(s.sessionId, "Conversation", true)}</div>`).join("")}
-        ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ended</span>${sessBtn(String(p), "History", false)}</div>`).join("")}
-        ${!live.length && !past.length ? `<div class="empty">No session has been bound to this task yet.</div>` : ""}
+        <h4>${T("Sessions on this task", "这个任务的 session")}</h4>
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}${ctxTag(s)}</span>${sessBtn(s.sessionId, T("Conversation", "对话"), true)}</div>`).join("")}
+        ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ${T("ended", "已结束")}</span>${sessBtn(String(p), T("History", "历史"), false)}</div>`).join("")}
+        ${!live.length && !past.length ? `<div class="empty">${T("No session has been bound to this task yet.", "这个任务还没有绑定过 session。")}</div>` : ""}
       </section>
       <section class="ctx-sec">
-        <h4>Task card</h4>
+        <h4>${T("Task card", "任务卡")}</h4>
         <div class="md">${markdown(t.body || "")}</div>
       </section>
     </div>
@@ -1723,7 +1745,7 @@ function markdown(text) {
       // HQ's own blocks are for people too: a titled list with live links, not a code box.
       if (lang === "hq-asks" || lang === "hq-resolved" || lang === "hq-update") {
         const items = code.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
-        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${{ "hq-asks": "Asked you", "hq-resolved": "Answers recorded", "hq-update": "Card updated" }[lang]}</div>
+        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${{ "hq-asks": T("Asked you", "问了你"), "hq-resolved": T("Answers recorded", "已记下回答"), "hq-update": T("Card updated", "任务卡已更新") }[lang]}</div>
           <ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul></div>`);
         return;
       }
@@ -1769,7 +1791,7 @@ function markdown(text) {
 // filter that does not match, or a folded project group.
 function revealTask(id) {
   const t = taskById(id);
-  if (!t) return toast(`${id} not found`, true);
+  if (!t) return toast(T(`${id} not found`, `找不到 ${id}`), true);
   // In Today, a task on today's list is its card there: bring that card's top edge to the top
   // of the column, without opening its details. Anything else is shown in All.
   if (ui.mode !== "all") {
@@ -1834,7 +1856,7 @@ function attachStrip(sid) {
   const list = ui.atts[sid] || [];
   if (!list.length) return "";
   return `<div class="atts">${list.map((a, i) => `<span class="att" title="${esc(a.path)}"><img src="${a.url}" alt="">
-      <button class="icon" title="Remove" data-action="att-remove" data-session="${esc(sid)}" data-i="${i}">✕</button></span>`).join("")}</div>`;
+      <button class="icon" title="${T("Remove", "移除")}" data-action="att-remove" data-session="${esc(sid)}" data-i="${i}">✕</button></span>`).join("")}</div>`;
 }
 // A 128×96 JPEG preview of an image, small enough to keep with the drafts.
 function thumbnail(dataURL) {
@@ -1856,8 +1878,8 @@ function readAsDataURL(file) {
 async function addImages(sid, files) {
   let added = 0;
   for (const f of files) {
-    if (!f || !/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast("Only PNG, JPEG, GIF or WebP images", true); continue; }
-    if (f.size > 20 * 1024 * 1024) { toast("That image is larger than 20 MB", true); continue; }
+    if (!f || !/^image\/(png|jpeg|gif|webp)$/.test(f.type)) { toast(T("Only PNG, JPEG, GIF or WebP images", "只支持 PNG、JPEG、GIF 或 WebP 图片"), true); continue; }
+    if (f.size > 20 * 1024 * 1024) { toast(T("That image is larger than 20 MB", "这张图片超过 20 MB"), true); continue; }
     try {
       const url = await readAsDataURL(f);
       const saved = await api("saveImage", { data: url });
@@ -1903,7 +1925,7 @@ const isBusy = (sid) => (ui.sessions.find((x) => x.sessionId === sid) || {}).sta
 // so a second click can't type the same message into the session again.
 function sendButton(sid, enabled) {
   const inFlight = ui.sending.has(sid);
-  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? "Sending…" : "Send"}</button>`;
+  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? T("Sending…", "发送中…") : T("Send", "发送")}</button>`;
 }
 
 async function send(sid) {
@@ -1921,8 +1943,8 @@ async function send(sid) {
     await api("send", { session: sid, text: message, queue: queued, ...sendExtra(ui.sessions.find((x) => x.sessionId === sid)) });
     delete ui.drafts[key];
     delete ui.atts[sid];
-    const withImgs = images.length ? ` with ${images.length} image${images.length === 1 ? "" : "s"}` : "";
-    toast(queued ? `Delivered${withImgs} — queued until the session finishes its turn` : `Sent${withImgs}`);
+    const withImgs = images.length ? T(` with ${images.length} image${images.length === 1 ? "" : "s"}`, `（带 ${images.length} 张图片）`) : "";
+    toast(queued ? T(`Delivered${withImgs} — queued until the session finishes its turn`, `已送达${withImgs}——排队等 session 这一轮结束`) : T(`Sent${withImgs}`, `已发送${withImgs}`));
   } catch (e) {
     toast(String(e.message || e), true);
   } finally {
@@ -1940,7 +1962,7 @@ async function saveField(el) {
   if (t && (t[el.dataset.field] || "") === ui.drafts[k]) { delete ui.drafts[k]; return; }
   const v = ui.drafts[k];
   delete ui.drafts[k];
-  await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, "Saved");
+  await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, T("Saved", "已保存"));
 }
 
 const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts, .tgrip";
@@ -1967,7 +1989,7 @@ async function resolveAll(taskId) {
       } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
     }
     if (!done.length) return;
-    let msg = `${done.length} answer${done.length === 1 ? "" : "s"} recorded`;
+    let msg = T(`${done.length} answer${done.length === 1 ? "" : "s"} recorded`, `已记下 ${done.length} 个回答`);
     // One message per session (normally the one that asked them all).
     const bySession = new Map();
     for (const x of done.filter((x) => x.push)) {
@@ -1981,10 +2003,10 @@ async function resolveAll(taskId) {
         for (const x of xs) if (x.res !== "snooze") await api("delivered", { id: x.a.id, session: sid });
         await api("send", { session: sid, text: pushMessageAll(xs), queue: Boolean(s && s.state === "busy"), ...sendExtra(s) });
         sent.push(...xs);
-        msg += ` · ${s && s.state === "busy" ? "queued for" : "sent to"} ${s ? s.title || s.project : sid}`;
+        msg += ` · ${s && s.state === "busy" ? T("queued for", "已排队给") : T("sent to", "已发给")} ${s ? s.title || s.project : sid}`;
       } catch (e) {
         for (const x of xs) { try { await api("delivered", { id: x.a.id, session: sid, undo: true }); } catch (e2) { /* best effort */ } }
-        msg += ` · couldn't reach the session (${e.message || e}); it gets the answers with your next message there`;
+        msg += T(` · couldn't reach the session (${e.message || e}); it gets the answers with your next message there`, ` · 联系不上 session（${e.message || e}）；你下次给它发消息时会一起带上这些回答`);
       }
     }
     toast(msg, false, async () => {
@@ -2001,7 +2023,7 @@ async function resolveAll(taskId) {
         if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
         ui.picks[x.a.id] = x.res;
       }
-      toast(sent.length ? "Reopened — the message already sent stays in the session" : "Reopened");
+      toast(sent.length ? T("Reopened — the message already sent stays in the session", "已重新打开——已经发出的消息还留在 session 里") : T("Reopened", "已重新打开"));
       refresh();
     });
   } finally {
@@ -2043,7 +2065,7 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["push:" + d.id];
       try {
         const made = await answerAsk(a, d.res, note);
-        let msg = `${d.id} → ${d.res === "todo" ? "@me todo" : d.res}`;
+        let msg = T(`${d.id} → ${d.res === "todo" ? "@me todo" : d.res}`, `${d.id} → ${(RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === d.res) || [])[1] || d.res}`);
         if (push) {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
@@ -2051,10 +2073,10 @@ document.addEventListener("click", async (ev) => {
             // (Later is not an answer: nothing to keep the hook from repeating.)
             if (d.res !== "snooze") await api("delivered", { id: d.id, session: target.sessionId });
             await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy", ...sendExtra(target) });
-            msg += ` · ${target.state === "busy" ? "queued for" : "sent to"} ${target.title || target.project}`;
+            msg += ` · ${target.state === "busy" ? T("queued for", "已排队给") : T("sent to", "已发给")} ${target.title || target.project}`;
           } catch (e) {
             try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
-            msg += ` · couldn't reach the session (${e.message || e}); it gets the answer with your next message there`;
+            msg += T(` · couldn't reach the session (${e.message || e}); it gets the answer with your next message there`, ` · 联系不上 session（${e.message || e}）；你下次给它发消息时会一起带上这个回答`);
           }
         }
         // Undo reopens the ask; an answer already typed into a session cannot be taken back.
@@ -2065,7 +2087,7 @@ document.addEventListener("click", async (ev) => {
             else { await api("reopen", { id: d.id }); await dropMadeTodo(made); }
             ui.drafts["note:" + d.id] = draftNote || "";
             if (imgs) ui.atts["ask:" + d.id] = imgs;
-            toast(push ? `${d.id} reopened — the message already sent stays in the session` : `${d.id} reopened`);
+            toast(push ? T(`${d.id} reopened — the message already sent stays in the session`, `${d.id} 已重新打开——已经发出的消息还留在 session 里`) : T(`${d.id} reopened`, `${d.id} 已重新打开`));
           } catch (e) { toast(String(e.message || e), true); }
           await refresh();
         });
@@ -2094,7 +2116,7 @@ document.addEventListener("click", async (ev) => {
       const set = (v) => api("set", { task: d.task, fields: [`sessions=${JSON.stringify(v)}`] });
       try {
         await set(after);
-        toast("Removed from this task's sessions", false, async () => { await set(before); delete ui.history[d.task]; await refresh(); });
+        toast(T("Removed from this task's sessions", "已从这个任务的 session 里移除"), false, async () => { await set(before); delete ui.history[d.task]; await refresh(); });
       } catch (e) { toast(String(e.message || e), true); }
       delete ui.history[d.task];
       return refresh();
@@ -2105,8 +2127,8 @@ document.addEventListener("click", async (ev) => {
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
       try {
         const r = await apiObj("resume", { task: d.task, session: d.session, dir: d.dir || (t && launchDir(t)) || "", where: place, skip: skipPerms(), name: d.name || "", focus: !stayOnBoard() });
-        const tab = r.reused ? `its old ${PLACES[place]} tab` : PLACES[place];
-        toast(stayOnBoard() ? `Resumed in ${tab} — bound to ${d.task}; carry on here` : `Resuming it in ${tab} — bound to ${d.task}`);
+        const tab = r.reused ? T(`its old ${PLACES[place]} tab`, `原来的 ${PLACES[place]} 标签页`) : PLACES[place];
+        toast(stayOnBoard() ? T(`Resumed in ${tab} — bound to ${d.task}; carry on here`, `已在${tab}里续上——绑定到 ${d.task}；在这里接着干`) : T(`Resuming it in ${tab} — bound to ${d.task}`, `正在${tab}里续上——绑定到 ${d.task}`));
         stayWith(d.session, d.name);
       } catch (e) { toast(String(e.message || e), true); }
       delete ui.history[d.task];
@@ -2125,7 +2147,7 @@ document.addEventListener("click", async (ev) => {
       const prev = (taskById(d.task) || {}).waiting_on_me || "";
       try {
         await api("set", { task: d.task, fields: ["waiting_on_me="] });
-        toast("Marked handled", false, () => act("set", { task: d.task, fields: [`waiting_on_me=${prev}`] }, "Undone"));
+        toast(T("Marked handled", "已标为处理好"), false, () => act("set", { task: d.task, fields: [`waiting_on_me=${prev}`] }, T("Undone", "已撤销")));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
@@ -2148,9 +2170,9 @@ document.addEventListener("click", async (ev) => {
       clearTimeout(ui.allowArmed && ui.allowArmed.timer);
       ui.allowArmed = null;
       return act("decide", { session: d.session, ask: d.ask, behavior: d.behavior },
-                 d.behavior === "allow" ? "Allowed" : "Denied");
+                 d.behavior === "allow" ? T("Allowed", "已允许") : T("Denied", "已拒绝"));
     }
-    case "unbind": return act("unbind", { session: d.session }, "Unbound");
+    case "unbind": return act("unbind", { session: d.session }, T("Unbound", "已解绑"));
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
     case "peek": return openPeek(d.session);
@@ -2179,11 +2201,11 @@ document.addEventListener("click", async (ev) => {
     case "close-modal": return closePeek();
     case "copy-msg": {
       const m = ui.modal && ui.modal.msgs[Number(d.i)];
-      if (m) await copyText(m.text, "Message copied");
+      if (m) await copyText(m.text, T("Message copied", "已复制消息"));
       return;
     }
     case "copy-all":
-      if (ui.modal) await copyText(ui.modal.msgs.map((m) => `${m.role === "user" ? "You" : "Claude"}:\n${m.text}`).join("\n\n"), "Conversation copied");
+      if (ui.modal) await copyText(ui.modal.msgs.map((m) => `${m.role === "user" ? "You" : "Claude"}:\n${m.text}`).join("\n\n"), T("Conversation copied", "已复制对话"));
       return;
     case "link":
       ev.preventDefault();
@@ -2204,7 +2226,7 @@ document.addEventListener("click", async (ev) => {
       const v = ui.drafts[key] ?? "";
       delete ui.drafts[key];
       ui.adding.delete(`${d.task}:${d.field}`);
-      return act("set", { task: d.task, fields: [`${d.field}=${v}`] }, "Saved");
+      return act("set", { task: d.task, fields: [`${d.field}=${v}`] }, T("Saved", "已保存"));
     }
     case "cancel-field": delete ui.drafts[`${d.field}:${d.task}`]; ui.adding.delete(`${d.task}:${d.field}`); return render();
     case "add-todo": {
@@ -2212,14 +2234,14 @@ document.addEventListener("click", async (ev) => {
       const text = (ui.drafts[key] || "").trim();
       if (!text) return;
       delete ui.drafts[key];
-      return act("addtodo", { task: d.task, text }, "Todo added");
+      return act("addtodo", { task: d.task, text }, T("Todo added", "待办已添加"));
     }
     case "bind-pick": {
       const sid = ui.drafts["bindpick:" + d.task];
-      if (!sid) return toast("Choose a session first", true);
+      if (!sid) return toast(T("Choose a session first", "先选一个 session"), true);
       delete ui.drafts["bindpick:" + d.task];
       ui.adding.delete(`${d.task}:bind`);
-      return act("bind", { task: d.task, session: sid }, "Bound — the session learns the task on its next message");
+      return act("bind", { task: d.task, session: sid }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
     }
     case "add-log": {
       const key = "log:" + d.task;
@@ -2227,7 +2249,7 @@ document.addEventListener("click", async (ev) => {
       if (!text) return;
       delete ui.drafts[key];
       ui.adding.delete(`${d.task}:log`);
-      return act("log", { task: d.task, message: text }, "Note saved");
+      return act("log", { task: d.task, message: text }, T("Note saved", "备注已保存"));
     }
     case "done-toggle": ui.doneOpen.has(d.task) ? ui.doneOpen.delete(d.task) : ui.doneOpen.add(d.task); return render();
     case "log-all": ui.logAll.has(d.task) ? ui.logAll.delete(d.task) : ui.logAll.add(d.task); return render();
@@ -2237,13 +2259,13 @@ document.addEventListener("click", async (ev) => {
       const text = (ui.drafts[key] || "").trim();
       if (!text) return;
       delete ui.drafts[key];
-      return act("ref", { action: "add", task: d.task, ref: text }, "Added");
+      return act("ref", { action: "add", task: d.task, ref: text }, T("Added", "已添加"));
     }
     case "ref-remove": {
       const ref = d.ref;
       try {
         await api("ref", { action: "remove", task: d.task, ref });
-        toast("Removed", false, () => act("ref", { action: "add", task: d.task, ref }, "Restored"));
+        toast(T("Removed", "已移除"), false, () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复")));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
@@ -2278,22 +2300,22 @@ document.addEventListener("click", async (ev) => {
       const v = (ui.drafts["projname:" + d.p] || "").trim();
       delete ui.drafts["projname:" + d.p];
       if (!v || v === d.p) return render();
-      return act("project", { action: "rename", names: [d.p, v] }, `Renamed ${d.p} → ${v}`);
+      return act("project", { action: "rename", names: [d.p, v] }, T(`Renamed ${d.p} → ${v}`, `已改名 ${d.p} → ${v}`));
     }
     case "proj-path-remove": {
       const pr = projects().find((x) => x.name === d.p);
-      return act("project", { action: "paths", names: [d.p, ...pr.paths.filter((x) => x !== d.path)] }, "Directory removed");
+      return act("project", { action: "paths", names: [d.p, ...pr.paths.filter((x) => x !== d.path)] }, T("Directory removed", "目录已删除"));
     }
     case "proj-path-add": {
       const v = (ui.drafts["projpath:" + d.p] || "").trim();
       if (!v) return;
       delete ui.drafts["projpath:" + d.p];
       const pr = projects().find((x) => x.name === d.p);
-      return act("project", { action: "paths", names: [d.p, ...pr.paths, v] }, "Directory added");
+      return act("project", { action: "paths", names: [d.p, ...pr.paths, v] }, T("Directory added", "目录已添加"));
     }
     case "proj-remove": {
       const n = tasks().filter((t) => t.project === d.p).length;
-      if (!n) return act("project", { action: "remove", names: [d.p] }, `Removed ${d.p}`);
+      if (!n) return act("project", { action: "remove", names: [d.p] }, T(`Removed ${d.p}`, `已删除 ${d.p}`));
       ui.projRemove[d.p] = true;
       return render();
     }
@@ -2301,14 +2323,14 @@ document.addEventListener("click", async (ev) => {
     case "proj-remove-confirm": {
       const to = ui.drafts["projto:" + d.p] ?? "";
       delete ui.projRemove[d.p];
-      return act("project", { action: "remove", names: [d.p], to }, `Removed ${d.p}; tasks moved to ${to || "(no project)"}`);
+      return act("project", { action: "remove", names: [d.p], to }, T(`Removed ${d.p}; tasks moved to ${to || "(no project)"}`, `已删除 ${d.p}；任务移到了${to || "（无项目）"}`));
     }
     case "proj-add": {
       const name = (ui.drafts["projnew"] || "").trim();
       const path = (ui.drafts["projnewpath"] || "").trim();
-      if (!name) return toast("Give the project a name", true);
+      if (!name) return toast(T("Give the project a name", "给项目起个名字"), true);
       delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
-      return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, `Added ${name}`);
+      return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, T(`Added ${name}`, `已添加 ${name}`));
     }
     case "scan-open": ui.settings = "projects"; // fall through to scan
     case "scan":
@@ -2321,27 +2343,27 @@ document.addEventListener("click", async (ev) => {
     case "scan-apply": {
       const names = [...ui.scanPick];
       ui.scan = null;
-      return act("scan-apply", { names }, `Created ${names.length} project(s) and sorted tasks into them`);
+      return act("scan-apply", { names }, T(`Created ${names.length} project(s) and sorted tasks into them`, `已创建 ${names.length} 个项目，并把任务归了进去`));
     }
-    case "copy-onboard": return copyText("/hq-onboard", "Copied — paste it into any Claude Code session");
+    case "copy-onboard": return copyText("/hq-onboard", T("Copied — paste it into any Claude Code session", "已复制——粘贴到任意 Claude Code session 里"));
     case "new-in-project": return openNewTask(d.p);
     case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return d.m === "jobs" ? refresh(true) : render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
-      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? `${d.task} off Focus` : `${d.task} added to Focus`);
+      return act("focus", { action: on ? "remove" : "add", tasks: [d.task] }, on ? T(`${d.task} off Focus`, `${d.task} 已移出 Focus`) : T(`${d.task} added to Focus`, `${d.task} 已加入 Focus`));
     }
     case "today-add": {
       const v = (ui.drafts["todaypick"] || "").trim();
       const id = (v.match(/T-\d+/i) || [])[0];
-      if (!id || !taskById(id.toUpperCase())) return toast("Pick a task from the list (type its id or title)", true);
+      if (!id || !taskById(id.toUpperCase())) return toast(T("Pick a task from the list (type its id or title)", "从列表里选一个任务（输入编号或标题）"), true);
       delete ui.drafts["todaypick"];
-      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, `${id.toUpperCase()} added to Focus`);
+      return act("focus", { action: "add", tasks: [id.toUpperCase()] }, T(`${id.toUpperCase()} added to Focus`, `${id.toUpperCase()} 已加入 Focus`));
     }
     case "today-remove": {
       const id = d.task;
       try {
         await api("focus", { action: "remove", tasks: [id] });
-        toast(`${id} off Focus`, false, () => act("focus", { action: "add", tasks: [id] }, `${id} back in Focus`));
+        toast(T(`${id} off Focus`, `${id} 已移出 Focus`), false, () => act("focus", { action: "add", tasks: [id] }, T(`${id} back in Focus`, `${id} 已放回 Focus`)));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
@@ -2349,12 +2371,12 @@ document.addEventListener("click", async (ev) => {
       ui.launchMenu = null;
       const t = taskById(d.task);
       const dir = t && launchDir(t);
-      if (!dir) return toast("This task has no directory yet — bind a session or give the project a directory first", true);
+      if (!dir) return toast(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或者给项目设个目录"), true);
       const place = launchPlace();
       try {
         const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms(), focus: !stayOnBoard() });
-        toast(place === "bg" ? `Started in the background on ${t.id} — Peek or Attach from its card`
-          : stayOnBoard() ? `Started on ${t.id} — it reads the card and reports here` : `Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`);
+        toast(place === "bg" ? T(`Started in the background on ${t.id} — Peek or Attach from its card`, `已在后台为 ${t.id} 开了 session——可从任务卡上 Peek 或 Attach`)
+          : stayOnBoard() ? T(`Started on ${t.id} — it reads the card and reports here`, `已为 ${t.id} 开了 session——它会读任务卡，在这里汇报`) : T(`Started in ${PLACES[place]} on ${t.id} — it reads the card and reports`, `已在 ${PLACES[place]} 里为 ${t.id} 开了 session——它会读任务卡并汇报`));
         stayWith(r && r.session, `${t.id} ${t.title}`);
       } catch (e) { toast(String(e.message || e), true); }
       setTimeout(() => refresh(), 2500);
@@ -2362,7 +2384,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "attach": {
       const place = launchPlace() === "bg" ? "terminal" : launchPlace();
-      try { await api("attach", { session: d.session, where: place }); toast(`Opening it in ${PLACES[place]}…`); }
+      try { await api("attach", { session: d.session, where: place }); toast(T(`Opening it in ${PLACES[place]}…`, `正在 ${PLACES[place]} 里打开…`)); }
       catch (e) { toast(String(e.message || e), true); }
       return;
     }
@@ -2370,31 +2392,31 @@ document.addEventListener("click", async (ev) => {
       if (ui.stopArmed !== d.session) {
         ui.stopArmed = d.session;
         render();
-        toast("Click stop again to end this session — its conversation is kept; Resume picks it up, in the same tab if it is still open");
+        toast(T("Click stop again to end this session — its conversation is kept; Resume picks it up, in the same tab if it is still open", "再点一下停止来结束这个 session——对话保留；之后可以 Resume 续上，标签页还开着就在原标签页里"));
         setTimeout(() => { if (ui.stopArmed === d.session) { ui.stopArmed = null; render(); } }, 4000);
         return;
       }
       ui.stopArmed = null;
-      return act("stop-session", { session: d.session }, "Stopped — its conversation is kept");
-    case "stop-task-sessions": return stopMany(liveFor(d.task), "task:" + d.task, `${d.task}'s sessions`);
-    case "stop-strays": return stopMany(strays(), "strays", "the sessions on finished tasks");
+      return act("stop-session", { session: d.session }, T("Stopped — its conversation is kept", "已停止——对话保留"));
+    case "stop-task-sessions": return stopMany(liveFor(d.task), "task:" + d.task, T(`${d.task}'s sessions`, ` ${d.task} 的 session`));
+    case "stop-strays": return stopMany(strays(), "strays", T("the sessions on finished tasks", "已结束任务上的 session"));
     case "stop":
       // WKWebView shows no confirm() dialog, so confirm with a second click instead.
       if (ui.stopArmed !== d.session) {
         ui.stopArmed = d.session;
         render();
-        toast("Click stop again to stop it — its conversation is kept, Attach resumes it");
+        toast(T("Click stop again to stop it — its conversation is kept, Attach resumes it", "再点一下停止——对话保留，Attach 可以续上"));
         setTimeout(() => { if (ui.stopArmed === d.session) { ui.stopArmed = null; render(); } }, 4000);
         return;
       }
       ui.stopArmed = null;
-      return act("stop", { session: d.session }, "Stopped");
-    case "proj-auto": return act("project", { action: "auto" }, "Tasks assigned by directory");
+      return act("stop", { session: d.session }, T("Stopped", "已停止"));
+    case "proj-auto": return act("project", { action: "auto" }, T("Tasks assigned by directory", "已按目录归属任务"));
     case "open-cats": ui.settings = "categories"; return render();
     case "close-cats": closeSettings(); return;
     case "cat-remove": {
       const n = categoryCount(d.cat);
-      if (!n) return act("category", { action: "remove", names: [d.cat] }, `Removed ${d.cat}`);
+      if (!n) return act("category", { action: "remove", names: [d.cat] }, T(`Removed ${d.cat}`, `已删除 ${d.cat}`));
       ui.catRemove[d.cat] = true;
       return render();
     }
@@ -2403,14 +2425,14 @@ document.addEventListener("click", async (ev) => {
       const to = ui.drafts["catto:" + d.cat] ?? "";
       delete ui.catRemove[d.cat];
       delete ui.drafts["catto:" + d.cat];
-      return act("category", { action: "remove", names: [d.cat], to }, `Removed ${d.cat}; tasks moved to ${to || "(none)"}`);
+      return act("category", { action: "remove", names: [d.cat], to }, T(`Removed ${d.cat}; tasks moved to ${to || "(none)"}`, `已删除 ${d.cat}；任务移到了${to || "（不分类）"}`));
     }
-    case "cat-adopt": return act("category", { action: "add", names: [d.cat] }, `Added ${d.cat}`);
+    case "cat-adopt": return act("category", { action: "add", names: [d.cat] }, T(`Added ${d.cat}`, `已添加 ${d.cat}`));
     case "cancel-new":
       ui.newTask = false; delete $("#newtask-form").dataset.drawn; clearNewTaskDrafts(); return render();
     case "create": {
       const title = $("#nt-title").value.trim();
-      if (!title) return toast("Give the task a title", true);
+      if (!title) return toast(T("Give the task a title", "给任务起个标题"), true);
       try {
         const out = await api("new", { title, category: $("#nt-cat").value, workdir: $("#nt-dir").value, project: $("#nt-proj").value });
         const id = String(out).split("\n")[0].trim();
@@ -2419,7 +2441,7 @@ document.addEventListener("click", async (ev) => {
         ui.newTask = false; delete $("#newtask-form").dataset.drawn;
         clearNewTaskDrafts();
         ui.expanded.add(id);
-        toast(`Created ${id}`);
+        toast(T(`Created ${id}`, `已创建 ${id}`));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
@@ -2442,12 +2464,12 @@ document.addEventListener("change", (ev) => {
     const t = taskById(d.task);
     if (t) { t[d.action.slice(4)] = el.value; render(); }
   }
-  if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, "Project saved");
-  if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, "Category saved");
+  if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, T("Project saved", "项目已保存"));
+  if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, T("Category saved", "分类已保存"));
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
-  if (d.action === "set-status") return act("set", { task: d.task, fields: [`status=${el.value}`] }, "Status saved");
-  if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, "Bound — the session learns the task on its next message");
-  if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, "Bound — the session learns the task on its next message");
+  if (d.action === "set-status") return act("set", { task: d.task, fields: [`status=${el.value}`] }, T("Status saved", "状态已保存"));
+  if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
+  if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (el.id === "show-closed") { ui.showClosed = el.checked; render(); }
   if (el.id === "activefirst-cb" || d.action === "active-first") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
@@ -2495,14 +2517,14 @@ document.addEventListener("keydown", async (ev) => {
     const text = (ui.drafts[el.dataset.key] || "").trim();
     if (!text) return;
     delete ui.drafts[el.dataset.key];
-    if (el.dataset.enter === "log") return act("log", { task: el.dataset.task, message: text }, "Logged");
-    if (el.dataset.enter === "addcat") return act("category", { action: "add", names: [text] }, `Added ${text}`);
+    if (el.dataset.enter === "log") return act("log", { task: el.dataset.task, message: text }, T("Logged", "已记入日志"));
+    if (el.dataset.enter === "addcat") return act("category", { action: "add", names: [text] }, T(`Added ${text}`, `已添加 ${text}`));
     if (el.dataset.enter === "renamecat") {
       if (text === el.dataset.cat) return render();
-      return act("category", { action: "rename", names: [el.dataset.cat, text] }, `Renamed ${el.dataset.cat} → ${text}`);
+      return act("category", { action: "rename", names: [el.dataset.cat, text] }, T(`Renamed ${el.dataset.cat} → ${text}`, `已改名 ${el.dataset.cat} → ${text}`));
     }
-    if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, "Todo added");
-    if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, "Added");
+    if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, T("Todo added", "待办已添加"));
+    if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, T("Added", "已添加"));
   }
 });
 
@@ -2558,7 +2580,7 @@ document.addEventListener("drop", (ev) => {
   if (i < 0) return;
   order.splice(at.before ? i : i + 1, 0, moving);
   act("project", { action: "order", names: order },
-    ui.activeFirst ? "Order saved — projects with live sessions still come first (Active first)" : "Order saved");
+    ui.activeFirst ? T("Order saved — projects with live sessions still come first (Active first)", "顺序已保存——有 session 在跑的项目仍然排最前（活跃的在前）") : T("Order saved", "顺序已保存"));
 });
 function finishDrag() {
   ui.dragging = null;

@@ -5,6 +5,8 @@ import Foundation
 @main
 struct Runner {
     static func main() {
+        // Assertions below are on the English wording; the machine's own language must not matter.
+        setenv(UILanguage.environmentKey, "en", 1)
         let t = Harness()
 
         let json = """
@@ -2489,6 +2491,18 @@ struct Runner {
         SkinTests.run(t)
         IdleTabTests.run(t)
         SessionControlTests.run(t)
+        LanguageTests.run(t)
+
+        print("\n-- language")
+        t.check("a stored language wins over the system's",
+                UILanguage.resolve(stored: "zh", preferred: ["en-US"]) == "zh")
+        t.check("unset follows the system: Chinese", UILanguage.resolve(stored: nil, preferred: ["zh-Hans-CN", "en"]) == "zh")
+        t.check("unset follows the system: the first of en / zh it lists",
+                UILanguage.resolve(stored: "auto", preferred: ["fr-FR", "en-GB", "zh-Hans"]) == "en")
+        t.check("neither listed means English", UILanguage.resolve(stored: nil, preferred: ["ja-JP"]) == "en")
+        t.check("the environment overrides everything",
+                UILanguage.resolve(stored: "zh", preferred: ["zh-Hans"], environment: "en") == "en")
+        t.check("L picks the English while the tests run", L("Quit", "退出") == "Quit")
 
         t.finish()
     }

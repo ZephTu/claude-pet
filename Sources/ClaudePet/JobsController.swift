@@ -47,14 +47,14 @@ final class JobsController {
         var raw = raw
         if (raw["id"] as? String ?? "").isEmpty { raw["id"] = Jobs.newID() }
         guard let data = try? JSONSerialization.data(withJSONObject: raw),
-              let job = try? JSONDecoder().decode(Job.self, from: data) else { return (nil, "That job doesn't read as a job.") }
+              let job = try? JSONDecoder().decode(Job.self, from: data) else { return (nil, L("That job doesn't read as a job.", "这份内容读不出一个任务。")) }
         if let problem = job.problem() { return (nil, problem) }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: job.directory, isDirectory: &isDir), isDir.boolValue else {
-            return (nil, "No such folder: \(job.directory)")
+            return (nil, L("No such folder: \(job.directory)", "没有这个文件夹：\(job.directory)"))
         }
         let before = store.load(job.id)
-        do { try store.save(job) } catch { return (nil, "Couldn't save the job: \(error.localizedDescription)") }
+        do { try store.save(job) } catch { return (nil, L("Couldn't save the job: \(error.localizedDescription)", "任务没能保存：\(error.localizedDescription)")) }
         // A changed session mode starts the session over.
         // A changed session mode or folder starts the session over (a session belongs to its folder).
         if before?.sessionMode != job.sessionMode || before?.directory != job.directory {
@@ -66,7 +66,7 @@ final class JobsController {
     }
 
     func setEnabled(_ id: String, _ on: Bool) async -> (Any?, String?) {
-        guard var job = store.load(id) else { return (nil, "No such job") }
+        guard var job = store.load(id) else { return (nil, L("No such job", "没有这个任务")) }
         job.enabled = on
         do { try store.save(job) } catch { return (nil, error.localizedDescription) }
         if let err = await apply(job) { return (nil, err) }
@@ -74,7 +74,7 @@ final class JobsController {
     }
 
     func delete(_ id: String) async -> (Any?, String?) {
-        guard Jobs.isValidID(id) else { return (nil, "No such job") }
+        guard Jobs.isValidID(id) else { return (nil, L("No such job", "没有这个任务")) }
         await uninstall(id)
         do { try store.delete(id) } catch { return (nil, error.localizedDescription) }
         return (["ok": true], nil)
@@ -83,7 +83,7 @@ final class JobsController {
     /// Starts a run now, whatever the schedule says. The runner takes the job's lock, so pressing
     /// it while a run is going only records a skip.
     func runNow(_ id: String) -> (Any?, String?) {
-        guard store.load(id) != nil else { return (nil, "No such job") }
+        guard store.load(id) != nil else { return (nil, L("No such job", "没有这个任务")) }
         guard FileManager.default.isExecutableFile(atPath: program) else { return (nil, Self.noRunner) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: program)
@@ -92,13 +92,13 @@ final class JobsController {
         p.standardInput = FileHandle.nullDevice
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return (nil, "Couldn't start it: \(error.localizedDescription)") }
+        do { try p.run() } catch { return (nil, L("Couldn't start it: \(error.localizedDescription)", "没能启动：\(error.localizedDescription)")) }
         return (["ok": true], nil)
     }
 
     /// Asks the running run to stop; the runner ends its whole process group within a second.
     func stop(_ id: String) -> (Any?, String?) {
-        guard Jobs.isValidID(id) else { return (nil, "No such job") }
+        guard Jobs.isValidID(id) else { return (nil, L("No such job", "没有这个任务")) }
         FileManager.default.createFile(atPath: store.stopURL(id).path, contents: Data())
         return (["ok": true], nil)
     }
@@ -115,7 +115,7 @@ final class JobsController {
     func detail(_ id: String, run: String) -> (Any?, String?) {
         guard let job = store.load(id), let r = store.runs(id).first(where: { $0.id == run }),
               run.range(of: #"^[0-9a-z-]+$"#, options: .regularExpression) != nil
-        else { return (nil, "That run is gone") }
+        else { return (nil, L("That run is gone", "这次运行的记录已经没了")) }
         var o: [String: Any] = ["job": dict(job), "run": r.json()]
         let logs = store.logsURL(id)
         if let stream = try? Data(contentsOf: logs.appending(path: run + ".jsonl")) {
@@ -164,9 +164,9 @@ final class JobsController {
         try? FileManager.default.createDirectory(at: LaunchAgent.directory, withIntermediateDirectories: true)
         let label = "gui/\(getuid())/\(LaunchAgent.label(for: job.id))"
         _ = await Self.launchctl(["bootout", label])
-        do { try plist.write(to: url, options: .atomic) } catch { return "Couldn't write \(url.path): \(error.localizedDescription)" }
+        do { try plist.write(to: url, options: .atomic) } catch { return L("Couldn't write \(url.path): \(error.localizedDescription)", "没能写入 \(url.path)：\(error.localizedDescription)") }
         let r = await Self.launchctl(["bootstrap", "gui/\(getuid())", url.path])
-        if r.status != 0 { return "macOS refused the schedule: " + (r.err.isEmpty ? r.out : r.err).prefix(200) }
+        if r.status != 0 { return L("macOS refused the schedule: ", "macOS 拒绝了这个定时：") + (r.err.isEmpty ? r.out : r.err).prefix(200) }
         // "Every N minutes" counts from here.
         store.setState(job.id) { $0["enabledAt"] = Jobs.iso(Date()) }
         return nil
@@ -214,7 +214,7 @@ final class JobsController {
             for r in runs.prefix(20) where r.ended != nil || r.status == .lost { ended.insert(r.id) }
             if let r = runs.first(where: { $0.status != .skipped }), r.status == .running {
                 report.rows.append(["job": job.id, "name": job.name, "status": "running",
-                                    "text": "running · " + Chatter.duration(until: now, now: r.started)])
+                                    "text": L("running · ", "运行中 · ") + Chatter.duration(until: now, now: r.started)])
             } else if let r = runs.first(where: { $0.status != .skipped }), r.failed, (r.ended ?? r.started) > seenAt {
                 report.unseenFailures += 1
                 report.rows.append(["job": job.id, "name": job.name, "status": "failed",
@@ -224,9 +224,9 @@ final class JobsController {
             for r in runs.prefix(5) where (r.ended != nil || r.status == .lost) && !(announced?.contains(r.id) ?? false) {
                 let wanted = job.notify == .always ? r.status != .skipped : job.notify == .failure && r.failed
                 guard wanted else { continue }
-                let what = r.failed ? Self.failureWord(r) : r.status == .stopped ? "stopped" : "done"
+                let what = r.failed ? Self.failureWord(r) : r.status == .stopped ? L("stopped", "已停止") : L("done", "完成")
                 let tail = r.summary.isEmpty ? "" : " — " + (r.summary.count > 90 ? String(r.summary.prefix(90)) + "…" : r.summary)
-                report.notices.append((text: "Scheduled job \(what): \(job.name)\(tail)", emphasis: job.name, jobId: job.id))
+                report.notices.append((text: L("Scheduled job \(what): \(job.name)\(tail)", "定时任务\(what)：\(job.name)\(tail)"), emphasis: job.name, jobId: job.id))
             }
         }
         // A restart must not replay old runs: the first poll only records what is there.
@@ -236,15 +236,19 @@ final class JobsController {
 
     private static func failureWord(_ r: JobRun) -> String {
         switch r.status {
-        case .timeout: return "timed out"
-        case .lost: return "interrupted"
-        default: return r.exitCode.map { $0 == 0 ? "failed" : "failed (exit \($0))" } ?? "failed"
+        case .timeout: return L("timed out", "超时")
+        case .lost: return L("interrupted", "被打断")
+        default: return r.exitCode.map { $0 == 0 ? L("failed", "失败") : L("failed (exit \($0))", "失败（退出码 \($0)）") } ?? L("failed", "失败")
         }
     }
 
     // MARK: - Helpers
 
-    private static let noRunner = "Claude Pet's runner (~/.claude/pet/pet-emit) isn't installed — reinstall Claude Pet."
+    /// Computed, so it follows the language the pet is set to (see `L`).
+    private static var noRunner: String {
+        L("Claude Pet's runner (~/.claude/pet/pet-emit) isn't installed — reinstall Claude Pet.",
+          "Claude Pet 的执行程序（~/.claude/pet/pet-emit）没装上 — 请重新安装 Claude Pet。")
+    }
 
     private func dict(_ job: Job) -> [String: Any] {
         guard let data = try? JSONEncoder().encode(job),

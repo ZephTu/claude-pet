@@ -19,6 +19,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onQuit: () -> Void
     private let onShowBoard: (() -> Void)?
     private let onSkin: ((String) -> Void)?
+    private let onLanguage: ((String) -> Void)?
 
     init(
         onPauseToggle: @escaping () -> Void,
@@ -31,8 +32,10 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onNoticeCount: @escaping (Int) -> Void,
         onQuit: @escaping () -> Void,
         onShowBoard: (() -> Void)? = nil,
-        onSkin: ((String) -> Void)? = nil
+        onSkin: ((String) -> Void)? = nil,
+        onLanguage: ((String) -> Void)? = nil
     ) {
+        self.onLanguage = onLanguage
         self.onShowBoard = onShowBoard
         self.onSkin = onSkin
         self.onNoticeHold = onNoticeHold
@@ -51,13 +54,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
         keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
         noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount,
-        skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true }
+        skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true },
+        language: String = "auto"
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
             shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
             noticeHold: noticeHold, noticeCount: noticeCount,
-            skin: skin, canShowSkin: canShowSkin
+            skin: skin, canShowSkin: canShowSkin, language: language
         )
         menu.popUp(positioning: nil, at: point, in: view)
     }
@@ -72,11 +76,12 @@ final class PetMenu: NSObject, NSMenuDelegate {
                   noticeHold: TimeInterval = Chatter.noticeHold,
                   noticeCount: Int = Chatter.noticeCount,
                   skin: String = PetSkins.defaultID,
-                  canShowSkin: (String) -> Bool = { _ in true }) -> NSMenu {
+                  canShowSkin: (String) -> Bool = { _ in true },
+                  language: String = "auto") -> NSMenu {
         let menu = NSMenu()
 
         if let problem {
-            let health = NSMenuItem(title: "⚠ \(problem.name): \(problem.status.label)…",
+            let health = NSMenuItem(title: L("⚠ \(problem.name): \(problem.status.label)…", "⚠ \(problem.name)：\(problem.status.label)…"),
                                     action: #selector(showHealth), keyEquivalent: "")
             health.target = self
             menu.addItem(health)
@@ -84,20 +89,20 @@ final class PetMenu: NSObject, NSMenuDelegate {
         }
 
         if onShowBoard != nil {
-            let board = NSMenuItem(title: "Task Board…", action: #selector(showBoard), keyEquivalent: "")
+            let board = NSMenuItem(title: L("Task Board…", "任务看板…"), action: #selector(showBoard), keyEquivalent: "")
             board.target = self
             menu.addItem(board)
             menu.addItem(.separator())
         }
 
         let pause = NSMenuItem(
-            title: paused ? "Wake Up" : "Take a Nap",
+            title: paused ? L("Wake Up", "醒来") : L("Take a Nap", "小睡一会"),
             action: #selector(togglePause), keyEquivalent: ""
         )
         pause.target = self
         menu.addItem(pause)
 
-        let keepOpen = NSMenuItem(title: "Keep List Open", action: #selector(toggleKeepListOpen),
+        let keepOpen = NSMenuItem(title: L("Keep List Open", "保持列表展开"), action: #selector(toggleKeepListOpen),
                                   keyEquivalent: "")
         keepOpen.state = keepListOpenOn ? .on : .off
         keepOpen.target = self
@@ -107,7 +112,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         // is just noise in a short menu.
         if mutedCount > 0 {
             let unmute = NSMenuItem(
-                title: "Unmute All (\(mutedCount))",
+                title: L("Unmute All (\(mutedCount))", "取消所有静音 (\(mutedCount))"),
                 action: #selector(unmuteAll), keyEquivalent: ""
             )
             unmute.target = self
@@ -116,14 +121,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let settings = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        let settings = NSMenuItem(title: L("Settings", "设置"), action: nil, keyEquivalent: "")
         let options = NSMenu()
-        let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
+        let login = NSMenuItem(title: L("Launch at Login", "登录时启动"), action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = launchesAtLogin ? .on : .off
         options.addItem(login)
         let shortcut = NSMenuItem(
-            title: "Jump to Waiting Session (\(HotKey.displayName))",
+            title: L("Jump to Waiting Session (\(HotKey.displayName))", "跳到等待中的 session (\(HotKey.displayName))"),
             action: #selector(toggleShortcut), keyEquivalent: "")
         shortcut.state = shortcutOn ? .on : .off
         shortcut.target = self
@@ -131,10 +136,10 @@ final class PetMenu: NSObject, NSMenuDelegate {
         options.addItem(.separator())
 
         // The "this session finished" bubbles above the pet.
-        let hold = NSMenuItem(title: "Bubble Duration", action: nil, keyEquivalent: "")
+        let hold = NSMenuItem(title: L("Bubble Duration", "气泡停留时间"), action: nil, keyEquivalent: "")
         let holds = NSMenu()
         for seconds in Chatter.noticeHoldChoices {
-            let item = NSMenuItem(title: "\(Int(seconds)) seconds", action: #selector(pickHold(_:)),
+            let item = NSMenuItem(title: L("\(Int(seconds)) seconds", "\(Int(seconds)) 秒"), action: #selector(pickHold(_:)),
                                   keyEquivalent: "")
             item.target = self
             item.representedObject = seconds
@@ -143,7 +148,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         }
         hold.submenu = holds
         options.addItem(hold)
-        let count = NSMenuItem(title: "Bubbles at Once", action: nil, keyEquivalent: "")
+        let count = NSMenuItem(title: L("Bubbles at Once", "同时显示的气泡数"), action: nil, keyEquivalent: "")
         let counts = NSMenu()
         for n in Chatter.noticeCountChoices {
             let item = NSMenuItem(title: "\(n)", action: #selector(pickCount(_:)), keyEquivalent: "")
@@ -159,11 +164,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
         // Who the pet is drawn as. A skin whose pictures are not in this build
         // yet is listed greyed out: no action, so AppKit disables it.
         if onSkin != nil {
-            let character = NSMenuItem(title: "Character", action: nil, keyEquivalent: "")
+            let character = NSMenuItem(title: L("Character", "角色"), action: nil, keyEquivalent: "")
             let skins = NSMenu()
             for option in PetSkins.all {
                 let ready = canShowSkin(option.id)
-                let item = NSMenuItem(title: ready ? option.name : "\(option.name) (no artwork yet)",
+                let item = NSMenuItem(title: ready ? option.name : L("\(option.name) (no artwork yet)", "\(option.name)（还没有图）"),
                                       action: ready ? #selector(pickSkin(_:)) : nil, keyEquivalent: "")
                 item.target = self
                 item.representedObject = option.id
@@ -174,7 +179,22 @@ final class PetMenu: NSObject, NSMenuDelegate {
             options.addItem(character)
             options.addItem(.separator())
         }
-        let health = NSMenuItem(title: "Connection Status…", action: #selector(showHealth),
+        // Named in both languages, so it can be found whichever one is showing.
+        if onLanguage != nil {
+            let lang = NSMenuItem(title: "Language · 语言", action: nil, keyEquivalent: "")
+            let langs = NSMenu()
+            for choice in UILanguage.choices {
+                let item = NSMenuItem(title: choice.name, action: #selector(pickLanguage(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = choice.id
+                item.state = choice.id == language ? .on : .off
+                langs.addItem(item)
+            }
+            lang.submenu = langs
+            options.addItem(lang)
+            options.addItem(.separator())
+        }
+        let health = NSMenuItem(title: L("Connection Status…", "连接状态…"), action: #selector(showHealth),
                                 keyEquivalent: "")
         health.target = self
         options.addItem(health)
@@ -182,7 +202,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
         menu.addItem(settings)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
+        let quit = NSMenuItem(title: L("Quit", "退出"), action: #selector(quit), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
 
@@ -203,6 +223,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
     }
     @objc private func pickSkin(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { onSkin?(id) }
+    }
+    @objc private func pickLanguage(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { onLanguage?(id) }
     }
     @objc private func quit() { onQuit() }
     @objc private func showBoard() { onShowBoard?() }
