@@ -334,6 +334,158 @@ OID="$("$HQ" asks "$PID" --json | python3 -c 'import json,sys; print([a["id"] fo
 "$HQ" ask snooze "$OID" --until 2030-01-01T00:00:00+00:00 >/dev/null && "$HQ" asks "$PID" >/dev/null && "$HQ" asks "$PID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$OID"'"][0]; assert "+" not in a["snoozed_until"] and len(a["snoozed_until"])==19, a' && ok "a snooze time with an offset is stored as local time" || fail "offset snooze broke hq asks"
 "$HQ" ask snooze "$OID" --until tomorrow >/dev/null 2>&1 && fail "nonsense --until was accepted" || ok "nonsense --until is refused"
 
+# SessionStart lists the card's open @claude todos — every source, text exactly as on the card —
+# so a session that was compacted or cleared still ticks and drops them. Not on every prompt.
+CT="$("$HQ" new "todo memory" | head -1)"; CC="$(ls "$T"/root/tasks/$CT-*/TASK.md)"
+printf '\n## 待办\n- [ ] @me review the PR <!--t:2026-11-22T08:00:00+08:00-->\n- [x] @claude finished thing\n- [ ] @claude comment the #34019 result on PR #3262, then "ask" `x` <!--t:2026-11-22T09:00:00+08:00-->\n- [ ] @Claude delete the cluster  of #3260\n- [-] @claude dropped thing\n- [ ] @wenbing send the dataset\n' >> "$CC"
+"$HQ" bind "$CT" --session sess-todo >/dev/null
+startctx() { hook "{\"session_id\":\"sess-todo\",\"hook_event_name\":\"SessionStart\",\"source\":\"$1\"}" | python3 -c 'import json,sys; t=sys.stdin.read(); print(json.loads(t)["hookSpecificOutput"]["additionalContext"] if t.strip() else "")'; }
+c="$(startctx startup)"
+echo "$c" | python3 -c '
+import sys; c = sys.stdin.read()
+assert "Open @claude todos on '"$CT"' (2)" in c, c
+lines = c.splitlines()
+assert "- comment the #34019 result on PR #3262, then \"ask\" `x`" in lines, c
+assert "- delete the cluster  of #3260" in lines, c
+for no in ("review the PR", "finished thing", "dropped thing", "send the dataset", "<!--t:"):
+    assert no not in c, no
+assert "done: <text>" in c and "drop: <text>" in c' && ok "SessionStart lists the open @claude todos, text exactly as on the card" || fail "SessionStart todo list: $c"
+for src in resume clear compact; do startctx $src | grep -q "^- delete the cluster  of #3260$" || fail "no todo list on SessionStart source=$src"; done; ok "resume, clear and compact get the list too"
+startctx compact | grep -q "just compacted" && ok "after a compaction the session is told the list is the card's" || fail "compact note missing"
+startctx startup | grep -q "compacted" && fail "compact note on a fresh start" || ok "a fresh start has no compaction note"
+hook '{"session_id":"sess-todo","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "Open @claude todos" && fail "todo list injected on a prompt" || ok "the todo list is not repeated on every prompt"
+stop sess-todo "$(printf 'ok\n```hq-update\ndone: comment the #34019 result on PR #3262, then "ask" `x`\ndrop: delete the cluster  of #3260\n```')" >/dev/null
+grep -q -- '- \[x\] @claude comment the #34019' "$CC" && grep -q -- '- \[-\] @Claude delete the cluster' "$CC" && ok "done: / drop: with the listed text tick and drop them" || fail "listed text did not match: $(grep '@claude\|@Claude' "$CC")"
+[ -z "$(startctx startup | grep "Open @claude todos")" ] && ok "no list when nothing is open for Claude" || fail "empty todo list shown"
+python3 - "$CC" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s += "".join(f"- [ ] @claude item {i:02d} do the thing\n" for i in range(1, 26))
+open(p, "w", encoding="utf-8").write(s)
+PY
+startctx startup | python3 -c '
+import sys; c = sys.stdin.read(); l = [x for x in c.splitlines() if x.startswith("- item ")]
+assert len(l) == 20 and l[0] == "- item 06 do the thing" and l[-1] == "- item 25 do the thing", l
+assert "- … 5 older ones not shown" in c and "(25)" in c, c' && ok "the list keeps the newest 20 and counts the rest" || fail "20-item cap"
+python3 - "$CC" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"^- \[ \] @claude item .*\n", "", s, flags=re.M)
+s += "".join(f"- [ ] @claude long {i:02d} " + "x" * 290 + "\n" for i in range(1, 11))
+open(p, "w", encoding="utf-8").write(s)
+PY
+startctx startup | python3 -c '
+import sys; c = sys.stdin.read(); l = [x for x in c.splitlines() if x.startswith("- long ")]
+assert 1 <= len(l) < 10 and sum(len(x) for x in l) <= 2000 + 2 * len(l) and l[-1].startswith("- long 10 "), l
+assert f"- … {10 - len(l)} older ones not shown" in c, c' && ok "and stays within about 2000 characters" || fail "character cap"
+"$HQ" unbind --session sess-todo >/dev/null
+
+# Refs are keyed by the thing a link points to: a PR's comment, /files or /commits is the PR, a
+# Jira comment the issue, a Jenkins console or test report the build. hq and board.js agree.
+python3 - "$HQ" <<'PY' && ok "canonical keys for GitHub, Jira, Jenkins, Confluence and other URLs" || fail "canonical keys"
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+GH, JI, JK = "https://github.com/tigergraph/bigtest", "https://graphsql.atlassian.net", "https://jenkins.graphtiger.com/job"
+cases = [
+    (f"{GH}/pull/3261#issuecomment-7075621457", f"{GH}/pull/3261"),
+    (f"{GH}/pull/3261", f"{GH}/pull/3261"),
+    (f"{GH}/pull/3261/", f"{GH}/pull/3261"),
+    (f"{GH}/pull/12/files", f"{GH}/pull/12"),
+    (f"{GH}/pull/12/files#diff-abc123", f"{GH}/pull/12"),
+    (f"{GH}/pull/12/commits/0a1b2c3", f"{GH}/pull/12"),
+    (f"{GH}/pull/12/checks?check_run_id=9", f"{GH}/pull/12"),
+    (f"{GH}/pull/12#discussion_r1234", f"{GH}/pull/12"),
+    (f"{GH}/pull/12#pullrequestreview-55", f"{GH}/pull/12"),
+    ("https://GitHub.com/ZephTu/claude-pet/issues/7#issuecomment-1", "https://github.com/ZephTu/claude-pet/issues/7"),
+    (f"{GH}/commit/0a1b2c3d#diff-1", f"{GH}/commit/0a1b2c3d"),
+    (f"{GH}/blob/master/a.py#L10-L20", f"{GH}/blob/master/a.py"),
+    (f"{GH}/pulls", f"{GH}/pulls"),
+    (f"{GH}/tree/fix/x", f"{GH}/tree/fix/x"),
+    ("https://github.example.com/o/r/pull/3/files", "https://github.example.com/o/r/pull/3"),
+    (f"{JI}/browse/GLE-13975", f"{JI}/browse/GLE-13975"),
+    (f"{JI}/browse/QA-9517?focusedCommentId=123&page=x#comment-123", f"{JI}/browse/QA-9517"),
+    (f"{JI}/browse/CORE-6234#comment-9", f"{JI}/browse/CORE-6234"),
+    (f"{JI}/jira/software/c/projects/QA/issues/QA-9517?jql=project%3DQA", f"{JI}/browse/QA-9517"),
+    (f"{JI}/jira/software/projects/QA/boards/12?selectedIssue=QA-77", f"{JI}/browse/QA-77"),
+    (f"{JI}/jira/servicedesk/projects/TSE/queues/custom/1/TSE-1061", f"{JI}/browse/TSE-1061"),
+    ("https://jira.example.com/jira/browse/ABC-1#x", "https://jira.example.com/jira/browse/ABC-1"),
+    (f"{JK}/release_test_all/33911/", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/console", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/consoleFull", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/consoleText", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/testReport/junit/a/b/", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/artifact/logs/x.log", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/pipeline-console/?selected-node=12", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_all/33911/display/redirect", f"{JK}/release_test_all/33911"),
+    (f"{JK}/release_test_pipeline/57353/console#footer", f"{JK}/release_test_pipeline/57353"),
+    (f"{JK}/org/job/repo/job/PR-12/5/console", f"{JK}/org/job/repo/job/PR-12/5"),
+    ("https://jenkins.graphtiger.com/view/QA/job/release_test/31416/console", "https://jenkins.graphtiger.com/view/QA/job/release_test/31416"),
+    (f"{JK}/release_test_all/", f"{JK}/release_test_all"),
+    (f"{JK}/release_test_all/lastBuild/console", f"{JK}/release_test_all/lastBuild/console"),
+    (f"{JK}/folder/job/123", f"{JK}/folder/job/123"),
+    ("https://ci.example.com/job/x/42/console", "https://ci.example.com/job/x/42"),
+    (f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status", f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status"),
+    (f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status#Hosts", f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status"),
+    (f"{JI}/wiki/pages/viewpage.action?pageId=5377851394", f"{JI}/wiki/pages/viewpage.action?pageId=5377851394"),
+    (f"{JI}/wiki/pages/viewpage.action?pageId=5377851394#comment-9", f"{JI}/wiki/pages/viewpage.action?pageId=5377851394"),
+    (f"{JI}/wiki/x/AwDkNgE", f"{JI}/wiki/x/AwDkNgE"),
+    ("https://qa-hub.graphtiger.com/releases/plans/release-test-all-k8s", "https://qa-hub.graphtiger.com/releases/plans/release-test-all-k8s"),
+    ("https://qa-hub.graphtiger.com/releases/runs/release_test_all/33903", "https://qa-hub.graphtiger.com/releases/runs/release_test_all/33903"),
+    ("https://tigergraph-release-prebuild.s3.amazonaws.com/prebuild/tigergraph-4.2.7-prod_sv4-wip_test_82526-offline.tar.gz",
+     "https://tigergraph-release-prebuild.s3.amazonaws.com/prebuild/tigergraph-4.2.7-prod_sv4-wip_test_82526-offline.tar.gz"),
+    ("https://claude.ai/artifact/Rr6LsqTHQYTSQZZfafzcZa", "https://claude.ai/artifact/Rr6LsqTHQYTSQZZfafzcZa"),
+    ("https://Example.COM/Path/#frag", "https://example.com/Path"),
+    ("http://example.com:8080/a?b=1#c", "http://example.com:8080/a?b=1"),
+    ("https://example.com/p/1).", "https://example.com/p/1"),
+]
+bad = [(u, hq.ref_key(f"title {u}"), want) for u, want in cases if hq.ref_key(f"title {u}") != want]
+assert not bad, "\n".join(map(str, bad))
+assert hq.ref_key("QA-1  x") == "QA-1 x" and hq.ref_key(f"a {GH}/pull/1 b {GH}/pull/1#c") == f"a {GH}/pull/1 b {GH}/pull/1#c"
+PY
+python3 - "$HQ" <<'PY' && ok "merging: canonical URL kept, its title preferred, else the newest; merging again changes nothing" || fail "merge_refs"
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+GH, JK = "https://github.com/tigergraph/bigtest/pull", "https://jenkins.graphtiger.com/job/release_test_all"
+card = [f"PR #3260 remote_segment rotate + replica count {GH}/3260", f"smoke #33911 {JK}/33911/", f"smoke #33911 (passed) {JK}/33911/",
+        f"PR #3261 replica check version range {GH}/3261", f"PR #3261 verification comment {GH}/3261#issuecomment-7075621457",
+        f"PR #3260 remote-segment verification comment {GH}/3260#issuecomment-7075987355", "QA-9517",
+        f"PR #3260 re-verify comment (#34021) {GH}/3260#issuecomment-7076621584",
+        f"console of #5 https://jenkins.example.com/job/x/5/console", f"report of #5 https://jenkins.example.com/job/x/5/testReport/"]
+want = [f"PR #3260 remote_segment rotate + replica count {GH}/3260", f"smoke #33911 (passed) {JK}/33911/",
+        f"PR #3261 replica check version range {GH}/3261", "QA-9517", "report of #5 https://jenkins.example.com/job/x/5/"]  # what followed the URL (here its /) stays
+got = hq.merge_refs(card, [])
+assert got == want, got
+assert hq.merge_refs(got, []) == got and hq.merge_refs(got, card) == got
+assert hq.merge_refs(got, [f"PR #3261 (merged) {GH}/3261/"]) == [want[0], want[1], f"PR #3261 (merged) {GH}/3261/", want[3], want[4]]
+assert hq.merge_refs([f"see {GH}/9#discussion_r1)."], []) == [f"see {GH}/9)."]
+PY
+LT="$("$HQ" new "links" | head -1)"; LC="$(ls "$T"/root/tasks/$LT-*/TASK.md)"
+lrefs() { "$HQ" board --json | python3 -c 'import json,sys; print(json.dumps([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$LT"'"][0]["refs"], ensure_ascii=False))'; }
+"$HQ" bind "$LT" --session sess-links >/dev/null
+GHP=https://github.com/o/r/pull
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 review thread %s/9#discussion_r55\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
+[ "$(lrefs)" = "[\"PR #9 files $GHP/9\"]" ] && ok "hq-update: two views of one PR become one ref at the PR's URL, the newer title kept" || fail "views not merged: $(lrefs)"
+before="$(lrefs)"; stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 review thread %s/9#discussion_r55\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
+[ "$(lrefs)" = "$before" ] && ok "a resent block changes no ref" || fail "resent block changed refs: $(lrefs)"
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 (merged) %s/9\n```' $GHP)" >/dev/null
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 merge comment %s/9#issuecomment-1\n```' $GHP)" >/dev/null
+[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] && ok "a title on the PR's own URL beats a comment's title" || fail "title choice: $(lrefs)"
+"$HQ" ref add "$LT" "comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" && [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"comment https://jira.example.com/browse/QA-1\"]" ] && ok "hq ref add stores a Jira comment link as the issue's" || fail "ref add canonical: $(lrefs)"
+python3 - "$LC" "$GHP" <<'PY'
+import re, sys
+p, g = sys.argv[1], sys.argv[2]; s = open(p, encoding="utf-8").read()
+refs = f'["build https://ci.example.com/job/x/42/", "QA-2", "log https://ci.example.com/job/x/42/consoleFull", "PR #9 {g}/9"]'
+s = re.sub(r"^refs: .*$", lambda m: "refs: " + refs, s, count=1, flags=re.M)
+open(p, "w", encoding="utf-8").write(s)
+PY
+out="$("$HQ" ref remove "$LT" "https://ci.example.com/job/x/42/testReport/")"
+[ "$out" = '{"removed": [{"i": 0, "ref": "build https://ci.example.com/job/x/42/"}, {"i": 2, "ref": "log https://ci.example.com/job/x/42/consoleFull"}]}' ] && [ "$(lrefs)" = "[\"QA-2\", \"PR #9 $GHP/9\"]" ] && ok "ref remove by any view of a build removes every entry for it" || fail "remove canonical: $out / $(lrefs)"
+"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"build https://ci.example.com/job/x/42/\", \"QA-2\", \"log https://ci.example.com/job/x/42/consoleFull\", \"PR #9 $GHP/9\"]" ] && ok "ref restore puts the variants back as they were" || fail "restore canonical: $(lrefs)"
+"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"build https://ci.example.com/job/x/42/\", \"QA-2\", \"log https://ci.example.com/job/x/42/consoleFull\", \"PR #9 $GHP/9\"]" ] && ok "and restoring twice adds nothing" || fail "second restore: $(lrefs)"
+"$HQ" unbind --session sess-links >/dev/null
+
 # Today's order: hq focus order puts the named tasks first, in that order; the rest keep theirs.
 "$HQ" focus add T-001 T-002 "$PID" >/dev/null
 "$HQ" focus order "$PID" T-001 >/dev/null

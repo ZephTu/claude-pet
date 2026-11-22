@@ -62,10 +62,12 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
+  // Tasks whose open @claude todos are unfolded (folded by default).
+  claudeOpen: new Set(JSON.parse(pref("hq-claude-todos-open", "[]"))),
 };
 
 // ------------------------------------------------------------------ bridge
@@ -405,9 +407,10 @@ function doTarget(t) {
 // A session on the task that could take the todo but is stopped on a prompt: the todo waits for
 // it rather than going to a second, new session.
 const doBlocked = (t) => liveFor(t.id).filter(canMessage).find(onPrompt) || null;
-async function doTodo(taskId, text) {
-  const t = taskById(taskId);
-  const key = `${taskId}|${text}`;
+// Hand a task something to do: as a message to its live session (queued when it is busy), or
+// to a new session started the way "New session" would, when none can take one. Nothing goes to
+// a session stopped on a prompt. `key` marks the button that asked, so it can say who got it.
+async function handOff(t, key, message, prompt, started) {
   if (!t || ui.handing.has(key)) return;
   ui.handing.add(key);
   render();
@@ -415,7 +418,7 @@ async function doTodo(taskId, text) {
     const s = doTarget(t);
     if (s) {
       const busy = s.state === "busy";
-      await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy, ...sendExtra(s) });
+      await api("send", { session: s.sessionId, text: message, queue: busy, ...sendExtra(s) });
       ui.handed[key] = { to: s.title || s.project, at: Date.now() };
       toast(T(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`, `${busy ? "已排队发给" : "已发给"} ${s.title || s.project}`));
     } else if (doBlocked(t)) {
@@ -424,14 +427,51 @@ async function doTodo(taskId, text) {
       const dir = launchDir(t);
       if (!dir) throw new Error(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或给项目设一个目录"));
       const place = launchPlace();
-      const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: DO_PROMPT(t, text), skip: skipPerms(), focus: !stayOnBoard() });
+      const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt, skip: skipPerms(), focus: !stayOnBoard() });
       stayWith(r && r.session, `${t.id} ${t.title}`);
       ui.handed[key] = { to: T("a new session", "新 session"), at: Date.now() };
-      toast(T(`Started a session on ${t.id} (${PLACES[place]}) to do it`, `已在 ${t.id} 上新开一个 session（${PLACES[place]}）去做`));
+      toast(started(PLACES[place]));
       setTimeout(() => refresh(), 2500);
     }
   } catch (e) { toast(String(e.message || e), true); }
   finally { ui.handing.delete(key); render(); }
+}
+function doTodo(taskId, text) {
+  const t = taskById(taskId);
+  return handOff(t, `${taskId}|${text}`,
+    `[HQ board] Please do this todo on ${taskId}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`,
+    t && DO_PROMPT(t, text),
+    (place) => T(`Started a session on ${taskId} (${place}) to do it`, `已在 ${taskId} 上新开一个 session（${place}）去做`));
+}
+
+// ---- "Tidy todos": have the task's session check its open @claude todos against how things
+// stand now, and tick or drop each in its hq-update. Same hand-off as Do it.
+const TIDY_ASK = "check each against how things stand now (PR merged? cluster deleted? run finished?) and, in your hq-update, tick the finished ones with `done: <text>` and drop the obsolete ones with `drop: <text>`, the text copied exactly from the card. Leave the ones still to do open and don't start on them now.";
+const TIDY_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then tidy its open @claude todos: ${TIDY_ASK}`;
+const claudeOpenTodos = (t) => t.todos.filter((x) => x.state === "open" && x.owner === "claude");
+function tidyButton(t) {
+  const n = claudeOpenTodos(t).length;
+  if (!n) return "";
+  const key = `${t.id}|tidy`;
+  const h = ui.handed[key];
+  if (ui.handing.has(key)) return `<button class="btn small ghost tidy" disabled>${T("Handing…", "交接中…")}</button>`;
+  if (h && Date.now() - h.at < HANDED_MS) {
+    return `<button class="btn small ghost tidy" title="${esc(T(`Handed to ${h.to} ${ago(new Date(h.at).toISOString())} — click to hand it over again`, `${ago(new Date(h.at).toISOString())}交给了 ${h.to}——再点一下会再交一次`))}" data-action="tidy-todos" data-task="${esc(t.id)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
+  }
+  const s = doTarget(t);
+  const held = !s && doBlocked(t);
+  const what = T(`check Claude's ${n} open todo${n === 1 ? "" : "s"} against how things stand now and tick or drop each`, `对照现状检查 Claude 的 ${n} 条未完成待办，逐条勾掉或不做`);
+  const tip = s ? T(`Ask ${s.title || s.project} to ${what}${s.state === "busy" ? " (busy — it will queue)" : ""}`, `让 ${s.title || s.project} ${what}${s.state === "busy" ? "（正忙——会排队）" : ""}`)
+    : held ? `${held.title || held.project}: ${ON_PROMPT()}`
+    : T(`No session on this task can take a message — start one to ${what}`, `这个任务没有能收消息的 session——新开一个来${what}`);
+  return `<button class="btn small ghost tidy" title="${esc(tip)}" data-action="tidy-todos" data-task="${esc(t.id)}">${T("Tidy todos", "整理待办")}</button>`;
+}
+function tidyTodos(taskId) {
+  const t = taskById(taskId);
+  return handOff(t, `${taskId}|tidy`,
+    `[HQ board] Please tidy the open @claude todos on ${taskId}'s card: ${TIDY_ASK}`,
+    t && TIDY_PROMPT(t),
+    (place) => T(`Started a session on ${taskId} (${place}) to tidy its todos`, `已在 ${taskId} 上新开一个 session（${place}）整理待办`));
 }
 
 // A card with nothing on it yet (no next step, todos or log) gets a different opening: the
@@ -988,18 +1028,88 @@ function kindOfUrl(u) {
   if (/\/wiki\/|confluence|docs\.google|notion\.(so|site)|\.md(\b|$)|claude\.ai\/artifact/i.test(u)) return "doc";
   return "link";
 }
+// ---- ref keys: begin (kept free of the page, so a script can run it next to hq's ref_key)
 const REF_URL_RE = /https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/g;
 // Python's str.split() whitespace, so a collapsed key here is the one hq makes.
 const PY_SPACE = /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
-// Which refs are the same — exactly hq's ref_key: a ref with one literal URL is that URL minus
-// trailing `/).,;:`; anything else (no URL, a ticket key, or two or more URLs) is its text with
-// whitespace collapsed. Never the URL a links rule builds: hq doesn't know those.
+// hq's canonical_url, pattern for pattern: a PR's comment or /files tab is the PR, a Jira comment
+// the issue, a Jenkins console or test report the build; anything else loses its #fragment.
+const URL_TAIL_RE = /[\/).,;:]+$/;
+const URL_SPLIT_RE = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/i;
+const CANON_GH_ITEM = /^(\/[^/?#]+\/[^/?#]+\/(?:pull|issues)\/[0-9]+)(?:[/?#][\s\S]*)?$/;
+const CANON_JIRA_BROWSE = /^([\s\S]*?\/browse\/[A-Z][A-Z0-9]+-[0-9]+)(?:[/?#][\s\S]*)?$/;
+const CANON_JIRA_PATH = /^([\s\S]*?)\/jira\/[^?#]*\/([A-Z][A-Z0-9]+-[0-9]+)(?:[/?#][\s\S]*)?$/;
+const CANON_JIRA_SELECTED = /^([\s\S]*?)\/jira\/[^?#]*\?(?:[^#]*&)?selectedIssue=([A-Z][A-Z0-9]+-[0-9]+)(?:[&#][\s\S]*)?$/;
+const CANON_JENKINS_BUILD = /^((?:\/[^/?#]+)*?(?:\/job\/[^/?#]+)+\/[0-9]+)(?:[/?#][\s\S]*)?$/;
+function canonicalUrl(url) {
+  url = String(url).replace(URL_TAIL_RE, "");
+  const m = url.match(URL_SPLIT_RE);
+  if (!m) return url;
+  const host = m[2].toLowerCase();
+  const base = m[1].toLowerCase() + host, rest = m[3];
+  const g = host.includes("github") ? rest.match(CANON_GH_ITEM) : null;
+  if (g) return base + g[1];
+  let j = rest.match(CANON_JIRA_BROWSE);
+  if (j) return base + j[1];
+  j = rest.match(CANON_JIRA_PATH) || rest.match(CANON_JIRA_SELECTED);
+  if (j) return base + j[1] + "/browse/" + j[2];
+  const b = rest.match(CANON_JENKINS_BUILD);
+  if (b) return base + b[1];
+  return (base + rest.split("#")[0]).replace(/\/+$/, "");
+}
+// Which refs are the same — exactly hq's ref_key: a ref with one literal URL is that URL's
+// canonical form (trailing `/).,;:` never count); anything else (no URL, a ticket key, or two or
+// more URLs) is its text with whitespace collapsed. Never the URL a links rule builds: hq doesn't
+// know those.
 function refKey(ref) {
   const text = String(ref);
   const urls = text.match(REF_URL_RE) || [];
-  if (urls.length === 1) return urls[0].replace(/[\/).,;:]+$/, "");
+  if (urls.length === 1) return canonicalUrl(urls[0]);
   return text.split(PY_SPACE).filter(Boolean).join(" ");
 }
+const lowerHost = (u) => { const m = u.match(URL_SPLIT_RE); return m ? m[1].toLowerCase() + m[2].toLowerCase() + m[3] : u; };
+function refUrlIsCanonical(ref) {
+  const urls = String(ref).match(REF_URL_RE) || [];
+  if (urls.length !== 1) return false;
+  const u = urls[0].replace(URL_TAIL_RE, "");
+  return lowerHost(u) === canonicalUrl(u);
+}
+function withCanonicalUrl(ref) {
+  const text = String(ref);
+  const found = [...text.matchAll(REF_URL_RE)];
+  if (found.length !== 1 || refUrlIsCanonical(text)) return text;
+  const u = found[0][0].replace(URL_TAIL_RE, "");
+  return text.slice(0, found[0].index) + canonicalUrl(u) + text.slice(found[0].index + u.length);
+}
+// hq's merge_refs, so a card written before hq merged views of one thing shows them as one: the
+// canonical URL, the title of an entry already on it (the newest such), else the newest title.
+function mergeRefs(refs) {
+  const order = [], groups = new Map();
+  for (let r of refs) {
+    r = String(r).trim();
+    if (!r) continue;
+    const k = refKey(r);
+    if (!groups.has(k)) { groups.set(k, []); order.push(k); }
+    groups.get(k).push(r);
+  }
+  return order.map((k) => {
+    const rs = groups.get(k);
+    const exact = rs.filter(refUrlIsCanonical);
+    return withCanonicalUrl(exact.length ? exact[exact.length - 1] : rs[rs.length - 1]);
+  });
+}
+// Where a link lives, for the Links groups in a task's right rail (kindOfUrl is about what it is).
+function refSource(url) {
+  const m = String(url || "").match(/^https?:\/\/([^/?#]*)([^?#]*)/i);
+  if (!m) return "other";
+  const host = m[1].toLowerCase(), path = m[2];
+  if (host.includes("github")) return "github";
+  if (/\/browse\/[A-Z][A-Z0-9]+-\d+/.test(path) || host.includes("jira") || (host.endsWith("atlassian.net") && /^\/jira(\/|$)/.test(path))) return "jira";
+  if (/\/wiki\//.test(path) || host.includes("confluence")) return "confluence";
+  if (host.includes("jenkins") || /\/job\//.test(path)) return "jenkins";
+  return "other";
+}
+// ---- ref keys: end
 function resolveRef(ref) {
   const url = (String(ref).match(new RegExp(REF_URL_RE.source)) || [])[0];
   if (url) {
@@ -1013,6 +1123,23 @@ function resolveRef(ref) {
     if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: ref };
   }
   return { ref, url: "", kind: "none", label: ref };
+}
+// The Links of a task's right rail, grouped by where they live, newest first; past REF_GROUP_SHOWN
+// a group folds behind "N more" (unfolded for this board's life, per task and group).
+const REF_GROUPS = [["github", "GitHub"], ["jira", "Jira"], ["confluence", "Confluence"], ["jenkins", "Jenkins"], ["other", T("Other", "其他")]];
+const REF_GROUP_SHOWN = 5;
+function refGroups(t, refs, editing) {
+  const by = {};
+  for (const r of refs.slice().reverse()) (by[refSource(r.url)] = by[refSource(r.url)] || []).push(r);
+  const item = (r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+      ${editing ? `<button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`;
+  return REF_GROUPS.filter(([g]) => by[g]).map(([g, name]) => {
+    const rs = by[g], key = `${t.id}:${g}`, all = ui.refMore.has(key);
+    const more = rs.length - REF_GROUP_SHOWN;
+    return `<div class="ref-g"><div class="ref-gh">${esc(name)} <span class="meta">${rs.length}</span></div>
+      ${(all ? rs : rs.slice(0, REF_GROUP_SHOWN)).map(item).join("")}
+      ${more > 0 ? `<button class="lnk ref-more" data-action="ref-more" data-group="${esc(key)}">${all ? T("Show fewer", "收起") : T(`${more} more`, `还有 ${more} 条`)}</button>` : ""}</div>`;
+  }).join("");
 }
 function logEntries(t) {
   // `- 2026-11-20 20:05:18: text` (hq log writes the time since 11/20); older lines carry the day only.
@@ -1079,8 +1206,12 @@ function renderTaskBody(t) {
   const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
   const finished = t.todos.filter((x) => x.state !== "open");
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
-  const shownTodos = openTodos.concat(foldDone ? finished.filter(isRecent) : finished);
-  const hiddenDone = finished.length - (shownTodos.length - openTodos.length);
+  const shownDone = foldDone ? finished.filter(isRecent) : finished;
+  const hiddenDone = finished.length - shownDone.length;
+  // Claude's open todos — its own working list, often long — fold behind one row, in their place
+  // after yours; yours and other people's stay in view. The row unfolds them (remembered per task).
+  const claudeN = openTodos.filter((x) => x.owner === "claude").length;
+  const claudeShown = ui.claudeOpen.has(t.id);
   const todoRow = (x) => {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
@@ -1091,9 +1222,24 @@ function renderTaskBody(t) {
       ${doItButton(t, x)}
       ${x.state === "open" ? `<button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
+  const claudeFold = () => `<button class="todo cfold ${claudeShown ? "on" : ""}" data-action="claude-todos-toggle" data-task="${esc(t.id)}"
+      title="${claudeShown ? T("Fold Claude's todos", "收起 Claude 的待办") : T("Show Claude's open todos", "展开 Claude 的未完成待办")}"><span class="box fold">${claudeShown ? "▾" : "▸"}</span><span class="who cl">Claude</span><span class="t">${T(`Claude's ${claudeN} todo${claudeN === 1 ? "" : "s"}`, `Claude 的 ${claudeN} 条`)}</span></button>`;
+  const todoRows = () => {
+    const out = [];
+    let folded = false;
+    for (const x of openTodos) {
+      if (x.owner === "claude") {
+        if (!folded) { out.push(claudeFold()); folded = true; }
+        if (!claudeShown) continue;
+      }
+      out.push(todoRow(x));
+    }
+    return out.concat(shownDone.map(todoRow)).join("");
+  };
   const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
     (finished.length > FINISHED_SHOWN
-      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? T("Hide finished", "收起已结束的") : T(`Show ${hiddenDone} finished`, `显示 ${hiddenDone} 条已结束的`)}</button>` : "");
+      ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? T("Hide finished", "收起已结束的") : T(`Show ${hiddenDone} finished`, `显示 ${hiddenDone} 条已结束的`)}</button>` : "") +
+    tidyButton(t);
   const live = liveFor(t.id);
   const unbound = ui.sessions.filter((s) => s.task !== t.id);
   // The log reads newest first, grouped by day, with the time of day beside each entry.
@@ -1106,9 +1252,9 @@ function renderTaskBody(t) {
     lastDay = day;
     return `${head}<li class="e"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
   }).join("");
-  // One entry per link: a card may still hold the same URL under two titles (written before hq
-  // merged them), and the later title is the one to show.
-  const refs = [...new Map(list(t.refs).map((ref) => [refKey(ref), resolveRef(ref)])).values()];
+  // One entry per link, merged as hq merges them (a card may predate that): a PR and a comment on
+  // it, or a build and its console, are one link.
+  const refs = mergeRefs(list(t.refs)).map(resolveRef);
   const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
   // Settled things — status, project, category, directories, links — sit in the right rail as
@@ -1165,7 +1311,7 @@ function renderTaskBody(t) {
         ${adding("todo") ? `<div class="row nowrap addbox">
             <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
             <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>` : ""}
-        ${shownTodos.length ? `<div class="todos">${shownTodos.map(todoRow).join("")}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
+        ${t.todos.length ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
 
         ${secHead(T("Log", "日志"), t, "log", T("Add a note — the task's memory; bound sessions read it", "加一条备注——任务的记忆；绑定的 session 会读它"), logs.length || null)}
         ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="${T("A decision, a finding, a note for whoever picks this up next", "一个决定、一个发现、给下一个接手者的备注")}">${esc(draft(k("log")))}</textarea>
@@ -1181,8 +1327,7 @@ function renderTaskBody(t) {
           <dt>${T("Folders", "目录")}</dt><dd>${dirs.length ? dirs.map((x) => `<span class="path" title="${esc(x)}">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>`).join("")
             : `<span class="faint" title="${T("Added automatically when a session is bound", "绑定 session 时会自动加上")}">${T("none yet", "还没有")}</span>`}</dd>
           <dt>${T("Links", "链接")}</dt><dd>
-            ${refs.map((r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
-              ${resEdit ? `<button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`).join("")}
+            ${refGroups(t, refs, resEdit)}
             <button class="lnk ${resEdit ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${resEdit ? T("Done", "完成") : refs.length ? T("Edit", "编辑") : T("+ Add", "+ 添加")}</button>
           </dd>
         </dl>
@@ -2151,6 +2296,7 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "resolve-all": return resolveAll(d.task);
     case "do-todo": return doTodo(d.task, d.text);
+    case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.add(d.id); return render();
     case "show-later": ui.showLater.has(d.task) ? ui.showLater.delete(d.task) : ui.showLater.add(d.task); return render();
     case "forget-session": {
@@ -2302,6 +2448,11 @@ document.addEventListener("click", async (ev) => {
       ui.adding.delete(`${d.task}:log`);
       return act("log", { task: d.task, message: text }, T("Note saved", "备注已保存"));
     }
+    case "claude-todos-toggle":
+      ui.claudeOpen.has(d.task) ? ui.claudeOpen.delete(d.task) : ui.claudeOpen.add(d.task);
+      savePref("hq-claude-todos-open", JSON.stringify([...ui.claudeOpen]));
+      return render();
+    case "ref-more": ui.refMore.has(d.group) ? ui.refMore.delete(d.group) : ui.refMore.add(d.group); return render();
     case "done-toggle": ui.doneOpen.has(d.task) ? ui.doneOpen.delete(d.task) : ui.doneOpen.add(d.task); return render();
     case "log-all": ui.logAll.has(d.task) ? ui.logAll.delete(d.task) : ui.logAll.add(d.task); return render();
     case "toggle-res": ui.resOpen.has(d.task) ? ui.resOpen.delete(d.task) : ui.resOpen.add(d.task); return render();

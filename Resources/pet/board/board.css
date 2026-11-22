@@ -796,6 +796,11 @@ main.single { grid-template-columns: 1fr; }
 .who.me { color: var(--amber); }
 .who.cl { color: var(--blue); }
 .todo .doit { margin-top: -1px; }
+/* Claude's open todos fold behind one row */
+.todo.cfold { width: calc(100% + 16px); background: none; border: 0; font: inherit; color: var(--dim); text-align: left; cursor: pointer; }
+.todo.cfold:hover, .todo.cfold.on { color: var(--text); }
+.todo.cfold .box.fold { border-color: transparent; color: var(--dim); font-size: 13px; }
+.sec-h .tidy { margin-left: auto; }
 .logs { list-style: none; margin: 0; padding: 0; border: 0; }
 .logs .day { color: var(--faint); font-size: 12px; margin: 10px 0 3px; }
 .logs .day:first-child { margin-top: 0; }
@@ -820,6 +825,12 @@ main.single { grid-template-columns: 1fr; }
 .ref:hover { text-decoration: underline; }
 .ref.none { color: var(--dim); }
 .ref-i .icon { width: 20px; height: 18px; }
+/* Links, grouped by where they live */
+.ref-g + .ref-g { margin-top: 8px; }
+.ref-gh { font-size: 11.5px; color: var(--faint); margin-bottom: 1px; }
+.ref-gh .meta { font-size: 11px; }
+.lnk.ref-more { display: block; margin: 1px 0 2px; }
+.ref-g + .lnk { margin-top: 6px; }
 .lnk { background: none; border: 0; padding: 0; color: var(--faint); font-size: 12px; cursor: pointer; }
 .lnk:hover, .lnk.on { color: var(--text); }
 .res { background: none; border: 0; padding: 0; margin: 8px 0 0; }
