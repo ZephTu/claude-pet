@@ -119,6 +119,18 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    The Stop hook files each line as an ask (`T-012.3`, `T-012.4`, …). Unanswered asks are
    re-injected every turn and shown on the board until you respond — an ask you skipped is
    never treated as "no".
+
+   **Claude's open todos come along at session start.** SessionStart — for every source:
+   `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
+   context, each exactly as written on the card, with the instruction to check them against how
+   things stand and tick finished ones with `done: <text>` / drop obsolete ones with
+   `drop: <text>` in the next `hq-update` (after a compaction it adds that the list is the card's,
+   not the session's memory of it). At most 20 todos and 2000 characters of todo text: the newest
+   that fit are listed, in card order, and a last line counts the older ones left out. A session
+   bound from the board gets the same list once with its first prompt; ordinary prompts never
+   carry it (UserPromptSubmit stays small). The board's **Tidy todos** asks for the same check
+   mid-session, and its message carries the list itself (same cap), since the one from the start
+   may be stale or compacted away. `@Claude` and `@Me` count as `@claude` / `@me`.
 3. **Every ask gets one of four answers:**
 
    | Answer | Meaning |
@@ -180,14 +192,33 @@ card whose category is not in the list (e.g. hand-edited) still shows, marked "n
 
 `refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
 ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
-board shows the title (cut to a few words). A card lists each link once: adding a ref whose URL is
-already there replaces that entry's title (so a title can move on, e.g. a PR from open to merged —
-an `hq-update` `ref:` line does the same), and removing one removes every entry with that URL. A
-trailing `/` or `).,;:` doesn't make a URL a different link; a ref with two or more URLs, or none,
-is matched by its whole text (whitespace collapsed). `hq ref remove` prints what it removed as JSON
+board shows the title (cut to a few words). A card lists each link once, keyed by a canonical URL
+(`ref_key` / `canonical_url` in `bin/hq`; the board's `refKey` / `canonicalUrl` in `board.js` are
+the same rules — keep them in step):
+
+| URL | Canonical form |
+|---|---|
+| GitHub (any host containing `github`) `…/<owner>/<repo>/pull/<n>` or `issues/<n>`, plus anything after it (`/files`, `/commits/…`, `?…`, `#diff-…`) | `…/<owner>/<repo>/pull/<n>` (or `issues/<n>`) |
+| GitHub, a link to one comment (`#issuecomment-<n>`, `#discussion_r<n>`, `#pullrequestreview-<n>`, `#r<n>`) | kept as written: a comment is its own entry, not merged into the PR |
+| Jira `…/browse/KEY-123` with any query, fragment or trailing path | `…/browse/KEY-123` |
+| Jira `…/jira/…/KEY-123`, or `…/jira/…?…selectedIssue=KEY-123` | `…/browse/KEY-123` |
+| Jira, a comment (`focusedCommentId=<n>` or `#comment-<n>`) | `…/browse/KEY-123?focusedCommentId=<n>` |
+| Jenkins `…/job/<a>[/job/<b>…]/<build#>/<console, testReport/…, artifact/…>` | `…/job/<a>…/<build#>` (a job URL without a build number stays as it is; on a host without `jenkins` in its name only Jenkins' own pages after the build number count, so `…/job/engineer/123/apply` is left alone) |
+| anything else | as written, `#fragment` included (`#L10`, `#/runs/2`, `#Heading` point somewhere else) |
+
+Scheme and host compare in lower case, and a trailing `/` or `).,;:` never counts. A ref with two or
+more URLs, or none, is matched by its whole text (whitespace collapsed). Entries with the same key
+merge into one, at the place of the first: its URL rewritten to the canonical one (an entry with
+no other of its key is left exactly as written), its title that
+of an entry whose URL already is the canonical one (the newest such — so a PR's title can move on
+from open to merged), else the newest entry's. `hq ref add` and an `hq-update` `ref:` line merge
+this way (resending the same block changes nothing), and removing one removes every entry with that
+key, whichever view of it you name. The board applies the same merge when it shows a card written
+before these rules. `hq ref remove` prints what it removed as JSON
 (`{"removed": [{"i": 0, "ref": "…"}, …]}`), and `hq ref restore T-012 '<that JSON>'` puts every entry
-back at its old place — the board's Undo after ✕ does this. The board shows them under **Resources**,
-grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tried in order:
+back at its old place — the board's Undo after ✕ does this. The board shows them under **Links**
+(Resources) in the task's right rail, grouped by source — GitHub, Jira, Confluence, Jenkins, Other —
+newest first, five per group before "N more". Shorthand becomes a link through `links` rules in `hq.json`, tried in order:
 
 ```json
 "links": [
