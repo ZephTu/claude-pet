@@ -129,7 +129,8 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    that fit are listed, in card order, and a last line counts the older ones left out. A session
    bound from the board gets the same list once with its first prompt; ordinary prompts never
    carry it (UserPromptSubmit stays small). The board's **Tidy todos** asks for the same check
-   mid-session.
+   mid-session, and its message carries the list itself (same cap), since the one from the start
+   may be stale or compacted away. `@Claude` and `@Me` count as `@claude` / `@me`.
 3. **Every ask gets one of four answers:**
 
    | Answer | Meaning |
@@ -197,16 +198,18 @@ the same rules — keep them in step):
 
 | URL | Canonical form |
 |---|---|
-| GitHub (any host containing `github`) `…/<owner>/<repo>/pull/<n>` or `issues/<n>`, plus anything after it (`#issuecomment-…`, `/files`, `/commits/…`, `?…`) | `…/<owner>/<repo>/pull/<n>` (or `issues/<n>`) |
-| GitHub `…/commit/<sha>#…` | without the fragment (as any other URL) |
+| GitHub (any host containing `github`) `…/<owner>/<repo>/pull/<n>` or `issues/<n>`, plus anything after it (`/files`, `/commits/…`, `?…`, `#diff-…`) | `…/<owner>/<repo>/pull/<n>` (or `issues/<n>`) |
+| GitHub, a link to one comment (`#issuecomment-<n>`, `#discussion_r<n>`, `#pullrequestreview-<n>`, `#r<n>`) | kept as written: a comment is its own entry, not merged into the PR |
 | Jira `…/browse/KEY-123` with any query, fragment or trailing path | `…/browse/KEY-123` |
 | Jira `…/jira/…/KEY-123`, or `…/jira/…?…selectedIssue=KEY-123` | `…/browse/KEY-123` |
-| Jenkins `…/job/<a>[/job/<b>…]/<build#>/<console, testReport/…, artifact/…>` | `…/job/<a>…/<build#>` (a job URL without a build number stays as it is) |
-| anything else | without its `#fragment` |
+| Jira, a comment (`focusedCommentId=<n>` or `#comment-<n>`) | `…/browse/KEY-123?focusedCommentId=<n>` |
+| Jenkins `…/job/<a>[/job/<b>…]/<build#>/<console, testReport/…, artifact/…>` | `…/job/<a>…/<build#>` (a job URL without a build number stays as it is; on a host without `jenkins` in its name only Jenkins' own pages after the build number count, so `…/job/engineer/123/apply` is left alone) |
+| anything else | as written, `#fragment` included (`#L10`, `#/runs/2`, `#Heading` point somewhere else) |
 
 Scheme and host compare in lower case, and a trailing `/` or `).,;:` never counts. A ref with two or
 more URLs, or none, is matched by its whole text (whitespace collapsed). Entries with the same key
-merge into one, at the place of the first: its URL rewritten to the canonical one, its title that
+merge into one, at the place of the first: its URL rewritten to the canonical one (an entry with
+no other of its key is left exactly as written), its title that
 of an entry whose URL already is the canonical one (the newest such — so a PR's title can move on
 from open to merged), else the newest entry's. `hq ref add` and an `hq-update` `ref:` line merge
 this way (resending the same block changes nothing), and removing one removes every entry with that

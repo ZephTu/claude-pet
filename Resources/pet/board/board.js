@@ -449,6 +449,22 @@ function doTodo(taskId, text) {
 const TIDY_ASK = "check each against how things stand now (PR merged? cluster deleted? run finished?) and, in your hq-update, tick the finished ones with `done: <text>` and drop the obsolete ones with `drop: <text>`, the text copied exactly from the card. Leave the ones still to do open and don't start on them now.";
 const TIDY_PROMPT = (t) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then tidy its open @claude todos: ${TIDY_ASK}`;
 const claudeOpenTodos = (t) => t.todos.filter((x) => x.state === "open" && x.owner === "claude");
+// The list itself goes with the message: a running session only has the one it was given at start
+// (maybe compacted away since), and a `done:` whose text doesn't match fails the whole hq-update.
+// Same cap as hq's SessionStart list: the newest 20 that fit in 2000 characters.
+function tidyList(t) {
+  const items = claudeOpenTodos(t);
+  const shown = [];
+  let used = 0;
+  for (const x of items.slice().reverse()) {
+    if (shown.length >= 20 || (shown.length && used + x.text.length > 2000)) break;
+    shown.unshift(x);
+    used += x.text.length;
+  }
+  const more = items.length - shown.length;
+  return `The open @claude todos (${items.length}), text exactly as on the card:\n` + shown.map((x) => `- ${x.text}`).join("\n")
+    + (more ? `\n- … ${more} older ones not shown — read the card's todo section` : "");
+}
 function tidyButton(t) {
   const n = claudeOpenTodos(t).length;
   if (!n) return "";
@@ -469,7 +485,7 @@ function tidyButton(t) {
 function tidyTodos(taskId) {
   const t = taskById(taskId);
   return handOff(t, `${taskId}|tidy`,
-    `[HQ board] Please tidy the open @claude todos on ${taskId}'s card: ${TIDY_ASK}`,
+    `[HQ board] Please tidy the open @claude todos on ${taskId}'s card: ${TIDY_ASK}` + (t ? "\n" + tidyList(t) : ""),
     t && TIDY_PROMPT(t),
     (place) => T(`Started a session on ${taskId} (${place}) to tidy its todos`, `已在 ${taskId} 上新开一个 session（${place}）整理待办`));
 }
@@ -1032,30 +1048,40 @@ function kindOfUrl(u) {
 const REF_URL_RE = /https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/g;
 // Python's str.split() whitespace, so a collapsed key here is the one hq makes.
 const PY_SPACE = /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
-// hq's canonical_url, pattern for pattern: a PR's comment or /files tab is the PR, a Jira comment
-// the issue, a Jenkins console or test report the build; anything else loses its #fragment.
+// hq's canonical_url, pattern for pattern: a PR's /files tab is the PR, a Jira issue opened from a
+// board the issue, a Jenkins console or test report the build; a link to one comment stays its
+// own, and any other #fragment is kept.
 const URL_TAIL_RE = /[\/).,;:]+$/;
 const URL_SPLIT_RE = /^(https?:\/\/)([^/?#]*)([\s\S]*)$/i;
 const CANON_GH_ITEM = /^(\/[^/?#]+\/[^/?#]+\/(?:pull|issues)\/[0-9]+)(?:[/?#][\s\S]*)?$/;
+const CANON_GH_COMMENT = /#(?:issuecomment-|discussion_r|pullrequestreview-|r)[0-9]+$/;
 const CANON_JIRA_BROWSE = /^([\s\S]*?\/browse\/[A-Z][A-Z0-9]+-[0-9]+)(?:[/?#][\s\S]*)?$/;
 const CANON_JIRA_PATH = /^([\s\S]*?)\/jira\/[^?#]*\/([A-Z][A-Z0-9]+-[0-9]+)(?:[/?#][\s\S]*)?$/;
 const CANON_JIRA_SELECTED = /^([\s\S]*?)\/jira\/[^?#]*\?(?:[^#]*&)?selectedIssue=([A-Z][A-Z0-9]+-[0-9]+)(?:[&#][\s\S]*)?$/;
-const CANON_JENKINS_BUILD = /^((?:\/[^/?#]+)*?(?:\/job\/[^/?#]+)+\/[0-9]+)(?:[/?#][\s\S]*)?$/;
+const CANON_JIRA_COMMENT = /[?&]focusedCommentId=([0-9]+)|#comment-([0-9]+)$/;
+const CANON_JENKINS_BUILD = /^((?:\/[^/?#]+)*?(?:\/job\/[^/?#]+)+\/[0-9]+)(?:\/([^?#]*))?(?:[?#][\s\S]*)?$/;
+// What may follow a build number on a host not named "jenkins" (hq's JENKINS_VIEW_RE).
+const CANON_JENKINS_VIEW = /^(?:|console\w*|testReport\b[\s\S]*|artifact\b[\s\S]*|changes|parameters|pipeline\S*|flowGraphTable|execution\b[\s\S]*|timestamps\b[\s\S]*|injectedEnvVars|display\b[\s\S]*|stages\b[\s\S]*|api\b[\s\S]*)\/?$/;
+const isJenkins = (host, view) => host.includes("jenkins") || CANON_JENKINS_VIEW.test(view || "");
 function canonicalUrl(url) {
   url = String(url).replace(URL_TAIL_RE, "");
   const m = url.match(URL_SPLIT_RE);
   if (!m) return url;
   const host = m[2].toLowerCase();
-  const base = m[1].toLowerCase() + host, rest = m[3];
+  const base = m[1].toLowerCase() + host;
+  let rest = m[3];
   const g = host.includes("github") ? rest.match(CANON_GH_ITEM) : null;
-  if (g) return base + g[1];
-  let j = rest.match(CANON_JIRA_BROWSE);
-  if (j) return base + j[1];
-  j = rest.match(CANON_JIRA_PATH) || rest.match(CANON_JIRA_SELECTED);
-  if (j) return base + j[1] + "/browse/" + j[2];
+  if (g) return base + (CANON_GH_COMMENT.test(rest) ? rest : g[1]);
+  const jb = rest.match(CANON_JIRA_BROWSE);
+  const j = jb || rest.match(CANON_JIRA_PATH) || rest.match(CANON_JIRA_SELECTED);
+  if (j) {
+    const c = rest.match(CANON_JIRA_COMMENT);
+    return base + (jb ? j[1] : j[1] + "/browse/" + j[2]) + (c ? `?focusedCommentId=${c[1] || c[2]}` : "");
+  }
   const b = rest.match(CANON_JENKINS_BUILD);
-  if (b) return base + b[1];
-  return (base + rest.split("#")[0]).replace(/\/+$/, "");
+  if (b && isJenkins(host, b[2])) return base + b[1];
+  if (rest.endsWith("#")) rest = rest.slice(0, -1);
+  return base + (rest.includes("#") ? rest : rest.replace(/\/+$/, ""));
 }
 // Which refs are the same — exactly hq's ref_key: a ref with one literal URL is that URL's
 // canonical form (trailing `/).,;:` never count); anything else (no URL, a ticket key, or two or
@@ -1083,10 +1109,12 @@ function withCanonicalUrl(ref) {
 }
 // hq's merge_refs, so a card written before hq merged views of one thing shows them as one: the
 // canonical URL, the title of an entry already on it (the newest such), else the newest title.
+// One with no other of its key stays exactly as written.
+const PY_TRIM = new RegExp(`^(?:${PY_SPACE.source})|(?:${PY_SPACE.source})$`, "g");   // str.strip()
 function mergeRefs(refs) {
   const order = [], groups = new Map();
   for (let r of refs) {
-    r = String(r).trim();
+    r = String(r).replace(PY_TRIM, "");
     if (!r) continue;
     const k = refKey(r);
     if (!groups.has(k)) { groups.set(k, []); order.push(k); }
@@ -1094,6 +1122,7 @@ function mergeRefs(refs) {
   }
   return order.map((k) => {
     const rs = groups.get(k);
+    if (new Set(rs).size === 1) return rs[0];
     const exact = rs.filter(refUrlIsCanonical);
     return withCanonicalUrl(exact.length ? exact[exact.length - 1] : rs[rs.length - 1]);
   });
@@ -1105,8 +1134,9 @@ function refSource(url) {
   const host = m[1].toLowerCase(), path = m[2];
   if (host.includes("github")) return "github";
   if (/\/browse\/[A-Z][A-Z0-9]+-\d+/.test(path) || host.includes("jira") || (host.endsWith("atlassian.net") && /^\/jira(\/|$)/.test(path))) return "jira";
-  if (/\/wiki\//.test(path) || host.includes("confluence")) return "confluence";
-  if (host.includes("jenkins") || /\/job\//.test(path)) return "jenkins";
+  if (host.includes("confluence") || (host.endsWith("atlassian.net") && /^\/wiki\//.test(path))) return "confluence";
+  const b = path.match(CANON_JENKINS_BUILD);
+  if (host.includes("jenkins") || (b && isJenkins(host, b[2]))) return "jenkins";
   return "other";
 }
 // ---- ref keys: end

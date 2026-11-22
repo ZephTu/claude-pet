@@ -350,6 +350,7 @@ assert "- delete the cluster  of #3260" in lines, c
 for no in ("review the PR", "finished thing", "dropped thing", "send the dataset", "<!--t:"):
     assert no not in c, no
 assert "done: <text>" in c and "drop: <text>" in c' && ok "SessionStart lists the open @claude todos, text exactly as on the card" || fail "SessionStart todo list: $c"
+"$HQ" board --json | python3 -c 'import json,sys; t=[t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$CT"'"][0]; o=[x["owner"] for x in t["todos"] if "delete the cluster" in x["text"]]; assert o==["claude"], o' && ok "@Claude is Claude's on the board too" || fail "@Claude owner not normalised"
 for src in resume clear compact; do startctx $src | grep -q "^- delete the cluster  of #3260$" || fail "no todo list on SessionStart source=$src"; done; ok "resume, clear and compact get the list too"
 startctx compact | grep -q "just compacted" && ok "after a compaction the session is told the list is the card's" || fail "compact note missing"
 startctx startup | grep -q "compacted" && fail "compact note on a fresh start" || ok "a fresh start has no compaction note"
@@ -380,32 +381,35 @@ assert 1 <= len(l) < 10 and sum(len(x) for x in l) <= 2000 + 2 * len(l) and l[-1
 assert f"- … {10 - len(l)} older ones not shown" in c, c' && ok "and stays within about 2000 characters" || fail "character cap"
 "$HQ" unbind --session sess-todo >/dev/null
 
-# Refs are keyed by the thing a link points to: a PR's comment, /files or /commits is the PR, a
-# Jira comment the issue, a Jenkins console or test report the build. hq and board.js agree.
+# Refs are keyed by the thing a link points to: a PR's /files or /commits is the PR, a Jira board
+# page the issue, a Jenkins console or test report the build. A link to one comment, and any other
+# #fragment, stays its own. hq and board.js agree.
 python3 - "$HQ" <<'PY' && ok "canonical keys for GitHub, Jira, Jenkins, Confluence and other URLs" || fail "canonical keys"
 import importlib.machinery, importlib.util, sys
 loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
 spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
 GH, JI, JK = "https://github.com/tigergraph/bigtest", "https://graphsql.atlassian.net", "https://jenkins.graphtiger.com/job"
 cases = [
-    (f"{GH}/pull/3261#issuecomment-7075621457", f"{GH}/pull/3261"),
+    (f"{GH}/pull/3261#issuecomment-7075621457", f"{GH}/pull/3261#issuecomment-7075621457"),
     (f"{GH}/pull/3261", f"{GH}/pull/3261"),
     (f"{GH}/pull/3261/", f"{GH}/pull/3261"),
     (f"{GH}/pull/12/files", f"{GH}/pull/12"),
     (f"{GH}/pull/12/files#diff-abc123", f"{GH}/pull/12"),
     (f"{GH}/pull/12/commits/0a1b2c3", f"{GH}/pull/12"),
     (f"{GH}/pull/12/checks?check_run_id=9", f"{GH}/pull/12"),
-    (f"{GH}/pull/12#discussion_r1234", f"{GH}/pull/12"),
-    (f"{GH}/pull/12#pullrequestreview-55", f"{GH}/pull/12"),
-    ("https://GitHub.com/ZephTu/claude-pet/issues/7#issuecomment-1", "https://github.com/ZephTu/claude-pet/issues/7"),
-    (f"{GH}/commit/0a1b2c3d#diff-1", f"{GH}/commit/0a1b2c3d"),
-    (f"{GH}/blob/master/a.py#L10-L20", f"{GH}/blob/master/a.py"),
+    (f"{GH}/pull/12#discussion_r1234", f"{GH}/pull/12#discussion_r1234"),
+    (f"{GH}/pull/12/files#r987", f"{GH}/pull/12/files#r987"),
+    (f"{GH}/pull/12#pullrequestreview-55", f"{GH}/pull/12#pullrequestreview-55"),
+    ("https://GitHub.com/ZephTu/claude-pet/issues/7#issuecomment-1", "https://github.com/ZephTu/claude-pet/issues/7#issuecomment-1"),
+    (f"{GH}/commit/0a1b2c3d#diff-1", f"{GH}/commit/0a1b2c3d#diff-1"),
+    (f"{GH}/blob/master/a.py#L10-L20", f"{GH}/blob/master/a.py#L10-L20"),
     (f"{GH}/pulls", f"{GH}/pulls"),
     (f"{GH}/tree/fix/x", f"{GH}/tree/fix/x"),
     ("https://github.example.com/o/r/pull/3/files", "https://github.example.com/o/r/pull/3"),
     (f"{JI}/browse/GLE-13975", f"{JI}/browse/GLE-13975"),
-    (f"{JI}/browse/QA-9517?focusedCommentId=123&page=x#comment-123", f"{JI}/browse/QA-9517"),
-    (f"{JI}/browse/CORE-6234#comment-9", f"{JI}/browse/CORE-6234"),
+    (f"{JI}/browse/QA-9517?focusedCommentId=123&page=x#comment-123", f"{JI}/browse/QA-9517?focusedCommentId=123"),
+    (f"{JI}/browse/QA-9517?filter=1", f"{JI}/browse/QA-9517"),
+    (f"{JI}/browse/CORE-6234#comment-9", f"{JI}/browse/CORE-6234?focusedCommentId=9"),
     (f"{JI}/jira/software/c/projects/QA/issues/QA-9517?jql=project%3DQA", f"{JI}/browse/QA-9517"),
     (f"{JI}/jira/software/projects/QA/boards/12?selectedIssue=QA-77", f"{JI}/browse/QA-77"),
     (f"{JI}/jira/servicedesk/projects/TSE/queues/custom/1/TSE-1061", f"{JI}/browse/TSE-1061"),
@@ -425,18 +429,22 @@ cases = [
     (f"{JK}/release_test_all/lastBuild/console", f"{JK}/release_test_all/lastBuild/console"),
     (f"{JK}/folder/job/123", f"{JK}/folder/job/123"),
     ("https://ci.example.com/job/x/42/console", "https://ci.example.com/job/x/42"),
+    ("https://careers.example.com/job/engineer/12345/apply", "https://careers.example.com/job/engineer/12345/apply"),
+    ("https://jenkins.example.com/job/x/42/anything", "https://jenkins.example.com/job/x/42"),
     (f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status", f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status"),
-    (f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status#Hosts", f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status"),
+    (f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status#Hosts", f"{JI}/wiki/spaces/QA/pages/1643216972/VENTI+QWENTI+reservation+status#Hosts"),
     (f"{JI}/wiki/pages/viewpage.action?pageId=5377851394", f"{JI}/wiki/pages/viewpage.action?pageId=5377851394"),
-    (f"{JI}/wiki/pages/viewpage.action?pageId=5377851394#comment-9", f"{JI}/wiki/pages/viewpage.action?pageId=5377851394"),
+    (f"{JI}/wiki/pages/viewpage.action?pageId=5377851394#comment-9", f"{JI}/wiki/pages/viewpage.action?pageId=5377851394#comment-9"),
     (f"{JI}/wiki/x/AwDkNgE", f"{JI}/wiki/x/AwDkNgE"),
     ("https://qa-hub.graphtiger.com/releases/plans/release-test-all-k8s", "https://qa-hub.graphtiger.com/releases/plans/release-test-all-k8s"),
     ("https://qa-hub.graphtiger.com/releases/runs/release_test_all/33903", "https://qa-hub.graphtiger.com/releases/runs/release_test_all/33903"),
     ("https://tigergraph-release-prebuild.s3.amazonaws.com/prebuild/tigergraph-4.2.7-prod_sv4-wip_test_82526-offline.tar.gz",
      "https://tigergraph-release-prebuild.s3.amazonaws.com/prebuild/tigergraph-4.2.7-prod_sv4-wip_test_82526-offline.tar.gz"),
     ("https://claude.ai/artifact/Rr6LsqTHQYTSQZZfafzcZa", "https://claude.ai/artifact/Rr6LsqTHQYTSQZZfafzcZa"),
-    ("https://Example.COM/Path/#frag", "https://example.com/Path"),
-    ("http://example.com:8080/a?b=1#c", "http://example.com:8080/a?b=1"),
+    ("https://Example.COM/Path/#frag", "https://example.com/Path/#frag"),
+    ("https://Example.COM/Path/#", "https://example.com/Path"),
+    ("https://app.example.com/#/runs/1", "https://app.example.com/#/runs/1"),
+    ("http://example.com:8080/a?b=1#c", "http://example.com:8080/a?b=1#c"),
     ("https://example.com/p/1).", "https://example.com/p/1"),
 ]
 bad = [(u, hq.ref_key(f"title {u}"), want) for u, want in cases if hq.ref_key(f"title {u}") != want]
@@ -454,25 +462,31 @@ card = [f"PR #3260 remote_segment rotate + replica count {GH}/3260", f"smoke #33
         f"PR #3260 re-verify comment (#34021) {GH}/3260#issuecomment-7076621584",
         f"console of #5 https://jenkins.example.com/job/x/5/console", f"report of #5 https://jenkins.example.com/job/x/5/testReport/"]
 want = [f"PR #3260 remote_segment rotate + replica count {GH}/3260", f"smoke #33911 (passed) {JK}/33911/",
-        f"PR #3261 replica check version range {GH}/3261", "QA-9517", "report of #5 https://jenkins.example.com/job/x/5/"]  # what followed the URL (here its /) stays
+        f"PR #3261 replica check version range {GH}/3261", card[4], card[5], "QA-9517", card[7],  # comments stay
+        "report of #5 https://jenkins.example.com/job/x/5/"]  # what followed the URL (here its /) stays
 got = hq.merge_refs(card, [])
 assert got == want, got
 assert hq.merge_refs(got, []) == got and hq.merge_refs(got, card) == got
-assert hq.merge_refs(got, [f"PR #3261 (merged) {GH}/3261/"]) == [want[0], want[1], f"PR #3261 (merged) {GH}/3261/", want[3], want[4]]
-assert hq.merge_refs([f"see {GH}/9#discussion_r1)."], []) == [f"see {GH}/9)."]
+assert hq.merge_refs(got, [f"PR #3261 (merged) {GH}/3261/"]) == want[:2] + [f"PR #3261 (merged) {GH}/3261/"] + want[3:]
+# A link with nothing to merge with is left exactly as written; different #/routes are different links.
+assert hq.merge_refs([f"see {GH}/9/files)."], []) == [f"see {GH}/9/files)."]
+assert hq.merge_refs(["a https://app.example.com/#/runs/1"], ["b https://app.example.com/#/runs/2"]) == ["a https://app.example.com/#/runs/1", "b https://app.example.com/#/runs/2"]
+assert hq.merge_refs(["same https://e.com/x/", "same https://e.com/x/"], []) == ["same https://e.com/x/"]
 PY
 LT="$("$HQ" new "links" | head -1)"; LC="$(ls "$T"/root/tasks/$LT-*/TASK.md)"
 lrefs() { "$HQ" board --json | python3 -c 'import json,sys; print(json.dumps([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$LT"'"][0]["refs"], ensure_ascii=False))'; }
 "$HQ" bind "$LT" --session sess-links >/dev/null
 GHP=https://github.com/o/r/pull
-stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 review thread %s/9#discussion_r55\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 commits %s/9/commits\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
 [ "$(lrefs)" = "[\"PR #9 files $GHP/9\"]" ] && ok "hq-update: two views of one PR become one ref at the PR's URL, the newer title kept" || fail "views not merged: $(lrefs)"
-before="$(lrefs)"; stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 review thread %s/9#discussion_r55\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
+before="$(lrefs)"; stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 commits %s/9/commits\nref: PR #9 files %s/9/files\n```' $GHP $GHP)" >/dev/null
 [ "$(lrefs)" = "$before" ] && ok "a resent block changes no ref" || fail "resent block changed refs: $(lrefs)"
 stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 (merged) %s/9\n```' $GHP)" >/dev/null
-stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 merge comment %s/9#issuecomment-1\n```' $GHP)" >/dev/null
-[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] && ok "a title on the PR's own URL beats a comment's title" || fail "title choice: $(lrefs)"
-"$HQ" ref add "$LT" "comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" && [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"comment https://jira.example.com/browse/QA-1\"]" ] && ok "hq ref add stores a Jira comment link as the issue's" || fail "ref add canonical: $(lrefs)"
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 checks %s/9/checks\n```' $GHP)" >/dev/null
+[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] && ok "a title on the PR's own URL beats a view's title" || fail "title choice: $(lrefs)"
+stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 verification comment %s/9#issuecomment-1\n```' $GHP)" >/dev/null
+[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"PR #9 verification comment $GHP/9#issuecomment-1\"]" ] && ok "a link to one comment stays its own entry" || fail "comment merged: $(lrefs)"
+"$HQ" ref add "$LT" "comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" && [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"PR #9 verification comment $GHP/9#issuecomment-1\", \"comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7\"]" ] && ok "hq ref add keeps a lone link exactly as written" || fail "ref add rewrote a lone link: $(lrefs)"
 python3 - "$LC" "$GHP" <<'PY'
 import re, sys
 p, g = sys.argv[1], sys.argv[2]; s = open(p, encoding="utf-8").read()
