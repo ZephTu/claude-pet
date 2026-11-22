@@ -579,7 +579,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
               set custom title of t to "\(IdleTab.appleScriptLiteral(title))"
             end tell
             """
+            // iTerm2 comes to the front on its own when it makes a window or tab (and when it has
+            // to launch), even without `activate`; in the background, the app that was in front
+            // — the board — is brought back.
+            let before = NSWorkspace.shared.frontmostApplication
             let r = await Self.run("/usr/bin/osascript", ["-e", script])
+            if !focus, let before, NSWorkspace.shared.frontmostApplication != before {
+                before.activate()
+            }
             return r.status == 0 ? (["ok": true], nil) : (nil, "\(place): " + (r.err.isEmpty ? r.out : r.err).prefix(300))
         default:
             return (nil, L("unknown place to open: \(place)", "不知道要在哪里打开：\(place)"))
@@ -709,28 +716,22 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)
             guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
-            // write text presses Return after each line, which would submit a
-            // multi-line message early, so lines are joined.
+            // Lines are joined (a newline would submit early). The text and its Return go in
+            // separately: arriving together, Claude Code takes them as one paste and the Return
+            // becomes a newline in its input instead of submitting it.
             let flat = text.components(separatedBy: .newlines).joined(separator: " ")
-            let escaped = flat.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            let script = """
-            tell application "iTerm2"
-              repeat with w in windows
-                repeat with t in tabs of w
-                  repeat with s in sessions of t
-                    if (id of s as text) contains "\(uuid)" then
-                      tell s to write text "\(escaped)"
-                      return "ok"
-                    end if
-                  end repeat
-                end repeat
-              end repeat
-            end tell
-            return "notfound"
-            """
-            let r = await Self.run("/usr/bin/osascript", ["-e", script])
-            return r.out.contains("ok") ? (["ok": true], nil) : (nil, L("iTerm2 session not found", "找不到 iTerm2 session"))
+            let before = Self.lastPromptAt(session)
+            let r = await Self.run("/usr/bin/osascript", ["-e", TerminalTarget.iTermTypeScript(uuid: uuid, text: flat)])
+            guard r.status == 0, r.out.contains("ok") else {
+                return (nil, r.out.contains("notfound") ? L("iTerm2 session not found", "找不到 iTerm2 session") :
+                        "iTerm2: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
+            }
+            if queue { return (["ok": true, "queued": true], nil) }
+            for _ in 0..<25 {
+                if Self.lastPromptAt(session) != before { return (["ok": true], nil) }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            return (nil, L("typed into its iTerm2 session, but no turn started — check it and press Return there", "已经输入到它的 iTerm2 session，但没有开始新一轮 — 去那里看看，在那里按回车"))
         default:
             return (nil, L("sending to \(t.kind) terminals is not supported yet — use Jump", "还不支持给 \(t.kind) 终端发消息 — 请用跳转"))
         }

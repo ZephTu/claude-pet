@@ -177,6 +177,31 @@ public enum TerminalTarget {
     /// `{"ok": false, "error": {"code": "terminal_handle_stale"}}` with status 0.
     /// Trusting the exit status alone would raise Orca to the foreground on some
     /// unrelated tab, which reads as the jump going to the wrong place.
+    /// Types `text` into the iTerm2 session whose id contains `uuid` and then presses Return,
+    /// as two writes a moment apart: in one write Claude Code takes the text and the Return as a
+    /// single paste, and the Return becomes a newline in its input instead of submitting it.
+    /// `uuid` must pass `isSafeITermUUID`.
+    public static func iTermTypeScript(uuid: String, text: String) -> String {
+        let lit = IdleTab.appleScriptLiteral(text)
+        return """
+        tell application "iTerm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if (id of s as text) contains "\(uuid)" then
+                  tell s to write text "\(lit)" newline no
+                  delay 0.3
+                  tell s to write text (character id 13) newline no
+                  return "ok"
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        return "notfound"
+        """
+    }
+
     public static func orcaSwitchSucceeded(_ stdout: String) -> Bool {
         guard
             let data = stdout.data(using: .utf8),

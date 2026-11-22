@@ -63,6 +63,13 @@ enum IdleTabTests {
         let typed = IdleTab.terminalTypeScript(tty: "/dev/ttys002", text: "say \"hi\"")
         t.check("typing into a tab finds it by tty and presses Return",
                 typed.contains(#"if tty of t is "/dev/ttys002""#) && typed.contains(#"("say \"hi\"" & return)"#))
+        let it = TerminalTarget.iTermTypeScript(uuid: "ABCD-1234", text: "say \"hi\"\nthere")
+        t.check("iTerm2: the text goes in without a newline, quoted and on one line",
+                it.contains(#"write text "say \"hi\" there" newline no"#))
+        t.check("iTerm2: Return goes in as its own write, a moment later, so it is not part of a paste",
+                it.contains("delay 0.3") && it.contains("write text (character id 13) newline no")
+                    && it.range(of: "newline no")!.lowerBound < it.range(of: "character id 13")!.lowerBound)
+        t.check("iTerm2: the session is found by its uuid", it.contains(#"contains "ABCD-1234""#))
         let run = IdleTab.terminalRunScript(tty: "/dev/ttys002", line: "cd '/x' && claude", focus: false)
         t.check("running a line without focus does not activate Terminal",
                 run.contains("do script") && !run.contains("activate"))
