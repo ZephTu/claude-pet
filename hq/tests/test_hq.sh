@@ -318,6 +318,19 @@ printf '%s\n' \
   > "$HOME/.claude/projects/-tmp-repo/$PSID.jsonl"
 "$HQ" peek "$PSID" --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [(x["role"],x["text"]) for x in m]==[("user","first ask"),("assistant","working"),("user","typed while busy"),("assistant","done")], m; assert m[2]["ts"]=="2026-01-01T00:00:02Z", m' && ok "peek shows prompts typed while the session was busy" || fail "peek missed a prompt queued in the terminal"
 
+# The same prompt now and then lands twice: as the user entry that starts a turn, and a moment later
+# as a queued_command folded into it. Peek shows it once; the same words typed a minute later are a
+# new message. A queued prompt with an image keeps its text.
+DSID=feedface-2222-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"open the PR"},"timestamp":"2026-01-01T00:00:00.000Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"open the PR","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-01-01T00:00:00.400Z"},"timestamp":"2026-01-01T00:00:00.400Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"opening"}]},"timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"open the PR","commandMode":"prompt","origin":{"kind":"human"}},"timestamp":"2026-01-01T00:01:00Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":[{"type":"text","text":"see [Image #1]"},{"type":"image","source":{"type":"base64","data":"AAAA"}}],"commandMode":"prompt","origin":{"kind":"human"}},"timestamp":"2026-01-01T00:01:05Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$DSID.jsonl"
+"$HQ" peek "$DSID" --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [(x["role"],x["text"]) for x in m]==[("user","open the PR"),("assistant","opening"),("user","open the PR"),("user","see [Image #1]")], m' && ok "peek shows a prompt written twice once, and keeps a queued prompt with an image" || fail "peek doubled a prompt or lost a queued image prompt"
+
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 

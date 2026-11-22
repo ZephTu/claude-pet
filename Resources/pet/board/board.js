@@ -1618,11 +1618,21 @@ function drawPeek(toBottom) {
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
+  // Peek keeps the last 30 messages, so when one arrives the oldest drops off and everything moves
+  // up. Remember the first message in view and where it sat, and put it back there.
+  let anchor = null;
+  if (body && !atBottom && m.keys) {
+    const top = body.getBoundingClientRect().top;
+    const els = [...body.querySelectorAll(".pmsg")];
+    const i = els.findIndex((el) => el.getBoundingClientRect().bottom > top);
+    if (i >= 0 && m.keys[i]) anchor = { key: m.keys[i], off: els[i].getBoundingClientRect().top - top };
+  }
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   const prompt = m.live && canMessage(s) && onPrompt(s);
   const canSend = m.live && canMessage(s);
   const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
+  m.keys = msgs ? msgs.map((x) => `${x.role}|${x.ts}|${x.text}`) : null;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !msgs.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : msgs.map((x, i) => `<div class="pmsg ${x.role}">
@@ -1651,7 +1661,13 @@ function drawPeek(toBottom) {
   fitAllGrow(box);
   if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
-  nb.scrollTop = toBottom || atBottom ? nb.scrollHeight : prevTop;
+  if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
+  nb.scrollTop = prevTop;
+  const j = anchor ? m.keys.indexOf(anchor.key) : -1;
+  if (j >= 0) {
+    const el = nb.querySelectorAll(".pmsg")[j];
+    nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - anchor.off;
+  }
 }
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
