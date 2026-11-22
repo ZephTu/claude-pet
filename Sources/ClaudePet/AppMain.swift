@@ -214,7 +214,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         BoardBridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
         }
-        BoardBridge.onLanguage = { [weak self] id in self?.setLanguage(id) }
         // The board shows the same quota reading the pet does — one pick from the same sources.
         BoardBridge.usage = { [weak self] in
             guard let u = self?.currentUsage(), u.percentagesUsable(now: Date()) else { return nil }
@@ -1020,9 +1019,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// it only appears on right-click and a pet that silently sees nothing
     /// looks exactly like a pet with nothing to show.
     private func mentionProblem() {
-        guard let problem = HealthCollector.quickProblem(petHome: petHome),
-              mentionedProblem != problem.name else { return }
-        mentionedProblem = problem.name
+        guard let found = HealthCollector.quickProblemKeyed(petHome: petHome),
+              mentionedProblem != found.key else { return }
+        mentionedProblem = found.key
+        let problem = found.check
         bridge?.say(L("\(problem.name): \(problem.detail) — right-click me for details",
                       "\(problem.name)：\(problem.detail) — 右键点我看详情"),
                     hold: 12, emphasis: problem.name, variant: .warn)

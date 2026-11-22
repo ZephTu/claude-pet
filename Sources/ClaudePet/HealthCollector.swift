@@ -76,15 +76,20 @@ enum HealthCollector {
     /// lets the menu leave the connection report out until it has something
     /// to say. Only the checks that mean "the pet cannot see your sessions":
     /// hooks missing from settings.json, pet-emit gone, or nowhere to write.
-    static func quickProblem(petHome: URL) -> HealthCheck? {
+    static func quickProblem(petHome: URL) -> HealthCheck? { quickProblemKeyed(petHome: petHome)?.check }
+
+    /// The same, with a key that doesn't change with the UI language — the check's name is
+    /// translated, so it can't say whether this problem was already mentioned.
+    static func quickProblemKeyed(petHome: URL) -> (key: String, check: HealthCheck)? {
         let (installed, expected, binaryOK) = hookState(petHome: petHome)
         let fm = FileManager.default
         let writable = fm.isWritableFile(atPath: petHome.path)
             || (try? fm.createDirectory(at: petHome, withIntermediateDirectories: true)) != nil
-        return [
-            HealthReport.hooks(installed: installed, expected: expected, binaryExists: binaryOK),
-            HealthReport.stateFiles(writable: writable, count: 0, corrupt: 0),
-        ].first { $0.status == .needsAttention }
+        let checks: [(String, HealthCheck)] = [
+            ("hooks", HealthReport.hooks(installed: installed, expected: expected, binaryExists: binaryOK)),
+            ("stateFiles", HealthReport.stateFiles(writable: writable, count: 0, corrupt: 0)),
+        ]
+        return checks.first { $0.1.status == .needsAttention }.map { (key: $0.0, check: $0.1) }
     }
 
     /// Where Claude Code is and what version it reports.

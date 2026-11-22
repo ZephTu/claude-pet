@@ -137,8 +137,6 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
     /// prompt that was on screen; one that has since gone away approves nothing.
     static var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
-    /// Sets the app's language ("en", "zh", "auto") — the board's own language switch.
-    static var onLanguage: ((String) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -231,10 +229,6 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await Self.run(claude, ["stop", str("session")])
             return r.status == 0 ? (["ok": true], nil) : (nil, r.err.isEmpty ? r.out : r.err)
         case "stop-session": return await stopSession(str("session"))
-        case "set-lang":
-            guard ["en", "zh", "auto"].contains(str("lang")), let set = Self.onLanguage else { return (nil, L("bad language", "不支持的语言")) }
-            set(str("lang"))
-            return (["ok": true], nil)
         case "agents":
             // Background sessions have no terminal, so the pet's records can't say what they are;
             // `claude agents --json` can.

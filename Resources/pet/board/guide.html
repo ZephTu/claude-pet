@@ -84,7 +84,7 @@
 <li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
 <li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
-<li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页右上角的 <b>EN / 中文</b> 也是同一个开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
+<li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
 <li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、active first。</li>
 <li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>resets</b> 后面是多久后重置。和悬停在小猫身上看到的是同一份数据。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存下来：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/hud-usage.json"</code>（必须写绝对路径）；或者用 <code>pet-emit --statusline</code> 包一层你的状态栏命令（见仓库的 docs/pet.zh-CN.md）。没有新鲜的数据就不显示。每个开着的 session 都会写入它自己最后一次调用 API 时的数字，所以显示的是<b>最后出现</b>的那组读数，不是最大的那组：手动重置额度之后会跟着降下来。合盖睡眠、重启小猫后新旧顺序依然记得；只有小猫从没见过的读数（第一次运行，或它关着、睡着期间新写进来的）一开始分不出新旧，会先显示较高的那组，等某个正在工作的 session 的数字再变一次就对了。</li>
 <li><b>Filter tasks…</b>：按编号、标题、关联单号过滤任务。</li>
@@ -166,7 +166,7 @@
 <li>底部可以直接回复。已经结束的 session 只能看历史。</li>
 </ul>
 <h1 id="zh-jobs">定时任务（Scheduled）</h1>
-<p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随系统语言，右上角 <b>EN / 中文</b> 可以切换。</p>
+<p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随右键 <b>Settings → Language · 语言</b> 的设置。</p>
 <ul>
 <li><b>谁在跑</b>：每个打开的任务对应一个 macOS LaunchAgent（<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>），到点由 launchd 启动 <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code>。所以猫关着也照跑；Mac 睡着时错过的那次，醒来后补跑一次（错过多次也只补一次）。第一次加任务时 macOS 可能提示"已添加后台项目"，这是正常的。</li>
 <li><b>从模板开始</b>：还没有任务时，这一页列出三个模板——<b>每天早上汇总昨晚的 CI</b>（Claude · 每个工作日 09:00）、<b>每小时看 PR 有没有新评论</b>（Claude · 每小时）、<b>每周清一次缓存</b>（Shell · 每周日 03:00）。点一个就打开填好名称、类型、prompt 或命令和时间的新建表单，改一改再保存。</li>
@@ -412,7 +412,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count); the filter box, <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
 <li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks and todos (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
-<li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The <b>EN / 中文</b> switch on the Scheduled page is the same setting. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
+<li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
 <li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, active first.</li>
 <li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>resets</b> how long until each resets. It is the same reading the pet shows when you hover it. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/hud-usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>; or wrap your statusline command in <code>pet-emit --statusline</code> (see docs/pet.md in the repo). With no fresh reading, nothing is shown. Every open session writes the figures from its own last API call, so what shows is the reading that appeared <b>last</b>, not the highest — after a quota reset it comes down with it. Which is newer survives sleep and restarts; only readings the pet has never seen (its first run, or ones written while it was off or asleep) it cannot order at once, and it shows the higher one until a working session's figures next move.</li>
 <li><b>Filter tasks…</b> by id, title or refs.</li>
@@ -493,7 +493,7 @@ After the status word comes how much context the session carries (e.g. <code>210
 <li>Reply from the box at the bottom. Ended sessions are history-only.</li>
 </ul>
 <h1 id="en-jobs">Scheduled jobs</h1>
-<p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following macOS; <b>EN / 中文</b> at the top right switches it.</p>
+<p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following right-click <b>Settings → Language · 语言</b>.</p>
 <ul>
 <li><b>What runs them</b>: each job that is on has a macOS LaunchAgent (<code>~/Library/LaunchAgents/local.claudepet.job.&lt;id&gt;.plist</code>); launchd starts <code>~/.claude/pet/pet-emit --run-job &lt;id&gt;</code> on time. So a job runs with the pet closed, and a run missed while the Mac slept happens once when it wakes (once, however many were missed). macOS may say a background item was added the first time — that is expected.</li>
 <li><b>Start from a template</b>: with no jobs yet, the page offers three — <b>Summarise last night's CI every morning</b> (Claude · weekdays 09:00), <b>Check my PRs for new comments every hour</b> (Claude · every hour), <b>Clear caches once a week</b> (Shell · Sun 03:00). A click opens the new-job form with the name, kind, prompt or command and schedule filled in, to adjust and save.</li>
