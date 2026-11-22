@@ -171,6 +171,33 @@ public enum TerminalTarget {
         return String(sessionID[sessionID.index(after: colon)...])
     }
 
+    /// Types `text` into the iTerm2 session whose id contains `uuid` and then presses Return,
+    /// as two writes a moment apart: in one write Claude Code takes the text and the Return as a
+    /// single paste, and the Return becomes a newline in its input instead of submitting it.
+    /// The text also goes in as a bracketed paste, so even a Return that arrives early is a key
+    /// of its own. The pause grows with the text (`BoardSend.returnDelay`).
+    /// `uuid` must pass `isSafeITermUUID`; `text` should have been through `BoardSend.typeable`.
+    public static func iTermTypeScript(uuid: String, text: String) -> String {
+        let paste = BoardSend.bracketedPaste(literal: IdleTab.appleScriptLiteral(text))
+        return """
+        tell application "iTerm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if (id of s as text) contains "\(uuid)" then
+                  tell s to write text (\(paste)) newline no
+                  delay \(BoardSend.returnDelayLiteral(characters: text.count))
+                  tell s to write text (character id 13) newline no
+                  return "ok"
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        return "notfound"
+        """
+    }
+
     /// Did `orca terminal switch --json` actually switch anything?
     ///
     /// The CLI exits 0 even when the handle is stale — a closed tab comes back as

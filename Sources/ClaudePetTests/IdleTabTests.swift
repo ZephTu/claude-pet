@@ -61,8 +61,45 @@ enum IdleTabTests {
         t.check("AppleScript literals cannot break a line",
                 !IdleTab.appleScriptLiteral("a\nb\rc").contains(where: { $0 == "\n" || $0 == "\r" }))
         let typed = IdleTab.terminalTypeScript(tty: "/dev/ttys002", text: "say \"hi\"")
-        t.check("typing into a tab finds it by tty and presses Return",
-                typed.contains(#"if tty of t is "/dev/ttys002""#) && typed.contains(#"("say \"hi\"" & return)"#))
+        let marked = #"(character id 27) & "[200~" & "say \"hi\"" & (character id 27) & "[201~""#
+        t.check("Terminal: the tab is found by tty", typed.contains(#"if tty of t is "/dev/ttys002""#))
+        t.check("Terminal: the text goes in as a bracketed paste, then the Return key",
+                typed.contains("do script (\(marked) & return) in t"))
+        t.check("Terminal: the paste markers are built outside the quoted literal",
+                !typed.contains("\u{1B}") && typed.components(separatedBy: "character id 27").count == 3)
+        let it = TerminalTarget.iTermTypeScript(uuid: "ABCD-1234", text: "say \"hi\" there")
+        t.check("iTerm2: the text goes in as a bracketed paste, quoted, without a newline",
+                it.contains(#"write text ((character id 27) & "[200~" & "say \"hi\" there" & (character id 27) & "[201~") newline no"#))
+        t.check("iTerm2: Return goes in as its own write, a moment later, so it is not part of a paste",
+                it.contains("delay 0.30") && it.contains("write text (character id 13) newline no")
+                    && it.range(of: "[201~")!.lowerBound < it.range(of: "delay 0.30")!.lowerBound
+                    && it.range(of: "delay 0.30")!.lowerBound < it.range(of: "character id 13")!.lowerBound)
+        t.check("iTerm2: the session is found by its uuid", it.contains(#"contains "ABCD-1234""#))
+        t.check("iTerm2: a long text waits longer before its Return",
+                TerminalTarget.iTermTypeScript(uuid: "A", text: String(repeating: "x", count: 10_000)).contains("delay 0.80"))
+
+        // What the board types: one line, nothing a terminal would act on.
+        t.check("typeable: lines are joined with spaces", BoardSend.typeable("a\nb\r\nc") == "a b  c")
+        t.check("typeable: ESC, ^C, ^D, NUL, BEL and DEL are removed",
+                BoardSend.typeable("a\u{1B}[201~b\u{03}\u{04}\u{00}\u{07}c\u{7F}d") == "a[201~bcd")
+        t.check("typeable: a tab is kept", BoardSend.typeable("a\tb") == "a\tb")
+        t.check("typeable: ordinary and non-ASCII text is untouched",
+                BoardSend.typeable("Fix it — 改一下 \"now\" 🙂") == "Fix it — 改一下 \"now\" 🙂")
+        t.check("typeable: a message of nothing but control characters is empty",
+                BoardSend.typeable("\u{1B}\u{03}").isEmpty)
+        t.check("an injected end marker cannot close the paste early",
+                !TerminalTarget.iTermTypeScript(uuid: "A", text: BoardSend.typeable("x\u{1B}[201~\ry")).contains("\u{1B}"))
+        t.check("a prompt starts a turn the board can watch for", BoardSend.startsTurn("fix the tests"))
+        t.check("a slash command or a ! line does not",
+                !BoardSend.startsTurn("/compact") && !BoardSend.startsTurn("!git status"))
+        t.check("the Return delay is 0.3 s for a short message", BoardSend.returnDelay(characters: 40) < 0.31)
+        t.check("the Return delay grows about 1 s per 20k characters",
+                abs(BoardSend.returnDelay(characters: 20_000) - 1.3) < 0.001)
+        t.check("the Return delay stops at 1.5 s", BoardSend.returnDelay(characters: 1_000_000) == 1.5)
+        t.check("the Return delay is an AppleScript number", BoardSend.returnDelayLiteral(characters: 5_000) == "0.55")
+        t.check("a session waiting on a prompt is not typed into",
+                BoardSend.refuses(state: .waiting) && !BoardSend.refuses(state: .busy)
+                    && !BoardSend.refuses(state: .idle) && !BoardSend.refuses(state: nil))
         let run = IdleTab.terminalRunScript(tty: "/dev/ttys002", line: "cd '/x' && claude", focus: false)
         t.check("running a line without focus does not activate Terminal",
                 run.contains("do script") && !run.contains("activate"))

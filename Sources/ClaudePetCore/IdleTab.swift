@@ -113,9 +113,19 @@ public enum IdleTab {
 
     /// Types `text` into the Terminal.app tab on `tty` and presses Return (a carriage return, as
     /// the key sends) — for a message to the Claude Code session running there.
+    ///
+    /// `do script` delivers everything in one write, and Claude Code takes a burst of text that
+    /// ends in a Return as a paste, the Return becoming a newline in its input. So the text goes
+    /// in as an explicit bracketed paste (`BoardSend.bracketedPaste`) and the carriage return
+    /// after the end marker is read as the Return key. That carriage return is kept although
+    /// `do script` adds a line ending of its own: which character Terminal adds is not
+    /// documented, and a line feed is Ctrl+J — a newline, not a submit — in Claude Code. The
+    /// extra ending lands after the submit, in an empty input: a carriage return there does
+    /// nothing, a line feed at worst leaves an empty line — better than a message left unsent.
+    /// `text` should have been through `BoardSend.typeable`.
     public static func terminalTypeScript(tty: String, text: String) -> String {
         inTab(tty, """
-                do script ("\(appleScriptLiteral(text))" & return) in t
+                do script (\(BoardSend.bracketedPaste(literal: appleScriptLiteral(text))) & return) in t
         """)
     }
 }
