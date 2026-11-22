@@ -171,26 +171,22 @@ public enum TerminalTarget {
         return String(sessionID[sessionID.index(after: colon)...])
     }
 
-    /// Did `orca terminal switch --json` actually switch anything?
-    ///
-    /// The CLI exits 0 even when the handle is stale — a closed tab comes back as
-    /// `{"ok": false, "error": {"code": "terminal_handle_stale"}}` with status 0.
-    /// Trusting the exit status alone would raise Orca to the foreground on some
-    /// unrelated tab, which reads as the jump going to the wrong place.
     /// Types `text` into the iTerm2 session whose id contains `uuid` and then presses Return,
     /// as two writes a moment apart: in one write Claude Code takes the text and the Return as a
     /// single paste, and the Return becomes a newline in its input instead of submitting it.
-    /// `uuid` must pass `isSafeITermUUID`.
+    /// The text also goes in as a bracketed paste, so even a Return that arrives early is a key
+    /// of its own. The pause grows with the text (`BoardSend.returnDelay`).
+    /// `uuid` must pass `isSafeITermUUID`; `text` should have been through `BoardSend.typeable`.
     public static func iTermTypeScript(uuid: String, text: String) -> String {
-        let lit = IdleTab.appleScriptLiteral(text)
+        let paste = BoardSend.bracketedPaste(literal: IdleTab.appleScriptLiteral(text))
         return """
         tell application "iTerm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
                 if (id of s as text) contains "\(uuid)" then
-                  tell s to write text "\(lit)" newline no
-                  delay 0.3
+                  tell s to write text (\(paste)) newline no
+                  delay \(BoardSend.returnDelayLiteral(characters: text.count))
                   tell s to write text (character id 13) newline no
                   return "ok"
                 end if
@@ -202,6 +198,12 @@ public enum TerminalTarget {
         """
     }
 
+    /// Did `orca terminal switch --json` actually switch anything?
+    ///
+    /// The CLI exits 0 even when the handle is stale — a closed tab comes back as
+    /// `{"ok": false, "error": {"code": "terminal_handle_stale"}}` with status 0.
+    /// Trusting the exit status alone would raise Orca to the foreground on some
+    /// unrelated tab, which reads as the jump going to the wrong place.
     public static func orcaSwitchSucceeded(_ stdout: String) -> Bool {
         guard
             let data = stdout.data(using: .utf8),

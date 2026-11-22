@@ -284,6 +284,8 @@ select.place { max-width: 100px; }
 .push { display: block; margin-top: 6px; font-size: 12px; color: var(--dim); cursor: pointer; line-height: 1.5; }
 .push input { vertical-align: -2px; margin: 0 6px 0 0; }
 .push b { color: var(--text); font-weight: 600; }
+.onprompt { margin-top: 6px; font-size: 12px; color: var(--amber); line-height: 1.5; }
+.pfoot + .onprompt { padding: 0 16px 12px; margin-top: -6px; }
 .scan-i { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
 .scan-i b { white-space: nowrap; }
 .scan-i .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

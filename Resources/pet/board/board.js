@@ -40,6 +40,20 @@ function canMessage(s) {
   // would stop that turn and throw the pending step away.
   return Boolean(s.background && s.bgId && s.state !== "busy" && s.state !== "waiting");
 }
+// The session's state as the pet shows it (its dots correct a wait that was answered or closed
+// since the state file was written); the file's state for sessions the pet doesn't list.
+function liveState(s) {
+  const p = s && (ui.dots || {})[s.sessionId];
+  return p && p.state ? p.state : s ? s.state : "";
+}
+// A terminal session stopped on a permission prompt or a question menu takes typed keys as its
+// answer: the Return that submits a message would pick the highlighted option ("Yes") for
+// something the user never saw. Nothing is typed into it until it has been answered there.
+const onPrompt = (s) => Boolean(s && SENDABLE[s.terminal && s.terminal.kind] && liveState(s) === "waiting");
+const ON_PROMPT = () => T("It is waiting on a prompt in its terminal — answer it there first (↗ Jump), then message it.",
+  "它在终端里等你确认或回答——先跳到终端（↗）在那里处理，再给它发消息。");
+// Can the board type into this session right now?
+const canSendNow = (s) => canMessage(s) && !onPrompt(s);
 // What a send needs beyond the text: a background session goes by its short id, and is continued
 // with the board's skip-permissions choice, as a session started from here would be.
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
@@ -377,15 +391,20 @@ function doItButton(t, x) {
     return `<button class="btn small ghost doit" title="${esc(T(`Handed to ${h.to} ${ago(new Date(h.at).toISOString())} — click to hand it over again`, `${ago(new Date(h.at).toISOString())}交给了 ${h.to}——再点一下会再交一次`))}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">✓ ${esc(h.to.length > 18 ? h.to.slice(0, 18) + "…" : h.to)}</button>`;
   }
   const s = doTarget(t);
+  const held = !s && doBlocked(t);
   const tip = s ? T(`Send it to ${s.title || s.project} as a message${s.state === "busy" ? " (busy — it will queue)" : ""}`, `作为一条消息发给 ${s.title || s.project}${s.state === "busy" ? "（正忙——会排队）" : ""}`)
+    : held ? `${held.title || held.project}: ${ON_PROMPT()}`
     : T("No session on this task can take a message — start one that does this todo", "这个任务没有能收消息的 session——新开一个来做这条待办");
   return `<button class="btn small doit" title="${esc(tip)}" data-action="do-todo" data-task="${esc(t.id)}" data-text="${esc(x.text)}">▶ ${T("Do it", "去做")}</button>`;
 }
 // The live session to hand a task's todo to: one the board can type into, most recently active first.
 function doTarget(t) {
-  return liveFor(t.id).filter(canMessage)
+  return liveFor(t.id).filter(canSendNow)
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))[0] || null;
 }
+// A session on the task that could take the todo but is stopped on a prompt: the todo waits for
+// it rather than going to a second, new session.
+const doBlocked = (t) => liveFor(t.id).filter(canMessage).find(onPrompt) || null;
 async function doTodo(taskId, text) {
   const t = taskById(taskId);
   const key = `${taskId}|${text}`;
@@ -399,6 +418,8 @@ async function doTodo(taskId, text) {
       await api("send", { session: s.sessionId, text: `[HQ board] Please do this todo on ${t.id}'s card now: "${text}". Tick it on the card when it's done, or say what is blocking it.`, queue: busy, ...sendExtra(s) });
       ui.handed[key] = { to: s.title || s.project, at: Date.now() };
       toast(T(`${busy ? "Queued for" : "Sent to"} ${s.title || s.project}`, `${busy ? "已排队发给" : "已发给"} ${s.title || s.project}`));
+    } else if (doBlocked(t)) {
+      throw new Error(`${doBlocked(t).title || doBlocked(t).project}: ${ON_PROMPT()}`);
     } else {
       const dir = launchDir(t);
       if (!dir) throw new Error(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或给项目设一个目录"));
@@ -616,14 +637,20 @@ function askCard(t, a, opt = {}) {
       ${attachStrip(attKey)}
       ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="${T("Type your answer into that session so it carries on now, instead of waiting for your next message there", "把回答直接发给那个 session，让它马上接着干，不用等你在那边发下一条消息")}">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
-        ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>` : ""}
+        ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>`
+        : pushBlocked(a) && !opt.sharedTarget ? `<div class="onprompt">${T(`${esc(pushBlocked(a).title || pushBlocked(a).project)} is waiting on a prompt in its terminal — the answer reaches it at its next turn`, `${esc(pushBlocked(a).title || pushBlocked(a).project)} 在终端里等你确认或回答——回应会在它下一轮送达`)}</div>` : ""}
     </div>`;
 }
 
 // The live session that raised an ask, if the board can type into its terminal.
 function pushTarget(a) {
   const s = a.session && ui.sessions.find((x) => x.sessionId === a.session);
-  return canMessage(s) ? s : null;
+  return canSendNow(s) ? s : null;
+}
+// The session that raised an ask, when it could take the answer but is stopped on a prompt.
+function pushBlocked(a) {
+  const s = a.session && ui.sessions.find((x) => x.sessionId === a.session);
+  return canMessage(s) && onPrompt(s) ? s : null;
 }
 // Ticked by default while that session sits idle; a busy one would only queue it.
 function wantPush(a) {
@@ -1241,6 +1268,7 @@ function renderSessionList(items, plain) {
     const busy = s.state === "busy";
     const kind = s.terminal && s.terminal.kind;
     const canSend = canMessage(s);
+    const prompt = onPrompt(s);
     const why = canSend ? "" : s.background ? T("It is busy in the background — you can message it when its turn ends, or Attach to watch it.", "它正在后台干活——等这一轮结束再发消息，或者 Attach 进去看。")
       : T(`Messaging from the Task Board isn't supported for ${kind ? (TERMINAL_NAME[kind] || kind) + " terminals" : "this session's terminal"} yet — use Jump to open it.`,
           `看板还不支持给${kind ? ` ${TERMINAL_NAME[kind] || kind} 终端` : "这个 session 的终端"}发消息——用 Jump 打开它。`);
@@ -1271,11 +1299,11 @@ function renderSessionList(items, plain) {
         </div>
         ${approveBar(s)}
         ${plainText(s.lastText) ? `<div class="last">${esc(plainText(s.lastText))}</div>` : ""}
-        ${open ? `<div class="send">
+        ${open ? `<div class="send" ${prompt ? `title="${esc(ON_PROMPT())}"` : ""}>
           <textarea class="grow" rows="1" data-key="msg:${esc(sid)}" data-session="${esc(sid)}"
-            placeholder="${busy ? T("Busy — it will queue · paste or drop images", "正忙——会排队 · 可粘贴或拖入图片") : T("Message · paste or drop images", "消息 · 可粘贴或拖入图片")}">${esc(draft("msg:" + sid))}</textarea>
-          ${sendButton(sid, true)}
-        </div>${attachStrip(sid)}` : ""}
+            placeholder="${prompt ? ON_PROMPT() : busy ? T("Busy — it will queue · paste or drop images", "正忙——会排队 · 可粘贴或拖入图片") : T("Message · paste or drop images", "消息 · 可粘贴或拖入图片")}">${esc(draft("msg:" + sid))}</textarea>
+          ${sendButton(sid, !prompt)}
+        </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${attachStrip(sid)}` : ""}
       </div>
     </div>`;
   };
@@ -1576,6 +1604,7 @@ function drawPeek(toBottom) {
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
+  const prompt = m.live && canMessage(s) && onPrompt(s);
   const canSend = m.live && canMessage(s);
   const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
@@ -1599,9 +1628,9 @@ function drawPeek(toBottom) {
     <div class="peek-body">${list}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
-        placeholder="${canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
-      ${sendButton(m.sid, canSend)}
-    </div>${canSend ? attachStrip(m.sid) : ""}
+        placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
+      ${sendButton(m.sid, canSend && !prompt)}
+    </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${canSend ? attachStrip(m.sid) : ""}
   </div>`;
   box.hidden = false;
   fitAllGrow(box);
@@ -1919,7 +1948,7 @@ document.addEventListener("drop", (ev) => {
 });
 
 // A busy session queues what it is sent; there is no new turn to wait for.
-const isBusy = (sid) => (ui.sessions.find((x) => x.sessionId === sid) || {}).state === "busy";
+const isBusy = (sid) => liveState(ui.sessions.find((x) => x.sessionId === sid)) === "busy";
 
 // While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
 // so a second click can't type the same message into the session again.
@@ -1935,6 +1964,8 @@ async function send(sid) {
   const images = ui.atts[sid] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  // The button is disabled for such a session; this catches a click from a board seconds old.
+  if (onPrompt(ui.sessions.find((x) => x.sessionId === sid))) return toast(ON_PROMPT(), true);
   const queued = isBusy(sid);
   ui.sending.add(sid);
   render();

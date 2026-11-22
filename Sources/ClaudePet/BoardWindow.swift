@@ -584,12 +584,49 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             // — the board — is brought back.
             let before = NSWorkspace.shared.frontmostApplication
             let r = await Self.run("/usr/bin/osascript", ["-e", script])
-            if !focus, let before, NSWorkspace.shared.frontmostApplication != before {
-                before.activate()
-            }
+            if !focus, let before { await Self.keepInFront(before) }
             return r.status == 0 ? (["ok": true], nil) : (nil, "\(place): " + (r.err.isEmpty ? r.out : r.err).prefix(300))
         default:
             return (nil, L("unknown place to open: \(place)", "不知道要在哪里打开：\(place)"))
+        }
+    }
+
+    private static let terminalBundleIDs: Set<String> = ["com.googlecode.iterm2", TerminalJump.terminalAppBundleID]
+
+    /// Puts `app` back in front whenever iTerm2 or Terminal takes the front during the next
+    /// `seconds` — a terminal can activate itself after osascript has returned (while it
+    /// launches, or once its new window is up). Only a terminal is pushed back: once the user
+    /// switches to any other app, the watch ends and that app is left alone.
+    private static func keepInFront(_ app: NSRunningApplication, seconds: Double = 1.5) async {
+        let end = Date().addingTimeInterval(seconds)
+        var lastTry = Date.distantPast
+        while true {
+            if let front = NSWorkspace.shared.frontmostApplication, front != app {
+                guard let id = front.bundleIdentifier, terminalBundleIDs.contains(id) else { return }
+                // Activation takes a moment to show in frontmostApplication; don't ask again
+                // on every tick while the first request is still landing.
+                if Date().timeIntervalSince(lastTry) >= 0.3 {
+                    bringBack(app)
+                    lastTry = Date()
+                }
+            }
+            if Date() >= end { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    /// Activates `app`. The pet itself is an accessory app asking from the background, where a
+    /// plain `activate()` is only a request that macOS 14+ often refuses — so it insists, and
+    /// orders the board window front regardless (as BoardWindow.present does).
+    private static func bringBack(_ app: NSRunningApplication) {
+        guard app.processIdentifier == ProcessInfo.processInfo.processIdentifier else {
+            app.activate()
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if let board = NSApp.windows.first(where: { $0 is BoardWindow && $0.isVisible }) {
+            board.orderFrontRegardless()
+            board.makeKey()
         }
     }
 
@@ -682,27 +719,33 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                                   arguments: ProcessProbe.arguments(pid: pid))
             else { return (nil, L("that session is not running any more — Resume it first", "这个 session 已经不在运行了 — 先 Resume 它")) }
         }
+        // A permission prompt or a question menu takes typed keys as its answer: the Return would
+        // pick the highlighted option ("Yes") for something the user has not seen. The board
+        // disables Send for such a session; this is the backstop for a list seconds old.
+        if BoardSend.refuses(state: Self.currentState(session)) {
+            return (nil, L("it is waiting on a prompt in its terminal — answer it there (Jump) first",
+                           "它在终端里等你确认或回答 — 先去那里（跳转）处理"))
+        }
         switch t.kind {
         case "terminal":
             guard TerminalTarget.isSafeTTYPath(t.handle) else { return (nil, L("unexpected Terminal tty", "Terminal 的 tty 不对劲")) }
             guard !NSRunningApplication.runningApplications(withBundleIdentifier: TerminalJump.terminalAppBundleID).isEmpty
             else { return (nil, L("Terminal is not running", "Terminal 没有在运行")) }
-            // Terminal.app types `do script` text into the tab as if from the keyboard. Lines are
-            // joined (a newline would submit early), and the text ends in a carriage return —
-            // the Return key — so the prompt is submitted whatever line ending Terminal adds.
-            let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+            // Terminal.app types `do script` text into the tab as if from the keyboard: one line,
+            // with no control characters, as a bracketed paste followed by the Return key
+            // (IdleTab.terminalTypeScript).
+            let typed = BoardSend.typeable(text)
+            guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return (nil, L("empty message", "消息是空的")) }
             let before = Self.lastPromptAt(session)
-            let r = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalTypeScript(tty: t.handle, text: flat)])
+            let r = await Self.run("/usr/bin/osascript", ["-e", IdleTab.terminalTypeScript(tty: t.handle, text: typed)])
             guard r.status == 0, r.out.contains("ok") else {
                 return (nil, r.out.contains("notfound") ? L("its Terminal tab is gone", "它的 Terminal 标签页已经没了") :
                         "Terminal: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
             }
             if queue { return (["ok": true, "queued": true], nil) }
-            // Like Orca's --wait-submit: say so if no turn started, instead of claiming it got there.
-            for _ in 0..<25 {
-                if Self.lastPromptAt(session) != before { return (["ok": true], nil) }
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
+            if !BoardSend.startsTurn(typed) { return (["ok": true], nil) }
+            if await Self.turnStarted(session, since: before) { return (["ok": true], nil) }
+            if Self.currentState(session) == .busy { return (["ok": true, "queued": true], nil) }
             return (nil, L("typed into its Terminal tab, but no turn started — check the tab and press Return there", "已经输入到它的 Terminal 标签页，但没有开始新一轮 — 去那个标签页看看，在那里按回车"))
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
@@ -716,21 +759,21 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)
             guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
-            // Lines are joined (a newline would submit early). The text and its Return go in
-            // separately: arriving together, Claude Code takes them as one paste and the Return
-            // becomes a newline in its input instead of submitting it.
-            let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+            // One line, with no control characters. The text and its Return go in separately:
+            // arriving together, Claude Code takes them as one paste and the Return becomes a
+            // newline in its input instead of submitting it (TerminalTarget.iTermTypeScript).
+            let typed = BoardSend.typeable(text)
+            guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else { return (nil, L("empty message", "消息是空的")) }
             let before = Self.lastPromptAt(session)
-            let r = await Self.run("/usr/bin/osascript", ["-e", TerminalTarget.iTermTypeScript(uuid: uuid, text: flat)])
+            let r = await Self.run("/usr/bin/osascript", ["-e", TerminalTarget.iTermTypeScript(uuid: uuid, text: typed)])
             guard r.status == 0, r.out.contains("ok") else {
                 return (nil, r.out.contains("notfound") ? L("iTerm2 session not found", "找不到 iTerm2 session") :
                         "iTerm2: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
             }
             if queue { return (["ok": true, "queued": true], nil) }
-            for _ in 0..<25 {
-                if Self.lastPromptAt(session) != before { return (["ok": true], nil) }
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
+            if !BoardSend.startsTurn(typed) { return (["ok": true], nil) }
+            if await Self.turnStarted(session, since: before) { return (["ok": true], nil) }
+            if Self.currentState(session) == .busy { return (["ok": true, "queued": true], nil) }
             return (nil, L("typed into its iTerm2 session, but no turn started — check it and press Return there", "已经输入到它的 iTerm2 session，但没有开始新一轮 — 去那里看看，在那里按回车"))
         default:
             return (nil, L("sending to \(t.kind) terminals is not supported yet — use Jump", "还不支持给 \(t.kind) 终端发消息 — 请用跳转"))
@@ -744,6 +787,29 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pid = (obj["pid"] as? NSNumber)?.int32Value, pid > 1 else { return nil }
         return pid
+    }
+
+    /// Like Orca's --wait-submit: watches up to 5 s for the session to take a new prompt.
+    private static func turnStarted(_ session: String, since before: String) async -> Bool {
+        for _ in 0..<25 {
+            if lastPromptAt(session) != before { return true }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return false
+    }
+
+    /// The session's state as the pet shows it now. A recorded wait that has since been approved,
+    /// or that Claude Code has closed, counts as what it became — a stale "waiting" in the file
+    /// must not lock the board out of a session that has moved on. Nil when nothing is recorded.
+    /// After a send, busy with no new prompt means the message went into Claude Code's queue
+    /// behind a turn the board did not know had started.
+    private static func currentState(_ session: String) -> SessionActivity? {
+        guard !session.isEmpty, !session.contains("/"),
+              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                  .appending(path: ".claude/pet/sessions/\(session).json")),
+              let s = SessionState.decode(from: data) else { return nil }
+        if StateAggregator.wasApproved(s) { return .busy }
+        return (StateAggregator.waitEnded(s) ?? s).state
     }
 
     /// When the session last took a prompt, per the pet's record — changes when a message lands.

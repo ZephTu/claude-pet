@@ -1,0 +1,53 @@
+import Foundation
+
+/// The pure parts of typing a board message into a session's terminal (BoardBridge.send).
+public enum BoardSend {
+    /// The message as it is typed: one line, with nothing that a terminal would act on.
+    ///
+    /// Lines are joined with spaces (a newline would submit early). Every other C0 control
+    /// character except tab, and DEL, is removed: typed into the tab, ESC would start an escape
+    /// sequence — even end the bracketed paste the text is wrapped in — and ^C, ^D, ^U… would
+    /// act as keys in Claude Code's input.
+    public static func typeable(_ text: String) -> String {
+        let flat = text.components(separatedBy: .newlines).joined(separator: " ")
+        return String(String.UnicodeScalarView(flat.unicodeScalars.filter { s in
+            s == "\t" || (s.value >= 0x20 && s.value != 0x7F)
+        }))
+    }
+
+    /// Does typing this text start a turn the board can watch for? A slash command runs inside
+    /// Claude Code and a `!` line runs in its shell mode; neither submits a prompt, so the
+    /// pet's `lastPromptAt` would never move and waiting for it would only report a false error.
+    public static func startsTurn(_ text: String) -> Bool {
+        !(text.hasPrefix("/") || text.hasPrefix("!"))
+    }
+
+    /// How long iTerm2 waits between the text and its Return: long enough for Claude Code to
+    /// have taken the whole text in, so the Return is a key of its own. 0.3 s, plus about 1 s
+    /// per 20,000 characters, at most 1.5 s.
+    public static func returnDelay(characters: Int) -> Double {
+        min(1.5, 0.3 + Double(max(0, characters)) / 20_000)
+    }
+
+    /// `returnDelay` as an AppleScript number (always with a dot, whatever the locale).
+    public static func returnDelayLiteral(characters: Int) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), returnDelay(characters: characters))
+    }
+
+    /// The AppleScript expression for `literal` (already passed through
+    /// `IdleTab.appleScriptLiteral`) wrapped in bracketed-paste markers, ESC[200~ … ESC[201~.
+    /// Claude Code then takes the text as one paste, and the key after the end marker as a key —
+    /// a Return there submits instead of becoming a newline in the input. ESC is built with
+    /// `character id 27` outside the literal, so neither the literal's escaping nor `typeable`
+    /// (which runs on the user's text before this) can remove the markers.
+    public static func bracketedPaste(literal: String) -> String {
+        #"(character id 27) & "[200~" & "\#(literal)" & (character id 27) & "[201~""#
+    }
+
+    /// Must the board refuse to type into a session in this state? A session waiting on a
+    /// permission prompt or a question menu takes typed keys as the answer: the Return would
+    /// pick the highlighted option ("Yes") for something the user has not seen.
+    public static func refuses(state: SessionActivity?) -> Bool {
+        state == .waiting
+    }
+}
