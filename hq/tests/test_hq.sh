@@ -305,6 +305,19 @@ printf '%s\n' '{"type":"custom-title","customTitle":"perf run"}' '{"type":"assis
 "$HQ" bind "$SID" --session "$HSID" >/dev/null
 "$HQ" history "$SID" --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["sessionId"]=="'"$HSID"'"][0]; assert r["cwd"]=="/tmp/repo" and r["title"]=="perf run" and r["lastText"]=="All done." and r["live"] is False, r' && ok "history lists a task's sessions with id, directory, name and last words"
 
+# peek: a prompt typed while Claude was busy is stored as a queued_command attachment, not a user
+# entry; it is still the user's message. Queued task notifications and peer messages are not.
+PSID=feedface-1111-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"first ask"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]},"timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"typed while busy","commandMode":"prompt","origin":{"kind":"human"}},"timestamp":"2026-01-01T00:00:02Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>x</task-notification>","commandMode":"task-notification","origin":{"kind":"task-notification"}},"timestamp":"2026-01-01T00:00:03Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"from a peer","commandMode":"prompt","origin":{"kind":"peer"}},"timestamp":"2026-01-01T00:00:04Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]},"timestamp":"2026-01-01T00:00:05Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$PSID.jsonl"
+"$HQ" peek "$PSID" --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [(x["role"],x["text"]) for x in m]==[("user","first ask"),("assistant","working"),("user","typed while busy"),("assistant","done")], m; assert m[2]["ts"]=="2026-01-01T00:00:02Z", m' && ok "peek shows prompts typed while the session was busy" || fail "peek missed a prompt queued in the terminal"
+
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 

@@ -1617,6 +1617,7 @@ function drawPeek(toBottom) {
   const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+  const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   const prompt = m.live && canMessage(s) && onPrompt(s);
   const canSend = m.live && canMessage(s);
@@ -1650,7 +1651,7 @@ function drawPeek(toBottom) {
   fitAllGrow(box);
   if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
-  if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
+  nb.scrollTop = toBottom || atBottom ? nb.scrollHeight : prevTop;
 }
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
@@ -1875,10 +1876,13 @@ function scrollToCard(elementId) {
 // they scroll (the cap is max-height in CSS). Run after every rebuild too: a box redrawn with a
 // three-line draft would otherwise come back one line tall.
 function fitGrow(el) {
+  // The conversation above a growing reply box shrinks; if it was at the bottom, keep it there.
+  const body = el.closest(".panel")?.querySelector(".peek-body");
+  const pinned = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   // Empty: one line, whatever the placeholder would wrap to in a narrow column.
-  if (!el.value) { el.style.height = ""; return; }
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + 2 + "px";
+  if (!el.value) el.style.height = "";
+  else { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
+  if (pinned) body.scrollTop = body.scrollHeight;
 }
 function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").forEach(fitGrow); }
 
@@ -1983,7 +1987,8 @@ async function send(sid) {
   const queued = isBusy(sid);
   ui.sending.add(sid);
   render();
-  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
+  // Sending from the conversation window: follow the message down to the bottom.
+  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(true);
   try {
     await api("send", { session: sid, text: message, queue: queued, ...sendExtra(ui.sessions.find((x) => x.sessionId === sid)) });
     delete ui.drafts[key];
