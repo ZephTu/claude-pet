@@ -374,6 +374,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let cmd = [claude, "--resume", session] + (skip ? [Self.skipFlag] : [])
         // The tab keeps the session's own name, as the pet and the board show it.
         let title = name.isEmpty ? "\(task) \(session.prefix(8))" : String(name.prefix(60))
+        // Orca knows which tab it has this session in, asleep after a restart too — go back there.
+        if into == "orca", let back = await resumeInOrcaPlace(session: session, dir: dir, command: cmd, focus: focus) {
+            return back
+        }
         // A tab this session ran in before — kept by Orca or Terminal across a restart, or left
         // behind by Stop — is reused rather than opening a second one beside it.
         if let reused = await resumeInIdleTab(place: into, title: title, dir: dir, command: cmd, focus: focus) {
@@ -427,6 +431,69 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         default:
             return nil
         }
+    }
+
+    /// Resumes a session in the Orca tab Orca has it in, or nil when Orca has no tab for it (then
+    /// the caller looks for an idle tab by title, or opens one). After a restart that tab sleeps
+    /// until its workspace is opened, and Orca then resumes the session in it by itself — so a
+    /// sleeping tab is woken and nothing is typed (typing too would run the session twice). A tab
+    /// Stop left at a shell prompt gets the resume command; one that already runs the session is
+    /// only brought forward.
+    private func resumeInOrcaPlace(session: String, dir: String, command: [String],
+                                   focus: Bool) async -> (Any?, String?)? {
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else { return nil }
+        let cli = app.appending(path: "Contents/Resources/bin/orca").path
+        let asked = await Self.run(cli, ["agent", "show", session, "--json"])
+        guard let id = OrcaPlace.orcaSessionID(showOutput: asked.out) else { return nil }
+        let shown = await Self.run(cli, ["agent", "show", "orca_session_id:\(id)", "--json"])
+        guard let place = OrcaPlace.places(showOutput: shown.out).first else { return nil }
+        func liveNow() async -> OrcaPlace.Live? {
+            let list = await Self.run(cli, ["terminal", "list", "--json"])
+            guard let data = list.out.data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let terms = (root["result"] as? [String: Any])?["terminals"] as? [[String: Any]] else { return nil }
+            return OrcaPlace.live(terminals: terms, place: place)
+        }
+        func bringForward(_ handle: String) async {
+            guard focus else { return }
+            _ = await Self.run(cli, ["terminal", "switch", "--terminal", handle, "--json"])
+            NSRunningApplication.runningApplications(withBundleIdentifier: Self.orcaBundleID).first?.activate()
+        }
+        switch await liveNow() {
+        case .agent(let handle)?:
+            await bringForward(handle)
+            return (["ok": true, "session": session, "where": "orca", "reused": handle], nil)
+        case .shell(let handle)? where Self.liveTerminalHandles().contains(handle):
+            await bringForward(handle)   // a live Claude Code session is recorded there after all
+            return (["ok": true, "session": session, "where": "orca", "reused": handle], nil)
+        case .shell(let handle)?:
+            let line = Self.shellLine(dir: dir, command: command)
+            let sent = await Self.run(cli, ["terminal", "send", "--terminal", handle, "--text", line, "--enter", "--json"])
+            guard sent.status == 0, TerminalTarget.orcaSwitchSucceeded(sent.out) else { return nil }
+            await bringForward(handle)
+            return (["ok": true, "session": session, "where": "orca", "reused": handle], nil)
+        case .busy?:
+            return nil
+        case nil:
+            break
+        }
+        // Asleep: opening its workspace wakes the tab, and Orca resumes the session in it.
+        let woke = await Self.run(cli, ["worktree", "activate", "--worktree", OrcaPlace.worktreeSelector(place), "--json"])
+        guard woke.status == 0, TerminalTarget.orcaSwitchSucceeded(woke.out) else {
+            return (nil, L("This session sleeps in an Orca tab the board can't wake — open its workspace in Orca and Orca resumes it there",
+                           "这个 session 在 Orca 一个休眠的标签页里，board 叫不醒——在 Orca 里打开它所在的工作区，Orca 会在原标签页里恢复它"))
+        }
+        for _ in 0..<20 {
+            try? await Task.sleep(for: .milliseconds(500))
+            switch await liveNow() {
+            case .agent(let h)?, .shell(let h)?, .busy(let h)?:
+                await bringForward(h)
+                return (["ok": true, "session": session, "where": "orca", "reused": h, "woke": true], nil)
+            case nil:
+                continue
+            }
+        }
+        return (["ok": true, "session": session, "where": "orca", "woke": true], nil)
     }
 
     /// Terminal handles that a live Claude Code session is recorded in — those tabs are not idle.
