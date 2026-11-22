@@ -1792,11 +1792,22 @@ function drawPeek(toBottom) {
   const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+  const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
+  // Peek keeps the last 30 messages, so when one arrives the oldest drops off and everything moves
+  // up. Remember the first message in view and where it sat, and put it back there.
+  let anchor = null;
+  if (body && !atBottom && m.keys) {
+    const top = body.getBoundingClientRect().top;
+    const els = [...body.querySelectorAll(".pmsg")];
+    const i = els.findIndex((el) => el.getBoundingClientRect().bottom > top);
+    if (i >= 0 && m.keys[i]) anchor = { key: m.keys[i], off: els[i].getBoundingClientRect().top - top };
+  }
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   const prompt = m.live && canMessage(s) && onPrompt(s);
   const canSend = m.live && canMessage(s);
   const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
+  m.keys = msgs ? msgs.map((x) => `${x.role}|${x.ts}|${x.text}`) : null;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !msgs.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : msgs.map((x, i) => `<div class="pmsg ${x.role}">
@@ -1825,7 +1836,13 @@ function drawPeek(toBottom) {
   fitAllGrow(box);
   if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
   const nb = box.querySelector(".peek-body");
-  if (toBottom || atBottom) nb.scrollTop = nb.scrollHeight;
+  if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
+  nb.scrollTop = prevTop;
+  const j = anchor ? m.keys.indexOf(anchor.key) : -1;
+  if (j >= 0) {
+    const el = nb.querySelectorAll(".pmsg")[j];
+    nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - anchor.off;
+  }
 }
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
@@ -2050,10 +2067,13 @@ function scrollToCard(elementId) {
 // they scroll (the cap is max-height in CSS). Run after every rebuild too: a box redrawn with a
 // three-line draft would otherwise come back one line tall.
 function fitGrow(el) {
+  // The conversation above a growing reply box shrinks; if it was at the bottom, keep it there.
+  const body = el.closest(".panel")?.querySelector(".peek-body");
+  const pinned = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   // Empty: one line, whatever the placeholder would wrap to in a narrow column.
-  if (!el.value) { el.style.height = ""; return; }
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + 2 + "px";
+  if (!el.value) el.style.height = "";
+  else { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
+  if (pinned) body.scrollTop = body.scrollHeight;
 }
 function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").forEach(fitGrow); }
 
@@ -2158,7 +2178,8 @@ async function send(sid) {
   const queued = isBusy(sid);
   ui.sending.add(sid);
   render();
-  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
+  // Sending from the conversation window: follow the message down to the bottom.
+  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(true);
   try {
     await api("send", { session: sid, text: message, queue: queued, ...sendExtra(ui.sessions.find((x) => x.sessionId === sid)) });
     delete ui.drafts[key];

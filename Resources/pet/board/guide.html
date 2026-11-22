@@ -159,11 +159,11 @@
 </ul>
 <h2>对话窗口（Peek）</h2>
 <ul>
-<li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
+<li>显示这个 session 最近 30 条消息，Claude 的回复按 Markdown 排版。不论你是在看板上发的，还是直接在终端里打的（包括 session 正忙时打进去排队的），都会显示。点窗口外面或按 <b>Esc</b> 关闭；从上下文窗口打开时，左上角 <b>←</b> 返回。</li>
 <li><b>复制</b>：选中文字 Cmd+C；每条消息悬停有 <b>Copy</b>；顶部 <b>Copy all</b> 复制整段对话。</li>
 <li><b>链接</b>：网页链接点击用浏览器打开；文件路径（<code>.md</code>、<code>.html</code>、代码文件、目录……）点击用默认程序打开，相对路径按该 session 的目录解析。脚本、可执行文件和 App 只会在访达里定位，不会直接运行。</li>
 <li>Claude 回复里的 <code>hq-asks</code> / <code>hq-resolved</code> / <code>hq-update</code> 块显示成"Asked you"/"Answers recorded"/"Card updated"列表，里面的链接可以点；普通代码块里的网址也可以点。</li>
-<li>底部可以直接回复。已经结束的 session 只能看历史。</li>
+<li>底部可以直接回复，发出后窗口停在最下面；你往上翻着看时，新消息进来，你正在看的那条消息原地不动。已经结束的 session 只能看历史。</li>
 </ul>
 <h1 id="zh-jobs">定时任务（Scheduled）</h1>
 <p>顶栏的 <b>定时任务 / Scheduled</b> 标签页：按时间表跑一段 Claude prompt 或一条 Shell 命令，并且能看到一共有几个任务、每次跑得怎么样。这一页的文字有中英文两版，跟随右键 <b>Settings → Language · 语言</b> 的设置。</p>
@@ -487,11 +487,11 @@ After the status word comes how much context the session carries (e.g. <code>210
 </ul>
 <h2>Conversation window (Peek)</h2>
 <ul>
-<li>The session's last 30 messages, Claude's replies rendered as Markdown. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
+<li>The session's last 30 messages, Claude's replies rendered as Markdown. What you typed in the terminal shows too, including messages typed while the session was busy and queued, not only those sent from the board. Click outside or press <b>Esc</b> to close; opened from a context window, <b>←</b> goes back.</li>
 <li><b>Copy</b>: select and Cmd+C; hover a message for <b>Copy</b>; <b>Copy all</b> for the whole conversation.</li>
 <li><b>Links</b>: web links open in your browser; file paths (<code>.md</code>, <code>.html</code>, source files, folders, …) open in their default app, relative paths resolved against the session's directory. Scripts, executables and apps are only shown in Finder, never run.</li>
 <li>The <code>hq-asks</code> / <code>hq-resolved</code> / <code>hq-update</code> blocks in Claude's replies show as "Asked you" / "Answers recorded" / "Card updated" lists with clickable links; URLs inside ordinary code blocks are clickable too.</li>
-<li>Reply from the box at the bottom. Ended sessions are history-only.</li>
+<li>Reply from the box at the bottom; after sending, the window stays at the bottom. While you are scrolled up reading, the message you are on stays where it is when new ones arrive. Ended sessions are history-only.</li>
 </ul>
 <h1 id="en-jobs">Scheduled jobs</h1>
 <p>The <b>Scheduled</b> tab in the top bar: a Claude prompt or a shell command run on a timetable, with how many jobs there are and how each run went. This page's text comes in English and Chinese, following right-click <b>Settings → Language · 语言</b>.</p>

@@ -1578,12 +1578,29 @@ def transcript_tail(path, nbytes=600_000):
     return out
 
 
+def message_role(o):
+    """Who said a transcript entry: "user", "assistant", or None. A prompt the user typed while
+    Claude was busy is not a user entry: it is an attachment of type queued_command, folded into
+    the running turn, so it counts as the user's too (only when a human typed it)."""
+    t = o.get("type")
+    if t == "attachment":
+        a = o.get("attachment") or {}
+        if a.get("type") == "queued_command" and (a.get("origin") or {}).get("kind") == "human" \
+                and a.get("commandMode", "prompt") == "prompt":
+            return "user"
+        return None
+    return t if t in ("user", "assistant") else None
+
+
 def message_text(o):
     """Visible text of a transcript entry: the user's typed prompt or Claude's prose."""
     if o.get("isSidechain") or o.get("isMeta") or o.get("isCompactSummary"):
         return None  # compaction summaries are not something anyone said
     c = o.get("message", {}).get("content")
-    if o.get("type") == "user":
+    role = message_role(o)
+    if role == "user" and o.get("type") == "attachment":
+        c = o["attachment"].get("prompt")
+    if role == "user":
         if isinstance(c, str):
             t = c
         elif isinstance(c, list):
@@ -1602,13 +1619,32 @@ def message_text(o):
     return None
 
 
+def ts_seconds(ts):
+    try:
+        return dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 def recent_messages(path, n=8):
     for nbytes in (600_000, 6_000_000):
         msgs = []
+        last_user = None
         for o in transcript_tail(path, nbytes):
             t = message_text(o)
-            if t:
-                msgs.append({"role": o["type"], "text": t, "ts": o.get("timestamp")})
+            if not t:
+                continue
+            role = message_role(o)
+            ts = o.get("timestamp") or (o.get("attachment") or {}).get("timestamp")
+            if role == "user":
+                # The same prompt is now and then written twice: as the user entry that starts a
+                # turn and, a moment later, as a queued_command folded into it. Show it once.
+                if o.get("type") == "attachment" and last_user and last_user["text"] == t:
+                    a, b = ts_seconds(last_user["ts"]), ts_seconds(ts)
+                    if a is not None and b is not None and abs(b - a) <= 10:
+                        continue
+                last_user = {"text": t, "ts": ts}
+            msgs.append({"role": role, "text": t, "ts": ts})
         if len(msgs) >= n:
             break
     return msgs[-n:]
@@ -1720,8 +1756,8 @@ def scan_sessions(days):
             cwd = next((o.get("cwd") for o in head + tail if o.get("cwd")), None)
             if not cwd:
                 continue
-            first = next((t for t in (message_text(o) for o in head if o.get("type") == "user") if t), "")
-            users = sum(1 for o in tail if o.get("type") == "user" and message_text(o))
+            first = next((t for t in (message_text(o) for o in head if message_role(o) == "user") if t), "")
+            users = sum(1 for o in tail if message_role(o) == "user" and message_text(o))
             sid = name[:-6]
             pet = pet_session(sid) or {}
             rows.append({
