@@ -1102,9 +1102,16 @@ REF_URL_RE = re.compile(r"https?://[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+")
 
 def ref_key(ref):
     """What makes two refs the same: the link they point to, not their title — "smoke #9 URL" and
-    "smoke #9 (passed) URL" are one ref. A ref without a URL (a ticket key) is its own text."""
-    m = REF_URL_RE.search(str(ref))
-    return m.group(0).rstrip("/") if m else " ".join(str(ref).split())
+    "smoke #9 (passed) URL" are one ref. Only a ref with exactly one URL is keyed by it, minus the
+    trailing `/` and the `).,;:` a sentence leaves stuck to it (the URL regex is ASCII-only, so
+    full-width `）。，；：` never reach the match). A ref without a URL (a ticket key), or with two
+    or more, is its own text with whitespace collapsed — so merging can't drop a second link.
+    The board keys refs the same way (refKey in board.js); keep the two in step."""
+    text = str(ref)
+    urls = REF_URL_RE.findall(text)
+    if len(urls) == 1:
+        return urls[0].rstrip("/).,;:")
+    return " ".join(text.split())
 
 
 def merge_refs(have, new):
@@ -1134,12 +1141,33 @@ def _cmd_ref(args, card):
         merged = merge_refs(refs, [ref])
         if merged != refs:
             set_fields(card, {"refs": merged})
-    else:
+    elif args.action == "remove":
         # Removing a link removes every entry pointing at it, so no older duplicate shows up again.
+        # What went is printed as JSON — {"removed": [{"i": index, "ref": text}, …]} — and
+        # `hq ref restore` takes it back, which is how the board's Undo puts every entry back.
         key = ref_key(args.ref)
-        if not any(ref_key(r) == key for r in refs):
+        gone = [{"i": i, "ref": r} for i, r in enumerate(refs) if ref_key(r) == key]
+        if not gone:
             die(f"{args.task} has no ref {args.ref!r}")
         set_fields(card, {"refs": [r for r in refs if ref_key(r) != key]})
+        print(json.dumps({"removed": gone}, ensure_ascii=False))
+    else:
+        # restore: undo a remove. Each entry goes back at its old index (in order, so the list is
+        # as it was if nothing changed meanwhile). A link that is on the card again by now (re-added
+        # since, or a second Undo) is left as it is.
+        try:
+            items = json.loads(args.ref)
+            items = items.get("removed", items) if isinstance(items, dict) else items
+            items = sorted(((int(x["i"]), str(x["ref"]).strip()) for x in items), key=lambda x: x[0])
+        except (ValueError, TypeError, KeyError, AttributeError):
+            die("restore takes the JSON `hq ref remove` printed")
+        out = [str(r) for r in refs]
+        there = {ref_key(r) for r in out}
+        for i, r in items:
+            if r and "\n" not in r and ref_key(r) not in there:
+                out.insert(max(0, min(i, len(out))), r)
+        if out != refs:
+            set_fields(card, {"refs": out})
 
 
 def cmd_addtodo(args):
@@ -1238,8 +1266,10 @@ def apply_update(card, block, via="session"):
     All or nothing: the whole block is checked first, and if any line can't be applied nothing
     is written and the problems are returned, for the Stop hook to send back. Applying the good
     lines anyway made the natural retry — the whole block again, corrected — add every todo and
-    log line twice. Adding is idempotent too (an open todo with the same text, a log line already
-    there, a ref already listed are skipped), so a block that does arrive twice changes nothing.
+    log line twice. Adding is idempotent too (an open todo with the same text or a log line already
+    there is skipped), so a block that does arrive twice changes nothing. A `ref:` line whose URL
+    is already on the card replaces that entry's title in place — on purpose, so a title can move
+    on (PR #9 open → merged) — and repeating it changes nothing.
     A block made only of template placeholders is the protocol's example echoed back: ignored."""
     entries = update_lines(block)
     if entries and all(v and is_placeholder(v) for _, v in entries):
@@ -1895,8 +1925,8 @@ def main():
     p = sub.add_parser("focus", help="the Focus list: hq focus [add|remove|order T-012 ...] [--json]")
     p.add_argument("action", nargs="?", choices=["show", "add", "remove", "order", "carry"], default="show")
     p.add_argument("tasks", nargs="*"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_focus)
-    p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket>")
-    p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("ref")
+    p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket> | restore T-1 <JSON from remove>")
+    p.add_argument("action", choices=["add", "remove", "restore"]); p.add_argument("task"); p.add_argument("ref")
     p.set_defaults(fn=cmd_ref)
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)

@@ -67,7 +67,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove T-012 <url>`, `hq peek <session-id-prefix>` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix>` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
@@ -181,7 +181,12 @@ card whose category is not in the list (e.g. hand-edited) still shows, marked "n
 `refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
 ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
 board shows the title (cut to a few words). A card lists each link once: adding a ref whose URL is
-already there replaces that entry's title, and removing one removes every entry with that URL. The board shows them under **Resources**,
+already there replaces that entry's title (so a title can move on, e.g. a PR from open to merged —
+an `hq-update` `ref:` line does the same), and removing one removes every entry with that URL. A
+trailing `/` or `).,;:` doesn't make a URL a different link; a ref with two or more URLs, or none,
+is matched by its whole text (whitespace collapsed). `hq ref remove` prints what it removed as JSON
+(`{"removed": [{"i": 0, "ref": "…"}, …]}`), and `hq ref restore T-012 '<that JSON>'` puts every entry
+back at its old place — the board's Undo after ✕ does this. The board shows them under **Resources**,
 grouped by kind. Shorthand becomes a link through `links` rules in `hq.json`, tried in order:
 
 ```json

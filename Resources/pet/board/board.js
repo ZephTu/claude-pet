@@ -961,8 +961,20 @@ function kindOfUrl(u) {
   if (/\/wiki\/|confluence|docs\.google|notion\.(so|site)|\.md(\b|$)|claude\.ai\/artifact/i.test(u)) return "doc";
   return "link";
 }
+const REF_URL_RE = /https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/g;
+// Python's str.split() whitespace, so a collapsed key here is the one hq makes.
+const PY_SPACE = /[\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/;
+// Which refs are the same — exactly hq's ref_key: a ref with one literal URL is that URL minus
+// trailing `/).,;:`; anything else (no URL, a ticket key, or two or more URLs) is its text with
+// whitespace collapsed. Never the URL a links rule builds: hq doesn't know those.
+function refKey(ref) {
+  const text = String(ref);
+  const urls = text.match(REF_URL_RE) || [];
+  if (urls.length === 1) return urls[0].replace(/[\/).,;:]+$/, "");
+  return text.split(PY_SPACE).filter(Boolean).join(" ");
+}
 function resolveRef(ref) {
-  const url = (String(ref).match(/https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/) || [])[0];
+  const url = (String(ref).match(new RegExp(REF_URL_RE.source)) || [])[0];
   if (url) {
     const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
     return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
@@ -1069,7 +1081,7 @@ function renderTaskBody(t) {
   }).join("");
   // One entry per link: a card may still hold the same URL under two titles (written before hq
   // merged them), and the later title is the one to show.
-  const refs = [...new Map(list(t.refs).map(resolveRef).map((r) => [r.url ? r.url.replace(/\/+$/, "") : r.ref, r])).values()];
+  const refs = [...new Map(list(t.refs).map((ref) => [refKey(ref), resolveRef(ref)])).values()];
   const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
   // Settled things — status, project, category, directories, links — sit in the right rail as
@@ -2266,8 +2278,15 @@ document.addEventListener("click", async (ev) => {
     case "ref-remove": {
       const ref = d.ref;
       try {
-        await api("ref", { action: "remove", task: d.task, ref });
-        toast(T("Removed", "已移除"), false, () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复")));
+        // ✕ removes every entry with this link; hq prints them ({"removed": [{i, ref}, …]}) and
+        // Undo puts them all back where they were. An older hq prints nothing: re-add this one.
+        const out = await api("ref", { action: "remove", task: d.task, ref });
+        let removed = null;
+        try { removed = JSON.parse(out).removed; } catch (e) { /* older hq */ }
+        const undo = Array.isArray(removed) && removed.length
+          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(removed) }, T("Restored", "已恢复"))
+          : () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复"));
+        toast(T("Removed", "已移除"), false, undo);
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
