@@ -13,6 +13,11 @@ enum IdleTabTests {
         t.check("Claude Code's box is not", !IdleTab.atShellPrompt("╰──────────────────╯"))
         t.check("program output is not", !IdleTab.atShellPrompt("Compiling ClaudePet\nBuilding..."))
         t.check("an empty screen is not", !IdleTab.atShellPrompt("\n  \n"))
+        t.check("a progress bar ending in % is not", !IdleTab.atShellPrompt("######## 100.0%"))
+        t.check("a download percentage is not", !IdleTab.atShellPrompt("Downloading 42%"))
+        t.check("a psql prompt is not", !IdleTab.atShellPrompt("postgres=#") && !IdleTab.atShellPrompt("postgres-#"))
+        t.check("a root prompt still is", IdleTab.atShellPrompt("root@box:~# "))
+        t.check("a macOS bash prompt still is", IdleTab.atShellPrompt("Mac:~ zhefu$ "))
 
         let idle: [String: Any] = ["handle": "term_a", "title": "T-071 claude-pet", "connected": true,
                                    "writable": true, "orphaned": false, "preview": "x % "]
@@ -27,6 +32,12 @@ enum IdleTabTests {
         var busy = idle; busy["preview"] = "Context ▓▓░ 40%"
         t.check("an orphaned, disconnected or busy Orca tab is not",
                 IdleTab.orca(terminals: [gone, off, busy], title: "T-071 claude-pet", occupied: []) == nil)
+        var agent = idle; agent["agentIdentity"] = "claude"
+        t.check("an Orca tab Orca says has an agent in it is not",
+                IdleTab.orca(terminals: [agent], title: "T-071 claude-pet", occupied: []) == nil)
+        var noAgent = idle; noAgent["agentIdentity"] = NSNull()
+        t.check("an Orca tab with a null agentIdentity is still idle",
+                IdleTab.orca(terminals: [noAgent], title: "T-071 claude-pet", occupied: []) == "term_a")
         var other = idle; other["handle"] = "term_b"
         t.check("the first usable Orca tab wins",
                 IdleTab.orca(terminals: [busy, other], title: "T-071 claude-pet", occupied: []) == "term_b")

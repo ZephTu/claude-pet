@@ -2488,6 +2488,7 @@ struct Runner {
         ContextTests.run(t)
         SkinTests.run(t)
         IdleTabTests.run(t)
+        SessionControlTests.run(t)
 
         t.finish()
     }

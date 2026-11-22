@@ -9,14 +9,15 @@ import Foundation
 /// Pure and AppKit-free so it can be tested without either terminal.
 public enum IdleTab {
     /// An Orca terminal (from `orca terminal list --json`) titled `title`, connected and writable,
-    /// with no live Claude Code session recorded in it (`occupied` holds those handles), whose
-    /// last line is a shell prompt.
+    /// with no agent in it — neither by Orca's own `agentIdentity` nor by a live Claude Code
+    /// session recorded there (`occupied` holds those handles) — whose last line is a shell prompt.
     public static func orca(terminals: [[String: Any]], title: String, occupied: Set<String>) -> String? {
         for t in terminals {
             guard let handle = t["handle"] as? String, !handle.isEmpty,
                   (t["title"] as? String) == title,
                   t["connected"] as? Bool == true, t["writable"] as? Bool == true,
                   t["orphaned"] as? Bool != true,
+                  ((t["agentIdentity"] as? String) ?? "").isEmpty, !(t["agentIdentity"] is [String: Any]),
                   !occupied.contains(handle),
                   atShellPrompt(t["preview"] as? String ?? "") else { continue }
             return handle
@@ -27,15 +28,19 @@ public enum IdleTab {
     /// Does the last non-empty line of a terminal's output look like an interactive shell
     /// waiting for a command? `%` (zsh), `$` (bash/sh), `#` (root), `❯` / `➜` (common themes).
     /// Claude Code's own screen also ends in `%` sometimes ("Context ▓▓░ 12%"), so lines with its
-    /// box-drawing or bar characters never count.
+    /// box-drawing or bar characters never count, and neither do lines whose prompt character
+    /// follows `=`/`-`/`#`/`(`, or a `%` that follows a digit — a progress bar ("100.0%"), a psql prompt
+    /// ("postgres=#", "postgres-#"). A remote shell over ssh still looks like a prompt; that is
+    /// the one case only the user can rule out.
     public static func atShellPrompt(_ preview: String) -> Bool {
         guard let last = preview.components(separatedBy: .newlines)
             .map({ $0.trimmingCharacters(in: .whitespaces) })
             .last(where: { !$0.isEmpty }), last.count < 300 else { return false }
         let tui: Set<Character> = ["│", "█", "░", "▓", "╭", "╰", "─", "⏵", "✻", "⎿"]
-        if last.contains(where: { tui.contains($0) }) || last.contains("Context") { return false }
-        guard let end = last.last else { return false }
-        return ["%", "$", "#", "❯", "➜"].contains(end)
+        if last.contains(where: { tui.contains($0) }) || last.contains("Context") || last.contains("##") { return false }
+        guard let end = last.last, ["%", "$", "#", "❯", "➜"].contains(end) else { return false }
+        if let before = last.dropLast().last, "=-#(".contains(before) || (end == "%" && before.isNumber) { return false }
+        return true
     }
 
     /// Lists every Terminal.app tab as `tty<TAB>custom title<TAB>busy<TAB>process,process…`.
