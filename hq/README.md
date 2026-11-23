@@ -621,6 +621,59 @@ those sorted in the last 48 hours; `hq board --json` carries the same list as `i
 The board's **Quick note** box and Claude Pet's ⌃⌥⌘N panel both run `add` then `sort`; Needs you
 shows the list.
 
+### Feeds: Zulip, Jira
+
+`hq feed zulip [--since HOURS] [--no-sort] [--dry-run] [--json]` reads the @-mentions and direct
+messages that came in since the last scan (the first scan looks back `--since` hours, default 24)
+and turns each conversation — one stream topic, or one set of DM recipients — into a quick note
+with `via: "zulip"`, `conv` and `msgs` (the message ids). Read only: nothing is ever sent. It calls
+Zulip's REST API directly with the account in `$HQ_ZULIPRC`, else `"feed": {"zulip": {"zuliprc":
+PATH}}` in `hq.json`, else `~/.zuliprc`; the key is never written anywhere else, and an error about
+the file never quotes it. A conversation where only you spoke adds nothing. Both narrows are read up
+to the newest message id taken before either is read, so a message that arrives mid-scan waits for
+the next one; a scan reads at most 500 messages a narrow and leaves the rest for the next.
+
+`hq feed jira [--site URL] [--since HOURS] [--no-sort] [--dry-run] [--json]` reads what other people
+did, since the last scan, to the issues you are assignee, reporter or watcher of — created, a field
+changed (`field: old → new`; a long field such as the description only as `field changed`), a
+comment added or edited — and turns each issue into a quick note with `via: "jira"`, `issue` (the
+key) and `events`. It calls Jira's REST API (v2, `search/jql` with `updated >= -Nm`) with Basic auth:
+the site from `$HQ_JIRA_SITE`, else `"feed": {"jira": {"site": URL}}` in `hq.json` (which `--site`
+writes); the token from `$HQ_JIRA_TOKEN`, else the login keychain, service `hq-jira` (or
+`"keychain"` in the same object), whose account is the email (or `$HQ_JIRA_EMAIL`, or `"email"`).
+Store it with `security add-generic-password -U -s hq-jira -a <email> -w "$(pbpaste)"`: the
+interactive `-w` prompt cuts input at 128 characters, shorter than an Atlassian token. The token is
+never written anywhere else, and never passed to the sorter. An issue only you changed adds
+nothing. Jira's search lags behind its writes, so each scan re-reads the 10 minutes before the
+cursor and drops the changes it has already seen, by id. Its note starts `Jira · KEY:
+summary · <site>/browse/KEY`, then `(type · status · priority · assignee X · reporter Y · you:
+roles)`, then one `[MM-DD HH:MM] who: text` line per change (mentions of you as `@me`).
+
+`hq feed all` scans every source that is set up (Zulip when a zuliprc file is there, Jira when a
+site is set), working or not, and exits 1 if any of them failed (a broken zuliprc, a wrong token, a
+scan of it already running), naming it on the last line after the others' results; with none set
+up it says so.
+
+The Zulip note's first line is `Zulip · <title> · <conversation URL>`, then one `[MM-DD HH:MM] who: text`
+line per message (yours as `me`, older lines trimmed past 3000 characters). Feed notes are sorted
+with a feed prompt that treats the messages as data, never instructions, and adds a `skip` kind:
+only a log line (`note`) is filed by itself; a `todo`, `task` or `me` pick waits unsorted for a
+click; a confident `skip` is dropped with `skipped: true`, hidden from the list but shown by
+`hq inbox --all` and restorable. Up to 4 notes are sorted at once. A filed feed note's refs come
+from its first line only (the conversation or issue link), never from links inside the messages.
+
+State lives in `<root>/secretary/feed/`: `state.json` holds, per source, the cursor (Zulip's
+`last_id`; Jira's `last_ts`, the epoch of the newest change seen, and `seen`, the ids of the changes
+inside the overlap), with `me` and `site`: a scan as another account or against another site starts
+over. Also the last scan's counts and cost. It is written under a lock, so two sources finishing at
+once don't lose each other's update; the raw messages and
+issues go to `zulip/<date>.jsonl` and `jira/<date>.jsonl`, kept 30 days. `--dry-run` prints the notes and saves nothing;
+`--no-sort` jots them unsorted. `hq feed status` shows the state. A second scan while one runs exits
+at once. The last output line is a summary (`zulip: 12 messages, 4 conversations → filed 1,
+unsorted 1, skipped 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → filed 1, unsorted 1, skipped 4
+($0.03)`), which Claude Pet shows for its "Secretary: scan Zulip · Jira" job, running `hq feed all`
+(weekdays, hourly 9–19, off until turned on from the secretary's window).
+
 ## Files
 
 ```
@@ -632,7 +685,8 @@ shows the list.
 ├── templates/lead.md         lead agent template
 ├── .claude/agents/           your leads, and secretary.md
 ├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md, reports.md
-│   └── reports/              its reports; .drafts/, .reports.json and .pending.json track edits and windows
+│   ├── reports/              its reports; .drafts/, .reports.json and .pending.json track edits and windows
+│   └── feed/                 state.json (scan cursors and last results); zulip/ and jira/<date>.jsonl raw (30 days)
 ├── inbox.json                quick notes: {"last": n, "items": [{id, text, images, state, dest, alts, …}]};
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
