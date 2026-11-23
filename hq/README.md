@@ -84,7 +84,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
@@ -137,7 +137,8 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    Only the lines that changed. `todo` / `done` / `drop` / `log` / `ref` / `workdir` may
    repeat; `state` lines replace the card's Status (当前状态) section; `done` / `drop` match an
    open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
-   that fits only one open todo). A block holding just `touch` stamps the card when nothing
+   that fits only one open todo). `project: NAME` moves the task to an existing project — a
+   name not in `hq.json` refuses the whole block, since only the user makes projects. A block holding just `touch` stamps the card when nothing
    changed. Only a block at the end of the reply counts, at the start of a line and outside any
    other fence; one shown mid-reply, or made of template placeholders (`<…>`), is an example.
    Keys take a full-width colon too, and one pair of quotes round a value is dropped.
@@ -235,8 +236,10 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    one (with `--text`, a number that now points at a different grant goes by the wording instead,
    and fails if that wording is gone) and prints it
    as JSON, which `hq grant add … --at <ts> --source <ask>` puts back unchanged. Adding and
-   revoking are logged on the card. Grants are per task for now; project-level grants (in
-   `PROJECT.md`, same section and parser) come later.
+   revoking are logged on the card. Project grants live in the project's `PROJECT.md` (same
+   section and parser) and hold for every task in it: `hq grant add|list|revoke --project NAME …`
+   in place of the task id. A session is given both, task grants first, then a "From project
+   NAME" group.
 
 ### Grants
 
@@ -262,13 +265,65 @@ on a Chinese card) and remove it when the last grant is revoked.
 
 ## Projects
 
-Projects are the level above tasks: `hq.json` lists them with their directories
-(`hq project add claude-pet --path ~/code/claude-pet`). A task joins the project of its directory —
-when it is created with a workdir, or when a session is bound — and the card's `project` field can
-be changed any time. The board groups tasks by project by default (or by status, a toggle away).
-`hq project list | add | paths | rename | remove --to | auto | order` manage them (the list order
-is the board's order — drag a group header to change it); `auto` sorts every task
-that has no project by its workdirs.
+A project is a line of work, not a directory: a **goal** with an end ("ship hq-v2") or a
+standing **duty** ("customer RCAs"). A task belongs to one project (the card's `project` field);
+its workdirs say where it is worked on, which is a separate thing — one repo can serve many
+projects, and one project can span repos.
+
+`hq.json` lists the projects — name, board order, and directories. The directories only
+suggest: a task with no project gets the one of its workdir when it is created or a session is
+bound (the deepest match wins). Give directories to repos that belong to one project; leave
+shared repos out, and tasks started there stay in "No project" until sorted. `auto` sorts every
+task that has no project by its workdirs.
+
+What the project *is* lives in `<root>/projects/<name>/PROJECT.md` (`hq project add` writes one
+from `templates/PROJECT.md`; projects without one still work):
+
+```markdown
+---
+name: perf                 # the short id: cards' project:, the folder, the CLI
+title: 性能基线与回归        # the display name
+kind: goal                 # goal = has an end · duty = a standing responsibility
+status: active             # active | paused | done | abandoned
+due: 2026-12-19            # a goal's deadline
+jira: ["QA-9397"]          # epics it tracks
+fixVersions: ["4.2.7"]
+updated: 2026-11-23
+---
+
+## Goal                    ← or 目标 / 职责范围
+## Done when               ← or 完成标准 / 健康标准
+## Brief                   ← or 简报: given to every session on one of its tasks
+## Grants                  ← or 授权: project grants, same format as a card's
+## Log                     ← or 决策记录
+```
+
+**The brief.** A session bound to a task whose project has a PROJECT.md is told, whenever it
+starts (SessionStart of any source, and `hq bind` from inside it): the project, its kind, due
+date and status, the first line of its goal, and the Brief section — background, conventions,
+commands, pitfalls — whatever repo the session works in. The brief is capped at 2000 characters
+(past that it is cut, pointing at PROJECT.md). `sessions.json` keeps a hash of what each session
+was given; UserPromptSubmit gives it again only when it changed (the brief was edited, or the
+task moved to another project), and says so when it is gone. HTML comments and lone
+`<placeholder>` lines from the template are not passed on. `hq project brief NAME` prints
+exactly what sessions get.
+
+```
+hq project list [--json]                    # with kind, status, due; "[no PROJECT.md]" if none
+hq project show NAME [--json]               # the file, plus task counts: open, done, done in 7
+                                            #   days, waiting on you (open asks + @me todos)
+hq project brief NAME
+hq project add NAME [--kind goal|duty] [--title T] [--due YYYY-MM-DD] [--path DIR]
+hq project set NAME kind=duty status=paused due= title="…" jira=QA-1,QA-2 fixVersions=4.2.7
+hq project paths NAME DIR…                  # replace its directories
+hq project rename OLD NEW                   # every card, hq.json, and projects/OLD/ follow
+hq project remove NAME --to OTHER|''        # its folder goes to projects/.removed/, not deleted
+hq project auto | order NAME…
+```
+
+Goal, done-when and the brief are edited in PROJECT.md directly. `hq board --json` gives each
+project its PROJECT.md fields (`defined` says whether there is one) and `stats`, and each task a
+`repo`: the git repo of its first workdir, a worktree counted as its main repo.
 
 ## Categories
 
@@ -356,6 +411,8 @@ small and reports in a fixed shape. Small tasks don't need one — the bound ses
 <root>/
 ├── CLAUDE.md                 chief-of-staff rules for sessions started in the root
 ├── templates/TASK.md         card template used by `hq new` (edit freely)
+├── templates/PROJECT.md      project template used by `hq project add`
+├── projects/<name>/PROJECT.md  a project: kind, goal, brief, project grants
 ├── templates/lead.md         lead agent template
 ├── .claude/agents/           your leads
 └── tasks/T-012-slug/

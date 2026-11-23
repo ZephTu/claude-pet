@@ -115,7 +115,7 @@ out="$("$HQ" ref remove T-001 "new https://example.com/r/")"
 "$HQ" ref remove T-001 "https://example.com/r" >/dev/null && [ "$(refs)" = '["QA-2"]' ] || fail "cleanup: $(refs)"
 # projects: auto-assign by directory, rename / guarded remove like categories
 mkdir -p "$T/proj-x/sub"
-"$HQ" project add projx --path "$T/proj-x" && "$HQ" project list | grep -q "^projx" && ok "project add"
+"$HQ" project add projx --path "$T/proj-x" >/dev/null && "$HQ" project list | grep -q "^projx" && ok "project add"
 P="$("$HQ" new "in project" --workdir "$T/proj-x/sub" | head -1)"
 grep -q "^project: projx" "$T"/root/tasks/$P-*/TASK.md && ok "new task gets its project from the workdir"
 "$HQ" new "no dir" >/dev/null; Q="$(ls "$T/root/tasks" | grep no-dir | cut -d- -f1-2)"
@@ -137,6 +137,73 @@ printf '%s\n' "{\"type\":\"user\",\"cwd\":\"$T/repo-g\",\"message\":{\"content\"
 "$HQ" scan --json | python3 -c 'import json,sys; d=json.load(sys.stdin); p=[x for x in d["projects"] if x["name"]=="repo-g"][0]; assert p["count"]==1 and not p["existing"]; s=[x for x in d["sessions"] if x["sessionId"].startswith("abcdef12")][0]; assert s["title"]=="flaky test" and s["first"]=="fix the flaky test"' && ok "scan proposes a project per repo with its sessions"
 "$HQ" scan --apply-projects --only repo-g >/dev/null && "$HQ" project list | grep -q "^repo-g" && ok "scan --apply-projects creates the chosen project"
 "$HQ" scan --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [x for x in d["projects"] if x["name"]=="repo-g"][0]["existing"]=="repo-g"' && ok "rescan marks it existing"
+
+# PROJECT.md: a project is a goal or a duty, with a brief every session on its tasks is given.
+PF="$T/root/projects/goalp/PROJECT.md"
+"$HQ" project add goalp --kind goal --title "Ship v2" --due 2026-12-19 >/dev/null && [ -f "$PF" ] \
+  && grep -q '^kind: goal' "$PF" && grep -q '^title: "Ship v2"' "$PF" && grep -q '^name: goalp' "$PF" && ok "project add writes PROJECT.md" || fail "project add PROJECT.md"
+rc=0; "$HQ" project set goalp status=bogus 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "project set checks status" || fail "project set status"
+rc=0; "$HQ" project set goalp due=12/19 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "project set checks the date" || fail "project set due"
+rc=0; "$HQ" project add a/b 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a project name can't hold a /" || fail "project name with /"
+"$HQ" project set goalp jira=QA-1,QA-2 >/dev/null && grep -q '^jira: \["QA-1", "QA-2"\]' "$PF" && ok "project set jira=a,b writes a list" || fail "project set jira"
+python3 - "$PF" <<'PYX'
+import sys; p = sys.argv[1]; s = open(p).read()
+s = s.replace("<goal: what it achieves · duty: what it covers, and what it doesn't>", "Release HQ v2 to the team.")
+s = s.replace("## Brief\n", "## Brief\nUse the worktree per task. Never install from a branch.\n")
+open(p, "w").write(s)
+PYX
+"$HQ" project show goalp --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["defined"] and p["kind"]=="goal" and p["due"]=="2026-12-19" and p["goal"]=="Release HQ v2 to the team." and p["brief"].startswith("Use the worktree") and p["done_when"]=="", p' && ok "project show reads kind, goal and brief (template hints dropped)" || fail "project show"
+"$HQ" project list | grep -q '^goalp .*\[goal · active · due 2026-12-19\]' && ok "project list shows kind, status, due" || fail "project list kind"
+"$HQ" project list | grep -q '^repo-g .*\[no PROJECT.md\]' && ok "a project without PROJECT.md still lists" || fail "legacy project list"
+GP="$("$HQ" new "Goal task" --project goalp --no-focus | head -1)"
+"$HQ" bind "$GP" --session sess-p >/dev/null
+ctx="$(hook '{"session_id":"sess-p","hook_event_name":"SessionStart","source":"startup"}')"
+echo "$ctx" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "belongs to project goalp: Ship v2 (a goal, due 2026-12-19)" in c and "Project goal: Release HQ v2 to the team." in c and "Never install from a branch." in c, c' && ok "SessionStart gives the project and its brief" || fail "SessionStart brief"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "Never install" && fail "brief repeated on a prompt" || ok "an unchanged brief is not repeated"
+sed -i.bak 's/Never install from a branch./Install from main only./' "$PF" && rm -f "$PF.bak"
+c1="$(hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c1" | grep -q "new or changed since you last saw it" && echo "$c1" | grep -q "Install from main only." && ok "a changed brief is given on the next prompt" || fail "changed brief"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "Install from main" && fail "changed brief given twice" || ok "a changed brief is given once"
+(CLAUDE_CODE_SESSION_ID=sess-pin "$HQ" bind "$GP" | grep -q "Install from main only.") && ok "bind from inside prints the brief" || fail "bind brief"
+"$HQ" unbind --session sess-pin >/dev/null
+"$HQ" project brief goalp | grep -q "^Project brief — applies to every task in goalp" && ok "project brief prints what sessions get" || fail "project brief"
+python3 -c "import sys; p=sys.argv[1]; s=open(p).read(); open(p,'w').write(s.replace('Install from main only.', 'x'*2500))" "$PF"
+"$HQ" project brief goalp | python3 -c 'import sys; t=sys.stdin.read(); assert "x"*1900 in t and "x"*2000 not in t and "cut short" in t, len(t)' && ok "a long brief is cut at 2000 characters" || fail "brief cut"
+python3 -c "import sys; p=sys.argv[1]; s=open(p).read(); open(p,'w').write(s.replace('x'*2500, 'Install from main only.'))" "$PF"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
+# project grants: same section and format as a card's, for every task in the project
+"$HQ" grant add --project goalp "rerun the smoke test" >/dev/null && grep -q '^- rerun the smoke test <!--g:' "$PF" && ok "grant add --project writes PROJECT.md" || fail "project grant add"
+(CLAUDE_CODE_SESSION_ID=x "$HQ" grant add --project goalp "anything" 2>/dev/null) && fail "a session added a project grant" || ok "project grants come from the user only"
+"$HQ" grant list --project goalp | grep -q "1. rerun the smoke test" && ok "grant list --project" || fail "project grant list"
+c2="$(hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c2" | grep -q "+ granted — a permission from now on, not a request to act now: rerun the smoke test" && ok "a new project grant reaches the session" || fail "project grant change"
+hook '{"session_id":"sess-p","hook_event_name":"SessionStart","source":"compact"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "From project goalp (they hold for every task in it):\n- rerun the smoke test" in c, c' && ok "SessionStart lists project grants under the project" || fail "SessionStart project grants"
+"$HQ" grant revoke --project goalp 1 >/dev/null && ! grep -q "rerun the smoke test <!--" "$PF" && ok "grant revoke --project" || fail "project grant revoke"
+# hq-update `project:` moves a task to an existing project, never makes one
+MSG='ok\n\n```hq-update\nproject: nosuch\n```'
+hook "{\"session_id\":\"sess-p\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "is not a project" && ok "hq-update project: refuses a project that doesn't exist" || fail "hq-update unknown project"
+grep -q '^project: goalp' "$T"/root/tasks/$GP-*/TASK.md || fail "refused block changed the project"
+MSG='ok\n\n```hq-update\nproject: repo-g\n```'
+hook "{\"session_id\":\"sess-p\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
+grep -q '^project: repo-g' "$T"/root/tasks/$GP-*/TASK.md && grep -q "project 'goalp' → 'repo-g'" "$T"/root/tasks/$GP-*/TASK.md && ok "hq-update project: moves the task and logs it" || fail "hq-update project"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "no longer has a project brief" && ok "moving to a project without a brief says the old one is gone" || fail "brief gone"
+"$HQ" set "$GP" project=goalp >/dev/null
+# board --json: project fields and counts, and each task's repo (a worktree counts as its repo)
+mkdir -p "$T/repo-main/.git/worktrees/wt" "$T/repo-main-wt/sub"
+echo "gitdir: $T/repo-main/.git/worktrees/wt" > "$T/repo-main-wt/.git"
+RP="$("$HQ" new "In a worktree" --workdir "$T/repo-main-wt/sub" --no-focus | head -1)"
+RG="$("$HQ" new "In a removed worktree" --workdir "$T/repo-main-gone" --no-focus | head -1)"
+"$HQ" board --json | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+p=[x for x in d["projects"] if x["name"]=="goalp"][0]
+assert p["defined"] and p["kind"]=="goal" and p["title"]=="Ship v2" and p["stats"]["open"]==1, p
+assert [x for x in d["projects"] if x["name"]=="repo-g"][0]["defined"] is False
+r={t["id"]: t["repo"] for t in d["tasks"]}
+assert r["'"$RP"'"]=="repo-main" and r["'"$RG"'"]=="repo-main", r' && ok "board --json: project fields, counts and each task's repo" || fail "board json projects"
+# rename moves the folder; remove puts it aside, never deletes it
+"$HQ" project rename goalp goalq >/dev/null && [ -f "$T/root/projects/goalq/PROJECT.md" ] && [ ! -e "$T/root/projects/goalp" ] \
+  && grep -q '^name: goalq' "$T/root/projects/goalq/PROJECT.md" && ok "project rename moves PROJECT.md" || fail "project rename folder"
+"$HQ" project remove goalq --to '' >/dev/null && [ ! -e "$T/root/projects/goalq" ] && ls "$T/root/projects/.removed/" | grep -q '^goalq-' && ok "project remove puts its folder aside" || fail "project remove folder"
 grep -q "@me ping Wenbing <!--t:" "$T"/root/tasks/T-001-*/TASK.md && ok "addtodo stamps a hidden creation time"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; o=[x for x in t["todos"] if x["state"]=="open"]; assert all(x["created"] for x in o) and not any("<!--" in x["text"] for x in t["todos"]), o' && ok "every open todo has a created time; the stamp is hidden"
 # Focus: new tasks join it, and it stays until you take a task off — no daily reset.

@@ -110,6 +110,7 @@ PY
 echo "==> task root → $ROOT"
 mkdir -p "$ROOT/tasks" "$ROOT/templates" "$ROOT/.claude/agents"
 [ -f "$ROOT/templates/TASK.md" ] || cp "$SRC/template/TASK.md" "$ROOT/templates/TASK.md"
+[ -f "$ROOT/templates/PROJECT.md" ] || cp "$SRC/template/PROJECT.md" "$ROOT/templates/PROJECT.md"
 [ -f "$ROOT/templates/lead.md" ] || cp "$SRC/template/agents/lead.md" "$ROOT/templates/lead.md"
 [ -f "$ROOT/CLAUDE.md" ] || cp "$SRC/template/CLAUDE.md" "$ROOT/CLAUDE.md"
 # Categories belong to the task root and are edited from the board; this is only a starting set.
