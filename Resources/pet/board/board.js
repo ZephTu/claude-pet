@@ -1758,7 +1758,7 @@ async function refreshPeek(first) {
   const m = ui.modal;
   if (!m) return;
   let msgs;
-  try { msgs = await apiJSON("peek", { session: m.sid }); } catch (e) { return toast(String(e.message || e), true); }
+  try { msgs = await apiJSON("peek", { session: m.sid, opened: Boolean(first) }); } catch (e) { return toast(String(e.message || e), true); }
   if (ui.modal !== m) return;
   // A session that has come up (or ended) since the window opened: send box on or off.
   const s = ui.sessions.find((x) => x.sessionId === m.sid);

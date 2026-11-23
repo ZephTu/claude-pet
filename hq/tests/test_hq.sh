@@ -540,9 +540,11 @@ cat > "$HOME/.claude/pet/jumps.jsonl" <<EOF
 {"at":"$NOW","session":"b","source":"pet-list","state":"replied"}
 {"at":"$NOW","session":"b","source":"board-peek","state":"replied","peekedAgo":5000}
 {"at":"2020-01-01T00:00:00Z","session":"old","source":"hotkey","state":"question"}
+{"at":"$NOW","session":"odd","source":["x"],"state":7}
+[1, 2]
 not json
 EOF
-"$HQ" jumps --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["total"]==3 and r["grid"]["replied"]=={"pet-list":1,"board-peek":1} and r["peekedFirst"]=={"permission":1} and r["states"]==["permission","replied"], r' && ok "hq jumps counts the last week by state x source" || fail "hq jumps"
+"$HQ" jumps --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["total"]==4 and r["grid"]["7"]=={"[\x27x\x27]":1} and r["grid"]["replied"]=={"pet-list":1,"board-peek":1} and r["peekedFirst"]=={"permission":1} and r["states"]==["permission","replied","7"], r' && ok "hq jumps counts the last week by state x source" || fail "hq jumps"
 "$HQ" jumps | grep -q "^permission " && ok "hq jumps prints a table" || fail "hq jumps table"
 rm "$HOME/.claude/pet/jumps.jsonl"; "$HQ" jumps | grep -q "no jumps" && ok "hq jumps without a log says so" || fail "hq jumps empty"
 

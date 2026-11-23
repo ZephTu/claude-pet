@@ -133,8 +133,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// What the pet's list draws each session's dot from — the board draws the same dot.
     static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
-    /// A session's conversation was just shown in Peek (open, or refreshed while open). The jump
-    /// log notes how long before a jump that was — see JumpLog.
+    /// A session's conversation was just opened in Peek. The jump log notes how long before a
+    /// jump that was — see JumpLog.
     static var onPeek: ((String) -> Void)?
     /// Answers a session's permission prompt the way the pet's Allow / Deny does — see
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
@@ -156,7 +156,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
             if r.1 == nil {
                 Self.onSeen?(str("session"))
-                Self.onPeek?(str("session"))
+                // Opening it, not the refreshes every few seconds while it stays open.
+                if body["opened"] as? Bool == true { Self.onPeek?(str("session")) }
             }
             return r
         case "pet":
@@ -253,11 +254,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             decide(str("session"), str("ask"), behavior)
             return (["ok": true], nil)
         case "jump":
-            guard let t = terminal(of: str("session")) else { return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端")) }
+            let origin = TerminalJump.Origin(session: str("session"), source: str("from").isEmpty ? "board" : str("from"),
+                                             view: str("view"))
+            guard let t = terminal(of: str("session")) else {
+                // Logged anyway: the log is about why the user wanted the terminal, not whether it worked.
+                TerminalJump.record?(origin, "")
+                return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
+            }
             // The page says which button: a card's session row, the sessions list, Peek, …
-            TerminalJump.jump(kind: t.kind, handle: t.handle,
-                              from: .init(session: str("session"), source: str("from").isEmpty ? "board" : str("from"),
-                                          view: str("view")))
+            TerminalJump.jump(kind: t.kind, handle: t.handle, from: origin)
             Self.onSeen?(str("session"))
             return (["ok": true], nil)
         case "copy":

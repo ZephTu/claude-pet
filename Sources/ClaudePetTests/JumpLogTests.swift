@@ -22,10 +22,8 @@ enum JumpLogTests {
                 JumpLog.state(of: s(.busy, phase: "awaiting-agent"), quiet: false) == .agent
                 && JumpLog.state(of: s(.busy, agents: ["Explore"]), quiet: false) == .agent)
         t.check("busy gone quiet is interrupted", JumpLog.state(of: s(.busy), quiet: true) == .interrupted)
-        t.check("an interrupted call in this stretch of work is interrupted",
-                JumpLog.state(of: s(.busy, trouble: t0.addingTimeInterval(5)), quiet: false) == .interrupted)
-        t.check("an interrupt before this stretch of work is not",
-                JumpLog.state(of: s(.busy, trouble: t0.addingTimeInterval(-5)), quiet: false) == .working)
+        t.check("an interrupted call the row still shows as working is working",
+                JumpLog.state(of: s(.busy, trouble: t0.addingTimeInterval(5)), quiet: false) == .working)
         t.check("idle after a reply is replied", JumpLog.state(of: s(.idle, detail: "Done."), quiet: false) == .replied)
         t.check("idle with nothing said is idle", JumpLog.state(of: s(.idle), quiet: false) == .idle)
         t.check("no live session is gone", JumpLog.state(of: nil, quiet: false) == .gone)
@@ -51,6 +49,13 @@ enum JumpLogTests {
         JumpLog.append(JumpLog.Event(at: t0, session: "b", source: "pet-list", state: .idle), to: file)
         let lines = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n")
         t.check("append creates the file and adds a line per jump", lines.count == 2)
+        if let h = try? FileHandle(forWritingTo: file) {
+            _ = try? h.seekToEnd(); try? h.write(contentsOf: Data("{\"cut".utf8)); try? h.close()
+        }
+        JumpLog.append(JumpLog.Event(at: t0, session: "c", source: "pet-list", state: .idle), to: file)
+        let after = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n")
+        t.check("a line cut short does not swallow the next one",
+                after.count == 4 && after.last?.hasPrefix("{\"at\"") == true)
         try? FileManager.default.removeItem(at: dir)
     }
 }

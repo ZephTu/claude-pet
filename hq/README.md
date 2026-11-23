@@ -44,10 +44,13 @@ recent messages from their transcripts under `~/.claude/projects`. Nothing leave
 Claude Pet appends to on every ↗ Jump — counts by the session's state at the time
 (`permission`, `question`, `replied`, `working`, `agent`, `interrupted`, `idle`, `gone`) × where
 it was clicked (`board-card`, `board-sessions`, `board-peek`, `board-context`, `pet-list`,
-`pet-finished`, `pet-notice`, `hotkey`), plus how many had their Peek open in the 10 minutes
-before. One JSON object per line: `at`, `session`, `source`, `state`, and when known `view`
+`pet-finished`, `pet-notice`, `hotkey`; `board` if the page did not say), plus how many had
+their Peek opened in the 10 minutes before. Clicks whose terminal can't be found are logged
+too. One JSON object per line: `at`, `session`, `source`, `state`, and when known `view`
 (board tab), `task`, `project`, `context` (% of the auto-compact window), `waited` (seconds in
-that state), `peekedAgo` (seconds since its Peek last showed it), `terminal`.
+that state; for `interrupted`, since it went quiet), `peekedAgo` (seconds since its Peek was
+last opened — refreshes while open don't count — since the pet started), `terminal` (left out when
+none was found).
 
 Re-run `hq/install.sh` to upgrade. `hq/uninstall.sh` removes hooks, commands and CLI and
 leaves your cards alone.

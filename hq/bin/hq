@@ -1856,20 +1856,22 @@ def jump_summary(days, now=None):
     since = (now or time.time()) - days * 86400
     events = []
     try:
-        with open(PET_JUMPS, encoding="utf-8") as f:
+        with open(PET_JUMPS, encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     e = json.loads(line)
-                    at = dt.datetime.fromisoformat(str(e["at"]).replace("Z", "+00:00")).timestamp()
+                    t = dt.datetime.fromisoformat(str(e["at"]).replace("Z", "+00:00"))
                 except (ValueError, KeyError, TypeError):
                     continue
-                if at >= since:
+                if t.tzinfo is None:   # the pet writes UTC; a stamp without a zone is read as UTC too
+                    t = t.replace(tzinfo=dt.timezone.utc)
+                if t.timestamp() >= since:
                     events.append(e)
     except FileNotFoundError:
         pass
     grid, by_state, by_source, peeked = {}, {}, {}, {}
     for e in events:
-        st, src = e.get("state") or "?", e.get("source") or "?"
+        st, src = (str(e.get(k)) if e.get(k) not in (None, "") else "?" for k in ("state", "source"))
         grid.setdefault(st, {}).setdefault(src, 0)
         grid[st][src] += 1
         by_state[st] = by_state.get(st, 0) + 1

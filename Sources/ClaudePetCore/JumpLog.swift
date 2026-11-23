@@ -26,8 +26,8 @@ public enum JumpLog {
         case replied
         /// Open, nothing said since the last turn, or never spoken to.
         case idle
-        /// Busy on paper but stopped: the user pressed Esc, or a tool call came
-        /// back interrupted.
+        /// Busy on paper but gone quiet — the row's "No recent activity", which is
+        /// what an Esc looks like from outside.
         case interrupted
         /// The pet no longer has it as a live session (a finished row whose
         /// session has since closed, or a stale board).
@@ -43,9 +43,10 @@ public enum JumpLog {
         case .waiting:
             return s.waitingOn.isEmpty ? .question : .permission
         case .busy:
-            // An interrupted call during this stretch of work, or work that went
-            // silent the way only an interrupt does.
-            if quiet || (s.troubleAt.map { $0 >= s.since } ?? false) { return .interrupted }
+            // Only what the row shows: an interrupted tool call that work carried
+            // on after is still working there, and a log that disagreed with the
+            // row would measure something the user never saw.
+            if quiet { return .interrupted }
             if s.phase == "awaiting-agent" || !s.backgroundAgents.isEmpty { return .agent }
             return .working
         case .idle:
@@ -66,10 +67,10 @@ public enum JumpLog {
         public let project: String
         /// Context used against its auto-compact window, 0-999.
         public let context: Int?
-        /// Seconds in its current state.
+        /// Seconds in its current state; for `interrupted`, since it went quiet.
         public let waited: Int?
-        /// Seconds since its Peek was last opened on the board, nil when it has
-        /// not been since the pet started.
+        /// Seconds since its Peek was last opened on the board (opened, not
+        /// refreshed while open), nil when it has not been since the pet started.
         public let peekedAgo: Int?
         /// "orca", "iterm2", … — some jumps land on the tab, an editor only on the window.
         public let terminal: String
@@ -121,9 +122,17 @@ public enum JumpLog {
         if !fm.fileExists(atPath: file.path) {
             fm.createFile(atPath: file.path, contents: nil)
         }
-        guard let handle = try? FileHandle(forWritingTo: file) else { return }
+        guard let handle = try? FileHandle(forUpdating: file) else { return }
         defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: Data(text.utf8))
+        guard let end = try? handle.seekToEnd() else { return }
+        var data = Data(text.utf8)
+        // A previous write cut short left no newline: start a fresh line, or this
+        // event would be glued onto the broken one and both lost.
+        if end > 0 {
+            try? handle.seek(toOffset: end - 1)
+            if (try? handle.read(upToCount: 1)) != Data("\n".utf8) { data.insert(0x0A, at: 0) }
+            _ = try? handle.seekToEnd()
+        }
+        try? handle.write(contentsOf: data)
     }
 }
