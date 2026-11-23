@@ -443,7 +443,10 @@ overwrites anything:
   as `"secretary": {"task": "T-…"}` in `hq.json`, and `hq board --json` reports it as
   `"secretary"`.
 
-`hq secretary [--json]` reports what is there.
+`hq secretary [--json]` reports what is there. Its `--json` also lists the sessions bound to the
+card (`sessions`) and the card's state lines (`state`: what the secretary is keeping an eye on).
+The board leaves the card out of All, Focus and the counts, shows its asks in Needs you and in
+the secretary's window, and shows `state` at the top of that window.
 
 Claude Pet runs it from the board's **Secretary** button. The button opens a scheduled job,
 `~/.claude/pet/jobs/secretary/`, which has no schedule, and runs it once per message:

@@ -1093,6 +1093,21 @@ grep -q '^category: other' "$T"/root/tasks/"$STID"-*/TASK.md && ok "secretary's 
 "$HQ" bind "$STID" --session=sec-sess >/dev/null
 "$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["sessions"]==["sec-sess"], d' && ok "secretary lists the sessions bound to its card" || fail "secretary sessions"
 "$HQ" unbind --session sec-sess >/dev/null
+python3 - "$T"/root/tasks/"$STID"-*/TASK.md <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"(?m)^(## (?:Status|当前状态)\n).*$", r"\1Watching T-030: the Monday meeting", s, count=1)
+open(p, "w", encoding="utf-8").write(s)
+PY2
+"$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["state"]==["Watching T-030: the Monday meeting"], d["state"]' && ok "secretary shows what its card says it is keeping an eye on" || fail "secretary state"
+# A root with its own card template: the goal's placeholder, whatever its wording, gets the secretary's goal.
+mkdir -p "$T/root/templates"
+printf -- '---\nid: T-000\ntitle: x\nstatus: active\n---\n\n## 目标\n<要达成什么，怎样算完成>\n\n## 当前状态\n<现在做到哪了>\n' > "$T/root/templates/TASK.md"
+python3 -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c.pop("secretary"); json.dump(c, open(p,"w"))' "$T/root/hq.json"
+"$HQ" secretary init --lang zh --json | python3 -c '
+import json,sys; d=json.load(sys.stdin); card=open(d["card"], encoding="utf-8").read()
+assert "秘书自己的卡片" in card and "<要达成什么" not in card, card' && ok "secretary init fills the goal of the root's own card template" || fail "secretary goal with root template"
+rm -rf "$T/root/templates"
 
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
