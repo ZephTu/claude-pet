@@ -699,7 +699,7 @@ def cmd_project(args):
                   + f"  {project_line(r):<{lw}}  {', '.join(r['paths']) or '-'}"
                   + ("" if r["listed"] else "   (not in list — used on cards)"))
         if usage.get(""):
-            print(f"{'(no project)':<22} {usage['']:>3} task(s)")
+            print(f"{'(no project)':<{nw}} {usage['']:>3} task(s)")
         return
     if a == "order":
         # Projects named here go first, in this order; any others keep their place after them.

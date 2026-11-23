@@ -619,7 +619,7 @@ function render() {
   $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
     `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? T("List", "列表") : T("Project", "项目")}</button>`).join("");
   // One button: by project it folds / unfolds every group; by status it closes open task cards.
-  const anyOpen = ui.groupBy !== "status" ? groupKeys().some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
+  const anyOpen = ui.groupBy !== "status" ? anyGroupOpen() : ui.expanded.size > 0;
   $("#foldall").textContent = anyOpen ? T("Collapse all", "全部收起") : T("Expand all", "全部展开");
   $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project group", "收起或展开所有项目组")
     : ui.groupBy === "repo" ? T("Fold or unfold every repo group", "收起或展开所有仓库组") : T("Close every open task", "收起所有展开的任务");
@@ -1044,7 +1044,7 @@ function renderTasks() {
       const shut = done ? !ui.openClosedProj.has(key) : ui.collapsed.has(key);
       const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
       const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
-      const movable = Boolean(name) && names.includes(name);
+      const movable = Boolean(name) && names.includes(name) && !done;
       const onMe = pr && pr.stats ? pr.stats.on_me || 0 : 0;
       const label = pr && pr.title && pr.title !== name ? pr.title : name;
       html += `<div class="group-title proj ${done ? "pdone" : ""}" data-action="collapse" data-key="${esc(key)}" data-closed="${done ? 1 : ""}" title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
@@ -2371,7 +2371,7 @@ function drawProjectPanel(onlyIfChanged) {
   const box = $("#modal");
   const pr = projectByName(m.name) || { name: m.name, defined: false, paths: [], stats: null, grants: [] };
   const mine = tasks().filter((t) => (t.project || "") === m.name);
-  const sig = JSON.stringify([pr, mine.map((t) => [t.id, t.title, t.status])]);
+  const sig = JSON.stringify([LANG, pr, mine.map((t) => [t.id, t.title, t.status])]);
   if (onlyIfChanged && sig === m.sig) return;
   m.sig = sig;
   const open = mine.filter(isOpen).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
@@ -2383,7 +2383,7 @@ function drawProjectPanel(onlyIfChanged) {
   const facts = [
     pr.kind ? `<span class="ptag ${esc(pr.kind)}">${PKIND_LABEL[pr.kind]}</span>` : "",
     pr.defined ? `<span class="ptag st">${PSTATUS_LABEL[pr.status] || esc(pr.status)}</span>` : "",
-    pr.due ? dueText(pr.due) : "",
+    pr.due && !projectClosed(pr) ? dueText(pr.due) : "",
   ].filter(Boolean).join("");
   const counts = pr.kind === "duty"
     ? T(`${st.open} open · ${st.done_7d} done in the last 7 days · ${st.done} done in all`, `${st.open} 进行中 · 最近 7 天完成 ${st.done_7d} · 共完成 ${st.done}`)
@@ -2618,6 +2618,11 @@ function markdown(text, scope = "") {
 
 // Bring a task into view in the middle column, whatever hides it: closed status, a search
 // filter that does not match, or a folded project group.
+// Whether any group (by project or repo) is unfolded, finished projects opened by hand included.
+function anyGroupOpen() {
+  return groupKeys().some((k) => !ui.collapsed.has(k)) || (ui.groupBy === "project" && [...ui.openClosedProj].some((n) => projectClosed(projectByName(n))));
+}
+
 function revealTask(id) {
   const t = taskById(id);
   if (!t) return toast(T(`${id} not found`, `找不到 ${id}`), true);
@@ -2633,8 +2638,12 @@ function revealTask(id) {
   if (f && !`${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)) {
     ui.filter = $("#search").value = "";
   }
-  if (ui.groupBy === "project") {
-    ui.collapsed.delete(t.project || "(none)");
+  // Unfold the group it is in: a finished project's group is folded unless opened by hand.
+  if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
+    ui.openClosedProj.add(t.project);
+    savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
+  } else if (ui.groupBy !== "status") {
+    ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
     savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
   }
   ui.expanded.add(id);
@@ -2673,10 +2682,15 @@ function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").fo
 
 // The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
 function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
+// Also disarms: a button in the modal isn't redrawn by render(), so it would stay armed.
 function paintArmed() {
-  if (!ui.armed) return;
   for (const b of document.querySelectorAll("[data-confirm]")) {
-    if (confirmKey(b.dataset) === ui.armed) { b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+    if (ui.armed && confirmKey(b.dataset) === ui.armed) {
+      if (!b.classList.contains("armed")) { b.dataset.unarmed = b.innerHTML; b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+    } else if (b.classList.contains("armed")) {
+      b.classList.remove("armed");
+      if (b.dataset.unarmed !== undefined) b.innerHTML = b.dataset.unarmed;
+    }
   }
 }
 
@@ -3073,7 +3087,7 @@ document.addEventListener("click", async (ev) => {
       const back = ui.modal && ui.modal.back;
       if (!back) return closePeek();
       ui.modal = back;
-      return back.type === "context" ? drawContext() : back.type === "project" ? drawProjectPanel() : drawPeek(true);
+      return back.type === "context" ? drawContext() : drawPeek(true);
     }
     case "ctx-goto": closePeek(); return revealTask(d.task);
     case "close-modal": return closePeek();
@@ -3203,10 +3217,13 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "fold-all": {
       if (ui.groupBy !== "status") {
-        const keys = groupKeys();
-        const anyOpen = keys.some((k) => !ui.collapsed.has(k));
-        ui.collapsed = new Set(anyOpen ? keys : []);
-        if (anyOpen) ui.expanded.clear();
+        const anyOpen = anyGroupOpen();
+        ui.collapsed = new Set(anyOpen ? groupKeys() : []);
+        if (anyOpen) {
+          ui.expanded.clear();
+          ui.openClosedProj.clear();
+          savePref("hq-open-closed-proj", "[]");
+        }
         savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       } else {
         ui.expanded.clear();
