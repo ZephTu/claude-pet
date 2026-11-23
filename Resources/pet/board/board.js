@@ -200,7 +200,7 @@ const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
 // Its turn is over but commands it started (a build, a test run…) are still running under it.
 // Not idle: it will have something to say when they finish. (A `claude --bg` session is another
 // thing — s.background — and says so with its own tag.)
-const bgRunning = (s) => s.state !== "busy" && s.state !== "waiting" && ((ui.dots || {})[s.sessionId] || {}).background > 0;
+const bgRunning = (s) => s.state !== "busy" && s.state !== "waiting" && dotClass(s) === "idle bg";
 // One word for where a task's live sessions stand, for its row and its Focus card: working beats
 // running in the background beats idle.
 const liveTag = (live) => {
@@ -1008,8 +1008,8 @@ function focusCard(t) {
     ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}" ${ui.resuming.has(r.sessionId) ? "disabled" : ""}>Resume</button>` : ""; })();
   // Clicking the card opens or closes its details, like a row in All; the details themselves
   // swallow clicks (data-action="none") so selecting or typing there never folds the card.
-  // Closed, a card is its next step, what it asks you, and your own todos; Claude's todos, the
-  // log and the sessions are one click away (the sessions are also in the right column).
+  // Closed, a card is its next step, a line per live session (click for Peek), what it asks you
+  // and your own todos; Claude's todos and the log are one click away.
   return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-st="${esc(t.status)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? T("Click to fold", "点击收起") : T("Click for details", "点击展开详情")}">
     <div class="fhead">
       ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="${T("Drag to reorder your Focus", "拖动调整 Focus 的顺序")}">⠿</span>`}
@@ -1043,7 +1043,7 @@ function focusSessions(t, live) {
   const rank = (s) => order[s.state] ?? (bgRunning(s) ? 2 : 3);
   return `<div class="fsess">${live.slice().sort((a, b) => rank(a) - rank(b) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).map((s) => {
     const title = String(s.title || s.project || s.sessionId.slice(0, 8));
-    const name = title.replace(new RegExp("^" + t.id + "\\s*"), "") || title;
+    const name = title.replace(new RegExp("^" + t.id + "\\s+"), "") || title;
     const last = plainText(s.lastText);
     return `<div class="fs" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
       ${dot(s)}<span class="fs-n">${newTag(s.sessionId)}${esc(name)}</span>
@@ -2633,7 +2633,10 @@ document.addEventListener("click", async (ev) => {
     case "unbind": return act("unbind", { session: d.session }, T("Unbound", "已解绑"));
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
-    case "peek": return openPeek(d.session);
+    case "peek":
+      // A session line or its last words: selecting text there to copy it is not a click.
+      if (el.tagName !== "BUTTON" && String(window.getSelection() || "").trim()) return;
+      return openPeek(d.session);
     case "att-remove":
       (ui.atts[d.session] || []).splice(Number(d.i), 1);
       render();
@@ -2971,25 +2974,27 @@ document.addEventListener("change", (ev) => {
   if (el.id === "activefirst-cb" || d.action === "active-first") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
 
-// Text that arrives in one go — a paste, or a dictation app such as Typeless inserting what it
-// heard — can bring its line breaks as \r\n, \r or U+2028/2029, each of which the box counts as a
-// line of its own, so a paragraph break turned into four or five empty lines. Make those plain
-// \n and keep at most one empty line in a row. Keys typed one at a time are left alone.
-const TYPED = new Set(["insertLineBreak", "insertParagraph", "deleteContentBackward", "deleteContentForward",
-  "deleteWordBackward", "deleteWordForward", "deleteByCut", "historyUndo", "historyRedo", "insertCompositionText"]);
-const tidyBreaks = (v) => v.replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, "\n").replace(/\n(?:[ \t\u00a0]*\n){2,}/g, "\n\n");
-function tidyInserted(el, ev) {
-  if (el.tagName !== "TEXTAREA" || TYPED.has(ev.inputType) || (ev.inputType === "insertText" && (ev.data || "").length <= 1)) return;
-  const v = el.value, tidy = tidyBreaks(v);
-  if (tidy === v) return;
-  const caret = tidyBreaks(v.slice(0, el.selectionEnd)).length;
-  el.value = tidy;
-  el.setSelectionRange(caret, caret);
-}
+// Text that arrives in one go — a paste, a drop, or a dictation app such as Typeless inserting
+// what it heard — can bring its line breaks as \r\n, \r or U+2028/2029, each of which the box
+// counts as a line of its own, so a paragraph break turned into four or five empty lines. Make
+// those plain \n, and keep at most two empty lines in a row. Only the inserted text is touched,
+// and it goes in through execCommand so Cmd-Z still undoes it; typing, IME commits and autocorrect
+// are left alone.
+const BULK = new Set(["insertFromPaste", "insertFromDrop", "insertFromYank", "insertText"]);
+const tidyBreaks = (v) => v.replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n").replace(/\n{4,}/g, "\n\n\n");
+document.addEventListener("beforeinput", (ev) => {
+  const el = ev.target;
+  if (el.tagName !== "TEXTAREA" || !ev.cancelable || ev.isComposing || ui.composing || !BULK.has(ev.inputType)) return;
+  const text = ev.data ?? (ev.dataTransfer ? ev.dataTransfer.getData("text/plain") : "");
+  if (!text) return;
+  const tidy = tidyBreaks(text);
+  if (tidy === text) return;
+  ev.preventDefault();
+  document.execCommand("insertText", false, tidy);   // fires its own input event, which saves the draft
+}, true);
 document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
-  tidyInserted(el, ev);
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   const note = /^note:(.+)$/.exec(el.dataset.key || "");
   if (note) autoPick(note[1], el.value.trim() !== "");

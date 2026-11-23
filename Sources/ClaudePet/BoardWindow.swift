@@ -62,6 +62,8 @@ final class BoardWindow: NSWindow {
     /// accessory app, so it has to activate itself for the window to be key.
     func present(reveal task: String = "") {
         showInDock(true)
+        // Minimised, it would stay in the Dock: every way of opening the board restores it.
+        if isMiniaturized { deminiaturize(nil) }
         // Activation is only a request on macOS 14+, and an accessory app
         // asking from a menu or a click on a non-activating panel is often
         // refused — the window then opened *behind* the frontmost app, which
@@ -88,15 +90,12 @@ final class BoardWindow: NSWindow {
     /// can be switched back to like any window; closing the board takes it out
     /// again. A board that is merely behind other windows keeps its place.
     private func showInDock(_ on: Bool) {
+        // The icon every time: the skin may have changed while the board was open (it is cached).
+        if on, let icon = Self.dockIcon() { NSApp.applicationIconImage = icon }
         let policy: NSApplication.ActivationPolicy = on ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
-        if on {
-            NSApp.mainMenu = Self.boardMenu()
-            NSApp.setActivationPolicy(.regular)
-            if let icon = Self.dockIcon() { NSApp.applicationIconImage = icon }
-        } else {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        if on { NSApp.mainMenu = Self.boardMenu() }
+        NSApp.setActivationPolicy(policy)
     }
 
     override func close() {
@@ -110,8 +109,9 @@ final class BoardWindow: NSWindow {
     }
 
     /// A regular app shows a menu bar; this is the least it needs: close the
-    /// board (Cmd-W) and quit. Quit carries no Cmd-Q on purpose — a stray
-    /// shortcut meant for another app would take the pet away with the board.
+    /// board (Cmd-W) and quit. Quit carries no Cmd-Q on purpose: Cmd-Q is
+    /// pressed by reflex to close a window, and here it would take the pet
+    /// away with the board. Quitting from the menu or the Dock is deliberate.
     private static func boardMenu() -> NSMenu {
         let main = NSMenu()
         let appItem = NSMenuItem()

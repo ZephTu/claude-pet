@@ -881,16 +881,11 @@ main.single { grid-template-columns: 1fr; }
 .lnk { background: none; border: 0; padding: 0; color: var(--faint); font-size: 12px; cursor: pointer; }
 .lnk:hover, .lnk.on { color: var(--text); }
 .res { background: none; border: 0; padding: 0; margin: 8px 0 0; }
-.rail-sec { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line); }
 .bsess { background: transparent; border: 0; padding: 6px 8px; margin: 0 -8px; border-radius: 7px; align-items: center; gap: 9px; }
 .bsess:hover { background: var(--panel-2); }
 .bsess .bs-t { flex: 1; min-width: 0; }
 .bsess .stitle { font-weight: 500; }
 .bsess .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trail .bsess .icons { opacity: 0; transition: opacity .12s; }
-.trail .bsess:hover .icons, .trail .bsess:focus-within .icons, .trail .bsess .icon.armed { opacity: 1; }
-.trail .bsess.past { flex-wrap: wrap; }
-.trail .bsess.past .icons { opacity: 1; }
 .past-h { margin: 12px 0 2px; }
 .metarow select, .field input, .field select, textarea, .note, select.bind { background: var(--bg); border-color: var(--line); color: var(--text); }
 
@@ -961,8 +956,6 @@ main.single { grid-template-columns: 1fr; }
 .hqblock.hq-resolved { box-shadow: inset 3px 0 0 var(--teal); }
 .md code { border: 0; }
 .md pre { border: 0; }
-.trail .bsess { position: relative; }
-.trail .bsess:not(.past) .icons { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: var(--panel-2); border-radius: 7px; }
 .menu input[type="radio"], .menu input[type="checkbox"] { accent-color: var(--text); }
 .badge.live { color: var(--on-accent); display: inline-block; font-size: 11px; }
 .badge.live::before { content: none; }
@@ -998,5 +991,5 @@ main.single { grid-template-columns: 1fr; }
 .tsess .bsess { align-items: flex-start; }
 .tsess .bsess .dot { margin-top: 5px; }
 .tsess .bsess .last { color: var(--faint); font-size: 12px; margin-top: 2px; cursor: pointer;
-  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tsess .bsess .last:hover { color: var(--dim); }

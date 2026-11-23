@@ -302,11 +302,11 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         self.watcher = watcher
     }
 
-    /// The Dock icon (there while the board is open — see BoardWindow) brings
-    /// the board forward, even when it is minimised.
+    /// The Dock icon (there only while the board is open — see BoardWindow)
+    /// brings the board forward, even when it is minimised. Relaunching the
+    /// app while the board is closed (Finder, `open`, an install) does nothing.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if let w = boardWindow, w.isMiniaturized { w.deminiaturize(nil) }
-        if boardWindow != nil { showBoard() }
+        if NSApp.activationPolicy() == .regular, boardWindow != nil { showBoard() }
         return false
     }
 
