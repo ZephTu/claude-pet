@@ -160,6 +160,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 if body["opened"] as? Bool == true { Self.onPeek?(str("session")) }
             }
             return r
+        case "peek-tool":
+            // One tool call's full input and output, for a Peek row that was opened.
+            return await hq(["peek", str("session"), "--tool", str("id"), "--json"])
         case "pet":
             var pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
             if let usage = Self.usage?() { pet["usage"] = usage }
@@ -826,7 +829,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     // MARK: - hq
 
     private var hqPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/bin/hq").path
+        // HQ_BIN: a worktree's hq for `--render-board` while developing; the installed one otherwise.
+        if let dev = ProcessInfo.processInfo.environment["HQ_BIN"], !dev.isEmpty { return dev }
+        return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/bin/hq").path
     }
 
     /// Runs hq and hands its stdout back as text; the page parses JSON itself.

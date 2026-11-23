@@ -39,6 +39,11 @@ captured automatically and sessions don't get the task rules.
 
 **Reading:** `hq sessions` / `hq peek` (and the board's Sessions column) read live sessions'
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
+`hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
+`{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`),
+`turn` (`start`, `done`, `ms`, output `tokens`, `context`) and `todos` (Claude's latest
+TodoWrite / TaskCreate list: `{text, status, active}`); `hq peek <sid> --tool <tool_use id>`
+prints one call's full input and output (an Edit's diff), `--json` for the fields.
 
 **Jump log:** `hq jumps [--days 7] [--json]` summarises `~/.claude/pet/jumps.jsonl`, which
 Claude Pet appends to on every ↗ Jump — counts by the session's state at the time
@@ -79,7 +84,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix>` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
 
 ### What a bound session does differently
