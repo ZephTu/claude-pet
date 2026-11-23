@@ -325,6 +325,28 @@ PY
 touch -t 200001010000 "$C1"
 [ -z "$(stop sess-1 "$(printf 'nothing new\n```hq-update\ntouch\n```')")" ] && ok "a touch-only block satisfies the write-back guard"
 
+# A session that finishes its own task says so on its entry, for the board's "Finishing a task" setting.
+fin() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("sess-1",{}).get("finished")))' "$HOME/.claude/hq/state/sessions.json"; }
+[ "$(fin)" = null ] && ok "an open task leaves no finished mark" || fail "finished mark too early: $(fin)"
+stop sess-1 "$(printf 'ok\n```hq-update\nstatus: nope\n```')" >/dev/null; stop sess-1 "$(printf 'ok\n```hq-update\nstatus: done\ndone: no such todo\n```')" >/dev/null
+[ "$(fin)" = null ] && ok "a block that was not applied finishes nothing" || fail "finished by a rejected block: $(fin)"
+stop sess-1 "$(printf 'All merged.\n```hq-update\nstatus: done\n```')" >/dev/null
+fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["task"]=="T-001" and d["status"]=="done" and d["at"], d' && ok "status done in a session's own block marks the session as having finished its task" || fail "no finished mark: $(fin)"
+first="$(fin)"; sleep 1
+stop sess-1 "$(printf 'still done\n```hq-update\nstatus: done\nlog: tidy\n```')" >/dev/null
+[ "$(fin)" = "$first" ] && ok "a task already done is not finished again" || fail "re-finished: $(fin)"
+mkdir -p "$HOME/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"sess-1\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
+"$HQ" sessions --json | python3 -c 'import json,sys; s=[x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]; assert s["finished"]["status"]=="done" and s["task"]=="T-001", s' && ok "hq sessions --json carries the finished mark" || fail "sessions --json finished"
+rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null
+stop sess-1 "$(printf 'reopened\n```hq-update\nstatus: blocked\n```')" >/dev/null
+stop sess-1 "$(printf 'gave up\n```hq-update\nstatus: abandoned\n```')" >/dev/null
+fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="abandoned", d' && ok "reopened and abandoned: a new finished mark" || fail "abandoned mark: $(fin)"
+stop sess-1 "$(printf 'back\n```hq-update\nstatus: blocked\n```')" >/dev/null
+python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
+import json, sys
+p = sys.argv[1]; s = json.load(open(p)); s["sess-1"].pop("finished", None); json.dump(s, open(p, "w"))
+PY
+
 # hq-update review fixes (PR #51): what is a block, all-or-nothing, matching, leniency, locking
 cardof() { cat "$C1"; }
 before="$(cardof)"

@@ -331,6 +331,7 @@ async function refresh(force) {
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
   else if (ui.modal && ui.modal.type === "project") drawProjectPanel(true);
   loadFlags();
+  sessionFinishes();
 }
 window.hqRefresh = refresh;
 
@@ -1681,8 +1682,8 @@ async function stopAll(list, lead = "") {
 }
 // Finishing a task here (done or abandoned) while it has live sessions asks whether to stop them
 // too, unless an answer was remembered (Settings → Sessions changes it). Conversations are kept and
-// Resume picks them up. A task finished elsewhere (a session's own hq-update, `hq set`) only gets
-// the "still running" bar.
+// Resume picks them up. A task its own session finished (that session's hq-update) is handled the
+// same way, see sessionFinishes; one finished by `hq set` only gets the "still running" bar.
 const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
 async function setStatus(id, status) {
   const live = isOpen({ status }) ? [] : liveFor(id);
@@ -1722,6 +1723,27 @@ function answerFinishAsk(stop) {
   const live = a && stop ? liveFor(a.task) : [];
   if (live.length) return stopAll(live, remember ? T("Remembered; ", "已记住；") : "");
   if (remember) { toast(T("Remembered — finishing a task leaves its sessions running", "已记住——以后结束任务时不停 session")); render(); }
+}
+
+// A session that finished its own task (status done / abandoned in its hq-update) is treated as if
+// the task were finished here: the same setting stops its sessions, asks, or leaves them. Once the
+// finishing session's turn is over (it is no longer busy), so its reply has landed; and only within
+// 10 minutes — one from while the board was closed may have been talked to since, and the amber
+// "still running" bar covers it. Each is handled once ("hq-finish-seen": the newest one handled).
+const FINISH_FRESH_MS = 10 * 60 * 1000;
+function sessionFinishes() {
+  const seen = Number(pref("hq-finish-seen", "0")) || 0, now = Date.now();
+  const at = (s) => Date.parse(s.finished.at) || 0;
+  const fresh = ui.sessions.filter((s) => s.finished && s.finished.task === s.task && s.state !== "busy"
+    && at(s) > seen && now - at(s) < FINISH_FRESH_MS);
+  if (!fresh.length) return;
+  savePref("hq-finish-seen", String(Math.max(...fresh.map(at))));
+  for (const id of new Set(fresh.map((s) => s.task))) {
+    const t = taskById(id), live = liveFor(id);
+    if (!t || isOpen(t) || !live.length) continue;
+    if (finishStop() === "stop") stopAll(live, T(`${id} was finished by its session; `, `${id} 已由它的 session 结束；`));
+    else if (finishStop() === "ask" && !ui.finishAsk) { ui.finishAsk = { task: id, status: t.status }; drawFinishAsk(); }
+  }
 }
 
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.

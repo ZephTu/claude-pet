@@ -2759,6 +2759,8 @@ def live_sessions():
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),
             "task": state.get(sid, {}).get("task"),
+            # Set when this session's own hq-update finished its task: {task, status, at}.
+            "finished": state.get(sid, {}).get("finished"),
             "lastText": (last or "")[:400],
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
@@ -3682,7 +3684,14 @@ def _hook_main():
             if b["kind"] == "hq-update":
                 # Only at the end of the reply: one quoted or shown mid-reply is an example.
                 if b["trailing"]:
-                    problems += apply_update(card, b["body"])
+                    before = parse_card(card).get("status")
+                    bad = apply_update(card, b["body"])
+                    problems += bad
+                    after = parse_card(card).get("status")
+                    # This session finished its task: say so on its entry, for the board to treat
+                    # like a task finished there (its "Finishing a task" setting: ask, stop, keep).
+                    if not bad and before in OPEN_STATUSES and after in ("done", "abandoned"):
+                        update_session(sid, lambda e: e.update(finished={"task": meta["id"], "status": after, "at": now_iso()}))
                 continue
             kind = b["kind"]
             for line in b["body"].splitlines():
