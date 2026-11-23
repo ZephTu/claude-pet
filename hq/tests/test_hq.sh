@@ -1441,6 +1441,95 @@ printf '[api]\nemail=me@example.com\nkey=wrong\nsite=http://127.0.0.1:%s\n' "$(c
 { "$HQ" feed zulip 2>&1 || true; } | grep -q "HTTP 401 bad key" && ok "feed: a Zulip error is reported" || fail "feed error"
 kill "$ZPID" 2>/dev/null; wait "$ZPID" 2>/dev/null || true; rm -f "$HOME/.zuliprc"
 
+# hq feed jira: issues you are assignee, reporter or watcher of, from a fake Jira; one item per issue
+# with what changed since the last scan, from someone else.
+"$HQ" feed | grep -q "jira: not set up" && ok "feed without a Jira site: not set up" || fail "feed no jira"
+{ "$HQ" feed all 2>&1 || true; } | grep -q "no feed is set up" && ok "feed all with nothing set up says so" || fail "feed all none"
+JS="$T/jira"; mkdir -p "$JS"
+cat > "$JS/server.py" <<'PY'
+import http.server, json, sys, urllib.parse, os, datetime as dt
+D = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
+        if self.headers.get("Authorization") != "Basic bWVAZXhhbXBsZS5jb206dG9r":
+            return self.reply(401, {"errorMessages": ["Client must be authenticated"]})
+        if u.path == "/rest/api/2/myself":
+            return self.reply(200, {"accountId": "me-1", "displayName": "Me"})
+        assert u.path == "/rest/api/2/search/jql" and "changelog" in q["expand"], self.path
+        mins = int(q["jql"].split("updated >= -")[1].split("m")[0])
+        cut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=mins)
+        iss = [i for i in json.load(open(os.path.join(D, "issues.json")))
+               if dt.datetime.strptime(i["fields"]["updated"], "%Y-%m-%dT%H:%M:%S.%f%z") >= cut]
+        self.reply(200, {"issues": iss, "isLast": True})
+    def reply(self, code, d):
+        b = json.dumps(d).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(D, "port"), "w").write(str(s.server_port))
+s.serve_forever()
+PY
+jira() {  # key event(new|comment|status|old) author_id author_name [text]: adds to the fake issues
+  python3 - "$JS/issues.json" "$@" <<'PY'
+import json, sys, os, datetime as dt
+p, key, ev, aid, name = sys.argv[1:6]; text = sys.argv[6] if len(sys.argv) > 6 else ""
+ts = lambda h=0: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+iss = json.load(open(p)) if os.path.exists(p) else []
+i = next((x for x in iss if x["key"] == key), None)
+if not i:
+    i = {"key": key, "fields": {"summary": f"Fix the loader ({key})", "status": {"name": "Open"}, "priority": {"name": "Major"},
+         "issuetype": {"name": "Bug"}, "assignee": {"accountId": "me-1", "displayName": "Me"},
+         "reporter": {"accountId": aid, "displayName": name}, "created": ts(100), "updated": ts(100),
+         "description": "", "comment": {"comments": []}}, "changelog": {"histories": []}}
+    iss.append(i)
+f, who = i["fields"], {"accountId": aid, "displayName": name}
+if ev == "new":
+    f["created"] = ts(); f["description"] = text
+elif ev == "comment":
+    f["comment"]["comments"].append({"author": who, "body": text, "created": ts(), "updated": ts()})
+elif ev == "status":
+    i["changelog"]["histories"].append({"author": who, "created": ts(), "items": [{"field": "status", "fromString": "Open", "toString": text}]})
+elif ev == "old":
+    f["comment"]["comments"].append({"author": who, "body": text, "created": ts(50), "updated": ts(50)})
+f["updated"] = ts(50 if ev == "old" else 0)
+json.dump(iss, open(p, "w"))
+PY
+}
+jira QA-1 new u-7 "Alice Wu" "the loader drops rows"
+jira QA-1 comment u-7 "Alice Wu" "[~accountid:me-1] can you take this one?"
+jira QA-2 old u-8 "Bob Li" "long ago"
+jira QA-2 status u-8 "Bob Li" "In Progress"
+jira QA-3 comment me-1 "Me" "my own note"
+python3 "$JS/server.py" "$JS" & JPID=$!; trap 'kill "$JPID" "$ZPID" 2>/dev/null; rm -rf "$T"' EXIT
+for _ in $(seq 50); do [ -s "$JS/port" ] && break; sleep 0.1; done
+export HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok
+"$HQ" feed jira --site "http://127.0.0.1:$(cat "$JS/port")" --dry-run | grep -q "jira: 2 issues (dry run" && [ ! -e "$T/root/secretary/feed/jira" ] && ok "feed jira --dry-run: reads, saves nothing" || fail "jira dry run"
+grep -q '"site": "http://127.0.0.1:' "$T/root/hq.json" && ok "feed jira --site is remembered in hq.json" || fail "jira site saved"
+JJ="$("$HQ" feed jira --no-sort --json)"
+echo "$JJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conversations"]==2 and len(r["items"])==2, r' && ok "feed jira: one item per issue; an issue with only your own changes adds nothing" || fail "jira items"
+hqi inbox --json | python3 -c '
+import json,sys
+xs={n["id"]:n for n in json.load(sys.stdin)["items"]}
+x=[n for n in xs.values() if n.get("issue")=="QA-2"][0]; t=x["text"].split("\n")
+assert x["via"]=="jira", x
+assert t[0].startswith("Jira · QA-2: Fix the loader (QA-2) · http://127.0.0.1:") and t[0].endswith("/browse/QA-2"), t
+assert "you: assignee" in t[1] and t[2].endswith("Bob Li: status: Open → In Progress") and len(t)==3, t
+a=[n for n in xs.values() if n.get("issue")=="QA-1"][0]["text"]
+assert "Alice Wu: created it: the loader drops rows" in a and "Alice Wu: commented: @me can you take this one?" in a, a' && ok "feed jira item: issue link, its state, your role, what changed (old comments left out, mentions of you as @me)" || fail "jira item text"
+ls "$T"/root/secretary/feed/jira/*.jsonl >/dev/null && ! grep -q '"tok"\|tok"' "$T/root/secretary/feed/state.json" && ok "feed jira keeps the raw issues, and no token" || fail "jira raw"
+[ -z "$("$HQ" feed jira --json --no-sort | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["items"]))')" ] && ok "feed jira: the next scan starts after the last change" || fail "jira cursor"
+sleep 1  # the fake keeps whole seconds: step past the cursor
+jira QA-1 comment u-7 "Alice Wu" "any news?"
+answer '{"kind":"skip","confidence":0.9,"reason":"nothing new","alternatives":[]}'
+"$HQ" feed all --claude "$FAKE" >"$T/out" 2>&1; tail -1 "$T/out" | grep -q "^jira 1 → filed 0, unsorted 0, skipped 1" && grep -q "one Jira issue the user is assignee" "$FAKE_DIR/args" && ok "feed all scans what is set up, sorts with the Jira prompt, sums up on one line" || fail "feed all"
+"$HQ" feed | grep -q "jira: last scan .*1 issues" && ok "feed status shows the Jira scan" || fail "jira status"
+export HQ_JIRA_TOKEN=wrong
+{ "$HQ" feed jira 2>&1 || true; } | grep -q "HTTP 401 Client must be authenticated" && ok "feed: a Jira error is reported" || fail "jira error"
+! "$HQ" feed all >"$T/out" 2>&1 && tail -1 "$T/out" | grep -q "jira failed: Jira myself: HTTP 401" && ok "feed all: a failed source fails the run, named on the last line" || fail "feed all failure"
+unset HQ_JIRA_EMAIL HQ_JIRA_TOKEN
+kill "$JPID" 2>/dev/null; wait "$JPID" 2>/dev/null || true
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

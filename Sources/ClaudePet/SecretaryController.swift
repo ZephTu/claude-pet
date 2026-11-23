@@ -15,15 +15,15 @@ import Foundation
 /// - the session is bound to the secretary's card, so the hq hooks give it the card's rules, file
 ///   its `hq-asks` as asks in Needs you, and tell it the answers at its next turn;
 /// - the board shows the conversation in Peek, by the session's id;
-/// - a second job, `secretary-zulip`, brings in what reached the user on Zulip: a shell job running
-///   `hq feed zulip` hourly on weekdays (off until turned on from the window), which files the
-///   messages into the inbox for the sorter.
+/// - a second job, `secretary-feed`, brings in what reached the user on Zulip and Jira: a shell job
+///   running `hq feed all` hourly on weekdays (off until turned on from the window), which files
+///   each conversation or issue into the inbox for the sorter.
 @MainActor
 final class SecretaryController {
     static let shared = SecretaryController()
 
     static let jobID = "secretary"
-    static let feedJobID = "secretary-zulip"
+    static let feedJobID = "secretary-feed"
     /// Weekdays, every hour from 9:00 to 19:00.
     static let feedSchedule = Schedule(kind: .cron, cron: "0 9-19 * * 1-5")
     private var jobs: JobsController { JobsController.shared }
@@ -80,7 +80,7 @@ final class SecretaryController {
         return (o, nil)
     }
 
-    /// The Zulip scan's job: on or off, when next, and how its last run went.
+    /// The scan's job: on or off, when next, and how its last run went.
     private func feedStatus() -> [String: Any] {
         guard let job = store.load(Self.feedJobID) else { return ["job": false, "enabled": false] }
         var f: [String: Any] = ["job": true, "enabled": job.enabled, "kind": job.schedule.kind.rawValue,
@@ -92,14 +92,14 @@ final class SecretaryController {
         return f
     }
 
-    /// The Zulip scan on or off. Made on first use; the user may change its schedule in Scheduled,
-    /// and what makes it the scan (a shell job running `hq feed zulip` in the task root) is put back.
+    /// The scan on or off. Made on first use; the user may change its schedule in Scheduled, and
+    /// what makes it the scan (a shell job running `hq feed all` in the task root) is put back.
     func setFeed(on: Bool) async -> (Any?, String?) {
         if info["root"] == nil, let err = await refreshInfo() { return (nil, err) }
         guard let root = info["root"] as? String, !root.isEmpty else { return (nil, L("No HQ root", "找不到 HQ 根目录")) }
         let command = Self.feedCommand
         var job = store.load(Self.feedJobID) ?? Job(
-            id: Self.feedJobID, name: L("Secretary: Zulip", "秘书：Zulip"), kind: .shell, command: command,
+            id: Self.feedJobID, name: L("Secretary: scan Zulip · Jira", "秘书：扫描 Zulip · Jira"), kind: .shell, command: command,
             cwd: root, schedule: Self.feedSchedule, enabled: false, timeoutMinutes: 15, notify: .failure)
         if store.load(Self.feedJobID) == nil || job.kind != .shell || job.command != command || job.directory != root {
             job.kind = .shell; job.command = command; job.cwd = root
@@ -122,7 +122,7 @@ final class SecretaryController {
     }
 
     static var feedCommand: String {
-        "'\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/hq/bin/hq' feed zulip"
+        "'\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/hq/bin/hq' feed all"
     }
 
     /// Scaffolds what is missing and makes the job. `lang`: the board's language, for the memory

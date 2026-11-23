@@ -1041,8 +1041,8 @@ function renderNotes() {
       ${x.state === "sorted" ? destChip(x, { kind: "unsorted" }, "ghost") : ""}
     </div>`;
   };
-  // A conversation from `hq feed`: its first line is "Zulip · <title> · <url>"; the messages are
-  // clamped to a few lines until the note is opened.
+  // A conversation or issue from `hq feed`: its first line is "Zulip · <title> · <url>" (or
+  // "Jira · …"); the lines after it are clamped to a few until the note is opened.
   const feedText = (x, isOpen) => {
     const [head, ...body] = String(x.text || "").split("\n");
     const parts = head.split(" · ");
@@ -1076,7 +1076,7 @@ function renderNotes() {
       side = `<button class="btn small ${isOpen ? "" : "ghost"}" data-action="note-change" data-id="${esc(x.id)}" title="${T("Put it somewhere else", "放到别处")}">${T("Move", "改")}</button>`;
     }
     return `<div class="qnote it ${x.state}">
-      <div class="it-t">${x.via === "zulip" ? feedText(x, isOpen) : `<span class="t">${esc(x.text)}</span>`} ${imgs(x)}
+      <div class="it-t">${["zulip", "jira"].includes(x.via) ? feedText(x, isOpen) : `<span class="t">${esc(x.text)}</span>`} ${imgs(x)}
         <div class="meta src">${meta}</div>
         ${chips ? `<div class="dests">${chips}</div>` : ""}
         ${isOpen && ["unsorted", "sorted"].includes(x.state) ? picker(x) : ""}
@@ -2586,17 +2586,17 @@ function secretaryReports(m) {
     <button class="btn small" data-action="secretary-report-now" ${busy ? "disabled" : ""} title="${T("Ask for the report that is due now", "让它现在写今天该写的报告")}">${T("Write one now", "现在写一份")}</button>
   </div>`;
 }
-// The Zulip scan (`hq feed zulip`, a job of its own): mentions and DMs go to the quick notes,
+// The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to the quick notes,
 // sorted there. Its switch, how the last scan went, and "scan now".
 function secretaryFeed(m) {
   const f = (m.sec || {}).feed || {};
   const hourly = f.kind === "cron" && f.cron === "0 9-19 * * 1-5";
   const when = hourly ? T("hourly on weekdays, 9–19", "工作日 9–19 点每小时") : T("on its schedule in Scheduled", "按“定时任务”里设的时间");
   const last = f.last;
-  const lastLine = last ? `<span class="meta ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary.replace(/^zulip: /, "").slice(0, 80))}` : ""}</span>` : "";
+  const lastLine = last ? `<span class="meta ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary.slice(0, 90))}` : ""}</span>` : "";
   return `<div class="sec-reports">
-    <span class="sec-watch-h">Zulip</span>
-    <span class="meta" title="${T("@-mentions and direct messages, one quick note per conversation: a log line for a task is filed, a todo or a new task waits for your click, the rest is put away", "@ 你的消息和私信，每个会话一条记录：属于某个任务的情况直接记进它的 Log，待办和新任务等你点，其余的收起")}${f.next ? " · " + T(`Next: ${esc(f.next)}`, `下一次：${esc(f.next)}`) : ""}">${f.enabled ? T(`Scan on: ${when}`, `扫描：开（${when}）`) : T("Scan off", "扫描：关")}</span>
+    <span class="sec-watch-h">Zulip · Jira</span>
+    <span class="meta" title="${T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away. Jira needs its site and token: see the guide", "Zulip 上 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子一条记录。属于某个任务的情况直接记进它的 Log，待办和新任务等你点，其余的收起。Jira 要先设站点和 token，见说明")}${f.next ? " · " + T(`Next: ${esc(f.next)}`, `下一次：${esc(f.next)}`) : ""}">${f.enabled ? T(`Scan on: ${when}`, `扫描：开（${when}）`) : T("Scan off", "扫描：关")}</span>
     ${lastLine}
     <span style="flex:1"></span>
     <button class="btn small ghost" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}">${f.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>
@@ -3587,7 +3587,7 @@ document.addEventListener("click", async (ev) => {
       try { ui.secretary = await apiObj(d.action, { on: d.on === "1" }); }
       catch (e) { return toast(String(e.message || e), true); }
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
-      return toast(d.action === "secretary-feed-now" ? T("Scanning Zulip…", "正在扫 Zulip…") : d.on === "1" ? T("Zulip scan on", "Zulip 扫描已开启") : T("Zulip scan off", "Zulip 扫描已关闭"));
+      return toast(d.action === "secretary-feed-now" ? T("Scanning…", "正在扫描…") : d.on === "1" ? T("Scan on", "扫描已开启") : T("Scan off", "扫描已关闭"));
     case "secretary-report-now":
       return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":
