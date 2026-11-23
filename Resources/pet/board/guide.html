@@ -50,7 +50,7 @@
 <p>同时开着十几个 Claude Code session 时，难的不再是干活本身，而是记住每个 session 在做什么、它问过你什么、你有没有回答。HQ 把这些状态从对话里搬到文件里：</p>
 <table>
 <tr><th>概念</th><th>是什么</th><th>存在多久</th></tr>
-<tr><td><b>项目（project）</b></td><td>一组相关任务，比如 claude-pet 下的几个功能。在 <code>hq.json</code> 里定义名字和对应的目录</td><td>长期</td></tr>
+<tr><td><b>项目（project）</b></td><td>一条工作线：一个<b>目标</b>（有终点，比如"发布 hq-v2"）或一项<b>长期职责</b>（比如"客户 RCA"），不是一个目录。内容写在 <code>projects/&lt;名字&gt;/PROJECT.md</code>，里面的简报会交给它每个任务的 session</td><td>目标到完成为止；职责长期</td></tr>
 <tr><td><b>任务卡</b></td><td><code>tasks/T-012-xxx/TASK.md</code>：目标、状态、下一步、待办、日志</td><td>到任务完成</td></tr>
 <tr><td><b>待回应事项（ask）</b></td><td>session 问过你、需要你决定或去做的事，记在 <code>asks.jsonl</code>，直到你回应</td><td>跟随任务</td></tr>
 <tr><td><b>session</b></td><td>绑定到某个任务的一条工作线程，随时可以关</td><td>随你</td></tr>
@@ -137,7 +137,7 @@
 <p>点开一个任务：</p>
 <table>
 <tr><th>部分</th><th>说明</th><th>谁会更新</th></tr>
-<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>展开的任务分两栏：左边是要做的事（待办、日志），右边一栏是这件事的属性，平时是纯文字。顶部"下一步"旁边的 <b>编辑</b> 把 status / project / category 变成三个下拉框（选了就保存），同时出现 next 输入框，改完点 <b>Done</b> 收起。Folders 是工作目录（只显示最后一级，悬停看全路径）；Links 见下面的 Resources</td><td>你；project 会按目录自动设置；绑定的 session 会改 status</td></tr>
+<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>展开的任务分两栏：左边是要做的事（待办、日志），右边一栏是这件事的属性，平时是纯文字。顶部"下一步"旁边的 <b>编辑</b> 把 status / project / category 变成三个下拉框（选了就保存），同时出现 next 输入框，改完点 <b>Done</b> 收起。Folders 是工作目录（只显示最后一级，悬停看全路径）；Links 见下面的 Resources</td><td>你；project 没填时按目录给默认值，session 可以用 hq-update 的 <code>project:</code> 改；绑定的 session 会改 status</td></tr>
 <tr><td><b>next</b></td><td>展开后最上面那块大字就是它，右边是 <b>编辑</b>、<b>打开任务卡</b>、<b>新 session ▾</b> 三个按钮；点 <b>编辑</b> 才出现它的输入框（session 会从任务卡读它，所以改了会影响下一个 session 做什么）；修改后出现 <b>保存</b> / <b>取消</b>；回车和点别处都不会保存。任务行的副标题优先显示你的下一条 <code>@me</code> 待办（黄色），没有再显示 next</td><td>你；绑定的 session 每做完一轮有实质内容的工作就会更新（超过两分钟没更新会被提醒一次）</td></tr>
 <tr><td><b>workdirs</b></td><td>这个任务涉及的目录</td><td>绑定 session 时自动加入；session 去别的目录干活时会自己补上</td></tr>
 <tr><td><b>Todos ＋</b></td><td>点 ＋ 展开输入框；开头写 <code>@me</code>、<code>@claude</code> 或人名表示谁来做（显示成 <b>You</b> / <b>Claude</b> / 人名）。方框 = 做完，✕（鼠标移上去才出现）= 不做。未完成的排前面，你的在最前，然后是 Claude 的，再是别人的；Claude 的未完成待办默认收起成一行 <b>Claude 的 N 条 ▸</b>（它自己的工作清单，常常很长），点这一行展开或收起，每个任务分别记住；你的和别人的待办始终显示。已完成的超过 3 条时收起到 <b>显示 N 条已结束的</b>（1 小时内刚勾掉的仍留在原处，方便撤销）。有 Claude 的未完成待办时，标题行右边有 <b>整理待办</b>：让这个任务的 session 逐条对照现状核对 Claude 的待办（PR 合了没有？集群删了没有？跑完了没有？），在 <code>hq-update</code> 里把做完的用 <code>done:</code> 勾掉、过时的用 <code>drop:</code> 去掉，还没做的留着、不马上开始做。发给运行中的 session 时，消息里附上 Claude 未完成待办的原文（最多 20 条、约 2000 字），它照着清单勾，不靠启动时的记忆。<code>@Claude</code> 大写也算 Claude 的。交给谁的规则和 <b>▶ 去做</b> 一样：有能发消息的 session 就发给最近活动的那个（忙就排队，在等你确认或回答时不发），没有就新开一个；发出后按钮显示交给了谁（30 分钟内）。<code>@claude</code> 的待办有 <b>▶ 去做</b>：这个任务有能发消息的 session 在跑，就把"请做卡上这条待办，做完勾掉"发给最近活动的那个（忙就排队；它在等你确认或回答时不发，提示你先去终端处理，也不会另开新的）；没有就按"新 session"的方式新开一个，让它读完任务卡直接去做这条。发出后按钮显示交给了谁（30 分钟内），再点会再发一次</td><td>你和 session</td></tr>
@@ -217,7 +217,7 @@ done: 重跑测试
 log: 选方案 v2，因为更便宜
 ref: PR #9 https://github.com/…/pull/9
 ```</pre>
-只写变了的行；<code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> 可以写多行；<code>state</code> 会替换卡片的"当前状态"一节；<code>done</code> / <code>drop</code> 按待办的文字匹配。什么都没变就只写一行 <code>touch</code>。</li>
+只写变了的行；<code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> 可以写多行；<code>state</code> 会替换卡片的"当前状态"一节；<code>done</code> / <code>drop</code> 按待办的文字匹配；<code>project: 名字</code> 把任务移到<b>已有的</b>项目（没有这个项目就整块退回——项目只能由你建）。什么都没变就只写一行 <code>touch</code>。</li>
 <li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。
 <pre>```hq-asks
 - 方案 v2 可以吗？
@@ -226,6 +226,7 @@ ref: PR #9 https://github.com/…/pull/9
 <li><b>没回应的问题不会被当成"不做"</b>：每一轮都会把还没回应的 ask 重新提醒给 session。</li>
 <li><b>授权过的事不再问</b>：绑定的 session 每次启动（新开、resume、/clear、compact 之后）都会收到这个任务当前生效的授权（最多 10 条、约 1500 字；从看板绑定的 session 跟着第一次注入一起收到）。规则是：授权是许可，不是让它现在去做什么；只在绑定这个任务时，本来要问、而某条授权<b>明确覆盖</b>的那一步直接做，并在回复里点名是哪条授权；每条都从窄理解，更大、更有风险或不一样的事照常问。之后每一轮<b>只在授权变了时</b>多注入一行（"+ granted：…（是许可，不是现在就做）" / "- revoked：…，这类事情重新要问"），没变就什么都不加，所以每轮的注入很小；"以后都可以"产生的授权跟着回答说一次，不重复。resume / compact 时先列出 session 上次看到之后被撤销的授权（旧对话里还留着旧列表）；session 改绑到别的任务，会被告知旧任务的授权在这里不算数。会反复出现的、<b>常规且可撤回</b>的那类问题，session 可以在问题末尾带一个建议措辞 <code>[grant: …]</code>（删除、发送、花钱、合并、force-push 永远不带）；看板把它从问题里拿掉，预填进 <b>以后都可以</b> 的编辑框。<b>授权只能由你加</b>：session 被要求不加、不放宽、不改写授权，<code>hq grant add</code> 和 <code>ask resolve --grant</code> 在 Claude Code session 里会直接拒绝（看板和你自己的终端可以；撤销 session 也能做）；<code>state:</code> 行不能是标题，所以 hq-update 也写不出一个授权小节。</li>
 <li><b>session 记得自己的待办</b>：绑定了任务的 session 每次启动（新开、resume、/clear、compact 之后）都会收到卡上 Claude 的未完成待办（原文照抄，最多 20 条、约 2000 字，更早的只说省略了几条），并被要求对照现状，在下一个 <code>hq-update</code> 里用 <code>done:</code> 勾掉做完的、用 <code>drop:</code> 去掉过时的。只在启动时给一次（从看板绑定的 session 在绑定后的第一条消息里也给一次），不会每轮都塞进去；要它中途再核对一遍，用待办旁边的 <b>整理待办</b>。</li>
+<li><b>session 知道任务属于哪条工作线</b>：任务所在的项目有 <code>PROJECT.md</code> 时，绑定的 session 每次启动（新开、resume、/clear、compact 之后，以及 <code>hq bind</code>）都会收到一段项目说明：属于哪个项目、是目标还是长期职责、截止时间、目标的第一行，再加上 <b>简报</b> 全文（最多 2000 字，超出的部分截掉，提示它去读 PROJECT.md）。简报是空的就什么都不说。不管 session 在哪个仓库里干活都一样。之后只在这段说明变了（改了简报、标题、类型、状态、截止时间或目标第一行，或者任务换了项目）时，在下一条消息里再给一次；简报没了也会告诉它之前那段不再适用。项目的 <b>授权</b> 一节对这个项目的所有任务都有效，注入时列在"From project …"下面。</li>
 <li><b>两边都能回应</b>：
   <ul>
   <li>在看板上点按钮 → session 下一轮收到"用户在看板上回应了 …"；</li>
@@ -254,7 +255,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明" [--grant "措辞"]</code></td><td>回应一条 ask；<code>--grant</code>（只能配 do）同时加一条常设授权</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
-<tr><td><code>hq grant list T-012 [--json]</code> · <code>hq grant add T-012 "措辞" [--source T-012.3]</code> · <code>hq grant revoke T-012 &lt;序号|措辞&gt;</code></td><td>查看、添加、撤销任务的常设授权；add / revoke 用 JSON 打印那一条，<code>hq grant add T-012 "措辞" --at 时间 --source 来源</code> 能原样加回</td></tr>
+<tr><td><code>hq grant list T-012 [--json]</code> · <code>hq grant add T-012 "措辞" [--source T-012.3]</code> · <code>hq grant revoke T-012 &lt;序号|措辞&gt;</code></td><td>查看、添加、撤销任务的常设授权；add / revoke 用 JSON 打印那一条，<code>hq grant add T-012 "措辞" --at 时间 --source 来源</code> 能原样加回。用 <code>--project 名字</code> 代替任务编号，就是项目级的授权（写在 PROJECT.md，对项目里每个任务都有效）</td></tr>
 <tr><td><code>hq category list</code> · <code>add 名字</code> · <code>rename 旧 新</code> · <code>remove 名字 --to 其他</code></td><td>管理分类（见下一节）</td></tr>
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>Focus 列表（order 按给出的顺序排）</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
@@ -275,11 +276,11 @@ ref: PR #9 https://github.com/…/pull/9
 
 <h1 id="zh-proj">项目</h1>
 <ul>
-<li>项目是任务的上一层，比如在 claude-pet 里做的几个功能都属于 claude-pet 项目。分类说的是"哪类工作"，项目说的是"属于哪个项目"，两者互不影响。</li>
-<li>每个项目有一个名字和若干目录，存在任务根目录的 <code>hq.json</code> 里。</li>
-<li><b>自动归属</b>：新建任务（填了工作目录）或绑定 session 时，按目录归到对应项目；目录嵌套时取最深的那个。之后可以在任务详情里手动改。</li>
-<li><b>⚙ 设置 → Projects</b>：新增项目（名字 + 目录）、改名（修改后点 Save，所有任务卡同步更新）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
-<li>命令行：<code>hq project list | add 名字 --path 目录 | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。</li>
+<li><b>项目是一条工作线，不是一个目录</b>：要么是有终点的<b>目标</b>（kind: goal，比如"发布 hq-v2"），要么是<b>长期职责</b>（kind: duty，比如"客户 RCA""Release 回归测试"）。一个任务只属于一个项目。目录（仓库）只是任务的属性（工作目录），用来开 session、Resume、匹配 session。分类说的是"哪类工作"，和项目互不影响。</li>
+<li><b>PROJECT.md</b>：每个项目一个 <code>&lt;任务根目录&gt;/projects/&lt;名字&gt;/PROJECT.md</code>。frontmatter 是 <code>title</code>（显示名）、<code>kind</code>（goal / duty）、<code>status</code>（active / paused / done / abandoned）、<code>due</code>（截止日期，目标才有）、<code>jira</code>（关联 epic）、<code>fixVersions</code>；正文几节：<b>目标</b>（职责写"职责范围"）、<b>完成标准</b>（职责写"健康标准"）、<b>简报</b>（交给这个项目每个任务的 session：背景、约定、常用命令、要避开的坑）、<b>授权</b>（和任务卡同样的格式）、<b>决策记录</b>。标题中英文都认（<code>## 目标</code>、<code>## Goal</code>、<code>## 目标 / Goal</code>…）；每节一直到下一个这几种标题为止，简报里自己加的 <code>## 常用命令</code> 之类的小标题算在简报里。职责的状态只有 active / paused。名字只差大小写的两个项目不允许（macOS 上会是同一个文件夹）。<code>name</code> 用短英文 id（命令行和卡片 <code>project:</code> 用它），显示名放 <code>title</code>。没有 PROJECT.md 的项目照样能用，只是没有类型、目标和简报。</li>
+<li><b>目录只是默认建议</b>：<code>hq.json</code> 里还是记着项目的名字、顺序和目录；新建任务或绑定 session 时，任务还没有项目就按目录给一个默认值（目录嵌套时取最深的）。只给专属某个项目的仓库配目录；几个项目共用的仓库不配，在那里新建的任务先归到"无项目"，再手动分。之后可以在任务详情里改，session 也可以用 hq-update 的 <code>project:</code> 改。</li>
+<li><b>⚙ 设置 → Projects</b>：新增项目（名字 + 目录，同时生成一份 PROJECT.md 草稿）、改名（修改后点 Save，所有任务卡和 PROJECT.md 的文件夹都跟着改）、增删目录（<b>+ directory</b>）、拖动 ⠿ 调整顺序、删除（有任务时先选移到哪个项目或"无项目"；PROJECT.md 的文件夹不删，移到 <code>projects/.removed/</code>）；有未归属的任务时，<b>Assign by directory</b> 一键按目录归属。</li>
+<li>命令行：<code>hq project list | show 名字 | brief 名字 | add 名字 [--kind goal|duty] [--title 显示名] [--due 日期] [--path 目录] | set 名字 kind=… status=… due=… title=… jira=A,B fixVersions=… | paths 名字 目录… | rename 旧 新 | remove 名字 --to 其他 | auto | order 名字…</code>。<code>list</code> 带上每个项目的进行中、已完成和等你的数目；<code>show</code> 显示内容和任务统计（进行中、已完成、最近 7 天完成、等你的）；<code>brief</code> 打印 session 实际会收到的那段文字。目标、完成标准、简报直接编辑 PROJECT.md。</li>
 </ul>
 
 <h1 id="zh-cats">分类与工作目录</h1>
@@ -312,11 +313,12 @@ ref: PR #9 https://github.com/…/pull/9
 <pre>---
 id: T-012
 title: "release_test_all 排障"
-project: bigtest             # 所属项目；按工作目录自动设置
+project: bigtest             # 所属项目；没填时按工作目录给默认值
 category: test-followup      # 自由填写
 status: active               # active | waiting-on-me | blocked | done | abandoned
 lead: test-lead
 updated: 2026-11-20
+closed: 2026-11-21           # 变成 done / abandoned 的那天，自动写
 workdirs: ["/path/to/bigtest"]
 refs: ["QA-9519", "bigtest#3248"]
 sessions: ["48f4f564"]
@@ -359,7 +361,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h2>文件</h2>
 <pre>&lt;任务根目录&gt;/tasks/T-012-xxx/TASK.md     任务卡
 &lt;任务根目录&gt;/tasks/T-012-xxx/asks.jsonl   待回应事项
-&lt;任务根目录&gt;/templates/                   新任务模板、lead 模板
+&lt;任务根目录&gt;/projects/rca/PROJECT.md      项目：类型、目标、简报、项目级授权
+&lt;任务根目录&gt;/templates/                   新任务、新项目、lead 的模板
 ~/.claude/hq/bin/hq                       命令行工具 + hook 入口
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
@@ -393,7 +396,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p>With a dozen Claude Code sessions open, the hard part is no longer the work — it is remembering what each session was doing, what it asked you, and whether you ever answered. HQ moves that state out of the conversations and into files:</p>
 <table>
 <tr><th>Concept</th><th>What it is</th><th>Lives</th></tr>
-<tr><td><b>Project</b></td><td>a group of related tasks — say, the features of claude-pet. Defined in <code>hq.json</code> with a name and its directories</td><td>long-term</td></tr>
+<tr><td><b>Project</b></td><td>a line of work: a <b>goal</b> with an end ("ship hq-v2") or a standing <b>duty</b> ("customer RCAs") — not a directory. Written up in <code>projects/&lt;name&gt;/PROJECT.md</code>, whose brief every session on one of its tasks is given</td><td>a goal until it is done; a duty for good</td></tr>
 <tr><td><b>Task card</b></td><td><code>tasks/T-012-slug/TASK.md</code>: goal, status, next step, todos, log</td><td>until the task is done</td></tr>
 <tr><td><b>Ask</b></td><td>something a session needs you to decide or do, kept in <code>asks.jsonl</code> until you answer</td><td>with the task</td></tr>
 <tr><td><b>Session</b></td><td>a working thread bound to one task; close it any time</td><td>as long as you like</td></tr>
@@ -479,7 +482,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <p>Open a task:</p>
 <table>
 <tr><th>Part</th><th>What it is</th><th>Who updates it</th></tr>
-<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>an open task has two columns: the work on the left (todos, log), the task's facts in a column on the right, as plain text. <b>Edit</b>, beside the next step at the top, turns status / project / category into three menus (picking saves) and opens next; <b>Done</b> folds it back. Folders are the workdirs (last part shown; hover for the full path); Links are the Resources below</td><td>you; project is set from the directory automatically; a bound session sets status</td></tr>
+<tr><td><b>Status / Project / Category / Folders / Links</b></td><td>an open task has two columns: the work on the left (todos, log), the task's facts in a column on the right, as plain text. <b>Edit</b>, beside the next step at the top, turns status / project / category into three menus (picking saves) and opens next; <b>Done</b> folds it back. Folders are the workdirs (last part shown; hover for the full path); Links are the Resources below</td><td>you; an empty project gets a default from the directory, and a session can move it with hq-update's <code>project:</code>; a bound session sets status</td></tr>
 <tr><td><b>next</b></td><td>the large text at the top of an open task, with <b>Edit</b>, <b>Open card</b> and <b>New session ▾</b> beside it; its box only appears under <b>Edit</b> (sessions read it from the card, so editing it steers the next one); edit, then <b>Save</b> / <b>Cancel</b> appear — neither Enter nor clicking away saves. A task row's subtitle shows your next <code>@me</code> todo (amber) first, else next</td><td>you; a bound session after each turn of real work (one reminder if a turn over two minutes left the card untouched)</td></tr>
 <tr><td><b>workdirs</b></td><td>directories the task touches</td><td>added when a session is bound; a session working in a new directory adds it</td></tr>
 <tr><td><b>Todos ＋</b></td><td>＋ shows the input; start with <code>@me</code>, <code>@claude</code> or a name (shown as <b>You</b> / <b>Claude</b> / the name). Box = done, ✕ (shown on hover) = won't do. Open ones come first — yours, then Claude's, then anyone else's. Claude's open todos (its own working list, often long) fold by default into one row, <b>Claude's N todos ▸</b>; click it to unfold or fold them, remembered per task. Yours and other people's always show. Once more than 3 are finished they fold under <b>Show N finished</b> (anything ticked in the last hour stays put for an easy undo). While Claude has open todos, the header has <b>Tidy todos</b>: it asks the task's session to check each of Claude's open todos against how things stand now (PR merged? cluster deleted? run finished?) and, in its <code>hq-update</code>, tick the finished ones with <code>done:</code> and drop the obsolete ones with <code>drop:</code> — the rest stay open and aren't started now. Sent to a running session, the message carries Claude's open todos word for word (at most 20, about 2000 characters), so it works from the card's list rather than its memory of the one it got at start. <code>@Claude</code> counts as Claude's too. It goes where <b>▶ Do it</b> would: to the most recently active session the board can message (queued if busy, nothing sent while it waits on a prompt), or to a new session when there is none; afterwards the button says who has it (for 30 minutes). An <code>@claude</code> todo has <b>▶ Do it</b>: with a live session on the task that the board can message, it sends "please do this todo on the card, tick it when done" to the most recently active one (queued if busy; if it is waiting on a prompt, nothing is sent and no second session is started — answer the prompt first); with none, it starts a session the way New session does, told to read the card and do that todo. Afterwards the button says who has it (for 30 minutes); clicking again hands it over again</td><td>you and sessions</td></tr>
@@ -559,7 +562,7 @@ done: rerun the suite
 log: picked plan v2 because it is cheaper
 ref: PR #9 https://github.com/…/pull/9
 ```</pre>
-Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> may repeat; <code>state</code> replaces the card's Status section; <code>done</code> / <code>drop</code> find the todo by its text. Nothing changed: a block holding just <code>touch</code>.</li>
+Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> may repeat; <code>state</code> replaces the card's Status section; <code>done</code> / <code>drop</code> find the todo by its text; <code>project: NAME</code> moves the task to an <b>existing</b> project (no such project: the block goes back — only you make projects). Nothing changed: a block holding just <code>touch</code>.</li>
 <li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …).
 <pre>```hq-asks
 - Approve plan v2?
@@ -568,6 +571,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <li><b>An unanswered ask is never a "no"</b> — open asks are reminded to the session every turn.</li>
 <li><b>Granted steps aren't asked again</b> — whenever a bound session starts (new, resumed, after /clear or a compaction) it gets the task's grants in force (at most 10 and about 1500 characters; a session bound from the board gets them with its first injection). The rule: grants are permissions, not requests to act now; while bound to the task, a step the session would otherwise ask about that a grant <b>clearly covers</b> is taken without asking and the grant named in the reply; each is read narrowly, and anything bigger, riskier or different is asked as usual. After that a turn only carries a line <b>when the grants changed</b> ("+ granted — a permission from now on, not a request to act now: …" / "- revoked — ask again before doing this: …"), nothing otherwise, so the per-turn injection stays tiny; a grant made by <b>Yes, always</b> is stated once, with the answer. On resume or compact the session first hears what was revoked since it last saw the grants (the old conversation still holds the old list); a session re-bound to another task is told the old task's grants don't apply there. For a <b>routine, reversible</b> kind of step that will come up again, the session may end the ask with a suggested wording, <code>[grant: …]</code> (never for deleting, sending, spending, merging or force-pushing); the board takes it off the question and pre-fills the <b>Yes, always</b> editor with it. <b>Only you add grants</b>: sessions are told never to add, widen or reword one, and <code>hq grant add</code> and <code>ask resolve --grant</code> refuse to run inside a Claude Code session (the board and your own terminal can; a session may still revoke); a <code>state:</code> line can't be a heading, so an hq-update can't write a grants section either.</li>
 <li><b>The session sees its own todos</b> — whenever a bound session starts (new, resumed, after /clear or a compaction) it gets Claude's open todos from the card, word for word (at most 20 and about 2000 characters; older ones are only counted), and is asked to check them against how things stand and, in its next <code>hq-update</code>, tick finished ones with <code>done:</code> and drop obsolete ones with <code>drop:</code>. Only at start (and, for a session bound from the board, once with its first message after binding), not every turn; to have it check again mid-way, use <b>Tidy todos</b> by the todos.</li>
+<li><b>The session knows its line of work</b> — when the task's project has a <code>PROJECT.md</code>, a bound session gets a note on it whenever it starts (new, resumed, after /clear or a compaction, and on <code>hq bind</code>): the project, goal or duty, its deadline, the first line of its goal, then the whole <b>Brief</b> (at most 2000 characters; past that it is cut and pointed at PROJECT.md), whatever repo the session works in. An empty brief: nothing is said. After that it hears again, with its next message, only when this note changes (the brief, title, kind, status, deadline or first line of the goal is edited, or the task moves to another project); a brief that is gone is reported as no longer applying. The project's <b>Grants</b> section holds for every task in it; they are listed under "From project …".</li>
 <li><b>Answer on either side</b> — on the board (delivered next turn), or in the chat (the session records it with an <code>hq-resolved</code> block and the board updates).</li>
 <li><b>Drafts are not done</b> — anything the session drafted for you to send becomes an <code>@me</code> todo until you tick it.</li>
 </ol>
@@ -592,7 +596,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…" [--grant "wording"]</code></td><td>answer an ask; <code>--grant</code> (with do only) also adds a standing grant</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
-<tr><td><code>hq grant list T-012 [--json]</code> · <code>hq grant add T-012 "wording" [--source T-012.3]</code> · <code>hq grant revoke T-012 &lt;n|wording&gt;</code></td><td>list, add or revoke a task's standing grants; add / revoke print that grant as JSON, and <code>hq grant add T-012 "wording" --at TIME --source ASK</code> puts a revoked one back as it was</td></tr>
+<tr><td><code>hq grant list T-012 [--json]</code> · <code>hq grant add T-012 "wording" [--source T-012.3]</code> · <code>hq grant revoke T-012 &lt;n|wording&gt;</code></td><td>list, add or revoke a task's standing grants; add / revoke print that grant as JSON, and <code>hq grant add T-012 "wording" --at TIME --source ASK</code> puts a revoked one back as it was. <code>--project NAME</code> in place of the task id: the project's grants (in PROJECT.md, for every task in it)</td></tr>
 <tr><td><code>hq category list</code> · <code>add NAME</code> · <code>rename OLD NEW</code> · <code>remove NAME --to OTHER</code></td><td>manage categories (next section)</td></tr>
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>the Focus list (order: in the order given)</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
@@ -613,11 +617,11 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 
 <h1 id="en-proj">Projects</h1>
 <ul>
-<li>A project is the level above tasks — the features you build in claude-pet all belong to the claude-pet project. Category says what kind of work it is; project says what it belongs to. They are independent.</li>
-<li>Each project has a name and some directories, kept in <code>hq.json</code> in your task root.</li>
-<li><b>Automatic</b>: creating a task with a workdir, or binding a session, puts the task in the project of that directory (the deepest match wins). Change it any time in the task.</li>
-<li><b>⚙ Settings → Projects</b>: add one (name + directory), rename it (edit, then Save — every card follows), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
-<li>From a shell: <code>hq project list | add NAME --path DIR | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>.</li>
+<li><b>A project is a line of work, not a directory</b>: a <b>goal</b> with an end (kind: goal — "ship hq-v2") or a standing <b>duty</b> (kind: duty — "customer RCAs", "release regression"). A task belongs to one project. A directory (repo) is just a task's workdir: where sessions open, resume and are matched. Category says what kind of work it is; it is independent of the project.</li>
+<li><b>PROJECT.md</b>: one per project, <code>&lt;root&gt;/projects/&lt;name&gt;/PROJECT.md</code>. Frontmatter: <code>title</code> (display name), <code>kind</code> (goal / duty), <code>status</code> (active / paused / done / abandoned), <code>due</code> (a goal's deadline), <code>jira</code> (epics), <code>fixVersions</code>. Sections: <b>Goal</b> (a duty: its scope), <b>Done when</b> (a duty: what running well looks like), <b>Brief</b> (given to every session on one of its tasks: background, conventions, commands, pitfalls), <b>Grants</b> (same format as a card's), <b>Log</b>. Headings in either language (<code>## Goal</code>, <code>## 目标</code>, <code>## 目标 / Goal</code> …); a section runs to the next of these headings, so a <code>## Commands</code> of your own inside the brief stays in the brief. A duty's status is active or paused. Two projects whose names differ only in case are refused (on macOS they would be one folder). The <code>name</code> is a short id (used by the CLI and a card's <code>project:</code>); the display name goes in <code>title</code>. A project without a PROJECT.md still works — it just has no kind, goal or brief.</li>
+<li><b>Directories only suggest</b>: <code>hq.json</code> still keeps each project's name, order and directories; creating a task or binding a session gives a task with no project a default from its directory (the deepest match wins). Give directories only to repos that belong to one project; leave shared repos out, and tasks started there land in "No project" for you to sort. Change it any time in the task; a session can move it with hq-update's <code>project:</code>.</li>
+<li><b>⚙ Settings → Projects</b>: add one (name + directory; a draft PROJECT.md comes with it), rename it (edit, then Save — every card and the PROJECT.md folder follow), add or remove directories (<b>+ directory</b>), drag ⠿ to reorder, remove it (if tasks use it, pick where they go or "no project"; its PROJECT.md folder is not deleted but moved to <code>projects/.removed/</code>); while some tasks have no project, <b>Assign by directory</b> sorts them in one go.</li>
+<li>From a shell: <code>hq project list | show NAME | brief NAME | add NAME [--kind goal|duty] [--title T] [--due DATE] [--path DIR] | set NAME kind=… status=… due=… title=… jira=A,B fixVersions=… | paths NAME DIR… | rename OLD NEW | remove NAME --to OTHER | auto | order NAME…</code>. <code>list</code> gives each project's open, done and waiting-on-you counts; <code>show</code> prints it with task counts (open, done, done in the last 7 days, waiting on you); <code>brief</code> prints exactly what sessions are given. Goal, done-when and the brief: edit PROJECT.md.</li>
 </ul>
 
 <h1 id="en-cats">Categories and workdirs</h1>
@@ -650,11 +654,12 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <pre>---
 id: T-012
 title: "Rerun perf baseline"
-project: bigtest             # set from the workdir automatically
+project: bigtest             # empty: defaulted from the workdir
 category: benchmark          # free text
 status: active               # active | waiting-on-me | blocked | done | abandoned
 lead: bench-lead
 updated: 2026-11-20
+closed: 2026-11-21           # the day it became done / abandoned, written for you
 workdirs: ["/path/to/bigtest"]
 refs: ["QA-9519", "bigtest#3248"]
 sessions: ["48f4f564"]
@@ -697,7 +702,8 @@ next: "run baseline on clusters A/C"
 <h2>Files</h2>
 <pre>&lt;root&gt;/tasks/T-012-slug/TASK.md       task card
 &lt;root&gt;/tasks/T-012-slug/asks.jsonl     asks ledger
-&lt;root&gt;/templates/                      new-task and lead templates
+&lt;root&gt;/projects/rca/PROJECT.md         a project: kind, goal, brief, project grants
+&lt;root&gt;/templates/                      task, project and lead templates
 ~/.claude/hq/bin/hq                    CLI and hook entry point
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
 ~/.claude/hq/state/sessions.json       session → task bindings
