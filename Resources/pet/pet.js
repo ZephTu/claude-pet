@@ -636,7 +636,7 @@ function dotClass(s) {
 
 /** Markup for one live-session row. */
 function sessionRowHTML(s) {
-  const jumpable = s.termHandle ? " jumpable" : "";
+  const jumpable = s.termHandle || s.opensBoard ? " jumpable" : "";
   const napped = s.snoozedFor ? " napped" : "";
   // A 6px dot was the whole signal that a row wanted something. It is carried
   // by the lamp's shape and a wash as well now — a background, so marking a
@@ -659,7 +659,7 @@ function sessionRowHTML(s) {
     '<span class="proj"></span><span class="what"></span>' +
     '<span class="meta">' + metaHTML(s) +
     // See rowAge: which clock this is.
-    ageHTML(rowAge(s), !!s.termHandle) + "</span>" +
+    ageHTML(rowAge(s), !!(s.termHandle || s.opensBoard)) + "</span>" +
     clock +
     '<span class="mute" title="' + TEXT.muteTip + '">\u00d7</span>' +
     "</div>" +
@@ -678,13 +678,13 @@ function sessionRowHTML(s) {
  * session has gone says so rather than offering a jump that cannot work.
  */
 function finishedRowHTML(f) {
-  const jumpable = f.termHandle ? " jumpable" : "";
+  const jumpable = f.termHandle || f.opensBoard ? " jumpable" : "";
   return (
     '<div class="row done' + (f.closed ? " gone" : "") + jumpable + '"><div class="line">' +
     '<span class="dot done"></span>' +
     '<span class="proj"></span>' +
     '<span class="what">' + (f.count > 1 ? TEXT.turns(f.count) : TEXT.done) + "</span>" +
-    ageHTML(f.agoSeconds, !!f.termHandle) +
+    ageHTML(f.agoSeconds, !!(f.termHandle || f.opensBoard)) +
     '<span class="read" title="' + TEXT.readTip + '">\u2713</span>' +
     "</div>" +
     // What Claude said last, so the row can answer "do I need to look?" on its

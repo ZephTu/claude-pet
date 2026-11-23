@@ -174,6 +174,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         panel.onDoubleClick = { bridge.handleDoubleClick() }
         bridge.onDoubleClickPet = { [weak self] in self?.toggleBoard() }
         bridge.onOpenBoardAt = { [weak self] task in self?.showBoard(reveal: task) }
+        bridge.onOpenSession = { [weak self] sid, kind, handle, source in
+            self?.openSession(sid, kind: kind, handle: handle, source: source) ?? .nowhere
+        }
         panel.onHover = { [weak self] point, panelOpen in
             if panelOpen { bridge.setHover(at: point) }
             self?.updateDwell(at: point, panelOpen: panelOpen)
@@ -212,6 +215,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
         BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
         BoardBridge.onPeek = { [weak self] sid in self?.peekedAt[sid] = Date() }
+        BoardBridge.clickTarget = { [weak self] in self?.clickTarget.rawValue ?? "" }
+        BoardBridge.onClickTarget = { [weak self] raw in self?.setClickTarget(ClickTarget(stored: raw)) }
         TerminalJump.record = { [weak self] origin, kind in self?.recordJump(origin, kind: kind) }
         BoardBridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
@@ -257,7 +262,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onQuit: { NSApp.terminate(nil) },
             onShowBoard: { [weak self] in self?.showBoard() },
             onSkin: { [weak panel] id in panel?.setSkin(id) },
-            onLanguage: { [weak self] id in self?.setLanguage(id) }
+            onLanguage: { [weak self] id in self?.setLanguage(id) },
+            onClickTarget: { [weak self] target in self?.setClickTarget(target) }
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
@@ -271,6 +277,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
                           keepListOpenOn: self.keepListOpen,
+                          clickTarget: self.clickTarget,
                           problem: HealthCollector.quickProblem(petHome: self.petHome),
                           noticeHold: self.noticeHold, noticeCount: self.noticeCount,
                           skin: panel?.skin ?? PetSkins.defaultID,
@@ -370,6 +377,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                              turns: transcriptStats.compactMapValues { $0.turns > 0 ? $0.turns : nil },
                              context: contextReadings,
                              tasks: hq.taskBySession, taskStatus: hq.statusBySession,
+                             clickTarget: clickTarget,
                              hqAsks: paused ? [] : hq.openAsks.map {
                                  ["id": $0.id, "task": $0.task, "text": $0.text,
                                   "status": hq.statusByTask[$0.task] ?? ""]
@@ -473,10 +481,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                           names: sessionNames(state),
                                           summaries: latestSummaries(now: now))
         for notice in notices {
-            let terminal = state.sessions.first { $0.sessionId == notice.sessionId }?.terminal
             bridge?.notify(notice.text, hold: noticeHold, emphasis: notice.emphasis,
                            sessionId: notice.sessionId,
-                           jumpable: terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false)
+                           jumpable: route(for: notice.sessionId) != .nowhere)
         }
         if !notices.isEmpty {
             lastSpoken[.sessionDone] = now
@@ -982,10 +989,51 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     /// The HQ task board. One window, reused: closing hides it, reopening
     /// refreshes it.
-    private func showBoard(reveal task: String = "") {
+    private func showBoard(reveal task: String = "", session: String = "") {
         let window = boardWindow ?? BoardWindow()
         boardWindow = window
-        window.present(reveal: task)
+        window.present(reveal: task, session: session)
+    }
+
+    // MARK: - Where a click on a session goes
+
+    /// Settings → "Clicking a Session Opens": its terminal, or its task on the board.
+    private var clickTarget = ClickTarget(stored: UserDefaults.standard.string(forKey: ClickTarget.key))
+
+    /// From the pet's menu or the board's settings, which both show this one value.
+    private func setClickTarget(_ target: ClickTarget) {
+        guard target != clickTarget else { return }
+        clickTarget = target
+        UserDefaults.standard.set(target.rawValue, forKey: ClickTarget.key)
+        // Rows bound to a task but with no terminal become clickable, or stop being.
+        render()
+    }
+
+    /// Where a click on this session would go, its terminal taken from what the pet last read.
+    private func route(for sessionID: String) -> ClickTarget.Route {
+        let terminal = latest.first { $0.sessionId == sessionID }?.terminal
+        return clickTarget.route(task: taskIndex.snapshot().taskBySession[sessionID],
+                                 canJump: terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false)
+    }
+
+    /// Opens a session from the pet — a notice, a row in its list, the shortcut — where
+    /// Settings says: its terminal, or the board at its task, with the session picked out and
+    /// its conversation open. Returns where it went; `.nowhere` opened nothing.
+    @discardableResult
+    private func openSession(_ sid: String, kind: String, handle: String, source: String) -> ClickTarget.Route {
+        let canJump = !handle.isEmpty && TerminalTarget.canJump(kind: kind)
+        let route = clickTarget.route(task: sid.isEmpty ? nil : taskIndex.snapshot().taskBySession[sid],
+                                      canJump: canJump)
+        switch route {
+        case .board(let task):
+            TerminalJump.record?(.init(session: sid, source: source), "board")
+            showBoard(reveal: task, session: sid)
+        case .terminal:
+            TerminalJump.jump(kind: kind, handle: handle, from: .init(session: sid, source: source))
+        case .nowhere:
+            break
+        }
+        return route
     }
 
     /// Double-click on the pet: show the board, or put it away if it is
@@ -1180,7 +1228,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             bridge?.say(L("nothing is waiting on you", "没有在等你的 session"), hold: 3)
             return
         }
-        guard let terminal = target.terminal, TerminalTarget.canJump(kind: terminal.kind) else {
+        // Its terminal, or its task on the board — the same setting as a click.
+        guard openSession(target.sessionId, kind: target.terminal?.kind ?? "",
+                          handle: target.terminal?.handle ?? "", source: "hotkey") != .nowhere else {
             // Still a jump the user wanted; the log is about why, not whether it worked.
             TerminalJump.record?(.init(session: target.sessionId, source: "hotkey"), "")
             bridge?.say(L("\(target.project) is waiting, but its terminal cannot be addressed",
@@ -1188,8 +1238,6 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                         hold: 5, emphasis: target.project)
             return
         }
-        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle,
-                          from: .init(session: target.sessionId, source: "hotkey"))
     }
 
     /// When each session's conversation was last shown in the board's Peek, since the pet started.
@@ -1293,13 +1341,12 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         bridge?.dismissNotice(sessionID)
         // A scheduled job's notice: its runs are on the board.
         if sessionID.hasPrefix("job:") { return showBoard(reveal: "jobs") }
-        guard let terminal = latest.first(where: { $0.sessionId == sessionID })?.terminal,
-              TerminalTarget.canJump(kind: terminal.kind) else {
+        let terminal = latest.first(where: { $0.sessionId == sessionID })?.terminal
+        guard openSession(sessionID, kind: terminal?.kind ?? "", handle: terminal?.handle ?? "",
+                          source: "pet-notice") != .nowhere else {
             bridge?.setPanelOpen(true)
             return
         }
-        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle,
-                          from: .init(session: sessionID, source: "pet-notice"))
         markSessionRead(sessionID)
     }
 

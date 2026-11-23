@@ -73,6 +73,7 @@ public enum JumpLog {
         /// refreshed while open), nil when it has not been since the pet started.
         public let peekedAgo: Int?
         /// "orca", "iterm2", … — some jumps land on the tab, an editor only on the window.
+        /// "board" when the click opened the session's task on the board instead (see ClickTarget).
         public let terminal: String
 
         public init(at: Date, session: String, source: String, state: State, view: String = "",

@@ -31,6 +31,10 @@ final class WebBridge {
     var onSnooze: ((String, CGPoint) -> Void)?
     /// An ask row in the list: open the board at that task.
     var onOpenBoardAt: ((String) -> Void)?
+    /// A session row was clicked: (sessionId, terminal kind, terminal handle, source). Opens it
+    /// where Settings → "Clicking a Session Opens" says — its terminal or its task on the
+    /// board — and returns where that was; `.nowhere` when there was nothing to open.
+    var onOpenSession: ((String, String, String, String) -> ClickTarget.Route)?
     /// The pet itself was double-clicked (not a row): the task board's toggle.
     var onDoubleClickPet: (() -> Void)?
     /// Right-click landed on a session row rather than on the pet.
@@ -189,18 +193,11 @@ final class WebBridge {
                         self.onMute?(id)
                     }
                 case "jump":
-                    guard
-                        let kind = row["kind"] as? String,
-                        let handle = row["handle"] as? String,
-                        !handle.isEmpty
-                    else {
-                        self.togglePanel()
-                        return
-                    }
-                    TerminalJump.jump(kind: kind, handle: handle,
-                                      from: .init(session: row["sessionId"] as? String ?? "", source: "pet-list"))
+                    let route = self.onOpenSession?(row["sessionId"] as? String ?? "",
+                                                    row["kind"] as? String ?? "",
+                                                    row["handle"] as? String ?? "", "pet-list") ?? .nowhere
                     // The list has served its purpose once we are jumping away.
-                    self.closePanel()
+                    if route == .nowhere { self.togglePanel() } else { self.closePanel() }
                 case "read":
                     // Acknowledging a finished turn. The list stays open: the
                     // user is working through it, and closing it after each one
@@ -212,15 +209,13 @@ final class WebBridge {
                     self.onSnooze?(row["sessionId"] as? String ?? "", point)
                 case "openFinished":
                     let ids = row["eventIds"] as? [String] ?? []
-                    let handle = row["handle"] as? String ?? ""
-                    switch PanelModel.finishedClick(handle: handle) {
+                    // Go there, and only then call it read: a jump that never
+                    // happened must not clear the one record that it happened at all.
+                    let route = self.onOpenSession?(row["sessionId"] as? String ?? "",
+                                                    row["kind"] as? String ?? "",
+                                                    row["handle"] as? String ?? "", "pet-finished") ?? .nowhere
+                    switch PanelModel.finishedClick(route) {
                     case .openThenRead:
-                        // Go there, and only then call it read: a jump that
-                        // never happened must not clear the one record that it
-                        // happened at all.
-                        TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle,
-                                          from: .init(session: row["sessionId"] as? String ?? "",
-                                                      source: "pet-finished"))
                         self.onMarkRead?(ids)
                         self.closePanel()
                     case .read:
@@ -431,6 +426,7 @@ final class WebBridge {
                       context: [String: ContextBudget.Reading] = [:],
                       tasks: [String: String] = [:],
                       taskStatus: [String: String] = [:],
+                      clickTarget: ClickTarget = .terminal,
                       hqAsks: [[String: String]] = [],
                       jobs: [[String: String]] = []) {
         guard isReady else { return }
@@ -532,9 +528,15 @@ final class WebBridge {
                     item["toolSeconds"] = Int(max(0, now.timeIntervalSince(began)))
                 }
             }
+            // Clicks go to its task on the board instead (see ClickTarget): clickable, even
+            // with no terminal to go to.
+            let canJump = s.terminal.map { TerminalTarget.canJump(kind: $0.kind) } ?? false
+            if case .board = clickTarget.route(task: tasks[s.sessionId], canJump: canJump) {
+                item["opensBoard"] = true
+            }
             // Only sessions we can actually jump to carry these, and only those
-            // rows render as clickable.
-            if let t = s.terminal, TerminalTarget.canJump(kind: t.kind) {
+            // (and the ones above) render as clickable.
+            if let t = s.terminal, canJump {
                 item["termKind"] = t.kind
                 item["termHandle"] = t.handle
                 // The project column is just the directory name, so three
@@ -578,6 +580,9 @@ final class WebBridge {
             if row.canJump, let t = row.terminal {
                 item["termKind"] = t.kind
                 item["termHandle"] = t.handle
+            }
+            if case .board = clickTarget.route(task: tasks[row.sessionId], canJump: row.canJump) {
+                item["opensBoard"] = true
             }
             return item
         }

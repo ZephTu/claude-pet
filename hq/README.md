@@ -68,7 +68,9 @@ too. One JSON object per line: `at`, `session`, `source`, `state`, and when know
 (board tab), `task`, `project`, `context` (% of the auto-compact window), `waited` (seconds in
 that state; for `interrupted`, since it went quiet), `peekedAgo` (seconds since its Peek was
 last opened — refreshes while open don't count — since the pet started), `terminal` (left out when
-none was found).
+none was found; `board` when the click opened the session's task on the board instead — Settings →
+"Clicking a Session Opens". Those are not jumps to a terminal: `hq jumps` leaves them out of the
+counts and reports them as `boardOpens`).
 
 Re-run `hq/install.sh` to upgrade. `hq/uninstall.sh` removes hooks, commands and CLI and
 leaves your cards alone.
@@ -175,6 +177,17 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    The Stop hook files each line as an ask (`T-012.3`, `T-012.4`, …). Unanswered asks are
    re-injected every turn and shown on the board until you respond — an ask you skipped is
    never treated as "no".
+
+   **Status follows the asks, between `active` and `waiting-on-me` only.** A reply that opens a
+   new ask without a `status:` line puts an `active` task at `waiting-on-me` (so does taking back
+   an answer, or the tick of an `@me` todo, with Undo). Once nothing is left on you — no open ask
+   (a snoozed one is still open), no open `@me` todo and no legacy `waiting_on_me` — answering an
+   ask (board, `hq ask resolve`, an `hq-resolved` block) or ticking off / dropping an `@me` todo
+   (board, `hq todo`, `done:` / `drop:`) puts a `waiting-on-me` task back to `active`; other todos
+   don't. A status written in the same reply (and applied) wins, and a reply's blocks are
+   weighed together, so one that ticks the last `@me` todo and asks again just stays waiting.
+   `blocked`, `done` and `abandoned` are never changed automatically. Each move is logged on the
+   card with `(auto, <via>)`.
 
    **Claude's open todos come along at session start.** SessionStart — for every source:
    `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the

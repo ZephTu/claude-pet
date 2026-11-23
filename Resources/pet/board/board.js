@@ -79,7 +79,7 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
-  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
+  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
   drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
@@ -320,6 +320,7 @@ async function refresh(force) {
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
     ui.usage = pet.usage || null;
+    ui.clickTarget = pet.clickTarget || "";   // empty: no pet behind this board (--render-board)
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
@@ -372,7 +373,16 @@ async function loadFlags() {
     ui.flagsLoading = false;
   }
 }
-window.hqReveal = (id) => refresh().then(() => { if (id) revealTask(id); });
+// From the pet: a click on a session opens its task here (Settings → "Clicking a session on the
+// pet opens"), with that session picked out and its conversation open.
+window.hqReveal = (id, sid) => refresh().then(() => {
+  clearTimeout(ui.hlTimer);   // a second click soon after the last Peek closed: keep the new pick
+  ui.hlSession = sid && id && id !== secId() && taskById(id) ? sid : null;
+  // Draw the pick first: revealTask only scrolls to a card already in Focus, without a redraw.
+  render();
+  if (id) revealTask(id);
+  if (ui.hlSession) openPeek(sid);
+});
 
 // ------------------------------------------------------------------ render
 // Background sessions (claude --bg) have no terminal; `claude agents --json` names them. Mark the
@@ -1264,7 +1274,7 @@ function focusSessions(t, live) {
     const title = String(s.title || s.project || s.sessionId.slice(0, 8));
     const name = title.replace(new RegExp("^" + t.id + "\\s+"), "") || title;
     const last = plainText(s.lastText);
-    return `<div class="fs" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
+    return `<div class="fs${s.sessionId === ui.hlSession ? " hl" : ""}" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
       ${dot(s)}<span class="fs-n">${newTag(s.sessionId)}${esc(name)}</span>
       <span class="fs-st">${esc(statusWord(s))}</span>
       <span class="fs-l">${last ? esc(last) : ""}</span>
@@ -1570,7 +1580,7 @@ function renderTaskBody(t) {
       <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div></div>
       ${tools}
     </div>`;
-  const sessRow = (s) => `<div class="bsess">
+  const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
@@ -1960,6 +1970,8 @@ function renderSessionSettings() {
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
     ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
+    ${ui.clickTarget ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task here opens in Focus if it is there, in All otherwise, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，Focus 里有就在 Focus，没有就在 All，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
+      `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
     ${row(T("Active first", "活跃的在前"), T("Tasks (and project groups) with a live session come first, most recently active first. Off: your own order", "有 session 在跑的任务（和项目组）排最前，最近有动静的在前。不勾：按你自己的顺序"),
@@ -2116,6 +2128,13 @@ async function openPeek(sid, back, opt = {}) {
   await refreshPeek(true);
 }
 function closePeek() {
+  // A session the pet sent us to stays picked out a moment longer, where its card is.
+  if (ui.hlSession && ui.modal && ui.modal.sid === ui.hlSession) {
+    const sid = ui.hlSession;
+    requestAnimationFrame(() => { const row = document.querySelector(".bsess.hl, .fs.hl"); if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
+    clearTimeout(ui.hlTimer);
+    ui.hlTimer = setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
+  }
   ui.modal = null;
   $("#modal").hidden = true;
   $("#modal").innerHTML = "";
@@ -3711,6 +3730,8 @@ document.addEventListener("change", (ev) => {
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
   if (d.action === "finish-stop-pref") { savePref("hq-finish-stop", el.value); return render(); }
   if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
+  // Kept by the pet, which its menu shares; shows at once, the next refresh confirms it.
+  if (d.action === "click-target") { ui.clickTarget = el.value; api("click-target", { value: el.value }).catch((e) => toast(String(e.message || e), true)); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
   if (["set-status", "set-project", "set-category"].includes(d.action)) {
     ui.pointerDown = false;
