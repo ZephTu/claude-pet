@@ -1979,33 +1979,48 @@ async function refreshPeek(first) {
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
   if (!first && sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode)) return;
-  const liveOnly = !first && !changed && bodySig === m.bodySig;
-  m.msgs = msgs;
-  m.sig = sig;
-  m.bodySig = bodySig;
-  Object.assign(m, act);
-  if (liveOnly && drawPeekLive()) return;
+  const next = { msgs, sig, bodySig, act };
+  if (!first && !changed && bodySig === m.bodySig) {   // only the lines above the list
+    applyPeek(m, next);
+    if (drawPeekLive()) return;
+  }
+  // A rebuild sets the list's scroll position, which stops a trackpad's glide dead: one that
+  // comes while you scroll waits until you have stopped for a moment. The new data waits with
+  // it, so what is on screen (Copy buttons, the status line) still matches the old list.
+  if (!first && !changed && peekScrolling()) { m.next = next; return holdPeek(m); }
+  applyPeek(m, next);
+  drawPeek(first);
+}
+function applyPeek(m, next) {
+  m.next = null;
+  m.msgs = next.msgs;
+  m.sig = next.sig;
+  m.bodySig = next.bodySig;
+  Object.assign(m, next.act);
   // An opened row whose call has since finished (or failed) shows its new output.
   for (const id of m.openTools) {
     const t = (m.items || []).find((x) => x.id === id);
     if (t && m.details[id] && m.details[id]._st !== t.status) loadToolDetail(m, id);
   }
-  // A rebuild sets the list's scroll position, which stops a trackpad's glide dead: one that
-  // comes while you scroll waits until you have stopped for a moment.
-  if (!first && peekScrolling()) return holdPeek(m);
-  drawPeek(first);
 }
 const PEEK_SCROLL_QUIET_MS = 1000;
-const peekScrolling = () => Date.now() - (ui.peekWheelAt || 0) < PEEK_SCROLL_QUIET_MS
-  || (ui.pointerDown && ui.peekPointer);   // dragging its scrollbar
+const peekScrolling = () => Date.now() - (ui.peekScrollAt || 0) < PEEK_SCROLL_QUIET_MS
+  || ui.peekScrollbar;   // its scrollbar is being dragged
+// Not while you select text in it either: the rebuild would drop the selection before you copy.
+const peekSelecting = () => { const sel = window.getSelection(); return sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode); };
 function holdPeek(m) {
   if (m.held) return;
   m.held = setTimeout(function again() {
     if (ui.modal !== m) return;
-    if (peekScrolling()) { m.held = setTimeout(again, 250); return; }
+    if (peekScrolling() || peekSelecting()) { m.held = setTimeout(again, 250); return; }
     m.held = null;
+    if (m.next) applyPeek(m, m.next);
     drawPeek(false);
   }, 250);
+}
+// A redraw the board starts on its own (not one you clicked for): waits out a scroll.
+function redrawPeek(m) {
+  if (peekScrolling()) holdPeek(m); else drawPeek(false);
 }
 // Just the status line and Claude's todos, in place (the reply box is not touched, so this is safe
 // mid-composition too). False when the window has not drawn them yet: then the caller rebuilds.
@@ -2014,18 +2029,33 @@ function drawPeekLive() {
   if (!live) return false;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   live.innerHTML = peekStatus(m, s, peekRun(m, s)) + peekTodos(m);
+  $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
   return true;
 }
 document.addEventListener("wheel", (ev) => {
-  if (ui.modal && ui.modal.type === "peek" && ev.target.closest && ev.target.closest(".peek-body")) ui.peekWheelAt = Date.now();
+  if (ui.modal && ui.modal.type === "peek" && ev.target.closest && ev.target.closest(".peek-body")) ui.peekScrollAt = Date.now();
 }, { capture: true, passive: true });
-document.addEventListener("mousedown", (ev) => {
-  ui.peekPointer = Boolean(ev.target.closest && ev.target.closest(".peek-body"));
+// Scrolling from the keyboard glides too (not while typing in the reply box).
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+document.addEventListener("keydown", (ev) => {
+  if (!ui.modal || ui.modal.type !== "peek" || !SCROLL_KEYS.has(ev.key)) return;
+  const t = ev.target;
+  if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
+  ui.peekScrollAt = Date.now();
 }, true);
+// The scrollbar: a left press on the list's own box at its right edge (macOS draws an overlay
+// scrollbar over the content, so clientWidth alone does not find it). Only that, so a click or a
+// right-click (whose menu can swallow the mouseup) in the conversation never holds Peek.
+document.addEventListener("mousedown", (ev) => {
+  const b = ev.target;
+  ui.peekScrollbar = ev.button === 0 && b.classList && b.classList.contains("peek-body") && ev.offsetX >= b.clientWidth - 16;
+}, true);
+document.addEventListener("mouseup", () => { ui.peekScrollbar = false; }, true);
 function drawPeek(toBottom) {
   if (ui.composing) { ui.peekPending = ui.peekPending || { toBottom: false }; ui.peekPending.toBottom ||= Boolean(toBottom); return; }
   const m = ui.modal;
   if (m.held) { clearTimeout(m.held); m.held = null; }   // this draw is the one it was holding
+  if (m.next) applyPeek(m, m.next);                       // so it shows what it was holding too
   const box = $("#modal");
   // The reply box is rebuilt with the rest; keep the cursor in it.
   const active = document.activeElement;
@@ -2055,7 +2085,7 @@ function drawPeek(toBottom) {
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
-        <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · ${ago(x.ts)}
+        <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
       </div>`).join("");
@@ -2185,7 +2215,7 @@ function toolGroup(g, m, run) {
   const hidden = n - shown.length;
   // Every call in the run still going: all are shown, so "0 earlier steps" would say nothing.
   const label = open || !hidden ? T(`${n} steps`, `${n} 步`) : T(`${hidden} earlier step${hidden === 1 ? "" : "s"}`, `前面还有 ${hidden} 步`);
-  return `<div class="pgroup" data-action="pgroup" data-key="${esc(key)}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${label} · ${kinds}${failed ? ` · <span class="bad">${T(`${failed} failed`, `${failed} 个失败`)}</span>` : ""}</div>`
+  return `<div class="pgroup" data-action="pgroup" data-key="${esc(key)}"><span class="pcaret">${open ? "▾" : hidden ? "▸" : ""}</span> ${label} · ${kinds}${failed ? ` · <span class="bad">${T(`${failed} failed`, `${failed} 个失败`)}</span>` : ""}</div>`
     + shown.map((t) => toolRow(t, m, run)).join("");
 }
 // The line under the title: what it is doing now, how long this turn has run, its tokens.
@@ -2232,7 +2262,7 @@ async function loadToolDetail(m, id) {
   const st = toolStatus(m, id);   // before the fetch: a call that ends meanwhile is fetched again
   try { m.details[id] = await apiJSON("peek-tool", { session: m.sid, id }); } catch (e) { m.details[id] = { err: String(e.message || e) }; }
   m.details[id]._st = st;
-  if (ui.modal === m) drawPeek(false);
+  if (ui.modal === m) redrawPeek(m);
 }
 // Running times tick between refreshes without rebuilding the window.
 setInterval(() => {
