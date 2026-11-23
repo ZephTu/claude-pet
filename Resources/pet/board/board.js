@@ -2019,7 +2019,7 @@ function drawPeek(toBottom) {
     : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · ${ago(x.ts)}
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
-        <div class="md">${markdown(x.text)}</div>
+        <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
       </div>`).join("");
   const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + m.sid);
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
@@ -2331,7 +2331,12 @@ function linkifyCode(code) {
 function hqSummary(lang, items) {
   if (lang === "hq-resolved") return T(`${items.length} answer${items.length === 1 ? "" : "s"}`, `${items.length} 条`);
   const tally = {};
-  for (const i of items) { const k = (i.match(/^([a-z]+):/) || [, i.split(/\s/)[0]])[1]; tally[k] = (tally[k] || 0) + 1; }
+  // The keys as hq's update_lines reads them: any case, a full-width colon, spaces before it.
+  for (const i of items) {
+    const m = /^([A-Za-z]+)\s*[:：]/.exec(i);
+    const k = m ? m[1].toLowerCase() : i.split(/\s/)[0].slice(0, 12);
+    tally[k] = (tally[k] || 0) + 1;
+  }
   return Object.entries(tally).map(([k, c]) => esc(c > 1 ? `${k} ×${c}` : k)).join(" · ");
 }
 function hashText(s) {
@@ -2340,7 +2345,9 @@ function hashText(s) {
   return (h >>> 0).toString(36);
 }
 
-function markdown(text) {
+// `scope` names the message the text is from, so a folded block's open state is that message's
+// alone: five replies ending in the same one-line `touch` update must not open together.
+function markdown(text, scope = "") {
   const out = [];
   const parts = String(text).split(/^```/m);
   parts.forEach((part, idx) => {
@@ -2356,7 +2363,7 @@ function markdown(text) {
         // Questions stay open: they are what the reader has to act on. Recorded answers and card
         // updates are bookkeeping — folded to one line that says what changed, opened on a click.
         if (lang === "hq-asks") { out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${title}</div>${list}</div>`); return; }
-        const key = `${lang}|${hashText(code)}`;
+        const key = `${scope}|${lang}|${hashText(code)}`;
         const open = ui.hqOpen.has(key);
         out.push(`<div class="hqblock ${lang} fold ${open ? "open" : ""}"><div class="hqb-t hqb-fold" data-action="hqfold" data-key="${esc(key)}" title="${T("Click to show or hide", "点击展开或收起")}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${title} · ${hqSummary(lang, items)}</div>${list}</div>`);
         return;
@@ -3214,26 +3221,37 @@ document.addEventListener("beforeinput", (ev) => {
     document.execCommand("insertText", false, tidy);   // fires its own input event, which saves the draft
     return;
   }
-  bulkInsert = { el, start: el.selectionStart, kept: el.value.length - (el.selectionEnd - el.selectionStart) };
+  bulkInsert = { el, before: el.value };
 }, true);
 // After the insert: tidy just the stretch that arrived, selecting it and typing over it so the
-// fix is one more undo step rather than a lost history.
+// fix is one more undo step rather than a lost history. Where it arrived is found by comparing
+// the text before and after, not taken from the caret: a drop or an autocorrect replacement
+// lands somewhere other than the selection.
 function tidyInserted(ev) {
   const b = bulkInsert;
   bulkInsert = null;
   const el = ev.target;
   if (!b || b.el !== el || ev.isComposing || ui.composing) return;
-  const end = b.start + (el.value.length - b.kept);
-  if (end <= b.start) return;
-  // Take in the line breaks either side too, so the arrival can't stack on blank lines already there.
-  let from = b.start, to = end;
-  while (from > 0 && /\s/.test(el.value[from - 1])) from--;
-  while (to < el.value.length && /\s/.test(el.value[to])) to++;
-  const piece = el.value.slice(from, to);
+  const v = el.value, old = b.before;
+  let start = 0;
+  while (start < v.length && start < old.length && v[start] === old[start]) start++;
+  let tail = 0;
+  while (tail < v.length - start && tail < old.length - start && v[v.length - 1 - tail] === old[old.length - 1 - tail]) tail++;
+  const end = v.length - tail;
+  if (end <= start) return;
+  // Reach across the seam only where the arrival itself ends in white space, so its breaks can't
+  // stack on blank lines already there; text it merely sits next to is not the paste's to tidy.
+  let from = start, to = end;
+  if (/\s/.test(v[start])) while (from > 0 && /\s/.test(v[from - 1])) from--;
+  if (/\s/.test(v[end - 1])) while (to < v.length && /\s/.test(v[to])) to++;
+  const piece = v.slice(from, to);
   const tidy = tidyBreaks(piece);
   if (tidy === piece) return;
+  // The caret goes back to the end of the arrival, not past the white space after it.
+  const caret = Math.min(from + tidyBreaks(v.slice(from, end)).length, from + tidy.length);
   el.setSelectionRange(from, to);
   document.execCommand("insertText", false, tidy);
+  el.setSelectionRange(caret, caret);
 }
 document.addEventListener("input", (ev) => {
   const el = ev.target;

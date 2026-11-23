@@ -1824,6 +1824,10 @@ def transcript_tail(path, nbytes=600_000):
         f.seek(max(0, size - nbytes))
         # Not splitlines(): that also breaks at U+0085, U+2028… inside a JSON string.
         lines = f.read().decode("utf-8", "ignore").split("\n")
+    return parse_jsonl(lines)
+
+
+def parse_jsonl(lines):
     out = []
     for line in lines:
         try:
@@ -2085,16 +2089,36 @@ def peek_timeline(entries):
 
 def peek_window(path, n):
     """The last n messages with the tool calls among them (at most PEEK_TOOLS_MAX, newest kept),
-    and the transcript entries they were read from. Reads further back until it has n messages:
-    screenshots sit in the transcript as base64, so a session that looked at a few dozen of them
-    has only a handful of messages in its last 6 MB. A whole 10 MB transcript parses in ~15 ms."""
-    for nbytes in (600_000, 6_000_000, PEEK_BYTES_MAX):
-        entries = transcript_tail(path, nbytes)
-        items = peek_timeline(entries)
-        at = [i for i, it in enumerate(items) if it["kind"] == "msg"]
-        if len(at) >= n:
-            items = items[at[-n]:]
-            break
+    and the transcript entries they were read from. Reads further back until it has n messages
+    (or PEEK_BYTES_MAX, or the start of the file): screenshots sit in the transcript as base64, so
+    a session that looked at a few dozen of them has only a handful of messages in its last 6 MB.
+    Each step reads and parses only the bytes the last one did not, and the board polls this
+    every few seconds: the worst case, a screenshot-heavy 64 MB tail, takes ~0.2 s."""
+    entries, items = [], []
+    if not path or not os.path.exists(path):
+        return items, entries
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        done, head = size, b""   # [done, size) is parsed; head = the cut line just before it
+        for nbytes in (600_000, 6_000_000, 24_000_000, PEEK_BYTES_MAX):
+            start = max(0, size - nbytes)
+            f.seek(start)
+            buf = f.read(done - start) + head
+            head = b""
+            if start > 0:   # the first line is cut: keep it for the next step, which reads its start
+                cut = buf.find(b"\n")
+                head, buf = (buf, b"") if cut < 0 else (buf[:cut], buf[cut + 1:])
+            # Not splitlines(): that also breaks at U+0085, U+2028… inside a JSON string.
+            entries = parse_jsonl(buf.decode("utf-8", "ignore").split("\n")) + entries
+            done = start
+            items = peek_timeline(entries)
+            at = [i for i, it in enumerate(items) if it["kind"] == "msg"]
+            if len(at) >= n:
+                items = items[at[-n]:]
+                break
+            if start == 0:
+                break
     tools = [it for it in items if it["kind"] == "tool"]
     if len(tools) > PEEK_TOOLS_MAX:
         drop = {id(it) for it in tools[:-PEEK_TOOLS_MAX]}

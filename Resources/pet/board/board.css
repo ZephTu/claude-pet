@@ -235,7 +235,7 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .hqblock ul { margin: 0; padding-left: 18px; }
 .hqblock.fold { padding-top: 4px; padding-bottom: 4px; }
 .hqblock.fold:not(.open) ul { display: none; }
-.hqb-fold { cursor: pointer; margin: 0; user-select: none; }
+.hqb-fold { cursor: pointer; margin: 0; -webkit-user-select: none; user-select: none; }
 .hqblock.fold.open .hqb-fold { margin-bottom: 2px; }
 .hqb-fold:hover { color: var(--text); }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }
