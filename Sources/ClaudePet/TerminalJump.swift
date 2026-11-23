@@ -37,7 +37,25 @@ import Foundation
 /// must never take the pet down or block the UI, and there is no good way to
 /// surface an error from a borderless accessory panel.
 enum TerminalJump {
-    static func jump(kind: String, handle: String) {
+    /// Where a jump was asked for, for the jump log — see JumpLog.
+    struct Origin {
+        /// The session being jumped to. Empty when the caller does not know it.
+        var session: String
+        /// "board-card", "pet-list", "hotkey", … — see JumpLog.Event.source.
+        var source: String
+        /// The board tab that was showing, for board sources.
+        var view: String = ""
+    }
+
+    /// Records each jump. Set by the app, which has the session states to
+    /// record; nil (the board rendered on its own) records nothing.
+    @MainActor static var record: ((Origin, _ kind: String) -> Void)?
+
+    @MainActor
+    static func jump(kind: String, handle: String, from origin: Origin) {
+        // Before the attempt, not after: the question is why the user wanted to
+        // go back, and a jump that then fails to find its tab wanted it too.
+        record?(origin, kind)
         switch kind {
         case "orca": jumpOrca(handle: handle)
         case "iterm2": jumpITerm(sessionID: handle)

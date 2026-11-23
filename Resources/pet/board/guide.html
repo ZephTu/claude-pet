@@ -250,7 +250,9 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>Focus 列表（order 按给出的顺序排）</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录）</td></tr>
+<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数</td></tr>
 </table>
+<p><b>跳终端记录</b>：每次从看板、小猫或快捷键跳回终端，小猫都会在 <code>~/.claude/pet/jumps.jsonl</code> 追加一行：时间、session、绑定的任务、当时的状态、context 占比、在这个状态里待了多久（打断的从没动静时算起）、从哪里点的、跳之前多久打开过它的 Peek（只算打开那一下，开着时的自动刷新不算；小猫重启后清零）。找不到终端、没跳成的也记。只存在本机，不含对话内容；用来看哪些情况还非得回终端不可。</p>
 <p>在 Claude Code 里还可以用三个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）、<code>/hq-onboard</code>（从已有 session 初始化）。</p>
 
 <h1 id="zh-onboard">从已有 session 开始</h1>
@@ -574,7 +576,9 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>the Focus list (order: in the order given)</td></tr>
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts)</td></tr>
+<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before</td></tr>
 </table>
+<p><b>Jump log</b>: every jump back to a terminal — from the board, the pet or the hotkey — adds one line to <code>~/.claude/pet/jumps.jsonl</code>: the time, the session, its task, its state, its context use, how long it had been in that state (for an interrupted one, since it went quiet), where you clicked, and how long before you opened its Peek (opening it counts, not the refreshes while it stays open; forgotten when the pet restarts). Clicks whose terminal can't be found are logged too. It stays on this machine and holds no conversation text; it is there to show which situations still need the terminal.</p>
 <p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board, <code>/hq-onboard</code> sets HQ up from your existing sessions.</p>
 
 <h1 id="en-onboard">Start from existing sessions</h1>

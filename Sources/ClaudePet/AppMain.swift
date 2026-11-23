@@ -211,6 +211,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         }
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
         BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
+        BoardBridge.onPeek = { [weak self] sid in self?.peekedAt[sid] = Date() }
+        TerminalJump.record = { [weak self] origin, kind in self?.recordJump(origin, kind: kind) }
         BoardBridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
         }
@@ -1171,12 +1173,41 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let terminal = target.terminal, TerminalTarget.canJump(kind: terminal.kind) else {
+            // Still a jump the user wanted; the log is about why, not whether it worked.
+            TerminalJump.record?(.init(session: target.sessionId, source: "hotkey"), "")
             bridge?.say(L("\(target.project) is waiting, but its terminal cannot be addressed",
                           "\(target.project) 在等你，但跳不到它的终端"),
                         hold: 5, emphasis: target.project)
             return
         }
-        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
+        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle,
+                          from: .init(session: target.sessionId, source: "hotkey"))
+    }
+
+    /// When each session's conversation was last shown in the board's Peek, since the pet started.
+    private var peekedAt: [String: Date] = [:]
+
+    /// One line in jumps.jsonl: what the session was doing when the user went back to its
+    /// terminal, and from where — see JumpLog.
+    private func recordJump(_ origin: TerminalJump.Origin, kind: String) {
+        let now = Date()
+        let sid = origin.session
+        // Muted sessions count too: hiding a row says nothing about why you went to it.
+        let session = StateAggregator.aggregate(latest, now: now, approved: isSettled).sessions
+            .first { $0.sessionId == sid }
+        let state = JumpLog.state(of: session, quiet: session.map { StateAggregator.isQuiet($0, now: now) } ?? false)
+        // Gone quiet: count from the silence, not from when the work began.
+        let entered = state == .interrupted ? session?.updatedAt : session?.since
+        let event = JumpLog.Event(
+            at: now, session: sid, source: origin.source, state: state,
+            view: origin.view,
+            task: sid.isEmpty ? nil : taskIndex.snapshot(now: now).taskBySession[sid],
+            project: session?.project ?? "",
+            context: contextReadings[sid]?.percent,
+            waited: entered.map { Int(max(0, now.timeIntervalSince($0))) },
+            peekedAgo: peekedAt[sid].map { Int(max(0, now.timeIntervalSince($0))) },
+            terminal: kind)
+        JumpLog.append(event, to: petHome.appending(path: "jumps.jsonl"))
     }
 
     /// Offers 5 / 15 / 30 minutes at the pointer.
@@ -1259,7 +1290,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             bridge?.setPanelOpen(true)
             return
         }
-        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle)
+        TerminalJump.jump(kind: terminal.kind, handle: terminal.handle,
+                          from: .init(session: sessionID, source: "pet-notice"))
         markSessionRead(sessionID)
     }
 

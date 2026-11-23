@@ -197,7 +197,8 @@ final class WebBridge {
                         self.togglePanel()
                         return
                     }
-                    TerminalJump.jump(kind: kind, handle: handle)
+                    TerminalJump.jump(kind: kind, handle: handle,
+                                      from: .init(session: row["sessionId"] as? String ?? "", source: "pet-list"))
                     // The list has served its purpose once we are jumping away.
                     self.closePanel()
                 case "read":
@@ -217,7 +218,9 @@ final class WebBridge {
                         // Go there, and only then call it read: a jump that
                         // never happened must not clear the one record that it
                         // happened at all.
-                        TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle)
+                        TerminalJump.jump(kind: row["kind"] as? String ?? "", handle: handle,
+                                          from: .init(session: row["sessionId"] as? String ?? "",
+                                                      source: "pet-finished"))
                         self.onMarkRead?(ids)
                         self.closePanel()
                     case .read:

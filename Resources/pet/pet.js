@@ -1049,6 +1049,7 @@ window.hitRow = function (x, y) {
   if (finished) {
     return {
       action: "openFinished",
+      sessionId: finished.dataset.sessionId || "",
       kind: finished.dataset.termKind || "",
       handle: finished.dataset.termHandle || "",
       eventIds: idsOf(finished),
@@ -1058,6 +1059,7 @@ window.hitRow = function (x, y) {
   if (!row) return null;
   return {
     action: "jump",
+    sessionId: row.dataset.sessionId || "",
     kind: row.dataset.termKind || "",
     handle: row.dataset.termHandle || "",
   };

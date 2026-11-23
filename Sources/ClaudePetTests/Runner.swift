@@ -2493,6 +2493,7 @@ struct Runner {
         SessionControlTests.run(t)
         OrcaPlaceTests.run(t)
         LanguageTests.run(t)
+        JumpLogTests.run(t)
 
         print("\n-- language")
         t.check("a stored language wins over the system's",
