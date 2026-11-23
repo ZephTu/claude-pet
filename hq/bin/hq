@@ -2398,7 +2398,10 @@ def inbox_dest(d, item):
         if w:
             out["workdir"] = w
     if k != "me":
-        refs = inbox_refs(d.get("refs"), item.get("text"))
+        # A feed note's body is other people's text: only its first line (the conversation's or
+        # issue's own link) may give refs, so a link someone pasted never lands on a card.
+        text = str(item.get("text") or "")
+        refs = inbox_refs(d.get("refs"), text.split("\n", 1)[0] if item.get("via") in FEED_SOURCES else text)
         if refs:
             out["refs"] = refs
     return out
@@ -2690,7 +2693,7 @@ def run_sorter(item, claude):
         cmd += ["--tools", "Read", "--allowedTools", "Read"] + [a for d in dirs for a in ("--add-dir", d)]
     else:
         cmd += ["--tools", ""]
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION") and k not in FEED_SECRET_ENV}
     env["HQ_HOOK_CHILD"] = "1"
     try:
         r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=INBOX_SORT_TIMEOUT,
@@ -2889,7 +2892,9 @@ FEED_KEEP_DAYS = 30            # raw message files older than this are deleted
 FEED_MSG_MAX = 600             # characters of one message in an inbox item
 FEED_ITEM_MAX = 3000           # characters of an inbox item (the newest messages are kept)
 FEED_PAGE = 1000
+ZULIP_MAX_MSGS = 500           # one scan reads at most this many messages a narrow; the rest waits
 FEED_SORTERS = 4               # sorts run side by side
+FEED_SECRET_ENV = ("HQ_JIRA_TOKEN",)   # never passed on to the sorter
 
 FEED_SCHEMA = json.loads(json.dumps(INBOX_SCHEMA))
 FEED_SCHEMA["properties"]["kind"]["enum"] = list(INBOX_KINDS) + ["skip", "unsorted"]
@@ -2956,6 +2961,22 @@ def save_feed_state(st):
     atomic_write(os.path.join(feed_dir(), "state.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
 
 
+def update_feed_state(source, fn):
+    """Read-modify-write of state[source] under a lock shared by every source (Zulip and Jira scans
+    may end at the same time): fn(previous dict) returns the new one, or None to leave it."""
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    with open(os.path.join(LOCK_DIR, "feed-state.lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            st = feed_state()
+            new = fn(st.get(source) if isinstance(st.get(source), dict) else {})
+            if new is not None:
+                st[source] = new
+                save_feed_state(st)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def feed_config(source):
     cfg = load_json(root_config_path(), {})
     f = cfg.get("feed") if isinstance(cfg, dict) and isinstance(cfg.get("feed"), dict) else {}
@@ -2973,7 +2994,10 @@ def zulip_conf():
         if not cp.read(path):
             raise FeedError(f"no zuliprc at {path} (Zulip → Settings → Account & privacy → API key → download .zuliprc)")
     except configparser.Error as e:
-        raise FeedError(f"can't read {path}: {e}")
+        # Never the parser's message: it quotes the offending line, which may be the key.
+        line = getattr(e, "lineno", None) or next((n for n, _ in getattr(e, "errors", [])), None)
+        raise FeedError(f"can't read {path}" + (f" (line {line})" if line else "") +
+                        ": it should be an [api] section with email, key and site")
     a = cp["api"] if cp.has_section("api") else {}
     email, key, site = (a.get(k, "").strip() for k in ("email", "key", "site"))
     if not (email and key and site):
@@ -2983,16 +3007,32 @@ def zulip_conf():
     return {"email": email, "key": key, "site": site.rstrip("/"), "path": path}
 
 
-def zulip_get(conf, path, **params):
+def feed_open(url, user, secret, **headers):
+    """GET with Basic auth. The credentials follow a redirect only to the same host (and never
+    from https to http): urllib would otherwise send them wherever the redirect points."""
     import base64
-    import urllib.error
     import urllib.parse
     import urllib.request
+    auth = "Basic " + base64.b64encode(f"{user}:{secret}".encode()).decode()
+
+    class SameHost(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            new = super().redirect_request(req, fp, code, msg, hdrs, newurl)
+            a, b = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+            if new is not None and a.netloc == b.netloc and (b.scheme == a.scheme or b.scheme == "https"):
+                new.add_unredirected_header("Authorization", auth)
+            return new
+    req = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": "hq-feed"}))
+    req.add_unredirected_header("Authorization", auth)
+    return urllib.request.build_opener(SameHost).open(req, timeout=30)
+
+
+def zulip_get(conf, path, **params):
+    import urllib.error
+    import urllib.parse
     url = f"{conf['site']}/api/v1/{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
-    auth = base64.b64encode(f"{conf['email']}:{conf['key']}".encode()).decode()
-    req = urllib.request.Request(url, headers={"Authorization": "Basic " + auth, "User-Agent": "hq-feed"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with feed_open(url, conf["email"], conf["key"]) as r:
             d = json.load(r)
     except urllib.error.HTTPError as e:
         try:
@@ -3014,22 +3054,33 @@ def zulip_hash(s):
     return "".join({"%": ".", "(": ".28", ")": ".29", ".": ".2E"}.get(ch, ch) for ch in q)
 
 
-def zulip_fetch(conf, narrow, after, since):
-    """Messages of a narrow newer than message id `after`; on a first scan (after None), those
-    sent since `since` (epoch seconds)."""
-    out = []
+def zulip_newest(conf, narrow):
+    """The id of the newest message of a narrow (None: none)."""
+    d = zulip_get(conf, "messages", anchor="newest", num_before=1, num_after=0, narrow=json.dumps(narrow),
+                  apply_markdown="false")
+    return max((m["id"] for m in d.get("messages") or []), default=None)
+
+
+def zulip_fetch(conf, narrow, after, since, top):
+    """Messages of a narrow newer than message id `after` and at most `top`; on a first scan
+    (after None), those sent since `since` (epoch seconds). Returns (messages, top): reading stops
+    after ZULIP_MAX_MSGS, and `top` comes down to the last id read, so the rest waits for the next
+    scan."""
     if after is None:
-        d = zulip_get(conf, "messages", anchor="newest", num_before=FEED_PAGE, num_after=0,
+        d = zulip_get(conf, "messages", anchor=top, num_before=FEED_PAGE, num_after=0,
                       narrow=json.dumps(narrow), apply_markdown="false")
-        return [m for m in d.get("messages") or [] if m.get("timestamp", 0) >= since]
-    anchor = after
+        return [m for m in d.get("messages") or [] if m.get("timestamp", 0) >= since and m["id"] <= top], top
+    out, anchor = [], after
     while True:
         d = zulip_get(conf, "messages", anchor=anchor, include_anchor="false", num_before=0, num_after=FEED_PAGE,
                       narrow=json.dumps(narrow), apply_markdown="false")
-        ms = d.get("messages") or []
+        ms = [m for m in d.get("messages") or [] if m["id"] <= top]
         out += ms
-        if d.get("found_newest", True) or not ms:
-            return out
+        if len(out) >= ZULIP_MAX_MSGS:
+            out = out[:ZULIP_MAX_MSGS]
+            return out, out[-1]["id"]
+        if d.get("found_newest", True) or not ms or ms[-1]["id"] >= top:
+            return out, top
         anchor = ms[-1]["id"]
 
 
@@ -3099,7 +3150,7 @@ def feed_lock(source):
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            die(f"a {source} scan is already running")
+            raise FeedError(f"a {source} scan is already running")
         try:
             yield
         finally:
@@ -3126,10 +3177,7 @@ def feed_file(source, raw, entries, cursor, sort, claude):
         feed_keep_raw(source, raw)
     ids = [inbox_add(t, via=source, extra=extra)["id"] for t, extra in entries]
     # The cursor moves before sorting: a sort that fails leaves an unsorted item, not a second copy.
-    st = feed_state()
-    prev = st.get(source) if isinstance(st.get(source), dict) else {}
-    st[source] = dict(prev, **cursor, last_scan=now_iso(), last={"items": ids})
-    save_feed_state(st)
+    update_feed_state(source, lambda prev: dict(prev, **cursor, last_scan=now_iso(), last={"items": ids}))
     sorted_items = feed_sort_all(ids, claude) if sort and ids else []
     counts = collections.Counter("skipped" if x.get("skipped") else x.get("state") for x in sorted_items)
     return {"items": ids, "filed": counts.get("sorted", 0), "unsorted": counts.get("unsorted", 0),
@@ -3137,10 +3185,8 @@ def feed_file(source, raw, entries, cursor, sort, claude):
 
 
 def feed_record(source, r):
-    st = feed_state()
-    if isinstance(st.get(source), dict):
-        st[source]["last"] = {k: r[k] for k in ("messages", "conversations", "items", "filed", "unsorted", "skipped", "cost") if k in r}
-        save_feed_state(st)
+    last = {k: r[k] for k in ("messages", "conversations", "items", "filed", "unsorted", "skipped", "cost") if k in r}
+    update_feed_state(source, lambda prev: dict(prev, last=last) if prev else None)
     return r
 
 
@@ -3150,22 +3196,28 @@ def feed_zulip(since_hours=None, sort=True, claude=None, dry=False):
         st = feed_state()
         zs = st.get("zulip") if isinstance(st.get("zulip"), dict) else {}
         me = zulip_get(conf, "users/me").get("user_id")
-        # From the last scan on; the first scan (or one as another user) looks back `since_hours`.
-        after = zs.get("last_id") if zs.get("me") == me and isinstance(zs.get("last_id"), int) else None
+        # From the last scan on; the first scan (or one as another user or server) looks back `since_hours`.
+        same = zs.get("me") == me and zs.get("site") == conf["site"] and isinstance(zs.get("last_id"), int)
+        after = zs["last_id"] if same else None
         since = time.time() - (FEED_FIRST_HOURS if since_hours is None else since_hours) * 3600
+        narrows = [[{"operator": "is", "operand": op}] for op in ("mentioned", "dm")]
+        # One upper bound for both narrows, read before either: a message that comes in while the
+        # first one is read is left to the next scan, not skipped by a cursor the second one moved.
+        top = max((x for x in (zulip_newest(conf, n) for n in narrows) if x is not None), default=None)
         msgs = {}
-        for op in ("mentioned", "dm"):
-            for m in zulip_fetch(conf, [{"operator": "is", "operand": op}], after, since):
-                msgs[m["id"]] = m
+        if top is not None and (after is None or top > after):
+            got = [zulip_fetch(conf, n, after, since, top) for n in narrows]
+            top = min(t for _, t in got)
+            msgs = {m["id"]: m for ms, _ in got for m in ms if m["id"] <= top}
         msgs = sorted(msgs.values(), key=lambda m: m["id"])
         # Conversations with something from someone else; the user's own lines are only context.
         convs = [c for c in zulip_conversations(conf, msgs, me) if any(m.get("sender_id") != me for m in c["msgs"])]
         texts = [zulip_item_text(c, me) for c in convs]
         if dry:
             return {"source": "zulip", "messages": len(msgs), "conversations": len(convs), "texts": texts, "dry": True}
-        last = max([m["id"] for m in msgs] + ([after] if after else []), default=None)
+        last = max(x for x in (top, after) if x is not None) if (top, after) != (None, None) else None
         r = feed_file("zulip", msgs, [(t, {"conv": c["key"], "msgs": [m["id"] for m in c["msgs"]]}) for c, t in zip(convs, texts)],
-                      {"me": me, "last_id": last if last is not None else zs.get("last_id")}, sort, claude)
+                      {"me": me, "site": conf["site"], "last_id": last}, sort, claude)
     return feed_record("zulip", dict(r, source="zulip", messages=len(msgs), conversations=len(convs)))
 
 
@@ -3175,6 +3227,7 @@ JIRA_PAGE = 100
 JIRA_MAX_ISSUES = 500          # one scan reads at most this many issues
 JIRA_VALUE_MAX = 120           # characters of one field value in a change line
 JIRA_LONG_FIELDS = {"description", "environment", "comment", "acceptance criteria"}
+JIRA_OVERLAP = 600             # seconds each scan re-reads before the cursor (search lags behind)
 
 
 def jira_conf():
@@ -3212,16 +3265,11 @@ def jira_conf():
 
 
 def jira_get(conf, path, **params):
-    import base64
     import urllib.error
     import urllib.parse
-    import urllib.request
     url = f"{conf['site']}/rest/api/2/{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
-    auth = base64.b64encode(f"{conf['email']}:{conf['token']}".encode()).decode()
-    req = urllib.request.Request(url, headers={"Authorization": "Basic " + auth, "Accept": "application/json",
-                                               "User-Agent": "hq-feed"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with feed_open(url, conf["email"], conf["token"], Accept="application/json") as r:
             return json.load(r)
     except urllib.error.HTTPError as e:
         try:
@@ -3258,7 +3306,8 @@ def jira_fetch(conf, minutes):
         token = d.get("nextPageToken")
         if d.get("isLast", True) or not token:
             break
-    return out
+    # An issue updated while the pages are read can show up twice: keep its last (newest) copy.
+    return list({i.get("key"): i for i in out}.values())
 
 
 def jira_mentions(text, me):
@@ -3267,7 +3316,8 @@ def jira_mentions(text, me):
 
 
 def jira_events(issue, after, me):
-    """What happened to an issue after `after` (epoch): [(ts, author id, author name, text)]."""
+    """What happened to an issue after `after` (epoch): [(ts, author id, author name, text, id)];
+    the id names the event (a history entry, a comment as of its last edit, the creation)."""
     f = issue.get("fields") or {}
     who = lambda u: ((u or {}).get("accountId"), (u or {}).get("displayName") or "Jira")
     clip = lambda v, n: v if len(v) <= n else v[:n - 1] + "…"
@@ -3275,7 +3325,8 @@ def jira_events(issue, after, me):
     if jira_ts(f.get("created")) > after:
         aid, name = who(f.get("reporter"))
         desc = jira_mentions(" ".join(str(f.get("description") or "").split()), me)
-        ev.append((jira_ts(f.get("created")), aid, name, "created it" + (": " + clip(desc, FEED_MSG_MAX) if desc else "")))
+        ev.append((jira_ts(f.get("created")), aid, name, "created it" + (": " + clip(desc, FEED_MSG_MAX) if desc else ""),
+                   f"new:{issue.get('key')}"))
     for h in (issue.get("changelog") or {}).get("histories") or []:
         t = jira_ts(h.get("created"))
         if t <= after:
@@ -3291,7 +3342,7 @@ def jira_events(issue, after, me):
             parts.append(f"{field}: {a} → {b}")
         if parts:
             aid, name = who(h.get("author"))
-            ev.append((t, aid, name, "; ".join(parts)))
+            ev.append((t, aid, name, "; ".join(parts), f"h:{h.get('id') or t}"))
     for c in ((f.get("comment") or {}).get("comments") or []):
         made, edited = jira_ts(c.get("created")), jira_ts(c.get("updated"))
         if max(made, edited) <= after:
@@ -3299,7 +3350,7 @@ def jira_events(issue, after, me):
         aid, name = who(c.get("author"))
         body = clip(jira_mentions(" ".join(str(c.get("body") or "").split()), me), FEED_MSG_MAX)
         ev.append((made if made > after else edited, aid, name,
-                   ("commented: " if made > after else "edited a comment: ") + body))
+                   ("commented: " if made > after else "edited a comment: ") + body, f"c:{c.get('id') or made}:{edited}"))
     return sorted(ev, key=lambda e: e[0])
 
 
@@ -3313,7 +3364,7 @@ def jira_item_text(conf, issue, events, me):
     head = f"Jira · {key}: {f.get('summary') or ''} · {conf['site']}/browse/{key}"
     sub = f"({state} · assignee {name(f.get('assignee'))} · reporter {name(f.get('reporter'))} · you: {', '.join(roles) or 'watcher'})"
     lines = [f"[{dt.datetime.fromtimestamp(t).strftime('%m-%d %H:%M')}] {'me' if aid == me else who}: {text}"
-             for t, aid, who, text in events]
+             for t, aid, who, text, _ in events]
     while len(lines) > 1 and len(head) + len(sub) + sum(len(x) + 1 for x in lines) > FEED_ITEM_MAX:
         lines.pop(0)
     skipped = len(events) - len(lines)
@@ -3332,27 +3383,42 @@ def feed_jira(since_hours=None, sort=True, claude=None, dry=False):
         now = time.time()
         # From the last change seen on; the first scan (or one as another user or site) looks back.
         same = js.get("me") == me and js.get("site") == conf["site"] and isinstance(js.get("last_ts"), (int, float))
-        after = js["last_ts"] if same else now - (FEED_FIRST_HOURS if since_hours is None else since_hours) * 3600
-        # JQL compares minutes, in the Jira user's time zone: ask relative to now, with a margin,
-        # and keep only what is newer than `after` exactly.
+        cursor = js["last_ts"] if same else now - (FEED_FIRST_HOURS if since_hours is None else since_hours) * 3600
+        seen = set(js.get("seen") or []) if same else set()
+        # Jira's search lags behind its writes: re-read JIRA_OVERLAP before the cursor, and drop the
+        # events already seen by id. JQL compares minutes, in the Jira user's time zone: ask
+        # relative to now, with a margin, and filter by the exact times here.
+        after = cursor - JIRA_OVERLAP if same else cursor
         issues = jira_fetch(conf, int((now - after) // 60) + 2)
-        entries, raw, newest = [], [], after
+        entries, raw, newest, ids = [], [], cursor, []
         for i in issues:
-            upd = jira_ts((i.get("fields") or {}).get("updated"))
-            newest = max(newest, upd)
-            ev = jira_events(i, after, me)
-            if upd > after:
-                raw.append({"timestamp": upd, "key": i.get("key"), "issue": i})
-            # Issues with something from someone else; the user's own changes are only context.
+            newest = max(newest, jira_ts((i.get("fields") or {}).get("updated")))
+            every = jira_events(i, after, me)
+            ids += [(e[0], e[4]) for e in every]
+            ev = [e for e in every if e[4] not in seen]
+            if ev:
+                raw.append({"timestamp": ev[-1][0], "key": i.get("key"), "issue": i})
+            # Issues with something new from someone else; the user's own changes are only context.
             if any(e[1] != me for e in ev):
                 entries.append((jira_item_text(conf, i, ev, me), {"issue": i.get("key"), "events": len(ev)}))
         if dry:
             return {"source": "jira", "issues": len(entries), "texts": [t for t, _ in entries], "dry": True}
-        r = feed_file("jira", raw, entries, {"me": me, "site": conf["site"], "last_ts": newest}, sort, claude)
+        # What the next scan re-reads: the ids of events inside its overlap.
+        keep = sorted({eid for t, eid in ids if t > newest - JIRA_OVERLAP})
+        r = feed_file("jira", raw, entries, {"me": me, "site": conf["site"], "last_ts": newest, "seen": keep}, sort, claude)
     return feed_record("jira", dict(r, source="jira", messages=len(raw), conversations=len(entries)))
 
 
 FEED_RUN = {"zulip": feed_zulip, "jira": feed_jira}
+
+
+def feed_configured(source):
+    """Whether the user set the source up (a zuliprc is there; a Jira site is set), working or
+    not: `hq feed all` runs these, so broken credentials fail the run instead of skipping it."""
+    if source == "zulip":
+        path = os.environ.get("HQ_ZULIPRC") or feed_config("zulip").get("zuliprc") or "~/.zuliprc"
+        return os.path.exists(os.path.expanduser(path))
+    return bool((os.environ.get("HQ_JIRA_SITE") or feed_config("jira").get("site") or "").strip())
 
 
 def feed_ready(source):
@@ -3415,7 +3481,7 @@ def cmd_feed(args):
         site = args.site.strip().rstrip("/")
         cfg["feed"]["jira"] = dict(jcfg, site=site if re.match(r"^https?://", site) else "https://" + site)
         atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
-    sources = [s for s in FEED_SOURCES if not feed_ready(s)] if args.action == "all" else [args.action]
+    sources = [s for s in FEED_SOURCES if feed_configured(s)] if args.action == "all" else [args.action]
     if args.action == "all" and not sources:
         die("no feed is set up: see hq feed status")
     results, failed = [], []
