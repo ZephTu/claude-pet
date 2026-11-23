@@ -839,19 +839,22 @@ stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 (merged) %s/9\n```' $GHP
 stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 checks %s/9/checks\n```' $GHP)" >/dev/null
 [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] && ok "a title on the PR's own URL beats a view's title" || fail "title choice: $(lrefs)"
 stop sess-links "$(printf 'ok\n```hq-update\nref: PR #9 verification comment %s/9#issuecomment-1\n```' $GHP)" >/dev/null
-[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"PR #9 verification comment $GHP/9#issuecomment-1\"]" ] && ok "a link to one comment stays its own entry" || fail "comment merged: $(lrefs)"
-"$HQ" ref add "$LT" "comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" && [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\", \"PR #9 verification comment $GHP/9#issuecomment-1\", \"comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7\"]" ] && ok "hq ref add keeps a lone link exactly as written" || fail "ref add rewrote a lone link: $(lrefs)"
+LH="$(dirname "$LC")/HISTORY.md"
+[ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] && grep -qx -- "- PR #9 verification comment $GHP/9#issuecomment-1" "$LH" \
+  && ok "a link to one comment is a process link: its own entry, in HISTORY.md" || fail "comment: $(lrefs) / $(cat "$LH" 2>/dev/null)"
+"$HQ" ref add "$LT" "comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" && [ "$(lrefs)" = "[\"PR #9 (merged) $GHP/9\"]" ] \
+  && grep -qx -- "- comment https://jira.example.com/browse/QA-1?focusedCommentId=7#comment-7" "$LH" && ok "hq ref add keeps a lone link exactly as written (a Jira comment goes to history)" || fail "ref add rewrote a lone link: $(lrefs) / $(cat "$LH")"
 python3 - "$LC" "$GHP" <<'PY'
 import re, sys
 p, g = sys.argv[1], sys.argv[2]; s = open(p, encoding="utf-8").read()
-refs = f'["build https://ci.example.com/job/x/42/", "QA-2", "log https://ci.example.com/job/x/42/consoleFull", "PR #9 {g}/9"]'
+refs = f'["pr {g}/7/", "QA-2", "files {g}/7/files", "PR #9 {g}/9"]'
 s = re.sub(r"^refs: .*$", lambda m: "refs: " + refs, s, count=1, flags=re.M)
 open(p, "w", encoding="utf-8").write(s)
 PY
-out="$("$HQ" ref remove "$LT" "https://ci.example.com/job/x/42/testReport/")"
-[ "$out" = '{"removed": [{"i": 0, "ref": "build https://ci.example.com/job/x/42/"}, {"i": 2, "ref": "log https://ci.example.com/job/x/42/consoleFull"}]}' ] && [ "$(lrefs)" = "[\"QA-2\", \"PR #9 $GHP/9\"]" ] && ok "ref remove by any view of a build removes every entry for it" || fail "remove canonical: $out / $(lrefs)"
-"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"build https://ci.example.com/job/x/42/\", \"QA-2\", \"log https://ci.example.com/job/x/42/consoleFull\", \"PR #9 $GHP/9\"]" ] && ok "ref restore puts the variants back as they were" || fail "restore canonical: $(lrefs)"
-"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"build https://ci.example.com/job/x/42/\", \"QA-2\", \"log https://ci.example.com/job/x/42/consoleFull\", \"PR #9 $GHP/9\"]" ] && ok "and restoring twice adds nothing" || fail "second restore: $(lrefs)"
+out="$("$HQ" ref remove "$LT" "$GHP/7/commits")"
+[ "$out" = "{\"removed\": [{\"i\": 0, \"ref\": \"pr $GHP/7/\"}, {\"i\": 2, \"ref\": \"files $GHP/7/files\"}]}" ] && [ "$(lrefs)" = "[\"QA-2\", \"PR #9 $GHP/9\"]" ] && ok "ref remove by any view of a PR removes every entry for it" || fail "remove canonical: $out / $(lrefs)"
+"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"pr $GHP/7/\", \"QA-2\", \"files $GHP/7/files\", \"PR #9 $GHP/9\"]" ] && ok "ref restore puts the variants back as they were" || fail "restore canonical: $(lrefs)"
+"$HQ" ref restore "$LT" "$out" && [ "$(lrefs)" = "[\"pr $GHP/7/\", \"QA-2\", \"files $GHP/7/files\", \"PR #9 $GHP/9\"]" ] && ok "and restoring twice adds nothing" || fail "second restore: $(lrefs)"
 "$HQ" unbind --session sess-links >/dev/null
 
 # Today's order: hq focus order puts the named tasks first, in that order; the rest keep theirs.
@@ -1451,6 +1454,95 @@ sed -n '/^---$/,/^---$/p' "$T"/root/tasks/$OT-*/TASK.md | grep -q '^status: acti
 stop sess-as "$(printf 'One more.\n```hq-asks\n- Reopen it?\n```')" >/dev/null
 [ "$(st)" = done ] && ok "auto status: an ask on a done task leaves it done" || fail "done moved: $(st)"
 "$HQ" unbind --session sess-as >/dev/null
+
+# Card budget: closed todos past the newest 5, todo ticks, log entries past the newest 20 and process
+# links (builds, runs, comments) move to HISTORY.md next to the card; nothing is lost.
+BT="$("$HQ" new "Budget" --no-focus | head -1)"; BC="$(ls "$T"/root/tasks/$BT-*/TASK.md)"; BH="$(dirname "$BC")/HISTORY.md"
+for i in 1 2 3 4 5 6 7 8; do "$HQ" addtodo "$BT" "@claude step $i" >/dev/null; done
+for i in 1 2 3 4 5 6 7; do "$HQ" todo "$BT" "$i" done --text "step $i" >/dev/null; done
+[ "$(grep -c '^- \[x\]' "$BC")" = 5 ] && grep -q '^- \[ \] @claude step 8' "$BC" && ! grep -q 'step 1 \|step 2 ' "$BC" \
+  && ok "budget: the card keeps the 5 most recently closed todos and every open one" || fail "closed todos on card: $(grep '^- \[' "$BC")"
+[ "$(sed -n '/^## Todos/,/^## /p' "$BH" | grep -c '^- \[x\] @claude step [12] ')" = 2 ] && ok "budget: the older closed todos are in HISTORY.md" || fail "history todos: $(cat "$BH")"
+! grep -q 'todo #' "$BC" && [ "$(grep -c ': todo #[0-9]* → done (cli): ' "$BH")" = 7 ] && ok "budget: todo ticks go to HISTORY.md, not the card's log" || fail "ticks: $(grep 'todo #' "$BC" "$BH")"
+"$HQ" board --json | python3 -c "import json,sys; t=[x for x in json.load(sys.stdin)['tasks'] if x['id']=='$BT'][0]; assert sum(1 for d in t['todos'] if d['state']=='done')==5, t['todos']" && ok "budget: board json shows the card's todos" || fail "board todos"
+for i in $(seq 1 25); do "$HQ" log "$BT" "note $i" >/dev/null; done
+[ "$(sed -n '/^## Log/,$p' "$BC" | grep -c ': note ')" = 20 ] && grep -q ': note 25$' "$BC" && ! grep -q ': note 5$' "$BC" \
+  && grep -q ': note 1$' "$BH" && grep -q ': note 5$' "$BH" && ok "budget: the card keeps the newest 20 log entries, the rest go to HISTORY.md" || fail "log budget: $(sed -n '/^## Log/,$p' "$BC")"
+"$HQ" ref add "$BT" "PR #5 https://github.com/o/r/pull/5" >/dev/null
+"$HQ" ref add "$BT" "build #77 https://jenkins.example.com/job/x/77/" >/dev/null
+"$HQ" ref add "$BT" "run https://github.com/o/r/actions/runs/123" >/dev/null
+brefs() { "$HQ" board --json | python3 -c 'import json,sys; print(json.dumps([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$BT"'"][0]["refs"], ensure_ascii=False))'; }
+[ "$(brefs)" = '["PR #5 https://github.com/o/r/pull/5"]' ] && grep -qx -- '- build #77 https://jenkins.example.com/job/x/77/' "$BH" && grep -qx -- '- run https://github.com/o/r/actions/runs/123' "$BH" \
+  && ok "budget: builds and runs are process links, kept in HISTORY.md" || fail "process links: $(brefs) / $(sed -n '/^## Links/,/^## /p' "$BH")"
+"$HQ" ref pin "$BT" "build #77 https://jenkins.example.com/job/x/77/" >/dev/null
+[ "$(brefs)" = '["PR #5 https://github.com/o/r/pull/5", "! build #77 https://jenkins.example.com/job/x/77/"]' ] && ! grep -q 'job/x/77' "$BH" \
+  && ok "ref pin keeps a process link on the card (key mark) and takes it out of HISTORY.md" || fail "pin: $(brefs)"
+"$HQ" ref add "$BT" "build #77 passed https://jenkins.example.com/job/x/77/" >/dev/null
+[ "$(brefs)" = '["PR #5 https://github.com/o/r/pull/5", "! build #77 passed https://jenkins.example.com/job/x/77/"]' ] && ok "a pinned link keeps its mark when a newer title merges in" || fail "pin merge: $(brefs)"
+out="$("$HQ" ref remove "$BT" "https://github.com/o/r/actions/runs/123")"
+[ "$out" = '{"removed": [], "history": ["run https://github.com/o/r/actions/runs/123"]}' ] && ! grep -q 'runs/123' "$BH" && ok "ref remove takes a link out of HISTORY.md too" || fail "remove from history: $out"
+"$HQ" ref restore "$BT" "$out" && grep -qx -- '- run https://github.com/o/r/actions/runs/123' "$BH" && ok "ref restore puts it back in HISTORY.md" || fail "restore history: $(cat "$BH")"
+"$HQ" bind "$BT" --session sess-bud >/dev/null
+stop sess-bud "$(printf 'ok\n```hq-update\nref!: build #78 https://jenkins.example.com/job/x/78/\nref: build #79 https://jenkins.example.com/job/x/79/\n```')" >/dev/null
+brefs | grep -q '"! build #78 https://jenkins.example.com/job/x/78/"' && ! brefs | grep -q '/79/' && grep -q 'job/x/79/' "$BH" \
+  && ok "hq-update: ref! keeps a build on the card, ref: sends it to HISTORY.md" || fail "ref!: $(brefs)"
+python3 - "$T/root/hq.json" <<'PY'
+import json, sys
+p = sys.argv[1]; c = json.load(open(p)); c["process_links"] = ["/releases/runs/"]; json.dump(c, open(p, "w"))
+PY
+"$HQ" ref add "$BT" "run #9 https://qa.example.com/releases/runs/all/9" >/dev/null
+! brefs | grep -q 'runs/all/9' && grep -q 'runs/all/9' "$BH" && ok "hq.json process_links adds URL patterns" || fail "process_links: $(brefs)"
+c="$(hook '{"session_id":"sess-bud","hook_event_name":"SessionStart"}')"
+echo "$c" | grep -q "$BT's history is in .*HISTORY.md" && ok "SessionStart says where the history is, to read only when needed" || fail "no history note: $c"
+"$HQ" board --json | python3 -c "
+import json,sys
+t=[x for x in json.load(sys.stdin)['tasks'] if x['id']=='$BT'][0]
+h=t['history']; assert any('note 1' in l for l in h['log']) and any(x['text']=='step 1' for x in h['todos']) and any('runs/all/9' in x for x in h['links']), h
+assert t['historyInfo']['log'] >= 12, t['historyInfo']" && ok "board json carries the history" || fail "board history"
+"$HQ" unbind --session sess-bud >/dev/null
+python3 - "$SRC/bin/hq" <<'PY' && ok "continued_title re-dates a dated title, or marks it continued"
+import datetime as dt, importlib.util, importlib.machinery, sys
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+d = dt.date(2026, 11, 23); f = hq.continued_title
+assert f("release test all 4.2.7 on 2026 Nov 22", d) == "release test all 4.2.7 on 2026 Nov 23"
+assert f("run 2026-11-22", d) == "run 2026-11-23" and f("run 2026/11/2", d) == "run 2026/11/23"
+assert f("跑 11月22日 回归", d) == "跑 11月23日 回归" and f("standup Nov 22", d) == "standup Nov 23"
+assert f("卡片预算", d) == "卡片预算（续 11-23）" and f("Card budget", d) == "Card budget (cont. 11-23)"
+assert f("4.2.7 release", d) == "4.2.7 release (cont. 11-23)"
+assert f("run Nov 20, 2025 x", d) == "run Nov 23, 2026 x" and f("2025年11月20日 回归", d) == "2026年11月23日 回归"
+assert f("Nov 20, then", d) == "Nov 23, then"
+PY
+# hq continue: the work goes on on a new card; the old one is closed and points at it.
+CT="$("$HQ" new "Nightly 2026-01-05" --category benchmark --workdir "$T" --no-focus | head -1)"; CC="$(ls "$T"/root/tasks/$CT-*/TASK.md)"
+python3 - "$CC" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = s.replace("<what done looks like>", "Nightly green").replace("<where it stands, 2-5 lines>", "two plans left")
+open(p, "w", encoding="utf-8").write(s)
+PY
+"$HQ" addtodo "$CT" "@claude open one" >/dev/null; "$HQ" addtodo "$CT" "@me closed one" >/dev/null; "$HQ" todo "$CT" 2 done >/dev/null
+"$HQ" grant add "$CT" "rerun a failed plan with the same parameters" >/dev/null
+"$HQ" ref add "$CT" "PR #8 https://github.com/o/r/pull/8" >/dev/null; "$HQ" set "$CT" "next=rerun the two plans" >/dev/null
+"$HQ" focus add "$CT" >/dev/null
+"$HQ" ask add "$CT" "Which plan first?" >/dev/null
+"$HQ" bind "$CT" --session sess-cont >/dev/null; hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
+out="$("$HQ" continue "$CT" --json)"
+NT="$(echo "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["to"])')"; NC="$(ls "$T"/root/tasks/$NT-*/TASK.md)"
+echo "$out" | python3 -c "import json,sys,datetime; r=json.load(sys.stdin); assert r['title']=='Nightly '+datetime.date.today().isoformat() and r['todos']==1 and r['sessions']==['sess-cont'] and r['asks']==1, r" \
+  && ok "hq continue makes the new card (title re-dated) and says what came along" || fail "continue: $out"
+grep -q '^- \[ \] @claude open one <!--t:' "$NC" && ! grep -q 'closed one' "$NC" && grep -q '^Nightly green$' "$NC" && grep -q '^two plans left$' "$NC" \
+  && grep -q '^- rerun a failed plan with the same parameters <!--g:' "$NC" && ok "the new card has the goal, status, open todos (with their times) and grants" || fail "new card: $(cat "$NC")"
+"$HQ" board --json | python3 -c "
+import json,sys
+ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; n=ts['$NT']; o=ts['$CT']
+assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun the two plans' and n['category']=='benchmark' and n['workdirs']==['$T'], n
+assert o['status']=='done' and 'continued in $NT' in o['body'] and 'continued from $CT' in n['body'], o" && ok "links, next, category and folders carried over; the old card is done and points at the new one" || fail "continue cards"
+"$HQ" focus --json | python3 -c "import json,sys; ids=json.load(sys.stdin)['ids']; assert '$NT' in ids and '$CT' not in ids, ids" && ok "the new card takes the old one's place in Focus" || fail "focus after continue"
+c="$(hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c" | grep -q "$CT, was continued in $NT" && ok "a session on the old card is moved and told on its next prompt" || fail "rebind note: $c"
+"$HQ" continue "$CT" 2>/dev/null && fail "continued a done task" || ok "only an open task can be continued"
+"$HQ" unbind --session sess-cont >/dev/null
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
