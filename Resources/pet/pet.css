@@ -102,65 +102,12 @@ html, body {
    PetLayout.mirrored(_:) has to agree with all of them. */
 #stage.mirrored #pet    { right: auto; left: 20px; }
 #stage.mirrored #panel  { left: auto; right: 2px; }
-/* Every variant except the alarm carries .chat as its base (see variant() in
-   pet.js), so this one rule moves all of them — which is what stops a NEW
-   variant from quietly staying on the wrong side of the window. */
-#stage.mirrored #bubble.chat { right: auto; left: 14px; text-align: left; }
-/* The alarm anchors to the same edge as everything else — it just does not wear
-   `.chat`, so it needs saying twice. Its pointed corner faces the cat. */
-#stage.mirrored #bubble.alert { right: auto; left: 14px; border-radius: 12px 12px 12px 4px; }
-
-/* ---- Giving way to the list -----------------------------------------------
-   The bubble hangs above the pet; the list opens to the pet's LEFT and grows
-   upward. Past a certain number of rows the two share a corner, which is how a
-   completion notice came to sit across the list's own top-right with its text
-   tangled in the `clear` control underneath.
-
-   Ordinary completions and chatter simply stand down — the list is already
-   carrying that news (see Chatter.yieldsToList). What is left is the alarm, the
-   quota warning and the hover readout, none of which the list says, so those
-   give up width instead: 148 = 466 (the bubble's right anchor) - 312 (the
-   list's right edge) - 6, which is the clear strip above the pet.
-
-   `crowded` is set from a MEASUREMENT of the list, in syncCrowding(), so a
-   short list costs the readout nothing. Both layouts, because the two swap
-   sides together and the strip is the same width either way. */
-#stage.crowded #bubble.chat,
-#stage.crowded #bubble.alert { max-width: 148px; }
-/* The command is the whole reason the card exists, so in the narrow strip it
-   wraps rather than truncating. */
-#stage.crowded #bubble.alert .abody { display: block; padding-left: 0; }
-#stage.crowded #bubble.alert .akey { padding-right: 4px; }
-#stage.crowded #bubble.alert .awhat {
-  white-space: normal; overflow-wrap: anywhere;
-  /* Each wrapped line keeps the chip's own rounded ends. */
-  -webkit-box-decoration-break: clone; box-decoration-break: clone;
-}
-/* Where it is, on its own line. Side by side the branch is flex:none and took
-   the whole strip, leaving the path as "~…" — and the path is the more
-   identifying half of the pair. There is height to spare above the bubble, so
-   this buys a line rather than a truncation. */
-#stage.crowded #bubble.readout .dpath { display: block; }
-#stage.crowded #bubble.readout .dtree { display: block; }
-/* The facts grid goes two pairs to a row: one pair per row costs the strip a
-   line it does not have (the card hangs from a fixed floor and grows up). */
-#stage.crowded #bubble.readout .dgrid { grid-template-columns: auto auto auto 1fr; column-gap: 5px; }
-#stage.crowded #bubble.readout .dmeter { gap: 4px; }
-#stage.crowded #bubble.readout .dgrid { font-size: 10.5px; }
-/* The strip is short as well as narrow: the card hangs from BUBBLE_FLOOR and a
-   long path already takes three lines, so the spacing tightens to keep its
-   top inside the window. */
-#stage.crowded #bubble.readout { padding: 7px 10px; line-height: 1.3; }
-#stage.crowded #bubble.readout > * + * { margin-top: 3px; }
-#stage.crowded #bubble.readout .dwhere { font-size: 11.5px; line-height: 1.25; }
-/* "context" is the widest label and sets the label column; in 128pt that
-   column is width the meter needs. */
-#stage.crowded #bubble.readout .dkey[data-short] { font-size: 0; }
-#stage.crowded #bubble.readout .dkey[data-short]::before { content: attr(data-short); font-size: 10.5px; }
-/* The meter keeps all its parts; the bar is what gives, since its job is
-   proportion and a short bar still shows proportion. */
-#stage.crowded #bubble.readout .qbar   { width: 22px; }
-#stage.crowded #bubble.readout .qpct   { width: auto; }
+/* Every bubble, and the column of finish notices, is centred on the pet, so
+   moving the centre moves all of them: 80 = 20 + 120 / 2, the mirrored pet's
+   middle. One rule for the lot is what stops a NEW variant from quietly staying
+   on the wrong side of the window. */
+#stage.mirrored #bubble,
+#stage.mirrored #notices { left: 80px; }
 
 #pet {
   position: absolute;
@@ -232,13 +179,22 @@ html, body {
    Anchored by its bottom edge on purpose: a chatter line wraps to two or three
    lines, and a top-anchored bubble grows downward straight over the cat's
    head. 138 = 280 (stage height) - 142, which keeps the bubble clear of the
-   top of the cat at y≈146. */
+   top of the cat at y≈146.
+
+   EVERY variant stays centred on the pet (x=400, PetLayout.petCenter) — a card
+   anchored to the window's edge instead sat off to the side of the head, which
+   a narrow skin shows plainly. Centred, the room is 2 × (480 - 400) = 160, so
+   every variant is laid out for 148: 326…474, clear of the list's right edge
+   at 312, so the bubble and the open list never share a corner.
+   width:max-content, because a box positioned at left:400 would otherwise
+   shrink-to-fit the 80pt left of the window's edge and wrap there. */
 #bubble {
   position: absolute;
   bottom: 138px;
   left: 400px;
   transform: translateX(-50%);
-  max-width: 150px;
+  width: max-content;
+  max-width: 148px;
   padding: 6px 10px;
   /* So every max-width below is the width the bubble actually reaches. Without
      it the padding and the border are added on top, and a variant capped at
@@ -267,16 +223,6 @@ html, body {
 #bubble.chat {
   font-weight: 400;
   white-space: normal;
-  /* Right-anchored, like the quota readout. Centred on the pet at x=400 in a
-     480pt window, a bubble cannot exceed 160pt without being clipped — which is
-     what wrapped a session name onto four lines. */
-  left: auto;
-  right: 14px;
-  transform: none;
-  /* A chatter line is a sentence, and a sentence set 300px wide is a long way
-     for the eye to travel back. The readouts below widen it again — their
-     content is columns, not prose. */
-  max-width: 212px;
   text-align: left;
   line-height: 1.45;
   /* pre-line, not normal: the hover detail arrives as several lines joined by
@@ -293,18 +239,11 @@ html, body {
   font-weight: 600;
 }
 
-/* The quota readout needs more width than a chatter line: four columns have to
-   fit on one row, or the bars wrap and stop being comparable. */
-/* Anchored to the window's right edge rather than centred on the pet: four
-   columns are wider than the space left of centre, and a centred bubble ran off
-   the right side of the window with the countdown clipped. */
+/* Four columns on one row in 148pt, or the bars wrap and stop being
+   comparable: the bar is what gives, since a short bar still shows proportion. */
 #bubble.quota {
-  left: auto;
-  right: 14px;
-  transform: none;
-  max-width: 262px;
   text-align: left;
-  padding: 8px 11px;
+  padding: 7px 9px;
 }
 /* Says what the bars are MEASURING. A bare percentage next to a bar is read as
    either "how much is gone" or "how much is left", and those are opposite
@@ -313,22 +252,31 @@ html, body {
   color: var(--dim); font: 600 11.5px/1.3 var(--round);
   padding-bottom: 3px;
 }
-/* Label | bar | value | reset: a two-column read (what, how much) with the bar
-   between. Fixed widths, so two rows line up as a grid. */
+/* Label, value and reset on one line, the bar under them at the card's full
+   width. Four columns side by side do not fit in 148pt with the countdown
+   still in it, and every row's bar spans the same width, so two rows still
+   compare at a glance. */
 .qrow {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  line-height: 1.7;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas: "label pct reset" "bar bar bar";
+  column-gap: 6px;
+  align-items: baseline;
+  line-height: 1.5;
   font-size: 11.5px;
   white-space: nowrap;
 }
-.qlabel { width: 32px; flex: none; color: var(--faint); }
-/* An explicit width, NOT flex:1. The bubble is shrink-to-fit, so a flex-grow
-   track has a basis of zero and the container reserves no space for it — the
-   bar renders as a hairline. */
+.qrow + .qrow { margin-top: 3px; }
+.qlabel { grid-area: label; color: var(--faint); }
+.qrow .qpct { grid-area: pct; width: auto; text-align: left; }
+.qreset { grid-area: reset; text-align: right; }
+.qrow .qbar { grid-area: bar; width: auto; margin: 1px 0 2px; }
+/* An explicit width, NOT flex:1. The readout's meter is a shrink-to-fit flex
+   row, so a flex-grow track has a basis of zero and the container reserves no
+   space for it — the bar renders as a hairline. 22, not more: the meter shares
+   a 148pt line with its figure and the model. */
 .qbar {
-  width: 68px;
+  width: 22px;
   flex: none;
   height: 4px;
   border-radius: 2px;
@@ -357,12 +305,14 @@ html, body {
    that collides with one of those inherits its layout silently — .detail is
    display:flex, which laid all four of these rows out side by side. Bubble-only
    classes are prefixed. */
+/* 148pt is short as well as narrow: the card hangs from a fixed floor and
+   grows up, and a long path already takes two lines, so the spacing is tight
+   enough to keep its top inside the window. */
 #bubble.readout {
   display: block;
   white-space: normal;
-  max-width: 272px;
-  padding: 8px 11px;
-  font: 400 11px/1.4 var(--sans);
+  padding: 7px 10px;
+  font: 400 11px/1.3 var(--sans);
 }
 
 /* ---- Intervention, completion and quota warning ----------------------------
@@ -374,20 +324,12 @@ html, body {
    NAMING: the panel owns .row, .detail, .name, .what and .done. Bubble-only
    classes are prefixed — `d` for the hover readout, `a` for the alarm card. */
 #bubble.alert {
-  /* Anchored to the window's right edge, NOT centred on the pet. Centred, a
-     card this wide runs off a 480pt window — which is exactly what a long
-     project name did: it was drawn from x=275 and the end of it was simply not
-     in the window. */
-  left: auto;
-  right: 14px;
-  transform: none;
   display: block;
   white-space: normal;
   text-align: left;
-  max-width: 250px;
-  padding: 8px 11px;
-  /* The pointed corner is the one nearest the cat. */
-  border-radius: 12px 12px 4px 12px;
+  padding: 8px 10px;
+  /* The pointed corners are the ones nearest the cat, which sits right below. */
+  border-radius: 12px 12px 4px 4px;
   border: 1.5px solid var(--coral);
 }
 .ahead { display: flex; gap: 7px; align-items: center; min-width: 0; }
@@ -417,16 +359,18 @@ html, body {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .abody {
-  display: flex; gap: 6px; align-items: baseline;
-  margin-top: 4px; padding-left: 19px;         /* 12 glyph + 7 gap */
+  margin-top: 4px;
   color: var(--dim); font-size: 11.5px;
 }
-.akey { flex: none; color: var(--faint); }
-/* The command, in a chip: it is code, and it is the thing being decided. */
+.akey { color: var(--faint); padding-right: 4px; }
+/* The command, in a chip: it is code, and it is the thing being decided — the
+   whole reason the card exists — so in 148pt it wraps rather than truncating. */
 .awhat {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: normal; overflow-wrap: anywhere;
   font: 11px/1.45 var(--mono); color: var(--text);
   background: var(--chip); padding: 0 6px; border-radius: 5px;
+  /* Each wrapped line keeps the chip's own rounded ends. */
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
 }
 .abuttons { margin-top: 7px; }
 /* Allow / Deny: two plain pills. Allow takes the accent, Deny stays quiet, so
@@ -446,22 +390,21 @@ html, body {
    without this a click on Allow in the alarm found nothing. */
 #bubble .decide-box { pointer-events: auto; }
 
-/* A finished turn. Softer than the alarm and it takes itself away — a neutral
-   ring, because "done" is news, not a warning. */
-#bubble.notice {
-  max-width: 240px;
-}
+/* A finished turn (#bubble.notice) is softer than the alarm and takes itself
+   away — a neutral ring, because "done" is news, not a warning. */
 /* The finish notices: a column of small bubbles above the pet, newest at the
    bottom. Each looks like #bubble.notice and, like it, takes no clicks.
-   `bottom` is set by placeNotices() so the column sits on top of #bubble. */
+   `bottom` is set by placeNotices() so the column sits on top of #bubble;
+   centred on the pet the same way, for the same reasons (see #bubble). */
 #notices {
-  position: absolute; right: 14px; bottom: 138px;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  position: absolute; left: 400px; bottom: 138px;
+  transform: translateX(-50%);
+  width: max-content; max-width: 148px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   pointer-events: none;
 }
-#stage.mirrored #notices { right: auto; left: 14px; align-items: flex-start; }
 .notice-item {
-  max-width: 240px; padding: 6px 10px; box-sizing: border-box;
+  max-width: 100%; padding: 6px 10px; box-sizing: border-box;
   border-radius: 12px; border: 1px solid var(--ring);
   background: var(--glass-solid);
   -webkit-backdrop-filter: blur(18px);
@@ -480,41 +423,53 @@ html, body {
 /* Quota past a threshold. Said with a coral ▲ — a warning, not news — so it
    reads apart from a finish notice by shape as well as colour. */
 #bubble.warn {
-  max-width: 240px;
   border-color: color-mix(in srgb, var(--coral) 55%, transparent);
 }
 #bubble.warn::before { content: "\25b2\00a0"; color: var(--coral); font-size: 10px; }
-#bubble.readout > * + * { margin-top: 5px; }
-.dpath { display: flex; gap: 6px; align-items: baseline; }
+#bubble.readout > * + * { margin-top: 3px; }
+/* Where it is, then the branch on its own line. Side by side the branch is the
+   part that cannot shrink and the path is left as "~…" — and the path is the
+   more identifying half of the pair. */
+.dpath { display: block; }
 /* Wraps instead of truncating, at the <wbr> after each "/" — see setPath() and
-   fitPath() in pet.js. min-width:0 lets it shrink beside the branch in the flex
-   (uncrowded) layout instead of pushing the bubble wider. */
+   fitPath() in pet.js. */
 .dwhere {
   color: var(--text);
-  font: 600 12px/1.3 var(--round);
-  min-width: 0;
+  font: 600 11.5px/1.25 var(--round);
   white-space: normal;
 }
 /* One directory name: never broken at its own hyphens. `anywhere` is only for a
    single name longer than the whole bubble. */
 .dseg { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
-.dtree { flex: none; color: var(--faint); font-size: 11px; }
+/* One line: a branch name is often longer than the card, and wrapped it cost
+   a line the path needs more. */
+.dtree {
+  display: block; color: var(--faint); font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .dtree::before { content: "\2387"; padding-right: 2px; opacity: 0.7; }
-/* Label / value, two columns — the same reading as the quota card. */
+/* Label / value — the same reading as the quota card — two pairs to a row:
+   one pair per row costs a line the card does not have (it hangs from a fixed
+   floor and grows up). */
 .dgrid {
-  display: grid; grid-template-columns: auto 1fr;
-  column-gap: 10px; row-gap: 1px; align-items: center;
+  display: grid; grid-template-columns: auto auto auto 1fr;
+  column-gap: 5px; row-gap: 1px; align-items: center;
+  font-size: 10.5px;
   white-space: nowrap;
 }
 .dgrid .wide { grid-column: 2 / -1; }
 .dkey { color: var(--faint); }
+/* "context" is the widest label and sets the label column; in 128pt that
+   column is width the meter needs. */
+.dkey[data-short] { font-size: 0; }
+.dkey[data-short]::before { content: attr(data-short); font-size: 10.5px; }
 .dval {
   color: var(--text);
   font-family: var(--round); font-weight: 500;
   font-variant-numeric: tabular-nums;
   min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
-.dmeter { display: flex; align-items: center; gap: 6px; }
+.dmeter { display: flex; align-items: center; gap: 4px; }
 .dmeter .qpct { width: auto; text-align: left; }
 .dmodel { color: var(--dim); font-weight: 400; }
 .dlast {
@@ -909,12 +864,9 @@ html, body {
 }
 
 /* Nearly out: the figure takes the warning too, in coral with a ▲, so it does
-   not rest on the bar's colour alone. */
+   not rest on the bar's colour alone. The readout's meter goes without the ▲:
+   in 148pt it would push the model name out of the card, and the coral figure
+   still carries the warning there. */
 .qrow[data-level="high"] .qpct,
 .dmeter[data-level="high"] .qpct { color: var(--coral); }
-.qrow[data-level="high"] .qpct::before,
-.dmeter[data-level="high"] .qpct::before { content: "\25b2\00a0"; font-size: 8px; vertical-align: 1px; }
-.qrow[data-level="high"] .qpct { width: auto; min-width: 32px; }
-/* In the crowded strip the ▲ would push the model name out of the card; the
-   coral figure still carries it there. */
-#stage.crowded #bubble.readout .dmeter .qpct::before { content: none; }
+.qrow[data-level="high"] .qpct::before { content: "\25b2\00a0"; font-size: 8px; vertical-align: 1px; }
