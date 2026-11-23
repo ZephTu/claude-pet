@@ -853,6 +853,21 @@ main.single { grid-template-columns: 1fr; }
 .launch { position: relative; display: inline-flex; }
 .launch > .btn.primary:first-child { border-radius: 7px 0 0 7px; }
 .launch .caret-btn { border-radius: 0 7px 7px 0; padding: 2px 7px; border-left: 1px solid color-mix(in srgb, var(--bg) 30%, transparent); }
+/* Slash commands for a session's message box: the session's skills and two built-ins. */
+#slash { position: fixed; z-index: 25; overflow-y: auto; padding: 5px; border-radius: 10px; font-size: 12.5px;
+  background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px var(--line); cursor: default; }
+#slash[hidden] { display: none; }
+#slash .srow { display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-radius: 6px; min-width: 0; }
+#slash .srow:hover { background: var(--panel-2); }
+#slash .srow.on { background: var(--wash-blue); }
+#slash .sname { color: var(--text); font-weight: 600; white-space: nowrap; }
+#slash .chip { flex: none; }
+#slash .sdesc { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* The keys stay in sight at the foot while the list scrolls (and the chosen row never hides under them). */
+#slash { scroll-padding-bottom: 30px; }
+#slash .shint { position: sticky; bottom: -5px; color: var(--faint); font-size: 11px; padding: 5px 8px 4px; margin: 4px -5px -5px;
+  border-top: 1px solid var(--line); background: var(--panel); }
+
 .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 12; width: 230px; padding: 6px; border-radius: 10px;
   background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px var(--line); font-size: 12.5px; cursor: default; }
 .menu .mh { color: var(--faint); font-size: 11.5px; padding: 4px 8px 2px; }

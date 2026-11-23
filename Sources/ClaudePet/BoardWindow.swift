@@ -244,6 +244,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 if body["opened"] as? Bool == true { Self.onPeek?(str("session")) }
             }
             return r
+        case "commands":
+            // The skills this session can run as slash commands, for the message box's completion.
+            return await hq(["peek", str("session"), "--commands", "--json"])
         case "peek-tool":
             // One tool call's full input and output, for a Peek row that was opened.
             return await hq(["peek", str("session"), "--tool", str("id"), "--json"])

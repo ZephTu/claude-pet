@@ -644,6 +644,7 @@ function render() {
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
     }
   }
+  slashPlace();
 }
 
 // Every task id on the page — chips, row ids — takes its task's status colour.
@@ -2110,6 +2111,7 @@ function drawPeek(toBottom) {
   box.hidden = false;
   fitAllGrow(box);
   if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
+  slashPlace();
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
   nb.scrollTop = prevTop;
@@ -3331,6 +3333,7 @@ document.addEventListener("input", (ev) => {
   if (note) autoPick(note[1], el.value.trim() !== "");
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA" && el.classList.contains("grow")) fitGrow(el);
+  if (el.tagName === "TEXTAREA" && el.dataset.session) slashUpdate(el);
 });
 
 // Input methods (Pinyin, Japanese…): hold every redraw while a word is being composed.
@@ -3349,6 +3352,141 @@ function compositionDone(ev) {
 }
 document.addEventListener("compositionend", compositionDone, true);
 document.addEventListener("focusout", compositionDone, true);   // in case a composition is cut off
+
+// ---- slash commands in a session's message box: type "/" and pick, as in the terminal.
+// What goes in the box is typed into the session's terminal, so a slash command runs there. The
+// skills are the session's own, as Claude Code listed them in its transcript (`hq peek --commands`):
+// that already accounts for its project, the user's skills and its plugins. Of Claude Code's
+// built-in commands only those that do their work without the terminal are offered: one that
+// opens a menu (/model, /config, /resume…) would leave the session sitting in it, out of the
+// board's sight, and one that only prints (/context, /cost) prints where the board can't see.
+const SLASH_BUILTIN = () => [
+  { name: "compact", desc: T("Compact the conversation now (add instructions after it if you like)", "现在压缩对话（后面可以接要保留什么的说明）"), builtin: true },
+  { name: "clear", desc: T("Start over: a new, empty session in the same terminal", "清空重来：在同一个终端里开一个新的空 session"), builtin: true },
+];
+const SLASH_MAX = 50;
+const slashCache = {};   // sessionId → { at, skills, loading }
+function slashQuery(el) {
+  const m = /^\/([^\s]*)$/.exec(el.value);
+  return m && !el.disabled && el.selectionStart === el.value.length ? m[1].toLowerCase() : null;
+}
+function slashSkills(sid, el) {
+  const c = slashCache[sid];
+  if (c && (c.loading || Date.now() - c.at < 60_000)) return c.skills || [];
+  slashCache[sid] = { at: Date.now(), skills: c ? c.skills : [], loading: true };
+  apiJSON("commands", { session: sid }).then((d) => {
+    slashCache[sid] = { at: Date.now(), skills: (d && d.skills) || [] };
+  }, () => { slashCache[sid] = { at: Date.now(), skills: c ? c.skills : [] }; })
+    .then(() => { if (document.activeElement === el) slashUpdate(el); });
+  return slashCache[sid].skills;
+}
+function slashUpdate(el) {
+  const q = slashQuery(el);
+  if (q === null) return slashClose();
+  const all = [...SLASH_BUILTIN(), ...slashSkills(el.dataset.session, el)];
+  // Names that start with what was typed first, then names that contain it anywhere ("review"
+  // finds code-review), then — from three letters, when it is a word, not a fragment of every
+  // other one — the ones whose description mentions it.
+  const rank = (x) => { const n = x.name.toLowerCase(); return n.startsWith(q) ? 0 : n.includes(q) ? 1 : q.length >= 3 && (x.desc || "").toLowerCase().includes(q) ? 2 : 3; };
+  const items = all.map((x, i) => ({ x, r: rank(x), i })).filter((y) => y.r < 3)
+    .sort((a, b) => a.r - b.r || a.i - b.i).slice(0, SLASH_MAX).map((y) => y.x);
+  const same = ui.slash && ui.slash.key === el.dataset.key && ui.slash.q === q;
+  const keep = same ? items.findIndex((x) => x.name === ui.slash.items[ui.slash.sel]?.name) : -1;
+  ui.slash = { key: el.dataset.key, q, items, sel: Math.max(0, keep) };
+  slashDraw();
+}
+function slashClose() {
+  if (!ui.slash) return;
+  ui.slash = null;
+  const p = $("#slash");
+  if (p) p.hidden = true;
+}
+// The box it belongs to: the focused one with its key (the Sessions column and the conversation
+// window share a key, so the focused one, not the first).
+function slashBox() {
+  const a = document.activeElement;
+  return ui.slash && a && a.tagName === "TEXTAREA" && a.dataset.key === ui.slash.key ? a : null;
+}
+function slashDraw() {
+  const el = slashBox();
+  if (!el || !ui.slash.items.length) { const p = $("#slash"); if (p) p.hidden = true; return; }
+  let p = $("#slash");
+  if (!p) {
+    p = document.createElement("div");
+    p.id = "slash";
+    p.setAttribute("role", "listbox");
+    document.body.appendChild(p);
+    // A press on a row picks it without taking the cursor out of the box.
+    p.addEventListener("mousedown", (ev) => {
+      ev.preventDefault();
+      const row = ev.target.closest("[data-i]");
+      if (row) slashPick(Number(row.dataset.i));
+    });
+  }
+  const { items, sel } = ui.slash;
+  p.innerHTML = items.map((x, i) => `<div class="srow ${i === sel ? "on" : ""}" role="option" data-i="${i}"${i === sel ? ` aria-selected="true"` : ""}>
+      <span class="sname">/${esc(x.name)}</span>${x.builtin ? `<span class="chip">${T("built-in", "内置")}</span>` : ""}<span class="sdesc">${esc(x.desc || "")}</span></div>`).join("")
+    + `<div class="shint">${T("↑↓ choose · Tab or Return fills it in · Esc closes", "↑↓ 选择 · Tab 或回车填入 · Esc 关闭")}</div>`;
+  p.hidden = false;
+  slashPlace();
+  const on = p.querySelector(".srow.on");
+  if (on) on.scrollIntoView({ block: "nearest" });
+}
+// Above the box (the boxes sit low: the conversation window's is at its foot), or below it when
+// there is more room there.
+function slashPlace() {
+  const p = $("#slash");
+  if (!p || p.hidden) return;
+  const el = slashBox();
+  if (!el) return slashClose();
+  const r = el.getBoundingClientRect();
+  const w = Math.max(320, Math.min(560, r.width));
+  p.style.width = `${w}px`;
+  p.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  const room = r.top - 8, below = innerHeight - r.bottom - 8;
+  if (room >= Math.min(p.scrollHeight, 260) || room >= below) {
+    p.style.maxHeight = `${Math.min(300, room)}px`; p.style.top = ""; p.style.bottom = `${innerHeight - r.top + 4}px`;
+  } else {
+    p.style.maxHeight = `${Math.min(300, below)}px`; p.style.bottom = ""; p.style.top = `${r.bottom + 4}px`;
+  }
+}
+function slashPick(i) {
+  const el = slashBox();
+  const x = ui.slash && ui.slash.items[i];
+  if (!el || !x) return;
+  slashClose();
+  // As typing would: the box's draft, undo and input handlers all see it.
+  el.setSelectionRange(0, el.value.length);
+  document.execCommand("insertText", false, `/${x.name} `);
+}
+document.addEventListener("keydown", (ev) => {
+  if (!ui.slash || ev.isComposing || !slashBox() || $("#slash")?.hidden !== false) return;
+  const n = ui.slash.items.length;
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ui.slash.sel = (ui.slash.sel + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
+  } else if (ev.key === "Tab" || (ev.key === "Enter" && !ev.shiftKey)) {
+    slashPick(ui.slash.sel);
+  } else if (ev.key === "Escape") {
+    slashClose();
+  } else return;
+  // Its own keys only: not a new line, not the next field, not closing the conversation window.
+  ev.preventDefault();
+  ev.stopImmediatePropagation();
+  if (ui.slash) slashDraw();
+}, true);
+// Next tick: a refresh that rebuilds the box focuses its stand-in first and puts the caret back
+// right after, and the caret decides whether the list shows.
+document.addEventListener("focusin", (ev) => {
+  const el = ev.target;
+  if (el.tagName === "TEXTAREA" && el.dataset.session) setTimeout(() => { if (document.activeElement === el) slashUpdate(el); }, 0);
+});
+// Leaving the box closes it — unless the box was only rebuilt by a refresh, which puts the cursor
+// straight back into its stand-in.
+document.addEventListener("focusout", () => setTimeout(() => { if (ui.slash && !slashBox()) slashClose(); }, 0), true);
+document.addEventListener("selectionchange", () => {
+  const el = slashBox();
+  if (el && slashQuery(el) === null) slashClose();
+});
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;

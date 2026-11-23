@@ -2973,8 +2973,64 @@ def find_transcript(prefix):
     return max(hits, key=os.path.getmtime), False
 
 
+def session_skills(path):
+    """The skills a session can run as slash commands, as Claude Code itself listed them: it
+    writes a skill_listing attachment when the session starts (and again after a compaction or
+    a resume), plus one for each skill that turns up later. So the newest full listing and the
+    additions after it — this session's project, user and plugin skills, nothing guessed.
+    [{name, desc}] in the listing's order; [] when the transcript has none."""
+    import mmap
+    key = b'"type":"skill_listing"'
+    found = []
+    with open(path, "rb") as f:
+        if os.fstat(f.fileno()).st_size == 0:
+            return []
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+            end = len(m)
+            while True:
+                at = m.rfind(key, 0, end)
+                if at < 0:
+                    break
+                start = m.rfind(b"\n", 0, at) + 1
+                stop = m.find(b"\n", at)
+                stop = len(m) if stop < 0 else stop
+                end = start
+                try:
+                    a = (json.loads(m[start:stop]) or {}).get("attachment") or {}
+                except ValueError:
+                    continue
+                if a.get("type") != "skill_listing":
+                    continue
+                found.append(a)
+                if a.get("isInitial"):
+                    break
+    out, seen = [], set()
+    for a in reversed(found):
+        names = [n for n in a.get("names") or [] if isinstance(n, str)]
+        descs = {}
+        # "- name: description" per line; a plugin's name has a colon of its own, so match the
+        # longest listed name each line starts with.
+        for line in str(a.get("content") or "").split("\n"):
+            hit = max((n for n in names if line.startswith(f"- {n}:")), key=len, default=None)
+            if hit:
+                descs[hit] = line[len(hit) + 3:].strip()
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                out.append({"name": n, "desc": one_line(descs.get(n, ""), 140)})
+    return out
+
+
 def cmd_peek(args):
     path, live = find_transcript(args.session)
+    if args.commands:
+        skills = session_skills(path) if path else []
+        if args.json:
+            print(json.dumps({"found": bool(path), "skills": skills}, ensure_ascii=False, indent=1))
+        else:
+            for x in skills:
+                print(f"/{x['name']}  {x['desc']}")
+        return
     if args.tool:
         d = tool_detail(path, args.tool) if path else None
         if not d:
@@ -3659,6 +3715,8 @@ def main():
     p.add_argument("--meta", action="store_true",
                    help="with --json: an object with title, cwd, live, tool calls, the turn, Claude's todos")
     p.add_argument("--tool", metavar="ID", help="one tool call's full input and output (id from --meta items)")
+    p.add_argument("--commands", action="store_true",
+                   help="the skills this session can run as slash commands, as Claude Code listed them")
     p.set_defaults(fn=cmd_peek)
     p = sub.add_parser("jumps", help="how often you jumped to a terminal, by session state and where you clicked")
     p.add_argument("--days", type=int, default=7); p.add_argument("--json", action="store_true")
