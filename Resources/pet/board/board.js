@@ -333,6 +333,14 @@ window.hqRefresh = refresh;
 // The Focus cards' ⚠ lines: `hq status --focus` reads each task's sessions, so it runs once a
 // minute (and when the Focus list changes), not on every few-second refresh; it never holds one up.
 const FLAGS_EVERY_MS = 60000;
+function showFlags(flags) {
+  const key = JSON.stringify(flags);
+  if (key === ui.flagsKey) return;
+  ui.flags = flags; ui.flagsKey = key;
+  // A timed redraw, so it waits for the mouse button and the Approve box as refresh() does.
+  if (ui.pointerDown || ui.overApprove) ui.pendingRender = true;
+  else render();
+}
 async function loadFlags() {
   const ids = list(focusState().ids).join(",");
   if (ui.flagsLoading || (Date.now() - ui.flagsAt < FLAGS_EVERY_MS && ids === ui.flagsIds)) return;
@@ -342,10 +350,12 @@ async function loadFlags() {
     const flags = {};
     for (const t of list(r.tasks)) if (list(t.flags).length) flags[t.id] = t.flags;
     ui.flagsAt = Date.now(); ui.flagsIds = ids;
-    const key = JSON.stringify(flags);
-    if (key !== ui.flagsKey) { ui.flags = flags; ui.flagsKey = key; render(); }
+    showFlags(flags);
   } catch (e) {
-    ui.flagsAt = Date.now();            // an old hq without `status`: try again in a minute, quietly
+    // An old hq without `status`, or hq failing: no ⚠ rather than stale ones; try again in a minute.
+    console.warn("hq status:", e);
+    ui.flagsAt = Date.now();
+    showFlags({});
   } finally {
     ui.flagsLoading = false;
   }

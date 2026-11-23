@@ -102,14 +102,15 @@ Flags — where the card and the sessions disagree:
 
 | kind | when |
 |---|---|
-| `card-behind` | a session (not mid-turn) ran tools more than 10 min after the card was last written |
-| `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watcher, once … finishes, 等, 盯 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min |
+| `card-behind` | a session not mid-turn (neither working nor held at a prompt) called tools more than 10 min after the card was last written |
+| `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min |
 | `stale` | open and not updated for 7 days |
 | `done-live` | done or abandoned with a session still running |
 | `over-budget` | the card is over 16 KB, 30 links or 30 todos |
 
-The board shows the Focus tasks' flags as ⚠ lines on their cards (`hq status --focus --json`,
-read about once a minute).
+A task's sessions are the ones bound to it and the ones its card lists, less any since bound to
+another task. The board shows the Focus tasks' flags as ⚠ lines on their cards (`hq status
+--focus --json`, read about once a minute); done tasks leave Focus, so `done-live` shows only here.
 
 ### What a bound session does differently
 

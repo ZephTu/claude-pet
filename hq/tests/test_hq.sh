@@ -739,6 +739,9 @@ assert s["messages"][-1]=={"role":"assistant","ts":s["messages"][-1]["ts"],"text
 ' && ok "status: card, open todos by owner with their waits, asks, log, the session and its context" || fail "status JSON"
 "$HQ" status "$S1" | grep -q "⚠ card behind: session 5ca7e5a1 worked until" && ok "status: flags a card its session worked past" || fail "status card-behind"
 "$HQ" status "$S1" | grep -q "^  @me todos (1):" && ok "status prints a text summary" || fail "status text"
+# An API error as the last reply (no tokens, model "<synthetic>") leaves the budget as it was.
+transcript "$P/$SS1.jsonl" '[{"type":"assistant","message":{"id":"a3","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"API Error: overloaded"}]},"timestamp":"@118"}]'
+"$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert c=={"tokens":100000,"budget":200000,"percent":50}, c' && ok "status: an API-error reply does not change the context budget" || fail "status context after API error"
 # The card written after that work: not behind any more.
 "$HQ" touch "$S1" >/dev/null
 "$HQ" status "$S1" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["idle-waiting"], k' && ok "status: a card written after its session's work is not behind" || fail "status card-behind cleared"
@@ -761,6 +764,9 @@ transcript "$P/$SS2.jsonl" '[{"type":"attachment","attachment":{"type":"queued_c
 "$HQ" status "$S2" --json | python3 -c '
 import json,sys; f=json.load(sys.stdin)["tasks"][0]["flags"]
 assert [x["kind"] for x in f]==["idle-waiting"] and "idle with nothing in the background" in f[0]["text"], f' && ok "status: once the watcher is done and the session sits idle, the card waiting on it is flagged" || fail "status idle-waiting live"
+# The watcher's completion notice arriving is not the session calling tools after the card.
+backdate "$(ls "$T"/root/tasks/$S2-*/TASK.md)" 115
+"$HQ" status "$S2" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["idle-waiting"], k' && ok "status: a background job finishing does not put the card behind" || fail "status card-behind on background completion"
 "$HQ" set "$S2" "next=wait on Ping for the numbers" >/dev/null
 "$HQ" status "$S2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["flags"]==[]' && ok "status: waiting on a person is not flagged" || fail "status waiting on a person"
 
@@ -789,6 +795,21 @@ assert "'"$S3"'" in ids and "'"$S4"'" in ids, ids' && ok "status with no task: e
 "$HQ" status --flagged --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert all(i!="'"$S2"'" for i in ids) and "'"$S4"'" in ids, ids' && ok "status --flagged keeps only the flagged tasks" || fail "status --flagged"
 "$HQ" focus add "$S2" >/dev/null
 "$HQ" status --focus --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert "'"$S2"'" in ids and "'"$S4"'" not in ids, ids' && ok "status --focus covers the Focus list" || fail "status --focus"
+# S5: a session held at a permission prompt is mid-turn, so not behind; then it moves to S6.
+S5="$("$HQ" new "Status prompt" --no-focus | head -1)"; S5C="$(ls "$T"/root/tasks/$S5-*/TASK.md)"
+SS5=5ca7e5a5-1111-2222-3333-444455556666
+transcript "$P/$SS5.jsonl" '[{"type":"assistant","message":{"id":"e1","content":[{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"rm -rf build"}}]},"timestamp":"@30"}]'
+echo "{\"pid\": $$, \"state\": \"waiting\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
+"$HQ" bind "$S5" --session "$SS5" >/dev/null; backdate "$S5C" 60
+"$HQ" status "$S5" --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["flags"]==[] and t["sessions"][0]["state"]=="waiting-on-you", t' && ok "status: a session held at a prompt is not a card behind" || fail "status card-behind while waiting on a prompt"
+echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
+"$HQ" status "$S5" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["card-behind"], k' && ok "status: the same session, idle, is" || fail "status card-behind once idle"
+S6="$("$HQ" new "Status elsewhere" --no-focus | head -1)"
+"$HQ" bind "$S6" --session "$SS5" >/dev/null; backdate "$S5C" 60
+"$HQ" status "$S5" "$S6" --json | python3 -c '
+import json,sys; a,b=json.load(sys.stdin)["tasks"]
+assert a["flags"]==[] and a["sessions"]==[], a
+assert [s["sessionId"] for s in b["sessions"]]==["'"$SS5"'"], b' && ok "status: a session since bound to another task counts there, not on its old card" || fail "status moved session"
 rm -rf "$HOME/.claude/pet"
 
 # hq jumps: the pet's jump log, last N days, by state x source.
