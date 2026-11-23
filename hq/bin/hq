@@ -3004,21 +3004,23 @@ def session_skills(path):
                 found.append(a)
                 if a.get("isInitial"):
                     break
-    out, seen = [], set()
+    # Oldest first: a name keeps its first place, and a later listing of it (a skill that
+    # changed) brings its new description.
+    order, seen, desc = [], set(), {}
     for a in reversed(found):
         names = [n for n in a.get("names") or [] if isinstance(n, str)]
-        descs = {}
         # "- name: description" per line; a plugin's name has a colon of its own, so match the
         # longest listed name each line starts with.
         for line in str(a.get("content") or "").split("\n"):
             hit = max((n for n in names if line.startswith(f"- {n}:")), key=len, default=None)
             if hit:
-                descs[hit] = line[len(hit) + 3:].strip()
+                desc[hit] = line[len(hit) + 3:].strip()
         for n in names:
+            desc.setdefault(n, "")
             if n not in seen:
                 seen.add(n)
-                out.append({"name": n, "desc": one_line(descs.get(n, ""), 140)})
-    return out
+                order.append(n)
+    return [{"name": n, "desc": one_line(desc[n], 140)} for n in order]
 
 
 def cmd_peek(args):

@@ -3365,34 +3365,44 @@ const SLASH_BUILTIN = () => [
   { name: "clear", desc: T("Start over: a new, empty session in the same terminal", "清空重来：在同一个终端里开一个新的空 session"), builtin: true },
 ];
 const SLASH_MAX = 50;
-const slashCache = {};   // sessionId → { at, skills, loading }
+const slashCache = {};   // sessionId → { at, skills, loading, failed }
 function slashQuery(el) {
   const m = /^\/([^\s]*)$/.exec(el.value);
   return m && !el.disabled && el.selectionStart === el.value.length ? m[1].toLowerCase() : null;
 }
-function slashSkills(sid, el) {
+function slashSkills(sid) {
   const c = slashCache[sid];
   if (c && (c.loading || Date.now() - c.at < 60_000)) return c.skills || [];
   slashCache[sid] = { at: Date.now(), skills: c ? c.skills : [], loading: true };
   apiJSON("commands", { session: sid }).then((d) => {
     slashCache[sid] = { at: Date.now(), skills: (d && d.skills) || [] };
-  }, () => { slashCache[sid] = { at: Date.now(), skills: c ? c.skills : [] }; })
-    .then(() => { if (document.activeElement === el) slashUpdate(el); });
+  }, () => { slashCache[sid] = { at: Date.now(), skills: c ? c.skills : [], failed: true }; })
+    // Into whichever box of this session has the cursor now: a refresh may have rebuilt it meanwhile.
+    .then(() => {
+      const a = document.activeElement;
+      if (a && a.tagName === "TEXTAREA" && a.dataset.session === sid) slashUpdate(a);
+    });
   return slashCache[sid].skills;
 }
 function slashUpdate(el) {
   const q = slashQuery(el);
   if (q === null) return slashClose();
-  const all = [...SLASH_BUILTIN(), ...slashSkills(el.dataset.session, el)];
+  // Esc said no to this text: a refresh putting the cursor back doesn't ask again; typing does.
+  if (ui.slashOff && ui.slashOff.key === el.dataset.key && ui.slashOff.value === el.value) return slashClose();
+  ui.slashOff = null;
+  const all = [...SLASH_BUILTIN(), ...slashSkills(el.dataset.session)];
   // Names that start with what was typed first, then names that contain it anywhere ("review"
   // finds code-review), then — from three letters, when it is a word, not a fragment of every
   // other one — the ones whose description mentions it.
   const rank = (x) => { const n = x.name.toLowerCase(); return n.startsWith(q) ? 0 : n.includes(q) ? 1 : q.length >= 3 && (x.desc || "").toLowerCase().includes(q) ? 2 : 3; };
-  const items = all.map((x, i) => ({ x, r: rank(x), i })).filter((y) => y.r < 3)
-    .sort((a, b) => a.r - b.r || a.i - b.i).slice(0, SLASH_MAX).map((y) => y.x);
+  const ranked = all.map((x, i) => ({ x, r: rank(x), i })).filter((y) => y.r < 3)
+    .sort((a, b) => a.r - b.r || a.i - b.i).slice(0, SLASH_MAX);
+  const items = ranked.map((y) => y.x);
   const same = ui.slash && ui.slash.key === el.dataset.key && ui.slash.q === q;
   const keep = same ? items.findIndex((x) => x.name === ui.slash.items[ui.slash.sel]?.name) : -1;
-  ui.slash = { key: el.dataset.key, q, items, sel: Math.max(0, keep) };
+  // Only a name match is chosen for you: text that merely turns up in a description ("/etc",
+  // "/tmp") is more likely a path, and Return should stay a new line until you pick with ↑↓.
+  ui.slash = { key: el.dataset.key, q, items, sel: keep >= 0 ? keep : ranked.length && ranked[0].r < 2 ? 0 : -1 };
   slashDraw();
 }
 function slashClose() {
@@ -3426,7 +3436,9 @@ function slashDraw() {
   const { items, sel } = ui.slash;
   p.innerHTML = items.map((x, i) => `<div class="srow ${i === sel ? "on" : ""}" role="option" data-i="${i}"${i === sel ? ` aria-selected="true"` : ""}>
       <span class="sname">/${esc(x.name)}</span>${x.builtin ? `<span class="chip">${T("built-in", "内置")}</span>` : ""}<span class="sdesc">${esc(x.desc || "")}</span></div>`).join("")
-    + `<div class="shint">${T("↑↓ choose · Tab or Return fills it in · Esc closes", "↑↓ 选择 · Tab 或回车填入 · Esc 关闭")}</div>`;
+    + `<div class="shint">${slashCache[el.dataset.session]?.failed
+      ? T("Couldn't read this session's skills — hq may need updating (hq/install.sh --yes)", "读不到这个 session 的 skill——hq 可能要更新（hq/install.sh --yes）")
+      : T("↑↓ choose · Tab or Return fills it in · Esc closes", "↑↓ 选择 · Tab 或回车填入 · Esc 关闭")}</div>`;
   p.hidden = false;
   slashPlace();
   const on = p.querySelector(".srow.on");
@@ -3461,12 +3473,16 @@ function slashPick(i) {
 }
 document.addEventListener("keydown", (ev) => {
   if (!ui.slash || ev.isComposing || !slashBox() || $("#slash")?.hidden !== false) return;
-  const n = ui.slash.items.length;
+  // With a modifier these keys keep their own meaning (Shift-Tab back, Shift-↑ to select…).
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || (ev.shiftKey && ev.key !== "Escape")) return;
+  const n = ui.slash.items.length, sel = ui.slash.sel;
   if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-    ui.slash.sel = (ui.slash.sel + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
-  } else if (ev.key === "Tab" || (ev.key === "Enter" && !ev.shiftKey)) {
-    slashPick(ui.slash.sel);
+    ui.slash.sel = sel < 0 ? (ev.key === "ArrowDown" ? 0 : n - 1) : (sel + (ev.key === "ArrowDown" ? 1 : n - 1)) % n;
+  } else if ((ev.key === "Tab" || ev.key === "Enter") && sel >= 0) {
+    slashPick(sel);
   } else if (ev.key === "Escape") {
+    const el = slashBox();
+    ui.slashOff = { key: el.dataset.key, value: el.value };
     slashClose();
   } else return;
   // Its own keys only: not a new line, not the next field, not closing the conversation window.
@@ -3487,6 +3503,8 @@ document.addEventListener("selectionchange", () => {
   const el = slashBox();
   if (el && slashQuery(el) === null) slashClose();
 });
+// Follow the box when its column or the conversation scrolls.
+document.addEventListener("scroll", (ev) => { if (ev.target.id !== "slash") slashPlace(); }, true);
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
