@@ -302,6 +302,14 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         self.watcher = watcher
     }
 
+    /// The Dock icon (there while the board is open — see BoardWindow) brings
+    /// the board forward, even when it is minimised.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let w = boardWindow, w.isMiniaturized { w.deminiaturize(nil) }
+        if boardWindow != nil { showBoard() }
+        return false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         ticker?.invalidate()
         watcher?.stop()

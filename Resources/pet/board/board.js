@@ -197,6 +197,19 @@ function laterLine(t) {
     (open ? later.map((a) => askCard(t, a)).join("") : "");
 }
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
+// Its turn is over but commands it started (a build, a test run…) are still running under it.
+// Not idle: it will have something to say when they finish. (A `claude --bg` session is another
+// thing — s.background — and says so with its own tag.)
+const bgRunning = (s) => s.state !== "busy" && s.state !== "waiting" && ((ui.dots || {})[s.sessionId] || {}).background > 0;
+// One word for where a task's live sessions stand, for its row and its Focus card: working beats
+// running in the background beats idle.
+const liveTag = (live) => {
+  if (!live.length) return "";
+  const [cls, word] = live.some((x) => x.state === "busy") ? ["", T("working", "在干活")]
+    : live.some(bgRunning) ? ["bg", T("in background", "后台在跑")]
+    : ["idle", live.length === 1 ? T("idle", "空闲") : T(`${live.length} idle`, `${live.length} 个空闲`)];
+  return `<span class="live ${cls}" title="${T("Its live sessions", "它在跑的 session")}">${word}</span>`;
+};
 // The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
 // a reply (from here or its terminal) clears it, same as in the pet's list.
 const newTag = (sid) => (ui.unread && ui.unread[sid]
@@ -923,7 +936,6 @@ function renderTasks() {
 const STATUS_SHORT = { "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"), done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃") };
 function renderTask(t, mode) {
   const asks = openAsks(t).length;
-  const live = liveFor(t.id).length;
   const open = ui.expanded.has(t.id);
   const mine = t.waiting_on_me || (t.todos.find((x) => x.state === "open" && x.owner === "me") || {}).text;
   // Row 1: id · title (one line) · badges. Row 2: the subtitle across the full width, two lines max.
@@ -931,7 +943,6 @@ function renderTask(t, mode) {
   // Status is the rail on the row's left edge (and the id's colour); the group heading already
   // names the project or the status, so the row repeats neither.
   const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? T("Waiting on you: ", "等你处理：") : T("Next: ", "下一步：")) + subText)}">${esc(subText)}</div>` : "";
-  const busy = liveFor(t.id).some((x) => x.state === "busy");
   return `<div class="task ${open ? "open" : ""}" id="task-${esc(t.id)}" data-st="${esc(t.status)}">
     <div class="task-head" data-action="expand" data-task="${esc(t.id)}" title="${esc(STATUS_SHORT[t.status] || t.status)}${T(` — click to ${open ? "fold" : "open"}`, `——点击${open ? "收起" : "展开"}`)}">
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
@@ -940,7 +951,7 @@ function renderTask(t, mode) {
         ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
             title="${focusIds().includes(t.id) ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}
-        ${live ? `<span class="live ${busy ? "" : "idle"}" title="${T("live sessions on it", "在做这个任务的 session")}">${busy ? T("working", "在干活") : T(live === 1 ? "1 session" : `${live} sessions`, `${live} 个 session`)}</span>` : ""}
+        ${liveTag(liveFor(t.id))}
         ${mode === "project" ? (t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : "")
           : t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
         <span class="age-d" title="${T("Last updated", "最后更新")} ${esc(t.updated || "")}">${t.age_days ?? "?"}${T("d", "天")}</span>
@@ -987,7 +998,6 @@ function focusCard(t) {
   const mine = open.filter((x) => x.owner === "me");
   const others = open.length - mine.length;
   const live = liveFor(t.id);
-  const busy = live.some((s) => s.state === "busy");
   const detail = ui.expanded.has(t.id);
   const box = (x) => `<div class="todo">
       <span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
@@ -1005,7 +1015,7 @@ function focusCard(t) {
       ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="${T("Drag to reorder your Focus", "拖动调整 Focus 的顺序")}">⠿</span>`}
       <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
       <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
-      ${live.length ? `<span class="live ${busy ? "" : "idle"}">${busy ? T("working", "在干活") : T("idle", "空闲")}</span>` : ""}
+      ${liveTag(live)}
       ${t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
       ${t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
       <button class="icon x" title="${T("Take it off Focus (the task stays)", "从 Focus 拿掉（任务本身不变）")}" data-confirm="${T("Unfocus?", "拿掉？")}" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
@@ -1016,12 +1026,33 @@ function focusCard(t) {
         <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet", "还没有下一步")}</span>`}</div></div>
         <div class="tools" data-action="none" title="">${resume}${launchSplit(t)}</div>
       </div>
+      ${focusSessions(t, live)}
       ${stillRunning(t)}
       ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
       ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
       ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : T("Nothing waiting on you here", "这里没有在等你的事")}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? T(`${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all`, `还有 ${others} 条是 Claude 或别人的待办——展开看全部`) : ""}</div>` : ""}
     </div>`}
   </div>`;
+}
+
+// A folded Focus card's live sessions, one line each: what it is doing and its last words. The
+// line opens Peek — the output you would otherwise open the card and scroll to the rail for.
+function focusSessions(t, live) {
+  if (!live.length) return "";
+  const order = { waiting: 0, busy: 1 };
+  const rank = (s) => order[s.state] ?? (bgRunning(s) ? 2 : 3);
+  return `<div class="fsess">${live.slice().sort((a, b) => rank(a) - rank(b) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).map((s) => {
+    const title = String(s.title || s.project || s.sessionId.slice(0, 8));
+    const name = title.replace(new RegExp("^" + t.id + "\\s*"), "") || title;
+    const last = plainText(s.lastText);
+    return `<div class="fs" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
+      ${dot(s)}<span class="fs-n">${newTag(s.sessionId)}${esc(name)}</span>
+      <span class="fs-st">${esc(statusWord(s))}</span>
+      <span class="fs-l">${last ? esc(last) : ""}</span>
+      <span class="fs-t">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
+      <span class="icon fs-eye">${ICON.peek}</span>
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function renderTodaySessions() {
@@ -1322,7 +1353,8 @@ function renderTaskBody(t) {
   const sessRow = (s) => `<div class="bsess">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}</div>
+          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
+          ${plainText(s.lastText) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
           ${s.background
@@ -1337,6 +1369,17 @@ function renderTaskBody(t) {
     ${stillRunning(t)}
     <div class="tcols">
       <div class="tmain">
+        <div class="tsess">
+          <div class="sec-h"><h3>Sessions <span class="meta">${live.length || ""}</span></h3>
+            <button class="icon ${adding("bind") ? "on" : ""}" title="${T("Bind a live session", "绑定一个正在运行的 session")}" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button></div>
+          ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
+              ? `<select class="bind" data-key="${k("bindpick")}"><option value="">${T("Choose a live session…", "选一个正在运行的 session…")}</option>
+                  ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? T(" · now on ", " · 现在在 ") + esc(s.task) : ""}</option>`).join("")}</select>
+                 <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">${T("Bind", "绑定")}</button>`
+              : `<span class="empty">${T("No other live sessions.", "没有别的正在运行的 session。")}</span>`}</div>` : ""}
+          ${live.length ? live.map(sessRow).join("") : `<div class="empty">${T("None live.", "没有在跑的。")}</div>`}
+          ${earlierList(t)}
+        </div>
         ${secHead(T("Todos", "待办"), t, "todo", T("Add a todo", "加一条待办"), null, todoState)}
         ${adding("todo") ? `<div class="row nowrap addbox">
             <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
@@ -1366,17 +1409,6 @@ function renderTaskBody(t) {
             <button class="btn small" data-action="add-ref" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>
           ${!(ui.board && (ui.board.links || []).length) ? `<div class="meta">${T("Shorthand like QA-123 becomes a link once you add a rule under \"links\" in hq.json (see Guide).", "在 hq.json 的 \"links\" 里加上规则后，QA-123 这样的简写就会变成链接（见说明）。")}</div>` : ""}
         </div>` : ""}
-        <div class="rail-sec">
-          <div class="sec-h"><h3>Sessions <span class="meta">${live.length || ""}</span></h3>
-            <button class="icon ${adding("bind") ? "on" : ""}" title="${T("Bind a live session", "绑定一个正在运行的 session")}" data-action="toggle-add" data-what="bind" data-task="${esc(t.id)}">${PLUS}</button></div>
-          ${adding("bind") ? `<div class="row nowrap addbox">${unbound.length
-              ? `<select class="bind" data-key="${k("bindpick")}"><option value="">${T("Choose a live session…", "选一个正在运行的 session…")}</option>
-                  ${unbound.map((s) => `<option value="${esc(s.sessionId)}" ${draft(k("bindpick")) === s.sessionId ? "selected" : ""}>${esc(s.title || s.project)} (${esc(s.project)})${s.task ? T(" · now on ", " · 现在在 ") + esc(s.task) : ""}</option>`).join("")}</select>
-                 <button class="btn small primary" data-action="bind-pick" data-task="${esc(t.id)}">${T("Bind", "绑定")}</button>`
-              : `<span class="empty">${T("No other live sessions.", "没有别的正在运行的 session。")}</span>`}</div>` : ""}
-          ${live.length ? live.map(sessRow).join("") : `<div class="empty">${T("None live.", "没有在跑的。")}</div>`}
-          ${earlierList(t)}
-        </div>
       </aside>
     </div>
   </div>`;
@@ -1500,8 +1532,12 @@ function renderSessionList(items, plain) {
   // As a list: what waits on you first, then what is working, then the rest — newest first in each.
   if (plain === "state" || ui.sgroupBy !== "project") {
     const newest = (a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
-    return [["waiting", T("Waiting on you", "等你")], ["busy", T("Working", "在干活")], ["", T("Idle", "空闲")]].map(([st, label]) => {
-      const group = items.filter((x) => (st ? x.state === st : x.state !== "waiting" && x.state !== "busy")).sort(newest);
+    // "In background": its turn is over but something it started is still running — it will be
+    // back. Idle is only what has nothing running and nothing to wait for.
+    const groupOf = (x) => (x.state === "waiting" || x.state === "busy" ? x.state : bgRunning(x) ? "bg" : "");
+    return [["waiting", T("Waiting on you", "等你")], ["busy", T("Working", "在干活")],
+      ["bg", T("In background", "后台在跑")], ["", T("Idle", "空闲")]].map(([st, label]) => {
+      const group = items.filter((x) => groupOf(x) === st).sort(newest);
       return group.length ? `<div class="group-title">${label} <span class="meta">${group.length}</span></div>${group.map(card).join("")}` : "";
     }).join("");
   }
@@ -2935,9 +2971,25 @@ document.addEventListener("change", (ev) => {
   if (el.id === "activefirst-cb" || d.action === "active-first") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
 
+// Text that arrives in one go — a paste, or a dictation app such as Typeless inserting what it
+// heard — can bring its line breaks as \r\n, \r or U+2028/2029, each of which the box counts as a
+// line of its own, so a paragraph break turned into four or five empty lines. Make those plain
+// \n and keep at most one empty line in a row. Keys typed one at a time are left alone.
+const TYPED = new Set(["insertLineBreak", "insertParagraph", "deleteContentBackward", "deleteContentForward",
+  "deleteWordBackward", "deleteWordForward", "deleteByCut", "historyUndo", "historyRedo", "insertCompositionText"]);
+const tidyBreaks = (v) => v.replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, "\n").replace(/\n(?:[ \t\u00a0]*\n){2,}/g, "\n\n");
+function tidyInserted(el, ev) {
+  if (el.tagName !== "TEXTAREA" || TYPED.has(ev.inputType) || (ev.inputType === "insertText" && (ev.data || "").length <= 1)) return;
+  const v = el.value, tidy = tidyBreaks(v);
+  if (tidy === v) return;
+  const caret = tidyBreaks(v.slice(0, el.selectionEnd)).length;
+  el.value = tidy;
+  el.setSelectionRange(caret, caret);
+}
 document.addEventListener("input", (ev) => {
   const el = ev.target;
   if (el.id === "search") { ui.filter = el.value; return render(); }
+  tidyInserted(el, ev);
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   const note = /^note:(.+)$/.exec(el.dataset.key || "");
   if (note) autoPick(note[1], el.value.trim() !== "");
