@@ -1458,13 +1458,26 @@ async function stopMany(list, armKey, what) {
     return;
   }
   ui.stopArmed = null;
+  return stopAll(list);
+}
+async function stopAll(list, lead = "") {
   let ok = 0;
   const errs = [];
   for (const s of list) {
     try { await stopOne(s); ok++; } catch (e) { errs.push(`${s.title || s.sessionId.slice(0, 8)}: ${e.message || e}`); }
   }
-  toast(errs.length ? T(`Stopped ${ok}; ${errs.join("; ")}`, `已停止 ${ok} 个；${errs.join("；")}`) : T(`Stopped ${ok} session${ok === 1 ? "" : "s"}`, `已停止 ${ok} 个 session`), errs.length > 0);
+  toast(lead + (errs.length ? T(`Stopped ${ok}; ${errs.join("; ")}`, `已停止 ${ok} 个；${errs.join("；")}`) : T(`stopped ${ok} session${ok === 1 ? "" : "s"} — conversations are kept`, `已停止 ${ok} 个 session——对话保留`)), errs.length > 0);
   await refresh();
+}
+// Finishing a task here (done or abandoned) ends its live sessions too: picking the status is the
+// decision, so no second click. Conversations are kept and Resume picks them up. A task finished
+// elsewhere (a session's own hq-update, `hq set`) only gets the "still running" bar.
+async function setStatus(id, status) {
+  const live = isOpen({ status }) ? [] : liveFor(id);
+  if (!live.length) return act("set", { task: id, fields: [`status=${status}`] }, T("Status saved", "状态已保存"));
+  try { await api("set", { task: id, fields: [`status=${status}`] }); }
+  catch (e) { toast(String(e.message || e), true); return refresh(); }
+  return stopAll(live, T("Status saved; ", "状态已保存；"));
 }
 
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
@@ -2967,7 +2980,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, T("Project saved", "项目已保存"));
   if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, T("Category saved", "分类已保存"));
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
-  if (d.action === "set-status") return act("set", { task: d.task, fields: [`status=${el.value}`] }, T("Status saved", "状态已保存"));
+  if (d.action === "set-status") return setStatus(d.task, el.value);
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (el.id === "show-closed") { ui.showClosed = el.checked; render(); }
