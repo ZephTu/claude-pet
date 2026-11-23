@@ -1413,6 +1413,8 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .sec-side .ss-row .meta + .switch { margin-left: 0; }
 .sec-side .ss-row .switch { margin-left: auto; pointer-events: none; flex: none; }
 .sec-side .ss-act { color: var(--accent); }
+.sec-side .ss-row .meta.one { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sec-side .ss-row .meta.bad { color: var(--red); }
 @media (min-width: 901px) { .sec-chat .sec-main > .watch { display: none; } }
 @media (max-width: 900px) { .sec-side { display: none; } }
 @media (min-width: 901px) { .sec-chat .bub { max-width: min(100%, 72ch); } }

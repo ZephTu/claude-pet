@@ -2763,17 +2763,17 @@ function secWhen(iso) {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 // The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to
-// the quick notes and are sorted there. Its switch, "scan now" and how the last scan went, for the ⋯ menu.
-function secFeedItems(st) {
+// the quick notes and are sorted there. Its switch, "scan now" and how the last scan went, as rows of
+// class `cls`: "pi" in the ⋯ menu, "ss-row" in the side column.
+function secFeedItems(st, cls) {
   const f = st.feed || {};
   const hourly = f.kind === "cron" && f.cron === "0 9-19 * * 1-5";
   const when = hourly ? T("weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("as set in Scheduled", "按定时任务的设置");
   const last = f.last;
   const tip = T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
     "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
-  return `<hr><div class="ph">Zulip · Jira</div>
-    <button class="pi" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
-    <button class="pi" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
+  return `<button class="${cls}" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
+    <button class="${cls}" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
 const localDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const kindWord = (k) => (k === "weekly" ? T("Weekly report", "周报") : T("Daily report", "日报"));
@@ -2926,7 +2926,7 @@ function drawSecretary(toBottom) {
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
     : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
-  const morePop = `<div class="pop" role="menu">${evening}${secFeedItems(st)}
+  const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}
     ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
   const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
@@ -2937,7 +2937,7 @@ function drawSecretary(toBottom) {
       ${m.watchOpen ? `<ul>${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>` : "";
 
   // The side column (wide windows only): what it watches, proposals still open, its reports,
-  // and the files it remembers — the same things the menus above hold, in view.
+  // the Zulip · Jira scan and the files it remembers — the same things the menus above hold, in view.
   const card = secId() && taskById(secId());
   const secAsks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
   const sideRes = RESOLUTIONS.filter(([r]) => r === "do" || r === "drop");
@@ -2950,6 +2950,7 @@ function drawSecretary(toBottom) {
     ${sideSec(T("Reports", "报告"), reports.length, `${reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")}
       ${evening.replace('class="pi"', 'class="ss-row"')}
       <button class="ss-row ss-act" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button>`)}
+    ${sideSec("Zulip · Jira", 0, secFeedItems(st, "ss-row"))}
     ${mem.length ? sideSec(T("What it remembers", "它记得的"), 0, mem.map((f) => `<button class="ss-row" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")) : ""}
   </aside>`;
 
