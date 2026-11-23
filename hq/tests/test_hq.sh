@@ -1322,6 +1322,23 @@ hqi inbox drop -- N-006 >/dev/null && hqi inbox restore --json -- N-006 | grep -
 # A note can't be filed onto the card it made itself (taking it back would delete that card).
 NT2="$(hqi inbox move --json --title="Card from a note" -- N-006 task | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 { hqi inbox move --task="$NT2" -- N-006 note 2>&1 || true; } | grep -q "was made from N-006" && ls -d "$T"/root/tasks/"$NT2"-* >/dev/null 2>&1 && ok "filing a note onto the card it created is refused, the card stays" || fail "self card move"
+# Folders: a task made from a note gets one, so New session has somewhere to start.
+mkdir -p "$T/work/repo-a" "$T/work/repo-b"
+"$HQ" project add fold >/dev/null 2>&1
+WA="$("$HQ" new "Folder source" --project fold | head -1)"
+hqi workdir add "$WA" -- "$T/work/repo-a" && card "$WA" | grep -q '^workdirs: .*work/repo-a"' && ok "hq workdir add" || fail "workdir add"
+hqi workdir add "$WA" -- "$T/work/repo-a" && [ "$(card "$WA" | grep -o 'repo-a' | wc -l | tr -d ' ')" = 1 ] && ok "hq workdir add: a folder already there is not added twice" || fail "workdir add twice"
+{ hqi workdir add "$WA" -- "$T/work/nope" 2>&1 || true; } | grep -q "no such folder" && { hqi workdir add "$WA" -- "$HOME" 2>&1 || true; } | grep -q "never a task's folder" && ok "hq workdir add refuses a missing folder and the home folder" || fail "workdir add refusals"
+hqi inbox add -- "new thing for repo-b" >/dev/null
+answer '{"kind":"task","title":"Named folder","text":"t","workdir":"repo-a","confidence":0.9,"reason":"r","alternatives":[]}'
+NF1="$(hqi inbox sort --claude "$FAKE" --json N-007 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+grep -q "dirs: .*work/repo-a" "$FAKE_DIR/stdin" && card "$NF1" | grep -q "^workdirs: \[\"$T/work/repo-a\"\]" && ok "sorter sees folders in full; one it names by its last part is used in full" || fail "sorter named folder"
+hqi inbox add -- "another for the fold project" >/dev/null
+answer '{"kind":"task","title":"Project folder","text":"t","project":"fold","confidence":0.9,"reason":"r","alternatives":[]}'
+NF2="$(hqi inbox sort --claude "$FAKE" --json N-008 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-a\"\]" && ok "a new task with no folder named takes the one its project's tasks use" || fail "project folder fallback"
+hqi workdir add "$NF2" -- "$T/work/repo-b" && hqi workdir remove "$NF2" -- "$T/work/repo-a" && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\"\]" && ok "hq workdir remove" || fail "workdir remove"
+{ hqi workdir remove "$NF2" -- "$T/work/repo-a" 2>&1 || true; } | grep -q "is not one of" && ok "hq workdir remove: a folder it doesn't have is an error" || fail "workdir remove missing"
 
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"

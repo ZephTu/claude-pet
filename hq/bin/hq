@@ -2363,14 +2363,53 @@ def inbox_dest(d, item):
             out["project"] = d["project"]
         if d.get("category") in load_categories():
             out["category"] = d["category"]
-        w = os.path.abspath(os.path.expanduser(str(d.get("workdir") or ""))) if d.get("workdir") else ""
-        if w and ok_workdir(w):
+        w = inbox_workdir(d.get("workdir"), out.get("project"))
+        if w:
             out["workdir"] = w
     if k != "me":
         refs = inbox_refs(d.get("refs"), item.get("text"))
         if refs:
             out["refs"] = refs
     return out
+
+
+def tilde(path):
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
+
+def inbox_workdir(guess, project):
+    """A new task's folder, so New session has somewhere to start: the path the sorter gave, or one
+    it named by its last part only; else the project's own folder; else the one the project's
+    tasks work in most. "" when none of these exists."""
+    seen = collections.Counter()
+    for m in (parse_card(p) for p in card_paths()):
+        for w in m.get("workdirs") or []:
+            if isinstance(w, str):
+                seen[(m.get("project") or "", os.path.normpath(w))] += 1
+    used = collections.Counter()
+    for (_, w), n in seen.items():
+        used[w] += n
+    g = str(guess or "").strip()
+    if g:
+        w = os.path.normpath(os.path.expanduser(g))
+        if os.path.isabs(w):
+            if ok_workdir(w):
+                return w
+        else:
+            hits = [(n, w) for w, n in used.items() if os.path.basename(w) == os.path.basename(g.rstrip("/"))
+                    and ok_workdir(w)]
+            if hits:
+                return max(hits)[1]
+    if project:
+        pr = next((p for p in load_projects() if p["name"] == project), {})
+        for p in pr.get("paths") or []:
+            if ok_workdir(p):
+                return os.path.normpath(p)
+        mine = sorted(((n, w) for (pj, w), n in seen.items() if pj == project and ok_workdir(w)), reverse=True)
+        if mine:
+            return mine[0][1]
+    return ""
 
 
 def inbox_label(d):
@@ -2519,8 +2558,9 @@ note says they will do it. text: the todo itself, short and imperative, without 
 - "note": information for one task: a finding, a decision, a number, a link, what someone \
 said. Set task (an open one, or one of the recently closed); text: the fact as one log line.
 - "task": new work that fits no open task. title: short (≤ 60 chars); text: the goal, one or two \
-sentences; project and category only from the lists given, when one clearly fits; workdir only \
-if the note names a path.
+sentences; project and category only from the lists given, when one clearly fits; workdir: a path the \
+note names, else the folder of the open task or project the work is closest to (copied in full \
+from the dirs listed), else leave it out.
 - "me": a personal reminder for the user that belongs to no task (call the dentist, renew the \
 badge). text: the reminder.
 - "unsorted": you can't tell, or the note is too short to act on.
@@ -2556,7 +2596,7 @@ def inbox_context():
         bits.append(m.get("status", ""))
         if m.get("next") and not is_placeholder(str(m["next"])):
             bits.append("next: " + _flat(m["next"], 100))
-        dirs = [os.path.basename(w.rstrip("/")) for w in (m.get("workdirs") or []) if isinstance(w, str)]
+        dirs = [tilde(w) for w in (m.get("workdirs") or []) if isinstance(w, str)]
         if dirs:
             bits.append("dirs: " + ", ".join(dict.fromkeys(dirs)))
         refs = [_flat(r, 70) for r in (m.get("refs") or []) if isinstance(r, str)][:4]
@@ -2570,7 +2610,8 @@ def inbox_context():
     for pr in load_projects():
         info = project_info(pr)
         out.append(f"- {pr['name']}" + (f": {_flat(info.get('title') or info.get('goal'), 120)}"
-                                         if info.get("title") or info.get("goal") else ""))
+                                         if info.get("title") or info.get("goal") else "")
+                   + (" | dirs: " + ", ".join(tilde(p) for p in pr["paths"]) if pr.get("paths") else ""))
     out += ["", "## Categories", ", ".join(load_categories())]
     mem = os.path.join(hq_root(), "secretary")
     for f, head in (("profile.md", "The user"), ("people.md", "People")):
@@ -2934,6 +2975,33 @@ def todo_plain(raw):
     txt = TODO_TIME_RE.sub("", raw.strip()).rstrip()
     o = re.match(r"@(\S+)\s+(.*)$", txt)
     return " ".join((o.group(2) if o else txt).split())
+
+
+def cmd_workdir(args):
+    """hq workdir add|remove T-1 PATH: the folders a task's work happens in; the board's New session
+    starts in the first. Binding a session adds its folder by itself — this is for a task that has
+    none yet (made on the board or from a quick note) or the wrong one."""
+    card = find_card(args.task)
+    d = os.path.normpath(os.path.abspath(os.path.expanduser(args.path)))
+    with card_lock(card):
+        meta = parse_card(card)
+        have = [w for w in meta.get("workdirs") or [] if isinstance(w, str)] if isinstance(meta.get("workdirs"), list) else []
+        if args.action == "add":
+            if not os.path.isdir(d):
+                die(f"{args.path}: no such folder")
+            if not ok_workdir(d):
+                die(f"{args.path}: /, the home folder and the HQ root are never a task's folder")
+            if d in (os.path.normpath(w) for w in have):
+                return
+            fields = {"workdirs": have + [d]}
+            if not meta.get("project") and project_for_path(d):
+                fields["project"] = project_for_path(d)
+            _set_fields(card, fields)
+        else:
+            left = [w for w in have if os.path.normpath(w) != d]
+            if len(left) == len(have):
+                die(f"{args.path} is not one of {meta.get('id', args.task)}'s folders")
+            _set_fields(card, {"workdirs": left})
 
 
 def cmd_ref(args):
@@ -5195,6 +5263,9 @@ def main():
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket> | restore T-1 <JSON from remove>")
     p.add_argument("action", choices=["add", "remove", "restore"]); p.add_argument("task"); p.add_argument("ref")
     p.set_defaults(fn=cmd_ref)
+    p = sub.add_parser("workdir", help="hq workdir add|remove T-1 PATH — the task's folders (New session starts in the first)")
+    p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("path")
+    p.set_defaults(fn=cmd_workdir)
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
     p = sub.add_parser("ask", help="hq ask add <task> <text…> | resolve <ask-id> <res> [note…] | reopen <ask-id>")
