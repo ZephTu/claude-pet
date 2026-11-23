@@ -1025,3 +1025,25 @@ main.single { grid-template-columns: 1fr; }
 .tsess .bsess .last { color: var(--faint); font-size: 12px; margin-top: 2px; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tsess .bsess .last:hover { color: var(--dim); }
+
+/* ---- project headings: kind, progress, due, load (T-079) ---- */
+.group-title.proj .pname { cursor: pointer; border-radius: 4px; }
+.group-title.proj .pname:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ptag { font: 600 11px/16px var(--round); padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+.ptag.goal { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+.ptag.duty { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 45%, transparent); }
+.ptag.st { color: var(--faint); }
+.pdue, .pload, .pprog { font: 500 12px var(--round); color: var(--dim); white-space: nowrap; }
+.pdue.soon { color: var(--amber); }
+.pdue.late { color: var(--red); font-weight: 600; }
+.pprog { display: inline-flex; align-items: center; gap: 5px; }
+.pprog .bar { width: 46px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; display: inline-block; }
+.pprog .bar > span { display: block; height: 100%; background: var(--teal); border-radius: 3px; }
+.group-title.proj.pdone { opacity: .62; }
+.group-title.proj.pdone .pname { text-decoration: line-through; text-decoration-color: var(--faint); }
+.group-title.proj.repo { font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; }
+.pfacts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.ppanel .md p:first-child { margin-top: 0; }
+.ppanel .md p:last-child { margin-bottom: 0; }
+.ppanel .ctx-s { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+.ppanel code { font-size: 12px; }

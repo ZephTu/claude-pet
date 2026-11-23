@@ -687,11 +687,16 @@ def cmd_project(args):
         if args.json:
             print(json.dumps(rows, ensure_ascii=False, indent=1))
             return
-        for r in rows:
+        # Padded per column (the "on you" part and the kind/status part vary in width).
+        width = lambda xs: max([len(x) for x in xs] or [0])
+        nw = max(22, width([r["name"] for r in rows]))
+        onme = [f"({r['stats']['on_me']} on you)" if r["stats"]["on_me"] else "" for r in rows]
+        ow, lw = width(onme), width([project_line(r) for r in rows])
+        for r, om in zip(rows, onme):
             st = r["stats"]
-            print(f"{r['name']:<22} {st['open']:>3} open {st['done']:>3} done"
-                  + (f" ({st['on_me']} on you)" if st["on_me"] else "")
-                  + f"  {project_line(r):<34} {', '.join(r['paths']) or '-'}"
+            print(f"{r['name']:<{nw}} {st['open']:>3} open {st['done']:>3} done"
+                  + (f" {om:<{ow}}" if ow else "")
+                  + f"  {project_line(r):<{lw}}  {', '.join(r['paths']) or '-'}"
                   + ("" if r["listed"] else "   (not in list — used on cards)"))
         if usage.get(""):
             print(f"{'(no project)':<22} {usage['']:>3} task(s)")
