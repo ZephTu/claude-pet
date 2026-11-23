@@ -3041,10 +3041,128 @@ def session_skills(path):
     return [{"name": n, "desc": one_line(desc[n], 140)} for n in order]
 
 
+def _front(path):
+    """A skill or command file's frontmatter as {key: value}: flat `key: value` lines, and a
+    `>` / `|` block's indented lines joined into one. {} when there is none or it can't be read."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
+            text = f.read(16384)
+    except OSError:
+        return {}
+    lines = text.replace("\r\n", "\n").split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}
+    out, block = {}, None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return out
+        if block and (line[:1].isspace() or not line.strip()):
+            out[block] = (out[block] + " " + line.strip()).strip()
+            continue
+        block = None
+        k, sep, v = line.partition(":")
+        if sep and k and not k[0].isspace():
+            k, v = k.strip(), v.strip()
+            if v[:1] in (">", "|"):
+                block, v = k, ""
+            out[k] = v.strip("'\"")
+    return {}
+
+
+def _flag(v):
+    """A frontmatter true/false the way Claude Code reads one: yes/no, on/off, 1/0 too. None if neither."""
+    v = str(v).strip().lower()
+    return True if v in ("true", "yes", "on", "1") else False if v in ("false", "no", "off", "0") else None
+
+
+def hidden_skills(cwd):
+    """Skills and commands marked `disable-model-invocation: true`. Claude Code leaves them out
+    of the skill listing (it is the list Claude may call), yet you can still type them — so they
+    are read from the same places it reads them: your ~/.claude, the project's .claude (the
+    session's folder and the folders above it, short of your home), and the plugins enabled for
+    that folder (user settings, then the project's settings and settings.local), whose names get
+    the plugin's prefix. [{name, desc}]. Never raises: a folder or file it can't read is skipped."""
+    home = os.path.expanduser("~")
+    real_home = os.path.realpath(home)
+    roots, projects = [(os.path.join(home, ".claude"), "")], []
+    d = os.path.realpath(cwd) if cwd else ""
+    while d and d != real_home and d != os.path.dirname(d):
+        projects.append(d)
+        roots.append((os.path.join(d, ".claude"), ""))
+        d = os.path.dirname(d)
+
+    def obj(path, *keys):
+        x = load_json(path, {})
+        for k in keys:
+            x = x.get(k) if isinstance(x, dict) else None
+        return x if isinstance(x, dict) else {}
+
+    enabled = dict(obj(os.path.join(home, ".claude", "settings.json"), "enabledPlugins"))
+    for proj in reversed(projects):   # nearer folders win
+        for f in ("settings.json", "settings.local.json"):
+            enabled.update(obj(os.path.join(proj, ".claude", f), "enabledPlugins"))
+    installed = obj(os.path.join(home, ".claude", "plugins", "installed_plugins.json"), "plugins")
+    for key, on in enabled.items():
+        recs = installed.get(key)
+        recs = [x for x in recs if isinstance(x, dict)] if isinstance(recs, list) else []
+        # A project-scope install counts only in that project (or below it).
+        recs = [x for x in recs if not x.get("projectPath")
+                or os.path.realpath(str(x["projectPath"])) in projects]
+        path = next((x.get("installPath") for x in reversed(recs)
+                     if isinstance(x.get("installPath"), str) and os.path.isdir(x["installPath"])), None)
+        if on is True and path:
+            roots.append((path, str(key).split("@")[0] + ":"))
+
+    def listdir(d):
+        try:
+            return sorted(os.listdir(d))
+        except OSError:
+            return []
+
+    out, seen = [], set()
+    for root, prefix in roots:
+        files = [(os.path.join(root, "skills", n, "SKILL.md"), n) for n in listdir(os.path.join(root, "skills"))]
+        files += [(os.path.join(root, "commands", n), n[:-3]) for n in listdir(os.path.join(root, "commands")) if n.endswith(".md")]
+        for path, default in files:
+            fm = _front(path)
+            if _flag(fm.get("disable-model-invocation", "")) is not True or _flag(fm.get("user-invocable", "")) is False:
+                continue
+            name = fm.get("name") or default
+            if prefix and not name.startswith(prefix):
+                name = prefix + name
+            if name not in seen:
+                seen.add(name)
+                out.append({"name": name, "desc": one_line(fm.get("description", ""), 140)})
+    return out
+
+
+def transcript_cwd(path):
+    """The folder a session runs in, from the first transcript lines that say."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for _, line in zip(range(200), f):
+                if '"cwd"' in line:
+                    try:
+                        c = json.loads(line).get("cwd")
+                    except ValueError:
+                        continue
+                    if c:
+                        return c
+    except OSError:
+        pass
+    return None
+
+
 def cmd_peek(args):
     path, live = find_transcript(args.session)
     if args.commands:
         skills = session_skills(path) if path else []
+        if path:
+            listed = {x["name"] for x in skills}
+            try:
+                skills += [x for x in hidden_skills(transcript_cwd(path)) if x["name"] not in listed]
+            except Exception:   # the transcript's own list matters more than these extras
+                pass
         if args.json:
             print(json.dumps({"found": bool(path), "skills": skills}, ensure_ascii=False, indent=1))
         else:
