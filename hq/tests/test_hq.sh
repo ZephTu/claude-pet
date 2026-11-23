@@ -1612,7 +1612,7 @@ G1="$("$HQ" new "Rerun perf baseline on 4.2.7" --no-focus | head -1)"
 G2="$("$HQ" new "perf baseline rerun for 4.2.7 release" --no-focus | head -1)"
 G3="$("$HQ" new "Loader crash on upgrade" --no-focus | head -1)"
 G4="$("$HQ" new "Write the customer reply" --no-focus | head -1)"
-G5="$("$HQ" new "Rerun perf baseline on 4.2.7 — part 2 after $G1" --no-focus | head -1)"
+G5="$("$HQ" new "Rerun perf baseline on 4.2.7 — part 2 after $G1." --no-focus | head -1)"
 "$HQ" ref add "$G3" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
 "$HQ" ref add "$G4" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
 "$HQ" ref add "$G4" "build 7 https://jenkins.example.com/job/x/7/" >/dev/null
@@ -1632,6 +1632,10 @@ named = [p for p in g["duplicates"] if g5 in p["tasks"] and g1 in p["tasks"]]
 assert named and named[0]["mention"] and g["duplicates"][-1]["mention"], g["duplicates"]
 assert all(not f["settled"] for f in g["findings"]), g["findings"]
 PY2
+# A hand-made card without an id is skipped, not a crash (the weekly report runs garden too).
+mkdir -p "$T/root/tasks/noid" && printf -- '---\ntitle: "Rerun perf baseline by hand"\nstatus: active\n---\n\n## Goal\nx\n' > "$T/root/tasks/noid/TASK.md"
+"$HQ" garden --json >/dev/null && ok "garden skips a card without an id" || fail "garden on a card without an id"
+rm -rf "$T/root/tasks/noid"
 "$HQ" garden | grep -q "^zombie: $S4 " && "$HQ" garden | grep -q "^duplicate? $G3 " && ok "garden prints the findings as text" || fail "garden text: $("$HQ" garden)"
 "$HQ" ask add "$GS" "Close $S4 as abandoned (quiet since 2020)?" >/dev/null
 GA="$("$HQ" asks "$GS" | grep -o "$GS\.[0-9]*" | tail -1)"

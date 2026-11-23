@@ -554,7 +554,7 @@ Write under `<root>/secretary/`.
 | `zombie` | open, `stale` in `hq status` (not updated for 7 days), and no session active for 7 days either |
 | `done-live` | done or abandoned with a session still running |
 | `over-budget` | the card is over budget (as `hq status` flags it) |
-| duplicate pair | two tasks, open or closed in the last 14 days (at least one open), whose title words overlap (Jaccard, or 0.8 × the share of the shorter title of 3+ words; 2+ words in common) or title-and-goal words do (3+ in common), scoring ≥ 0.5 — or that share a key link or ticket key. Pairs sharing a link first; a pair whose cards name each other (`mention`) last. At most 8 |
+| duplicate pair | two tasks, open or closed in the last 14 days (at least one open), whose title words overlap (Jaccard, or 0.8 × the share of the shorter title of 3+ words; 2+ words in common) or title-and-goal words do (3+ in common), scoring ≥ 0.5 — or that share a key link or a ticket key (a ref starting with one). Pairs sharing a link first; a pair where one card names the other (`mention`: often a part or a follow-up) last; an old card and the one `hq continue` made from it are left out. At most 8 |
 
 Each finding carries the secretary's asks that name its task (`asked`) and `settled`: why it isn't
 to be proposed again, when an ask about it is still open, or the last answer was No and the card

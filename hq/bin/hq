@@ -2083,7 +2083,10 @@ def gather_report(kind, since=None, gh=True, now=None):
          "projects": projects, "owed": owed, "edits": report_edits(), "gh": bool(gh and states)}
     if kind == "weekly":
         # The weekly look over the board (`hq garden`): proposals for the reply, not the report.
-        r["garden"] = gather_garden()
+        try:
+            r["garden"] = gather_garden(now.astimezone())
+        except Exception as e:  # noqa: BLE001 — the report matters more than the tidying
+            r["garden"] = {"error": f"{type(e).__name__}: {e}", "findings": [], "duplicates": []}
     return r
 
 
@@ -2154,7 +2157,7 @@ def report_text(r):
         out.append("## Tidying the board (weekly; hq garden) — not for the report file")
         out.append("Propose the cleanups worth doing as asks in your reply's hq-asks block "
                    "(Tidying the board in your instructions).")
-        out.append(garden_text(r["garden"]))
+        out.append(f"(hq garden failed: {r['garden']['error']})" if r["garden"].get("error") else garden_text(r["garden"]))
         out.append("")
     if not r["gh"]:
         out.append("(PR states unknown: gh is not available or not logged in)")
@@ -5535,7 +5538,7 @@ GARDEN_DUP_SHOWN = 8
 GARDEN_STOP = set("""the a an and or of to for in on at by with from into via is are be as it its this that
 not no new add fix fixes use using make run runs test tests task tasks card cards board hq claude pet
 的 了 和 与 及 在 把 让 给 用 做 一个 还 也 就 要""".split())
-TICKET_RE = re.compile(r"\b(?!T-\d)[A-Z][A-Z0-9]+-\d+\b")
+TICKET_RE = re.compile(r"^(?:!\s*)?([A-Z][A-Z0-9]+-\d+)\b")   # a ref that starts with a ticket key
 
 
 def garden_words(text):
@@ -5544,7 +5547,7 @@ def garden_words(text):
     out = {w for w in re.findall(r"[a-z][a-z0-9_.+-]{2,}", text) if w.strip(".-") not in GARDEN_STOP}
     for run in re.findall(r"[㐀-鿿]+", text):
         out |= {run[i:i + 2] for i in range(len(run) - 1)} - GARDEN_STOP
-        if len(run) == 1:
+        if len(run) == 1 and run not in GARDEN_STOP:
             out.add(run)
     return {w.strip(".-") for w in out if w.strip(".-")}
 
@@ -5569,7 +5572,7 @@ def garden_links(meta):
         if process_ref(r):
             continue
         out |= {u.rstrip(URL_TAIL) for u in REF_URL_RE.findall(r)}
-        out |= set(TICKET_RE.findall(r))
+        out |= set(TICKET_RE.findall(r.strip()))
     return out
 
 
@@ -5587,8 +5590,8 @@ def garden_score(ta, tb, fa, fb):
 def garden_dups(metas, sec):
     today_ = dt.date.today()
     recent = (today_ - dt.timedelta(days=GARDEN_DUP_CLOSED_DAYS)).isoformat()
-    pool = [m for m in metas if m.get("id") != sec and (m.get("status") in OPEN_STATUSES
-                                                         or str(m.get("closed") or "") >= recent)]
+    pool = [m for m in metas if m.get("id") and m.get("id") != sec
+            and (m.get("status") in OPEN_STATUSES or str(m.get("closed") or "") >= recent)]
     info = {}
     for m in pool:
         title = garden_words(m.get("title"))
@@ -5605,14 +5608,19 @@ def garden_dups(metas, sec):
             shared = sorted(la & lb)
             if score < GARDEN_DUP_SCORE and not shared:
                 continue
-            mention = bool(re.search(rf"\b{re.escape(b['id'])}\b(?!\.)", body_a)
-                           or re.search(rf"\b{re.escape(a['id'])}\b(?!\.)", body_b))
-            pairs.append({"tasks": [a["id"], b["id"]], "titles": [a.get("title", ""), b.get("title", "")],
+            # `hq continue` made one from the other: the same work by design, not a duplicate.
+            if any(re.search(rf"continued in {re.escape(y['id'])}\b", str(x.get("next") or ""))
+                   for x, y in ((a, b), (b, a))):
+                continue
+            mention = bool(re.search(rf"\b{re.escape(b['id'])}\b(?!\.\d)", body_a)
+                           or re.search(rf"\b{re.escape(a['id'])}\b(?!\.\d)", body_b))
+            pairs.append({"tasks": [a["id"], b["id"]], "titles": [a.get("title") or "", b.get("title") or ""],
                           "statuses": [a.get("status"), b.get("status")],
                           "goals": [garden_goal(a), garden_goal(b)],
                           "score": round(score, 2), "sharedLinks": shared[:5],
                           "words": sorted(fa & fb)[:12], "mention": mention})
-    # Shared links first, then the closest; a pair whose cards name each other is known to be related.
+    # Shared links first, then the closest; a pair where one card names the other last (often a
+    # part or a follow-up, though "same work as T-012" names it too).
     pairs.sort(key=lambda p: (p["mention"], not p["sharedLinks"], -p["score"]))
     return pairs[:GARDEN_DUP_SHOWN]
 
@@ -5656,13 +5664,13 @@ def gather_garden(now=None):
                and isinstance(pet_session(sid), dict) and pid_alive(pet_session(sid).get("pid"))}
     findings = []
     for m in metas:
-        if m.get("id") == sec or not (m.get("status") in OPEN_STATUSES or m.get("id") in live_on):
+        if not m.get("id") or m.get("id") == sec or not (m.get("status") in OPEN_STATUSES or m.get("id") in live_on):
             continue
         s = task_status(m, state, now, seen)
         kinds = {f["kind"]: f for f in s["flags"]}
         last = max([local_dt(x["lastAt"]) for x in s["sessions"] if x.get("lastAt")] or [None],
                    key=lambda t: t or dt.datetime.min.replace(tzinfo=now.tzinfo))
-        base = {"task": s["id"], "title": s["title"], "status": s["status"], "project": s["project"],
+        base = {"task": s["id"], "title": s["title"] or "", "status": s["status"], "project": s["project"],
                 "updated": s["updated"], "cardWritten": s["cardWritten"], "next": s["next"], "state": s["state"][:3],
                 "meTodos": s["todos"]["me"]["count"], "asks": s["asks"]["count"]}
         if "stale" in kinds:
@@ -5724,7 +5732,7 @@ def garden_text(g):
         out.append(f"duplicate? {a} {p['titles'][0]} [{p['statuses'][0]}]  ~  {b} {p['titles'][1]} [{p['statuses'][1]}]")
         why = [f"word overlap {p['score']}"] + ([f"same links: {', '.join(p['sharedLinks'])}"] if p["sharedLinks"] else [])
         if p["mention"]:
-            why.append("the cards name each other (known to be related)")
+            why.append("one card names the other (often a part or follow-up; read what it says)")
         out.append("  " + "; ".join(why) + (f"; shared words: {' '.join(p['words'])}" if p["words"] else ""))
         for t, goal in zip(p["tasks"], p["goals"]):
             if goal:

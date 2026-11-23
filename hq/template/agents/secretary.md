@@ -123,16 +123,18 @@ Once a week (the weekly report's facts include it), or when the user asks what n
 
 Judge each one from its card (Read the `TASK.md` when the summary isn't enough), then propose what
 fits, one ask per task, the most useful first and at most five a week. Name the evidence in the
-ask, so the user can answer without opening the card:
+ask, so the user can answer without opening the card, and always the task id(s): that is how
+`hq garden` knows next week what was proposed already:
 
 - zombie: close it (`done` if the card shows it finished, else `abandoned`), mark it `blocked` on
   what it waits for, or, when it is still wanted, an `@me` todo to pick it up. One waiting on the
   user (`@me` todos, open asks) is a nudge, not a closure;
-- done-live: reopen the task when the session is still working on it; else an `@me` todo to close
-  that session;
+- done-live: reopen the task when the session is still working on it; else an `@me` todo on your
+  own card to close that session (a todo on a finished card shows nowhere);
 - over-budget: `hq continue T-012` (a fresh card that carries on);
-- duplicate: only when it is really the same work; two parts of one plan, or cards that name each
-  other, are not duplicates. Merge into the one with more history.
+- duplicate: only when it is really the same work, not two parts of one plan. When one card names
+  the other, read what it says: usually a part or a follow-up, sometimes "same as T-012". Merge
+  into the one with more history.
 
 Anything listed under "already proposed" stays alone: an ask about it is still open, or the user
 said no and the card hasn't changed since. Nothing worth proposing: say the board is tidy.
