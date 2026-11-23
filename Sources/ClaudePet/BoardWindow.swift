@@ -90,12 +90,22 @@ final class BoardWindow: NSWindow {
     /// can be switched back to like any window; closing the board takes it out
     /// again. A board that is merely behind other windows keeps its place.
     private func showInDock(_ on: Bool) {
-        // The icon every time: the skin may have changed while the board was open (it is cached).
-        if on, let icon = Self.dockIcon() { NSApp.applicationIconImage = icon }
         let policy: NSApplication.ActivationPolicy = on ? .regular : .accessory
-        guard NSApp.activationPolicy() != policy else { return }
-        if on { NSApp.mainMenu = Self.boardMenu() }
-        NSApp.setActivationPolicy(policy)
+        if NSApp.activationPolicy() != policy {
+            if on { NSApp.mainMenu = Self.boardMenu() }
+            NSApp.setActivationPolicy(policy)
+        }
+        guard on, let icon = Self.dockIcon() else { return }
+        // The icon every time: the skin may have changed while the board was open (it is cached).
+        // After the policy switch, and once more on the next turn: the bundle has no icon file,
+        // and the Dock tile it builds for a newly regular app came up blank (the generic app
+        // icon) until a click redrew it, when the icon had been set before the switch.
+        NSApp.applicationIconImage = icon
+        DispatchQueue.main.async {
+            guard NSApp.activationPolicy() == .regular else { return }
+            NSApp.applicationIconImage = icon
+            NSApp.dockTile.display()
+        }
     }
 
     override func close() {
