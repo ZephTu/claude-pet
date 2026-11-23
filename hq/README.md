@@ -100,7 +100,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
 `hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
-`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
+`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary),
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
 ### Where things stand: `hq status`
@@ -544,6 +544,28 @@ up to 10 minutes for the lock instead of being skipped.
 
 Unattended, the job is allowed only Read, Grep, Glob, `Bash(~/.claude/hq/bin/hq:*)` and Edit or
 Write under `<root>/secretary/`.
+
+### Tidying the board: `hq garden`
+
+`hq garden [--json]` lists what a weekly look over the board would tidy, without a model:
+
+| kind | when |
+|---|---|
+| `zombie` | open, `stale` in `hq status` (not updated for 7 days), and no session active for 7 days either |
+| `done-live` | done or abandoned with a session still running |
+| `over-budget` | the card is over budget (as `hq status` flags it) |
+| duplicate pair | two tasks, open or closed in the last 14 days (at least one open), whose title words overlap (Jaccard, or 0.8 × the share of the shorter title of 3+ words; 2+ words in common) or title-and-goal words do (3+ in common), scoring ≥ 0.5 — or that share a key link or a ticket key (a ref starting with one). Pairs sharing a link first; a pair where one card names the other (`mention`: often a part or a follow-up) last; an old card and the one `hq continue` made from it are left out. At most 8 |
+
+Each finding carries the secretary's asks that name its task (`asked`) and `settled`: why it isn't
+to be proposed again, when an ask about it is still open, or the last answer was No and the card
+hasn't been written since. The secretary's card is left out. `--json` gives `{now, secretary,
+findings: [{kind, task, …, asked, settled}], duplicates: [{tasks, titles, statuses, goals, score,
+sharedLinks, words, mention, asked, settled}]}`.
+
+`hq report weekly` (Fridays, so the evening report's scheduled run) includes it as `garden` and ends
+its text with a "Tidying the board" section; the secretary proposes the cleanups worth doing as
+asks on its card (at most five a week) and carries out a Yes with `hq set`, `hq continue`,
+`hq addtodo` …
 
 ### Reports
 

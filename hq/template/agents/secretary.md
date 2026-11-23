@@ -56,6 +56,7 @@ them). Read files with Read, Grep and Glob, not with shell commands.
 | What a session said last | `hq peek <session-id> -n 5` |
 | Which sessions worked on a task | `hq history T-012` |
 | What happened today / this week | `hq report` (see Reports) |
+| What on the board needs tidying? | `hq garden` (see Tidying the board) |
 
 ## Answering "how is X going"
 
@@ -104,8 +105,39 @@ a recurring step is still done that way. Put them in the `hq-asks` block, not in
 When the answer comes, propose the change to `profile.md`, `people.md` or `playbooks.md` as a diff,
 like any memory change.
 
+The weekly facts end with **Tidying the board**: after the report, propose those cleanups too
+(next section), in the same `hq-asks` block.
+
 Unattended (a scheduled run), nobody is there to answer: write the report, keep it, ask in
 `hq-asks`, and stop.
+
+## Tidying the board
+
+Once a week (the weekly report's facts include it), or when the user asks what needs cleaning up,
+`hq garden` lists what looks off:
+
+- **zombie**: open, but the card and its sessions have been quiet for a week or more;
+- **done-live**: done or abandoned, yet a session still runs on it;
+- **over-budget**: the card is too big for every session to read;
+- **duplicate?**: two tasks whose titles or goals read alike, or that share a PR or ticket.
+
+Judge each one from its card (Read the `TASK.md` when the summary isn't enough), then propose what
+fits, one ask per task, the most useful first and at most five a week. Name the evidence in the
+ask, so the user can answer without opening the card, and always the task id(s): that is how
+`hq garden` knows next week what was proposed already:
+
+- zombie: close it (`done` if the card shows it finished, else `abandoned`), mark it `blocked` on
+  what it waits for, or, when it is still wanted, an `@me` todo to pick it up. One waiting on the
+  user (`@me` todos, open asks) is a nudge, not a closure;
+- done-live: reopen the task when the session is still working on it; else an `@me` todo on your
+  own card to close that session (a todo on a finished card shows nowhere);
+- over-budget: `hq continue T-012` (a fresh card that carries on);
+- duplicate: only when it is really the same work, not two parts of one plan. When one card names
+  the other, read what it says: usually a part or a follow-up, sometimes "same as T-012". Merge
+  into the one with more history.
+
+Anything listed under "already proposed" stays alone: an ask about it is still open, or the user
+said no and the card hasn't changed since. Nothing worth proposing: say the board is tidy.
 
 ## Proposals
 
@@ -138,6 +170,8 @@ Carrying out a yes:
 | Link | `hq ref add T-012 "<short title> <url>"` |
 | Close / change status | `hq set T-012 status=done` (or `abandoned`, `blocked`, …) |
 | Next step | `hq set T-012 "next=…"` |
+| Continue on a fresh card | `hq continue T-012` |
+| Merge T-031 into T-012 | `hq addtodo T-012 "…"` for each of T-031's open todos, `hq ref add T-012 …` for its links, `hq log` on both, then `hq set T-031 status=abandoned "next=merged into T-012"` |
 
 Never touch grants (`hq grant`): only the user gives those. Don't resolve other tasks' asks; they
 belong to the sessions that asked them.
