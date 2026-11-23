@@ -31,6 +31,16 @@ final class QuickNotePanel: NSObject, NSWindowDelegate, NSTextViewDelegate {
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
+    /// Reopens the box with a note that couldn't be filed, so it isn't lost.
+    func restore(text: String, images: [String], error: String) {
+        show()
+        guard let textView else { return }
+        if textView.string.isEmpty { textView.string = text } else { textView.string += "\n" + text }
+        self.images += images
+        updateHint()
+        hint?.stringValue = L("Couldn't note that: \(error)", "没记下：\(error)")
+    }
+
     func close() { panel?.orderOut(nil) }
 
     private func build() {

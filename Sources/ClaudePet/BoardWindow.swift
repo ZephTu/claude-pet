@@ -341,12 +341,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await Self.noteAdd(text: str("text"), images: body["images"] as? [String] ?? [], via: "board")
         case "note-sort": return await Self.noteSort(str("id"))
         case "note-move":
-            // Each field as --name=value: a text starting with "-" must not read as an option.
+            // Each field as --name=value: a text starting with "-" must not read as an option. Options
+            // first and the action word after "--" (see noteAdd).
             let fields = ["task", "owner", "text", "title", "project", "category", "workdir"]
                 .filter { !str($0).isEmpty }.map { "--\($0)=\(str($0))" }
-            return await hq(["inbox", "move", "--json"] + fields + ["--", str("id"), str("kind")])
-        case "note-drop": return await hq(["inbox", "drop", "--json", "--", str("id")])
-        case "note-restore": return await hq(["inbox", "restore", "--json", "--", str("id")])
+            return await hq(["inbox", "--json"] + fields + ["--", "move", str("id"), str("kind")])
+        case "note-drop": return await hq(["inbox", "--json", "--", "drop", str("id")])
+        case "note-restore": return await hq(["inbox", "--json", "--", "restore", str("id")])
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
                                 place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false,
@@ -481,15 +482,18 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     static func noteAdd(text: String, images: [String], via: String) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty else { return (nil, L("empty note", "内容是空的")) }
-        return await hq(["inbox", "add", "--json", "--via=\(via)"] + images.map { "--image=\($0)" } + ["--", text])
+        // Every option before "--" and every positional after it, the action word included: the
+        // pet runs hq on /usr/bin/python3 (3.9), whose argparse stops filling `rest` once options
+        // come between the action and the text.
+        return await hq(["inbox", "--json", "--via=\(via)"] + images.map { "--image=\($0)" } + ["--", "add", text])
     }
 
     /// Has a cheap model file it (`hq inbox sort`, a few seconds): a new task, a todo or log line on
     /// a task, or the user's own todo — or it stays unsorted when the model isn't sure.
     static func noteSort(_ id: String) async -> (Any?, String?) {
-        var args = ["inbox", "sort", "--json"]
+        var args = ["inbox", "--json"]
         if let claude = await findClaude() { args.append("--claude=\(claude)") }
-        return await hq(args + ["--", id])
+        return await hq(args + ["--", "sort", id])
     }
 
     // MARK: - New sessions

@@ -1791,7 +1791,10 @@ def save_inbox(items, last=None):
         d = load_json(inbox_path(), {})
         last = d.get("last", 0) if isinstance(d, dict) and isinstance(d.get("last"), int) else 0
     cutoff = time.time() - INBOX_KEEP_DAYS * 86400
-    keep = [x for x in items if x.get("state") in ("unsorted", "sorting") or (ts_seconds(x.get("at")) or 0) >= cutoff]
+    # By the last change, not by when it was jotted: an old note filed or dropped today must stay
+    # long enough to be moved or restored.
+    keep = [x for x in items if x.get("state") in ("unsorted", "sorting") or
+            max(ts_seconds(x.get(k)) or 0 for k in ("at", "sorted_at", "moved_at")) >= cutoff]
     atomic_write(inbox_path(), json.dumps({"last": last, "items": keep}, ensure_ascii=False, indent=1) + "\n")
 
 
@@ -2201,7 +2204,9 @@ def inbox_sort(nid, claude=None):
             raise InboxError("claude not found (pass --claude PATH)")
         ans, cost = run_sorter(item, exe)
     except InboxError as e:
-        return inbox_update(nid, lambda x: x.update(state="unsorted", error=str(e)))
+        # Only if nothing happened meanwhile: a move or drop made while it ran stands.
+        err = str(e)
+        return inbox_update(nid, lambda x: x.update(state="unsorted", error=err) if x.get("state") == "sorting" else None)
     pick = inbox_dest(ans, item)
     alts = []
     for a in ans.get("alternatives") or []:
@@ -2248,7 +2253,11 @@ def inbox_move(nid, want):
                 die(f"can't file {x['id']} there: " + ("no such open task" if want.get("kind") in ("todo", "note")
                                                        else "the secretary isn't set up" if want.get("kind") == "me"
                                                        else "it needs a title"))
-        left = inbox_undo(x.get("undo")) if x.get("state") == "sorted" else ""
+        u = x.get("undo") or {}
+        if d and x.get("state") == "sorted" and u.get("created") and d.get("task") == u.get("task"):
+            # Taking the note back would remove the very card it is being filed on.
+            die(f"{u.get('task')} was made from {x['id']} — edit that card, or move the note to unsorted first")
+        left = inbox_undo(u) if x.get("state") == "sorted" else ""
         x.update(undo=None, error=None)
         if d:
             # Where it was stays one click away: the old place joins the alternatives.
@@ -2256,7 +2265,12 @@ def inbox_move(nid, want):
             for a in [x.get("dest")] + list(x.get("alts") or []):
                 if a and a != d and a not in alts:
                     alts.append(a)
-            x.update(state="sorted", undo=inbox_apply(x, d), dest=d, alts=alts[:3], by="user", moved_at=now_iso())
+            try:
+                x.update(state="sorted", undo=inbox_apply(x, d), dest=d, alts=alts[:3], by="user", moved_at=now_iso())
+            except InboxError as e:
+                # The old place is already taken back: say so on the note rather than leave it
+                # pointing there.
+                x.update(state="unsorted", error=str(e), alts=alts[:3], by="user", moved_at=now_iso())
         else:
             x.update(state="unsorted", by="user", moved_at=now_iso())
         save_inbox(items)
@@ -4745,7 +4759,16 @@ def main():
     p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")
     p.set_defaults(fn=lambda a: hook_main())
 
-    args = ap.parse_args()
+    args, extra = ap.parse_known_args()
+    if extra:
+        # Python < 3.12's argparse fills a nargs="*" positional with the first run of positionals
+        # only, so `hq inbox add --sort TEXT` (or `add --json -- "-x"`) leaves TEXT over. For inbox
+        # the leftovers are more of `rest`, in order; anything option-like before "--" is a typo.
+        cut = extra.index("--") if "--" in extra else len(extra)
+        bad = [x for x in extra[:cut] if x.startswith("-")]
+        if getattr(args, "fn", None) is not cmd_inbox or bad:
+            ap.error("unrecognized arguments: " + " ".join(bad or extra))
+        args.rest = list(args.rest or []) + extra[:cut] + extra[cut + 1:]
     if not getattr(args, "fn", None):
         ap.print_help()
         return

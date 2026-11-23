@@ -971,7 +971,7 @@ function renderMyTodos() {
 const notes = () => (ui.board && ui.board.inbox) || [];
 const unsortedNotes = () => notes().filter((x) => x.state === "unsorted");
 function destLabel(d) {
-  if (!d) return T("unsorted", "未分拣");
+  if (!d || d.kind === "unsorted") return T("unsorted", "未分拣");
   if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
   if (d.kind === "todo") return `${d.task} ${T("todo", "待办")} @${d.owner || "me"}`;
   if (d.kind === "note") return `${d.task} ${T("log", "记录")}`;
@@ -1005,7 +1005,8 @@ function renderNotes() {
   const open = unsortedNotes().length;
   const picker = (x) => {
     const k = "note-pick:" + x.id;
-    const pick = ui.drafts[k] || x.task || "";
+    // Preselect the task it is filed on — not a card it created, which it can't be filed onto.
+    const pick = ui.drafts[k] || (x.dest && x.dest.kind === "task" ? "" : x.task) || "";
     const choices = tasks().filter(isOpen).filter((t) => t.id !== secId());
     return `<div class="qnote-pick">
       <select data-key="${esc(k)}"><option value="">${T("Choose a task…", "选一个任务…")}</option>
@@ -1068,7 +1069,8 @@ async function noteMove(id, dest, quiet) {
 async function captureSubmit() {
   const box = $("#capture");
   const text = box.value.trim();
-  const images = (ui.atts.capture || []).map((a) => a.path);
+  const atts = ui.atts.capture || [];
+  const images = atts.map((a) => a.path);
   if (!text && !images.length) return;
   box.value = "";
   delete ui.atts.capture;
@@ -1076,7 +1078,11 @@ async function captureSubmit() {
   renderCaptureAtts();
   let x;
   try { x = await apiObj("note-add", { text, images }); }
-  catch (e) { if (!box.value) box.value = text; return toast(String(e.message || e), true); }
+  catch (e) {
+    // Put back what was typed and pasted, unless something new is already in the box.
+    if (!box.value && !(ui.atts.capture || []).length) { box.value = text; ui.atts.capture = atts; renderCaptureAtts(); }
+    return toast(String(e.message || e), true);
+  }
   toast(T("Noted — sorting…", "记下了，正在分拣…"));
   refresh();
   try {
@@ -3437,7 +3443,9 @@ document.addEventListener("click", async (ev) => {
     case "goto": return revealTask(d.task);
     case "note-move": return noteMove(d.id, JSON.parse(d.dest));
     case "note-to-task": {
-      const task = ui.drafts["note-pick:" + d.id];
+      // What the picker shows, preselected or chosen.
+      const sel = el.closest(".qnote-pick") && el.closest(".qnote-pick").querySelector("select");
+      const task = (sel && sel.value) || ui.drafts["note-pick:" + d.id];
       if (task) { delete ui.drafts["note-pick:" + d.id]; return noteMove(d.id, { kind: d.kind, task }); }
       return;
     }

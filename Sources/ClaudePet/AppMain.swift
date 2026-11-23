@@ -1195,7 +1195,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             let added = await BoardBridge.noteAdd(text: text, images: images, via: "hotkey")
             guard let id = Self.noteJSON(added.0)?["id"] as? String else {
-                self?.bridge?.say(L("Couldn't note that: \(added.1 ?? "?")", "没记下：\(added.1 ?? "?")"), hold: 6)
+                let err = added.1 ?? "?"
+                self?.bridge?.say(L("Couldn't note that: \(err)", "没记下：\(err)"), hold: 6)
+                // Nothing typed is lost: the box comes back with it.
+                self?.quickNote.restore(text: text, images: images, error: err)
                 return
             }
             self?.bridge?.say(L("Noted — sorting…", "记下了，正在分拣…"), hold: 4)
