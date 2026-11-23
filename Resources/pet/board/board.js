@@ -1500,8 +1500,15 @@ function canonicalUrl(url) {
 // canonical form (trailing `/).,;:` never count); anything else (no URL, a ticket key, or two or
 // more URLs) is its text with whitespace collapsed. Never the URL a links rule builds: hq doesn't
 // know those.
+// The key mark (`! ` before a ref, hq's KEY_MARK): a link the card keeps even when it is a build,
+// a run or a comment — those otherwise go to HISTORY.md. It is not part of what the link is.
+const keyMarked = (ref) => new RegExp(`^(?:${PY_SPACE.source})?!`).test(String(ref));
+function unmarkedRef(ref) {
+  const text = String(ref).replace(PY_TRIM, "");
+  return text.startsWith("!") ? text.slice(1).replace(new RegExp(`^(?:${PY_SPACE.source})`), "") : text;
+}
 function refKey(ref) {
-  const text = String(ref);
+  const text = unmarkedRef(ref);
   const urls = text.match(REF_URL_RE) || [];
   if (urls.length === 1) return canonicalUrl(urls[0]);
   return text.split(PY_SPACE).filter(Boolean).join(" ");
@@ -1536,8 +1543,11 @@ function mergeRefs(refs) {
   return order.map((k) => {
     const rs = groups.get(k);
     if (new Set(rs).size === 1) return rs[0];
-    const exact = rs.filter(refUrlIsCanonical);
-    return withCanonicalUrl(exact.length ? exact[exact.length - 1] : rs[rs.length - 1]);
+    // The key mark stays with the link whichever entry's title wins.
+    const mark = rs.some(keyMarked) ? "! " : "";
+    const us = rs.map(unmarkedRef);
+    const exact = us.filter(refUrlIsCanonical);
+    return mark + withCanonicalUrl(exact.length ? exact[exact.length - 1] : us[us.length - 1]);
   });
 }
 // Where a link lives, for the Links groups in a task's right rail (kindOfUrl is about what it is).
@@ -1554,18 +1564,19 @@ function refSource(url) {
 }
 // ---- ref keys: end
 function resolveRef(ref) {
-  const url = (String(ref).match(new RegExp(REF_URL_RE.source)) || [])[0];
+  const text = unmarkedRef(ref);
+  const url = (text.match(new RegExp(REF_URL_RE.source)) || [])[0];
   if (url) {
-    const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
+    const label = text.replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
     return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
   }
   for (const rule of (ui.board && Array.isArray(ui.board.links) ? ui.board.links : [])) {
     let re;
     try { re = new RegExp(rule.match); } catch (e) { continue; }
-    const m = String(ref).match(re);
-    if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: ref };
+    const m = text.match(re);
+    if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: text };
   }
-  return { ref, url: "", kind: "none", label: ref };
+  return { ref, url: "", kind: "none", label: text };
 }
 // The Links of a task's right rail, grouped by where they live, newest first; past REF_GROUP_SHOWN
 // a group folds behind "N more" (unfolded for this board's life, per task and group).
@@ -1582,13 +1593,32 @@ function refGroups(t, refs, editing) {
     return `<div class="ref-g"><div class="ref-gh">${esc(name)} <span class="meta">${rs.length}</span></div>
       ${(all ? rs : rs.slice(0, REF_GROUP_SHOWN)).map(item).join("")}
       ${more > 0 ? `<button class="lnk ref-more" data-action="ref-more" data-group="${esc(key)}">${all ? T("Show fewer", "收起") : T(`${more} more`, `还有 ${more} 条`)}</button>` : ""}</div>`;
-  }).join("");
+  }).join("") + processGroup(t, editing);
+}
+// Process links — a build, a run, a comment — live in the task's HISTORY.md, not on the card (so
+// sessions don't read them): one folded group, newest first. Edit offers to keep one on the card.
+function processGroup(t, editing) {
+  const rs = list(t.history && t.history.links).map(resolveRef).reverse();
+  if (!rs.length) return "";
+  const key = `${t.id}:process`, open = ui.refMore.has(key);
+  const item = (r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+      ${editing ? `<button class="icon" title="${T("Keep on the card — a key link sessions see", "留在卡上——作为 session 会看到的关键链接")}" data-action="ref-pin" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">↑</button>
+        <button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`;
+  return `<div class="ref-g proc"><button class="lnk ref-gh" data-action="ref-more" data-group="${esc(key)}"
+      title="${T("Builds, runs and comments — kept in HISTORY.md, not read by sessions", "构建、运行和评论——放在 HISTORY.md 里，session 不读")}">${open ? "▾" : "▸"} ${T("Process", "过程")} <span class="meta">${rs.length}</span></button>
+    ${open ? rs.map(item).join("") : ""}</div>`;
 }
 function logEntries(t) {
   // `- 2026-11-20 20:05:18: text` (hq log writes the time since 11/20); older lines carry the day only.
-  return String(t.body || "").split("\n")
+  const parse = (text) => String(text || "").split("\n")
     .map((l) => l.match(/^\s*-\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?):\s+(.*)$/))
     .filter(Boolean).map((m) => ({ date: m[1].replace("T", " "), text: m[2] }));
+  // What the card budget moved to HISTORY.md (todo ticks, older entries) reads in its place by time.
+  const hist = parse(list(t.history && t.history.log).join("\n"));
+  const card = parse(t.body);
+  if (!hist.length) return card;
+  return hist.concat(card).map((e, i) => [e, i])
+    .sort((a, b) => (a[0].date < b[0].date ? -1 : a[0].date > b[0].date ? 1 : a[1] - b[1])).map((x) => x[0]);
 }
 const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
@@ -1647,7 +1677,10 @@ function renderTaskBody(t) {
   const isRecent = (x) => ui.recent.some((r) => r.task === t.id && r.i === x.i && Date.now() - r.at < RECENT_MS);
   const ownerRank = (x) => (x.owner === "me" ? 0 : x.owner === "claude" ? 1 : x.owner ? 2 : 3);
   const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
-  const finished = t.todos.filter((x) => x.state !== "open");
+  // Closed todos the card budget moved to HISTORY.md follow the card's own, read-only.
+  const histDone = list(t.history && t.history.todos).map((x) => ({ ...x, hist: true }));
+  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse());
+  const anyTodos = t.todos.length + histDone.length;
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
   const shownDone = foldDone ? finished.filter(isRecent) : finished;
   const hiddenDone = finished.length - shownDone.length;
@@ -1659,6 +1692,8 @@ function renderTaskBody(t) {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
     const who = x.owner ? `<span class="who ${x.owner === "me" ? "me" : x.owner === "claude" ? "cl" : ""}">${esc(OWNER_LABEL(x.owner))}</span>` : `<span class="who"></span>`;
+    if (x.hist) return `<div class="todo ${x.state} hist" title="${T("In HISTORY.md (card budget)", "在 HISTORY.md 里（卡片预算）")}">
+      <span class="box ${x.state}">${mark}</span>${who}<span class="t">${esc(x.text)}</span></div>`;
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? T("Mark done", "标为完成") : T("Reopen", "恢复")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       ${who}<span class="t">${esc(x.text)}</span>
@@ -1679,7 +1714,7 @@ function renderTaskBody(t) {
     }
     return out.concat(shownDone.map(todoRow)).join("");
   };
-  const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
+  const todoState = (!anyTodos ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
     (finished.length > FINISHED_SHOWN
       ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? T("Hide finished", "收起已结束的") : T(`Show ${hiddenDone} finished`, `显示 ${hiddenDone} 条已结束的`)}</button>` : "") +
     tidyButton(t);
@@ -1707,6 +1742,8 @@ function renderTaskBody(t) {
       <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
         title="${editNext ? T("Done editing", "改完了") : T("Edit status, project, category and next", "修改状态、项目、分类和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
       <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Open the card file", "用编辑器打开任务卡文件")}">${T("Open card", "打开任务卡")}</button>
+      ${isOpen(t) && t.id !== secId() ? `<button class="btn small" data-action="continue" data-task="${esc(t.id)}" data-confirm="${T("Continue?", "续？")}"
+        title="${T("Continue on a new card dated today: open todos, status, next step, key links and grants come along; this card is closed and its sessions move over", "续到一张今天的新卡：未完成待办、当前状态、下一步、关键链接和授权都带过去；这张卡关闭，绑定的 session 一起换过去")}">${T("Continue today", "续到今天")}</button>` : ""}
       ${launchSplit(t)}
     </div>`;
   const head = editNext ? `<div class="now editing">
@@ -1766,7 +1803,7 @@ function renderTaskBody(t) {
         ${adding("todo") ? `<div class="row nowrap addbox">
             <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
             <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>` : ""}
-        ${t.todos.length ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
+        ${anyTodos ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
 
         ${secHead(T("Grants", "授权"), t, "grant", T("Add a standing grant — a kind of step sessions on this task take without asking", "加一条常设授权——这个任务的 session 不用问就可以做的一类事"), (t.grants || []).length || null)}
         ${adding("grant") ? `<div class="addbox"><div class="row nowrap">
@@ -3934,7 +3971,17 @@ document.addEventListener("click", async (ev) => {
       const text = (ui.drafts[key] || "").trim();
       if (!text) return;
       delete ui.drafts[key];
-      return act("ref", { action: "add", task: d.task, ref: text }, T("Added", "已添加"));
+      // Added by hand: a key link, kept on the card even when it is a build or a comment.
+      return act("ref", { action: "pin", task: d.task, ref: text }, T("Added", "已添加"));
+    }
+    case "ref-pin": return act("ref", { action: "pin", task: d.task, ref: d.ref }, T("Kept on the card", "已留在卡上"));
+    case "continue": {
+      try {
+        const out = JSON.parse(await api("continue", { task: d.task }));
+        ui.expanded.add(out.to);
+        toast(T(`Continued in ${out.to}`, `已续到 ${out.to}`) + (out.asks && out.asks.length ? T(` — ${out.asks.length} open ask(s) moved with it`, `——${out.asks.length} 条未回应的问题一起搬过去了`) : ""));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
     }
     case "workdir-add": {
       try {
@@ -3956,13 +4003,14 @@ document.addEventListener("click", async (ev) => {
     case "ref-remove": {
       const ref = d.ref;
       try {
-        // ✕ removes every entry with this link; hq prints them ({"removed": [{i, ref}, …]}) and
-        // Undo puts them all back where they were. An older hq prints nothing: re-add this one.
+        // ✕ removes every entry with this link, on the card and in HISTORY.md; hq prints them
+        // ({"removed": [{i, ref}, …], "history": [ref, …]}) and Undo puts them all back where they
+        // were. An older hq prints nothing: re-add this one.
         const out = await api("ref", { action: "remove", task: d.task, ref });
-        let removed = null;
-        try { removed = JSON.parse(out).removed; } catch (e) { /* older hq */ }
-        const undo = Array.isArray(removed) && removed.length
-          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(removed) }, T("Restored", "已恢复"))
+        let gone = null;
+        try { gone = JSON.parse(out); } catch (e) { /* older hq */ }
+        const undo = gone && (list(gone.removed).length || list(gone.history).length)
+          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(gone) }, T("Restored", "已恢复"))
           : () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复"));
         toast(T("Removed", "已移除"), false, undo);
       } catch (e) { toast(String(e.message || e), true); }

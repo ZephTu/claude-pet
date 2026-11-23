@@ -361,6 +361,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(args)
         case "ref": return await hq(["ref", str("action"), str("task"), "--", str("ref")])
         case "workdir": return await hq(["workdir", str("action"), str("task"), "--", str("path")])
+        case "continue": return await hq(["continue", str("task"), "--json"])
         case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])

@@ -134,6 +134,8 @@ h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
   cursor: pointer; display: grid; place-items: center; font-size: 11px; line-height: 1; color: var(--bg); }
 .box.done { background: var(--teal); border-color: var(--teal); }
 .box.dropped { background: var(--panel-2); color: var(--faint); }
+/* A closed todo the card budget moved to HISTORY.md: read-only. */
+.todo.hist .box { cursor: default; opacity: .55; }
 .todo.done .t, .todo.dropped .t { color: var(--faint); text-decoration: line-through; }
 .owner { font-size: 11px; color: var(--blue); margin-right: 3px; }
 .owner.me { color: var(--accent); font-weight: 600; }
@@ -1056,6 +1058,8 @@ main.single { grid-template-columns: 1fr; }
 .ref-gh { font-size: 11.5px; color: var(--faint); margin-bottom: 1px; }
 .ref-gh .meta { font-size: 11px; }
 .lnk.ref-more { display: block; margin: 1px 0 2px; }
+/* Process links (HISTORY.md): a folded group whose header is the toggle. */
+.lnk.ref-gh { display: block; font-size: 11.5px; }
 .ref-g + .lnk { margin-top: 6px; }
 .lnk { background: none; border: 0; padding: 0; color: var(--faint); font-size: 12px; cursor: pointer; }
 .lnk:hover, .lnk.on { color: var(--text); }
