@@ -47,7 +47,12 @@ after the previous compaction, else the session's first reply, at most 60k) and 
 TodoWrite / TaskCreate list: `{text, status, active}`); `hq peek <sid> --tool <tool_use id>`
 prints one call's full input and output (an Edit's diff), `--json` for the fields.
 `hq peek <sid> --commands [--json]` lists the skills the session can run as slash commands —
-the newest `skill_listing` Claude Code wrote into the transcript plus skills added after it;
+the newest `skill_listing` Claude Code wrote into the transcript plus skills added after it,
+then the skills and commands marked `disable-model-invocation: true` (left out of that listing,
+but still yours to type) from `~/.claude`, the session folder's `.claude` and those above it (up
+to your home), and the plugins enabled for that folder — user settings, then the project's
+`settings.json` and `settings.local.json`; a project-scope install counts only in its project —
+as `plugin:name`. A file or settings it can't read is skipped;
 `--json` gives `{found, skills: [{name, desc}]}` (the board's message boxes complete `/` from it).
 
 **Jump log:** `hq jumps [--days 7] [--json]` summarises `~/.claude/pet/jumps.jsonl`, which
