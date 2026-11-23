@@ -120,6 +120,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 // reloads when the language changes).
 if (LANG === "zh") {
   $("#search").placeholder = "筛选任务";
+  $("#search").title = "三个页面都筛选：任务按编号、标题、关联、分类、项目；问题和待办也按自己的文字";
   $("#new-task").textContent = "新建任务";
   $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
@@ -713,15 +714,17 @@ function usageChips() {
 
 function renderAsks() {
   const items = [];
-  for (const t of tasks()) for (const a of openAsks(t)) items.push([t, a]);
+  let total = 0;
+  for (const t of tasks()) for (const a of openAsks(t)) { total++; if (taskMatches(t, a.text)) items.push([t, a]); }
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
-  const later = tasks().filter((t) => laterAsks(t).length);
+  const later = tasks().filter((t) => laterAsks(t).length && taskMatches(t, ...laterAsks(t).map((a) => a.text)));
   const laterHtml = later.map((t) => `<div class="later-of"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${laterLine(t)}</div>`).join("");
   const head = `<div class="vhead"><h1>Needs you</h1></div>`;
+  if (!items.length && total) return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")}</div>` + filterNote(0, total) + laterHtml;
   if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>${T("Claude has nothing waiting on an answer from you.", "Claude 没有在等你回答的问题。")}</div>` + laterHtml;
   const byTask = new Map();
   for (const [t, a] of items) byTask.set(t, (byTask.get(t) || []).concat([a]));
-  return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")} <span class="meta">${items.length}</span></div>` + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
+  return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")} <span class="meta">${items.length}</span></div>` + filterNote(items.length, total) + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
 }
 
 // A task with several open asks answers them together: each answer button only picks, and one
@@ -885,11 +888,14 @@ function answerNote(id) {
 
 function renderMyTodos() {
   const items = [];
+  let total = 0;
   for (const t of tasks().filter(isOpen))
-    for (const x of t.todos) if (x.state === "open" && x.owner === "me") items.push([t, x]);
+    for (const x of t.todos) if (x.state === "open" && x.owner === "me") { total++; if (taskMatches(t, x.text)) items.push([t, x]); }
   // A card may still carry the old free-text "waiting on you" field (written before it was
   // folded into @me todos). Show it here as a todo rather than lose it; ticking clears it.
-  const legacy = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
+  const waiting = tasks().filter((t) => isOpen(t) && t.waiting_on_me);
+  total += waiting.length;
+  const legacy = waiting.filter((t) => taskMatches(t, t.waiting_on_me));
   // Newest first; each shows how long it has been waiting (amber after STALE_DAYS).
   const since = (iso) => Date.parse(iso || "") || 0;
   items.sort((a, b) => since(b[1].created) - since(a[1].created));
@@ -907,11 +913,12 @@ function renderMyTodos() {
   const recent = ui.recent.filter((r) => {
     const t = taskById(r.task);
     const x = t && t.todos.find((y) => y.i === r.i);
-    return x && x.state !== "open";
+    return x && x.state !== "open" && taskMatches(t, r.text);
   });
   const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? T(" · blocked", " · 阻塞中") : ""}</div>`;
-  if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">${T("Your todos", "你的待办")}</div><div class="empty">${T("Nothing waiting on you.", "没有在等你的事。")}</div>`;
-  return `<div class="group-title">${T("Your todos", "你的待办")} <span class="meta">${items.length + legacy.length}</span></div><div class="inbox-list">` + legacy.map((t) => `
+  const note = filterNote(items.length + legacy.length, total);
+  if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">${T("Your todos", "你的待办")}</div>${note || `<div class="empty">${T("Nothing waiting on you.", "没有在等你的事。")}</div>`}`;
+  return `<div class="group-title">${T("Your todos", "你的待办")} <span class="meta">${items.length + legacy.length}</span></div>${note}<div class="inbox-list">` + legacy.map((t) => `
     <div class="todo it">
       <span class="box" title="${T("Handled (you can undo)", "处理好了（可以撤销）")}" data-action="clear-waiting" data-task="${esc(t.id)}"></span>
       <div class="it-t"><span class="t clickable" title="${T("Show context", "查看上下文")}" data-action="ctx" data-kind="waiting" data-task="${esc(t.id)}">${esc(t.waiting_on_me)}</span>${src(t)}</div>
@@ -1016,13 +1023,26 @@ function compareTasks(a, b) {
     String(b.updated).localeCompare(String(a.updated)) || String(a.id).localeCompare(String(b.id));
 }
 
+// The search box filters every tab: a task matches on its id, title, refs, category or project;
+// an ask or a todo also on its own text.
+const filterText = () => ui.filter.trim().toLowerCase();
+function taskMatches(t, ...own) {
+  const f = filterText();
+  return !f || [t.id, t.title, list(t.refs).join(" "), t.category, t.project || "", ...own].join(" ").toLowerCase().includes(f);
+}
+// Above a filtered list: how much of it the filter shows, and a way out.
+function filterNote(shown, total) {
+  if (!filterText() || shown === total) return "";
+  const q = esc(ui.filter.trim());
+  return `<div class="fnote">${T(`Filter “${q}”: ${shown} of ${total}`, `筛选"${q}"：显示 ${shown} / ${total}`)}<button class="btn small ghost" data-action="clear-filter">${T("Clear", "清除")}</button></div>`;
+}
+
 function renderTasks() {
-  const f = ui.filter.toLowerCase();
-  const visible = tasks().filter((t) => (ui.showClosed || isOpen(t)) &&
-    (!f || `${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)));
+  const pool = tasks().filter((t) => ui.showClosed || isOpen(t));
+  const visible = pool.filter((t) => taskMatches(t));
   if (!tasks().length) return renderOnboarding();
-  if (!visible.length) return `<div class="empty">${f ? T("No tasks match.", "没有匹配的任务。") : T("No tasks.", "没有任务。")}</div>`;
-  let html = "";
+  if (!visible.length) return pool.length && filterText() ? filterNote(0, pool.length) : `<div class="empty">${T("No tasks.", "没有任务。")}</div>`;
+  let html = filterNote(visible.length, pool.length);
   if (ui.groupBy === "project") {
     const names = projectNames();
     const extra = [...new Set(visible.map((t) => t.project || "").filter((n) => n && !names.includes(n)))];
@@ -1038,7 +1058,7 @@ function renderTasks() {
       const group = visible.filter((t) => (t.project || "") === name)
         .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
       // Every listed project shows, even with nothing open — unless a search is narrowing things.
-      if (!group.length && (!name || !names.includes(name) || f)) continue;
+      if (!group.length && (!name || !names.includes(name) || filterText())) continue;
       const key = name || "(none)";
       const pr = projectByName(name);
       const done = finished.includes(name);
@@ -1142,6 +1162,7 @@ function renderToday() {
   const picked = ui.activeFirst
     ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
     : mine;
+  const shown = picked.filter((t) => taskMatches(t));
   const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
   return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${T(`${picked.length} task${picked.length === 1 ? "" : "s"}`, `${picked.length} 个任务`)}</span>
@@ -1151,7 +1172,8 @@ function renderToday() {
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
       <button class="btn small" data-action="today-add">${T("Add", "添加")}</button></div>
     ${draftNew}
-    ${picked.length ? picked.map(focusCard).join("") : `<div class="card empty-today">
+    ${filterNote(shown.length, picked.length)}
+    ${shown.length ? shown.map(focusCard).join("") : picked.length ? "" : `<div class="card empty-today">
       <b>${T("Nothing in Focus yet.", "Focus 里还没有任务。")}</b>
       <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`}`;
 }
@@ -1232,7 +1254,8 @@ function focusSessions(t, live) {
 }
 
 function renderTodaySessions() {
-  const ids = focusIds();
+  // Follows the filter, like the cards beside it.
+  const ids = focusIds().filter((id) => { const t = taskById(id); return t && taskMatches(t); });
   const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
   const loose = ui.sessions.filter((s) => !s.task);
   return `<div class="vhead"><h2 class="side-h">${T("Sessions on these tasks", "这些任务的 session")}</h2></div>
@@ -2631,15 +2654,15 @@ function revealTask(id) {
   // In Today, a task on today's list is its card there: bring that card's top edge to the top
   // of the column, without opening its details. Anything else is shown in All.
   if (ui.mode !== "all") {
-    if (ui.mode === "today" && focusIds().includes(id)) return scrollToCard("ftask-" + id);
+    if (ui.mode === "today" && focusIds().includes(id)) {
+      if (!taskMatches(t)) { ui.filter = $("#search").value = ""; render(); }
+      return scrollToCard("ftask-" + id);
+    }
     ui.mode = "all";
     savePref("hq-mode", "all");
   }
   if (!isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
-  const f = ui.filter.toLowerCase();
-  if (f && !`${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)) {
-    ui.filter = $("#search").value = "";
-  }
+  if (!taskMatches(t)) ui.filter = $("#search").value = "";
   // Unfold the group it is in: a finished project's group is folded unless opened by hand.
   if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
     ui.openClosedProj.add(t.project);
@@ -3310,6 +3333,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "copy-onboard": return copyText("/hq-onboard", T("Copied — paste it into any Claude Code session", "已复制——粘贴到任意 Claude Code session 里"));
     case "new-in-project": return openNewTask(d.p);
+    case "clear-filter": ui.filter = $("#search").value = ""; return render();
     case "mode": ui.mode = d.m; savePref("hq-mode", d.m); ui.newTask = false; return d.m === "jobs" ? refresh(true) : render();
     case "focus-toggle": {
       const on = focusIds().includes(d.task);
