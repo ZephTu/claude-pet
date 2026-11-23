@@ -251,8 +251,23 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
         case "resolve":
+            // "Yes, always" carries the standing grant's wording; hq adds it to the card with the answer.
+            let grant = str("grant").isEmpty ? [] : ["--grant=\(str("grant"))"]
             return await hq(["ask", "resolve", str("id"), str("resolution"),
-                             "--via", "board", "--note=\(str("note"))"])
+                             "--via", "board", "--note=\(str("note"))"] + grant)
+        case "grant":
+            // list / add / revoke a task's standing grants; revoke goes by #n, checked against the text shown.
+            let index = (body["index"] as? Int).map(String.init) ?? str("index")
+            switch str("action") {
+            case "add":
+                let extra = (str("at").isEmpty ? [] : ["--at=\(str("at"))"]) + (str("source").isEmpty ? [] : ["--source=\(str("source"))"])
+                // Positionals first and the wording as --text=: argparse can't take `rest*` positionals
+                // after options, and wording starting with "-" must not read as one.
+                return await hq(["grant", "add", str("task"), "--via=board", "--text=\(str("text"))"] + extra)
+            case "revoke":
+                return await hq(["grant", "revoke", str("task")] + (index.isEmpty ? [] : [index]) + ["--via=board", "--text=\(str("text"))"])
+            default: return await hq(["grant", "list", str("task"), "--json"])
+            }
         case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
         case "snooze":
             // "Later": the ask stays open, out of sight until tomorrow (or `until`; "" brings it back).

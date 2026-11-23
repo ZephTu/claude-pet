@@ -220,6 +220,7 @@ def parse_card(path):
                       "state": {"x": "done", "-": "dropped", " ": "open"}[mark],
                       "owner": owner, "text": txt, "created": created})
     meta["todos"] = todos
+    meta["grants"] = card_grants(body)
     meta["body"] = body.strip()
     meta["path"] = path
     meta["dir"] = os.path.dirname(path)
@@ -542,6 +543,193 @@ def age_days(meta):
         return None
 
 
+# ---------------------------------------------------------------- standing grants
+# The card's `## Grants` (`## 授权`) section: one plain bullet per kind of thing the user has said
+# "yes, and from now on just do it" to. The wording is the rule. A hidden <!--g:TIME ASK-ID-->
+# says when, and from which ask (none: added by hand). Plain bullets, never `- [ ]`: every
+# checkbox line on a card is a todo. Revoking deletes the line and logs it.
+GRANTS_HEADING_RE = re.compile(r"^##[ \t]*(?:Grants|Standing grants|授权|常设授权)[ \t]*$", re.I)
+GRANT_LINE_RE = re.compile(r"^[-*][ \t]+(?!\[[ xX\-]\][ \t])(.+?)[ \t]*$")
+GRANT_STAMP_RE = re.compile(r"\s*<!--\s*g:([^>]*?)\s*-->\s*$")
+GRANT_SUGGEST_RE = re.compile(r"\s*\[(?:grant|授权)[:：]\s*([^\[\]]+?)\s*\]\s*$", re.I)
+GRANT_MAX_CHARS = 300
+GRANTS_SHOWN = 10              # grants, and characters of grant text, a SessionStart shows
+GRANTS_CHARS = 1500
+
+
+def grants_section(lines):
+    """(heading index, end index) of the grants section in a card's lines, or None. Headings
+    inside ``` fences don't count: a card may quote an example of the section."""
+    head, fence = None, False
+    for i, l in enumerate(lines):
+        if re.match(r"^\s*(```|~~~)", l):
+            fence = not fence
+        elif fence:
+            continue
+        elif head is None and GRANTS_HEADING_RE.match(l):
+            head = i
+        elif head is not None and l.startswith("## "):
+            return head, i
+    return (head, len(lines)) if head is not None else None
+
+
+def card_grants(text):
+    lines = text.split("\n")
+    sec = grants_section(lines)
+    out = []
+    if not sec:
+        return out
+    for j in range(sec[0] + 1, sec[1]):
+        m = GRANT_LINE_RE.match(lines[j])
+        if not m:
+            continue
+        txt, at, src = m.group(1), None, None
+        st = GRANT_STAMP_RE.search(txt)
+        if st:
+            txt = txt[:st.start()].rstrip()
+            bits = st.group(1).split()
+            at = bits[0] if bits else None
+            src = bits[1] if len(bits) > 1 else None
+        if txt:
+            out.append({"i": len(out) + 1, "text": txt, "at": at, "from": src})
+    return out
+
+
+def grant_key(text):
+    return " ".join(str(text).split()).casefold()
+
+
+def clean_grant(text):
+    t = " ".join(str(text).replace("<!--", "").replace("-->", "").split())
+    t = re.sub(r"^[-*]\s+", "", t)
+    if not t or is_placeholder(t):
+        die("a grant needs its wording, e.g. 'rerun a verification with the same parameters'")
+    if len(t) > GRANT_MAX_CHARS:
+        die(f"a grant is one short rule (at most {GRANT_MAX_CHARS} characters)")
+    return t
+
+
+def add_grant(card, text, source=None, at=None, via="cli"):
+    """Add a standing grant to the card. Returns it; the same wording already there is not added twice."""
+    text = clean_grant(text)
+    with card_lock(card):
+        lines = open(card, encoding="utf-8").read().split("\n")
+        for g in card_grants("\n".join(lines)):
+            if grant_key(g["text"]) == grant_key(text):
+                return dict(g, existed=True)
+        at = at or now_iso()
+        item = f"- {text} <!--g:{at}{' ' + source if source else ''}-->"
+        sec = grants_section(lines)
+        if sec:
+            j = sec[1]
+            while j > sec[0] + 1 and not lines[j - 1].strip():
+                j -= 1
+            lines.insert(j, item)
+        else:
+            # Before the todos (or the status / log section), so it reads as part of the brief.
+            head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Todo|待办|Log|决策记录)", l, re.I)), None)
+            zh = bool(re.search(r"^##\s+(待办|决策记录|当前状态|目标)", "\n".join(lines), re.M))
+            block = ["## 授权" if zh else "## Grants", item, ""]
+            if head is None:
+                lines += [""] + block
+            else:
+                lines[head:head] = block
+        atomic_write(card, "\n".join(lines))
+        append_log(card, f"grant added ({via}): {text}")
+    return next(g for g in card_grants(open(card, encoding="utf-8").read()) if grant_key(g["text"]) == grant_key(text))
+
+
+def revoke_grant(card, pick, text=None, via="cli"):
+    """Remove grant #pick (or the one with this wording). Returns it, with what restoring it needs."""
+    with card_lock(card):
+        lines = open(card, encoding="utf-8").read().split("\n")
+        sec = grants_section(lines)
+        rows = []                       # (line index, grant), numbered as card_grants numbers them
+        for j in range(sec[0] + 1, sec[1]) if sec else ():
+            g = card_grants("\n".join([lines[sec[0]], lines[j]]))
+            if g:
+                rows.append((j, g[0]))
+        hit = None
+        if pick:
+            n = int(pick) if str(pick).isdigit() else None
+            hit = rows[n - 1] if n and 0 < n <= len(rows) else None
+            # The board passes the text it showed: if the numbering moved, go by the text.
+            if hit and text and grant_key(hit[1]["text"]) != grant_key(text):
+                hit = None
+        if not hit and (text or (pick and not str(pick).isdigit())):
+            want = grant_key(text or pick)
+            hit = next((r for r in rows if grant_key(r[1]["text"]) == want), None)
+        if not hit:
+            die(f"no grant {text or pick!r} on {os.path.basename(os.path.dirname(card))}")
+        del lines[hit[0]]
+        sec = grants_section(lines)
+        if not any(l.strip() for l in lines[sec[0] + 1:sec[1]]):
+            del lines[sec[0]:sec[1]]          # the last one went: so does the empty section
+        atomic_write(card, "\n".join(lines))
+        append_log(card, f"grant revoked ({via}): {hit[1]['text']}")
+    return hit[1]
+
+
+def grants_for(meta):
+    """The grants in force for a task's sessions. (Project-level grants join here with T-079.)"""
+    return meta.get("grants") or []
+
+
+def grants_text(meta):
+    gs = grants_for(meta)
+    if not gs:
+        return ""
+    shown, used = [], 0
+    for g in gs:
+        if len(shown) >= GRANTS_SHOWN or (shown and used + len(g["text"]) > GRANTS_CHARS):
+            break
+        shown.append(g)
+        used += len(g["text"])
+    lines = [f"Standing grants on {meta['id']} — the user has said yes to these for good. Do what they cover "
+             "without an hq-asks, and say in your reply which grant you acted on. Anything not clearly "
+             "covered: ask as usual."]
+    lines += [f"- {g['text']}" for g in shown]
+    if len(shown) < len(gs):
+        lines.append(f"- … {len(gs) - len(shown)} more in the card's grants section")
+    return "\n".join(lines)
+
+
+def grants_change_text(meta, seen):
+    """What changed in the grants since this session was last told (None: never told — all of them)."""
+    now = [g["text"] for g in grants_for(meta)]
+    if seen is None:
+        return grants_text(meta)
+    have = {grant_key(x) for x in seen}
+    cur = {grant_key(x) for x in now}
+    added = [x for x in now if grant_key(x) not in have]
+    gone = [x for x in seen if grant_key(x) not in cur]
+    if not added and not gone:
+        return ""
+    lines = [f"Standing grants on {meta['id']} changed since your last turn:"]
+    lines += [f"+ new — do this without asking from now on: {x}" for x in added]
+    lines += [f"- revoked — ask again before doing this: {x}" for x in gone]
+    return "\n".join(lines)
+
+
+def cmd_grant(args):
+    card = find_card(args.task)
+    if args.action == "list":
+        gs = parse_card(card)["grants"]
+        if args.json:
+            print(json.dumps(gs, ensure_ascii=False, indent=1))
+        for g in [] if args.json else gs:
+            print(f"{g['i']:>2}. {g['text']}" + (f"  (from {g['from']})" if g.get("from") else ""))
+    elif args.action == "add":
+        # The board passes the wording as --text, so wording that starts with "-" is never an option.
+        g = add_grant(card, args.text or " ".join(args.rest), source=args.source, at=args.at, via=args.via)
+        print(json.dumps(g, ensure_ascii=False))
+    elif args.action == "revoke":
+        if not args.rest and not args.text:
+            die("usage: hq grant revoke <task> <n | wording> [--text <wording as last seen>]")
+        g = revoke_grant(card, " ".join(args.rest), text=args.text, via=args.via)
+        print(json.dumps(g, ensure_ascii=False))
+
+
 # ---------------------------------------------------------------- asks ledger
 def asks_path(task_dir):
     return os.path.join(task_dir, "asks.jsonl")
@@ -565,9 +753,10 @@ def read_asks(task_dir):
             # An answer is news again: whatever was delivered before it (a "Later" typed into the
             # session) is not this answer. The board and the hook mark delivery after resolving.
             a.update(state=e["resolution"], note=e.get("note", ""), via=e.get("via"),
-                     resolved_at=e.get("ts"), seq=e.get("seq"), delivered=None)
+                     resolved_at=e.get("ts"), seq=e.get("seq"), delivered=None, granted=e.get("granted"))
         elif e.get("type") == "reopen" and e.get("id") in asks:
-            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None, snoozed_until=None)
+            asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None, snoozed_until=None,
+                                 granted=None)
         elif e.get("type") == "snooze" and e.get("id") in asks:
             # "Later" on the board: the ask stays open, out of sight until `until` (local ISO).
             asks[e["id"]]["snoozed_until"] = e.get("until") or None
@@ -588,6 +777,12 @@ def append_event(task_dir, event):
 def add_ask(card, text, session=None, context=None):
     meta = parse_card(card)
     existing = read_asks(meta["dir"])
+    # "… [grant: <wording>]": the session's suggestion for a standing grant, should the user say
+    # "yes, always". Kept apart from the question.
+    suggest = None
+    m = GRANT_SUGGEST_RE.search(text)
+    if m and text[:m.start()].strip():
+        suggest, text = " ".join(m.group(1).split())[:GRANT_MAX_CHARS], text[:m.start()]
     # Sessions are reminded of their open asks every turn and tend to repeat them: the same
     # question still open on this task is the same ask, not a new one.
     key = " ".join(text.split()).casefold()
@@ -597,6 +792,8 @@ def add_ask(card, text, session=None, context=None):
     n = max([int(a["id"].rsplit(".", 1)[1]) for a in existing] or [0]) + 1
     aid = f"{meta['id']}.{n}"
     event = {"type": "open", "id": aid, "task": meta["id"], "text": text.strip(), "session": session}
+    if suggest:
+        event["grant"] = suggest
     if context:
         # The reply that asked — so the board can show why, even after the session is gone.
         event["context"] = strip_hq_blocks(context)[:6000]
@@ -613,12 +810,18 @@ def find_ask(aid):
     die(f"no ask {aid}")
 
 
-def resolve_ask(aid, resolution, note="", via="cli"):
+def resolve_ask(aid, resolution, note="", via="cli", grant=None):
+    """Answer an ask. With `grant` (only with do): "yes, and from now on just do this kind of
+    thing" — the grant goes on the card first, then the answer, which records its wording."""
     if resolution not in RESOLUTIONS:
         die(f"resolution must be one of {', '.join(RESOLUTIONS)}")
     card, _ = find_ask(aid)
-    append_event(os.path.dirname(card), {"type": "resolve", "id": aid, "resolution": resolution,
-                                         "note": note, "via": via})
+    event = {"type": "resolve", "id": aid, "resolution": resolution, "note": note, "via": via}
+    if grant and grant.strip():
+        if resolution != "do":
+            die("a grant goes with a yes (do)")
+        event["granted"] = add_grant(card, grant, source=aid, via=via)["text"]
+    append_event(os.path.dirname(card), event)
 
 
 # ---------------------------------------------------------------- session state
@@ -692,6 +895,9 @@ workdir: <absolute path you started working in>
 ```hq-asks
 - <question or request>
 ```
+   If it is a kind of step that will come up again (rerun with the same parameters, delete an
+   env once triaged, fix review findings on the PR …), end the line with `[grant: <that kind of
+   step, worded as a standing permission>]`: the user can then say yes to it for good.
 3. When the user answers tracked asks in chat, record each one:
 ```hq-resolved
 - <ask id> <do|drop|later|archive>: <short note>
@@ -718,8 +924,10 @@ def snoozed(a, now=None):
     return bool(until) and until > (now or dt.datetime.now())
 
 
-def answer_text(state, note):
+def answer_text(state, note, granted=None):
     """How an answer reads to the session: yes / no / the user's own answer, not do / drop."""
+    if granted:
+        return answer_text(state, note) + f" — and from now on, without asking: {granted} (a standing grant)"
     if state == "do" and note and note.startswith("made an @me todo"):
         return "the user made it an @me todo and will do it themselves — don't ask again" + note[len("made an @me todo"):].replace(" — the user will do it", "", 1)
     if state == "do":
@@ -1523,7 +1731,7 @@ def cmd_ask(args):
     elif args.action == "resolve":
         if not args.rest:
             die("usage: hq ask resolve <ask-id> <do|drop|later|archive> [note…]")
-        resolve_ask(args.target, args.rest[0], args.note or " ".join(args.rest[1:]), via=args.via)
+        resolve_ask(args.target, args.rest[0], args.note or " ".join(args.rest[1:]), via=args.via, grant=args.grant)
 
 
 def cmd_asks(args):
@@ -2410,10 +2618,11 @@ def hook_main():
     meta = parse_card(card)
 
     if event == "SessionStart":
-        update_session(sid, lambda e: e.update(announced=True))
-        # Every source — startup, resume, clear, compact — gets the open @claude todos: after a
-        # compaction or /clear the session no longer remembers them.
-        parts = [protocol(meta), open_asks_text(meta, sid=sid, state=state),
+        # Every source — startup, resume, clear, compact — gets the grants in force and the open
+        # @claude todos: after a compaction or /clear the session no longer remembers them.
+        grants = [g["text"] for g in grants_for(meta)]
+        update_session(sid, lambda e: e.update(announced=True, grants=grants))
+        parts = [protocol(meta), grants_text(meta), open_asks_text(meta, sid=sid, state=state),
                  claude_todos_text(meta, payload.get("source") or "")]
         emit(event, "\n\n".join(p for p in parts if p))
 
@@ -2426,6 +2635,12 @@ def hook_main():
             todos = claude_todos_text(meta)
             if todos:
                 lines.append(todos)
+        # Grants: the whole list once (SessionStart, or here for a session bound from the board),
+        # then only what changed — nothing at all on a turn where nothing did.
+        grants = [g["text"] for g in grants_for(meta)]
+        g = grants_change_text(meta, s.get("grants") if s.get("announced", True) else None)
+        if g:
+            lines.append(g)
         if s.get("update_problems"):
             lines.append(update_problems_text(meta, s["update_problems"]))
         # An answer goes to the session that asked, once. Another session on the same task
@@ -2441,11 +2656,11 @@ def hook_main():
         if fresh:
             lines.append("The user answered these asks on the HQ board since your last turn:")
             for a in fresh:
-                lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {answer_text(a['state'], a.get('note'))}")
+                lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {answer_text(a['state'], a.get('note'), a.get('granted'))}")
         told = {a["id"] for a in fresh}
 
         def note_turn(entry):
-            entry.update(turn_start=turn_start, announced=True)
+            entry.update(turn_start=turn_start, announced=True, grants=grants)
             entry.pop("update_problems", None)
             entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
         update_session(sid, note_turn)
@@ -2547,7 +2762,15 @@ def main():
     p.add_argument("rest", nargs="*"); p.add_argument("--via", default="cli"); p.add_argument("--note")
     p.add_argument("--session"); p.add_argument("--undo", action="store_true")
     p.add_argument("--until", help="snooze: hide the ask until this local time (default: tomorrow 00:00; \"\" clears)")
+    p.add_argument("--grant", help="resolve do: also add this standing grant to the task (\"yes, always\")")
     p.set_defaults(fn=cmd_ask)
+    p = sub.add_parser("grant", help="standing grants: hq grant list|add|revoke <task> [wording | n]")
+    p.add_argument("action", choices=["list", "add", "revoke"]); p.add_argument("task")
+    p.add_argument("rest", nargs="*"); p.add_argument("--source", help="add: the ask it came from")
+    p.add_argument("--at", help="add: when it was granted (restoring a revoked one)")
+    p.add_argument("--text", help="revoke: the wording as last seen; used if #n no longer matches")
+    p.add_argument("--via", default="cli"); p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_grant)
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_asks)
