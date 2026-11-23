@@ -587,6 +587,7 @@ function render() {
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
   const activeRegion = active && active.closest ? active.closest("#modal") : null;
+  const taScrolls = textScrolls(document);
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
@@ -659,6 +660,7 @@ function render() {
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
     }
   }
+  restoreTextScrolls(document, taScrolls);
   slashPlace();
 }
 
@@ -2248,6 +2250,7 @@ function drawPeek(toBottom) {
   const active = document.activeElement;
   // (By its key: the secretary's window also has its asks' note boxes.)
   const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd, active.dataset.key] : null;
+  const taScrolls = textScrolls(box);
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
@@ -2308,6 +2311,7 @@ function drawPeek(toBottom) {
     const ta = [...box.querySelectorAll("textarea")].find((x) => x.dataset.key === typing[2]);
     if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); }
   }
+  restoreTextScrolls(box, taScrolls);
   slashPlace();
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
@@ -2903,11 +2907,31 @@ function fitGrow(el) {
   const body = el.closest(".panel")?.querySelector(".peek-body");
   const pinned = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   // Empty: one line, whatever the placeholder would wrap to in a narrow column.
+  // Measuring collapses the box for a moment, which loses its own scroll: past the five lines it
+  // grows to, typing on the last line showed the first ones.
+  const top = el.scrollTop;
   if (!el.value) el.style.height = "";
   else { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
+  el.scrollTop = top;
   if (pinned) body.scrollTop = body.scrollHeight;
 }
 function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").forEach(fitGrow); }
+// Boxes are rebuilt with the rest of the page (every refresh, every new message in Peek), and a
+// new box starts scrolled to its top: a draft longer than the five lines a box grows to showed its
+// first lines while you typed at its end. These keep each box where it was scrolled, by its key
+// and whether it is in the conversation window (a session's box in the Sessions column shares
+// its key with the window's reply box).
+function textScrolls(root) {
+  return [...root.querySelectorAll("textarea[data-key]")].filter((t) => t.scrollTop > 0)
+    .map((t) => [t.dataset.key, Boolean(t.closest("#modal")), t.scrollTop]);
+}
+function restoreTextScrolls(root, saved) {
+  for (const [key, inModal, top] of saved) {
+    root.querySelectorAll(`textarea[data-key="${CSS.escape(key)}"]`).forEach((t) => {
+      if (Boolean(t.closest("#modal")) === inModal) t.scrollTop = top;
+    });
+  }
+}
 
 // The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
 function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
