@@ -23,9 +23,16 @@ final class SecretaryController {
 
     /// What hq last said about the secretary (`hq secretary --json`).
     private var info: [String: Any] = [:]
-    /// An answer arrived while a run was going: run again once it ends.
-    private var wakePending = false
+    /// The secretary's asks answered Yes since its last wake-up: it runs once they have settled.
+    private var answeredYes: Set<String> = []
     private var waking = false
+    /// A run was launched and hasn't recorded its start yet (the runner records it only after
+    /// taking the job's lock and checking the quota): the newest run record at launch time.
+    private var launched: (after: String?, at: Date)?
+
+    /// How long a Yes waits before the secretary acts on it: longer than the board's Undo
+    /// (8 s), and answering several asks one after another makes one run.
+    static let wakeGrace: Duration = .seconds(10)
 
     /// Runs hq with these arguments: (stdout, error). Set by the board's bridge, which knows where
     /// hq is and how to run it.
@@ -41,7 +48,7 @@ final class SecretaryController {
         let runs = store.runs(Self.jobID)
         o["job"] = store.load(Self.jobID) != nil
         o["sessionId"] = state["sessionId"] as? String ?? ""
-        o["running"] = runs.first(where: { $0.status != .skipped })?.status == .running
+        o["running"] = running
         if let r = runs.first {
             // The last run when it went wrong, or was skipped (quota): the chat says why.
             o["last"] = ["status": r.status.rawValue, "summary": r.summary, "at": Jobs.iso(r.ended ?? r.started),
@@ -50,7 +57,7 @@ final class SecretaryController {
         if let ctx = state["contextTokens"] as? Int, let window = state["contextWindow"] as? Int, window > 0 {
             o["contextPct"] = Int((Double(ctx) * 100 / Double(window)).rounded())
         }
-        o["waking"] = wakePending
+        o["waking"] = !answeredYes.isEmpty
         return (o, nil)
     }
 
@@ -62,6 +69,9 @@ final class SecretaryController {
         if let err = r.1 { return (nil, err) }
         if let err = parseInfo(r.0) { return (nil, err) }
         if let err = await ensureJob() { return (nil, err) }
+        // Its session id and binding now, so a run from Scheduled (Run now, or a schedule) before
+        // the first chat is already the secretary's session.
+        if let err = await prepare() { return (nil, err) }
         return await status()
     }
 
@@ -75,27 +85,39 @@ final class SecretaryController {
     }
 
     func stop() -> (Any?, String?) {
-        wakePending = false
+        answeredYes.removeAll()
         return jobs.stop(Self.jobID)
     }
 
     /// An ask on the secretary's card was answered on the board: let it act on the answer now
     /// (the hq hook hands it the answer at the start of the run). A run already going doesn't
-    /// see it — the next one does, started as soon as that run ends.
-    func answered(askID: String, resolution: String) {
-        guard resolution == "do" else { return }
+    /// see it — the next one does, started as soon as that run ends. `toTodo`: the user took it
+    /// as their own @me todo, so there is nothing for the secretary to do.
+    func answered(askID: String, resolution: String, toTodo: Bool) {
+        guard resolution == "do", !toTodo else { return }
         Task { @MainActor in
             if info["task"] == nil { _ = await refreshInfo() }
             guard let task = info["task"] as? String, askID.hasPrefix(task + ".") else { return }
-            wakePending = true
+            answeredYes.insert(askID)
             wakeWhenFree()
         }
     }
 
+    /// The answer was undone (the board's Undo reopens the ask): don't wake up for it.
+    func reopened(askID: String) {
+        answeredYes.remove(askID)
+    }
+
     // MARK: - Internals
 
+    /// A run is going, or was just launched and hasn't recorded its start yet.
     private var running: Bool {
-        store.runs(Self.jobID).first(where: { $0.status != .skipped })?.status == .running
+        let runs = store.runs(Self.jobID)
+        if let l = launched {
+            // Its first record (a start, or a skip) is in, or the runner never got going.
+            if runs.first?.id != l.after || Date().timeIntervalSince(l.at) > 60 { launched = nil } else { return true }
+        }
+        return runs.first(where: { $0.status != .skipped })?.status == .running
     }
 
     private func wakeWhenFree() {
@@ -103,14 +125,16 @@ final class SecretaryController {
         waking = true
         Task { @MainActor in
             defer { waking = false }
-            // A few seconds' grace: answering several asks one after another makes one run.
-            try? await Task.sleep(for: .seconds(3))
-            while running { try? await Task.sleep(for: .seconds(3)) }
-            guard wakePending else { return }
-            wakePending = false
-            guard await prepare() == nil else { return }
-            _ = start(L("I answered your proposals on the board. Carry out the ones I said yes to, then report in one line each.",
-                        "我在看板上回应了你的建议：同意的照做，做完每条用一行汇报。"), trigger: "answer")
+            // Until every Yes is acted on: one arriving while this one starts gets its own run.
+            while !answeredYes.isEmpty {
+                try? await Task.sleep(for: Self.wakeGrace)
+                while running { try? await Task.sleep(for: .seconds(3)) }
+                guard !answeredYes.isEmpty else { return }
+                answeredYes.removeAll()
+                guard await prepare() == nil else { return }
+                _ = start(L("I answered your proposals on the board. Carry out the ones I said yes to, then report in one line each.",
+                            "我在看板上回应了你的建议：同意的照做，做完每条用一行汇报。"), trigger: "answer")
+            }
         }
     }
 
@@ -126,13 +150,14 @@ final class SecretaryController {
         var sid = store.state(Self.jobID)["sessionId"] as? String ?? ""
         if sid.isEmpty {
             sid = UUID().uuidString.lowercased()
-            store.setState(Self.jobID) { $0["sessionId"] = sid; $0.removeValue(forKey: "boundTask") }
+            store.setState(Self.jobID) { $0["sessionId"] = sid; $0[Jobs.preassignedKey] = true }
         }
-        if store.state(Self.jobID)["boundTask"] as? String != "\(task) \(sid)" {
+        // hq's own record, not a cache: an `hq unbind` or a reset of its sessions is mended here.
+        let bound = info["sessions"] as? [String] ?? []
+        if !bound.contains(sid) {
             guard let hq else { return "no hq" }
             let r = await hq(["bind", task, "--session=\(sid)"])
             if let err = r.1 { return err }
-            store.setState(Self.jobID) { $0["boundTask"] = "\(task) \(sid)" }
         }
         return nil
     }
@@ -142,8 +167,9 @@ final class SecretaryController {
         do { try Data(prompt.utf8).write(to: file, options: .atomic) } catch {
             return (nil, error.localizedDescription)
         }
+        let before = store.runs(Self.jobID).first?.id
         let r = jobs.runNow(Self.jobID, extra: ["--trigger", trigger, "--prompt-file", file.path])
-        if r.1 != nil { try? FileManager.default.removeItem(at: file) }
+        if r.1 != nil { try? FileManager.default.removeItem(at: file) } else { launched = (before, Date()) }
         return r
     }
 

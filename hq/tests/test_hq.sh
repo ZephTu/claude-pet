@@ -980,6 +980,10 @@ echo "# mine" > "$T/root/secretary/people.md"; rm "$T/root/secretary/playbooks.m
 [ "$(cat "$T/root/secretary/people.md")" = "# mine" ] && [ -f "$T/root/secretary/playbooks.md" ] && [ "$(ls -d "$T"/root/tasks/"$STID"-* | wc -l | tr -d ' ')" = 1 ] && ok "secretary init again: adds what is missing, keeps the rest, one card" || fail "secretary init idempotent"
 "$HQ" board --json | python3 -c 'import json,sys; s=json.load(sys.stdin)["secretary"]; assert s=="'"$STID"'", s' && ok "board --json names the secretary's card" || fail "board json secretary"
 "$HQ" secretary | grep -q "^task:   $STID" && ok "secretary prints its files" || fail "secretary text"
+grep -q '^category: other' "$T"/root/tasks/"$STID"-*/TASK.md && ok "secretary's card gets the default category" || fail "secretary category"
+"$HQ" bind "$STID" --session=sec-sess >/dev/null
+"$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["sessions"]==["sec-sess"], d' && ok "secretary lists the sessions bound to its card" || fail "secretary sessions"
+"$HQ" unbind --session sec-sess >/dev/null
 
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"

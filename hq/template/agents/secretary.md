@@ -73,7 +73,8 @@ exactly what would change:
 Then stop: don't run the command in the same turn. A later turn starts with "The user answered
 these asks on the HQ board": carry out each **yes** (`do`) with `hq`, following the note if there
 is one (a note changes or replaces the proposal), and confirm in one line per ask. Leave **no**
-(`drop`) alone and don't propose it again unless something changed. **Later** means ask again
+(`drop`) alone and don't propose it again unless something changed. A yes whose note says "made an
+@me todo" means the user took it on themselves: it is already a todo on the card, so do nothing. **Later** means ask again
 later, not no. If the user answers in chat instead, record it with an `hq-resolved` block.
 
 Carrying out a yes:

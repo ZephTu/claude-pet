@@ -88,10 +88,15 @@ enum JobRunner {
             var sid = UUID().uuidString.lowercased()
             var resuming = false
             if job.sessionMode == .resume, let s = state["sessionId"] as? String, Self.isSessionID(s) {
-                // One not on disk yet was handed out before its first run (the secretary's, so it
-                // can be bound to its task first): start it under that id.
-                sid = s
-                resuming = transcript(of: s) != nil
+                if transcript(of: s) != nil {
+                    sid = s
+                    resuming = true
+                } else if state[Jobs.preassignedKey] as? Bool == true {
+                    // Handed out before its first run (the secretary's, so it is bound to its task
+                    // from its first prompt): start it under that id. Any other id not on disk is
+                    // left behind, as before: Claude refuses a --session-id that already exists.
+                    sid = s
+                }
             }
             start["sessionId"] = sid
             store.append(id, start)
@@ -137,6 +142,7 @@ enum JobRunner {
                     state["sessionId"] = result.sessionId ?? sid
                     if let c = result.contextTokens { state["contextTokens"] = c }
                     if let w = result.contextWindow { state["contextWindow"] = w }
+                    state.removeValue(forKey: Jobs.preassignedKey)    // it is on disk now
                     store.setState(id) { $0 = state }
                 }
             }

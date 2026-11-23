@@ -36,6 +36,9 @@ public enum Jobs {
     /// Set in the environment of everything a job runs. The hook sees it and stays out of the
     /// way: a scheduled run is not a session waiting on you.
     public static let environmentKey = "CLAUDE_PET_JOB"
+    /// In a job's state: its `sessionId` was handed out before the session's first run (the
+    /// secretary's), so the runner starts a session under it rather than a new one.
+    public static let preassignedKey = "sessionPreassigned"
 
     public static func iso(_ date: Date) -> String {
         let f = ISO8601DateFormatter()

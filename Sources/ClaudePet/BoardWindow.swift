@@ -261,7 +261,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let r = await hq(["ask", "resolve", str("id"), str("resolution"),
                               "--via", "board", "--note=\(str("note"))"] + grant)
             // A yes to one of the secretary's proposals: it carries it out now, not at its next chat.
-            if r.1 == nil { secretary.answered(askID: str("id"), resolution: str("resolution")) }
+            // Not "To todo": the user took that one on themselves.
+            if r.1 == nil {
+                secretary.answered(askID: str("id"), resolution: str("resolution"), toTodo: body["toTodo"] as? Bool == true)
+            }
             return r
         case "grant":
             // list / add / revoke the standing grants of a task, or of a project (`project`, kept in its
@@ -280,7 +283,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return await hq(["grant", "revoke"] + who + (index.isEmpty ? [] : [index]) + whose + ["--via=board", "--text=\(str("text"))"])
             default: return await hq(["grant", "list"] + who + whose + ["--json"])
             }
-        case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
+        case "reopen":
+            let r = await hq(["ask", "reopen", str("id"), "--via=board"])
+            if r.1 == nil { secretary.reopened(askID: str("id")) }    // an Undo: the secretary leaves it
+            return r
         case "snooze":
             // "Later": the ask stays open, out of sight until tomorrow (or `until`; "" brings it back).
             let until = body["until"] as? String

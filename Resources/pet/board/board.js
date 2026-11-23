@@ -836,7 +836,7 @@ async function answerAsk(a, res, note) {
   const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
   await api("addtodo", { task, text });
   try {
-    await api("resolve", { id: a.id, resolution: "do", note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
+    await api("resolve", { id: a.id, resolution: "do", toTodo: true, note: `made an @me todo — the user will do it${note ? `: ${note}` : ""}` });
   } catch (e) {
     try { await dropMadeTodo({ task, text }); } catch (e2) { /* best effort */ }
     throw e;

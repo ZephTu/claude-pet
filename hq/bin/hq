@@ -1675,7 +1675,9 @@ def secretary_info():
     memory = os.path.join(root, "secretary")
     files = {f: os.path.isfile(os.path.join(memory, f)) for f in SECRETARY_FILES}
     tid = secretary_task_id()
-    return {"root": root, "task": tid, "card": find_card(tid) if tid else None,
+    # The sessions bound to its card: the board checks its session is among them before a run.
+    sessions = sorted(s for s, e in load_state().items() if tid and isinstance(e, dict) and e.get("task") == tid)
+    return {"root": root, "task": tid, "card": find_card(tid) if tid else None, "sessions": sessions,
             "agent": agent, "agentExists": os.path.isfile(agent), "memory": memory, "files": files,
             "ready": bool(tid) and os.path.isfile(agent) and all(files.values())}
 
@@ -1702,9 +1704,7 @@ def secretary_init(lang):
         made.append(os.path.join(info["memory"], f))
     if not info["task"]:
         # Its asks are what Needs you shows; the card itself stays off Focus.
-        cats = load_categories()
-        tid, card = new_card(SECRETARY_TITLE[lang], slug="secretary", category="other" if "other" in cats else "",
-                             lead="secretary", focus=False)
+        tid, card = new_card(SECRETARY_TITLE[lang], slug="secretary", lead="secretary", focus=False)
         text = open(card, encoding="utf-8").read()
         text = re.sub(r"(?m)^<what done looks like>$", lambda _: SECRETARY_GOAL[lang], text, count=1)
         atomic_write(card, text)
