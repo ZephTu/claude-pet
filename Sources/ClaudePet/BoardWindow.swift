@@ -354,6 +354,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if let to = body["to"] as? String { args.append("--to=\(to)") }
             return await hq(args)
         case "ref": return await hq(["ref", str("action"), str("task"), "--", str("ref")])
+        case "workdir": return await hq(["workdir", str("action"), str("task"), "--", str("path")])
         case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])
@@ -464,6 +465,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
             panel.allowsMultipleSelection = false
+            if !str("message").isEmpty { panel.message = str("message") }
             if !str("path").isEmpty { panel.directoryURL = URL(fileURLWithPath: (str("path") as NSString).expandingTildeInPath) }
             guard panel.runModal() == .OK, let url = panel.url else { return (["path": ""], nil) }
             let home = NSHomeDirectory()

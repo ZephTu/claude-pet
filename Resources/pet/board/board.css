@@ -939,6 +939,8 @@ main.single { grid-template-columns: 1fr; }
 .props dt { color: var(--faint); }
 .props dd { margin: 0; min-width: 0; }
 .props .path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.props .path:has(.x) { display: flex; gap: 6px; align-items: baseline; }
+.props .path .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .pill { display: inline-flex; align-items: center; gap: 6px; }
 .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .pill[data-st="active"]::before { background: var(--teal); }

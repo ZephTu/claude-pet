@@ -470,6 +470,18 @@ function launchDir(t) {
   const pr = projects().find((p) => p.name === t.project);
   return pr && pr.paths[0] ? pr.paths[0] : "";
 }
+// A task with no folder yet (made on the board or from a quick note, no session bound): ask for
+// one, keep it on the card, and start there. "" when the picker is cancelled.
+async function ensureLaunchDir(t) {
+  const have = launchDir(t);
+  if (have) return have;
+  const r = await apiObj("pick-folder", { path: "", message: T(`${t.id} has no folder yet — pick the one its sessions should start in`, `${t.id} 还没有目录——选一个 session 要开在里面的目录`) });
+  if (!r.path) return "";
+  // Start there even if it can't be kept (an older hq without `workdir`): launch expands the ~.
+  try { await api("workdir", { action: "add", task: t.id, path: r.path }); } catch (e) { toast(String(e.message || e), true); return r.path; }
+  await refresh();
+  return launchDir(taskById(t.id) || t) || r.path;
+}
 // ---- "▶ Do it" on an @claude todo: hand it to the task's live session, or start one for it.
 const DO_PROMPT = (t, text) => `This session works on HQ task ${t.id}: ${t.title}. Read the task card, then do this todo from it: "${text}". Tick it on the card when it's done, or say what is blocking it.`;
 const HANDED_MS = 30 * 60 * 1000;   // how long a handed-over todo says so
@@ -513,8 +525,8 @@ async function handOff(t, key, message, prompt, started) {
     } else if (doBlocked(t)) {
       throw new Error(`${doBlocked(t).title || doBlocked(t).project}: ${ON_PROMPT()}`);
     } else {
-      const dir = launchDir(t);
-      if (!dir) throw new Error(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或给项目设一个目录"));
+      const dir = await ensureLaunchDir(t);
+      if (!dir) return toast(T("No folder picked — the session needs one to start in", "没有选目录——session 得有个目录才能开"));
       const place = launchPlace();
       const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt, skip: skipPerms(), focus: !stayOnBoard() });
       stayWith(r && r.session, `${t.id} ${t.title}`);
@@ -1776,8 +1788,9 @@ function renderTaskBody(t) {
           <dt>${T("Status", "状态")}</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
           <dt>${T("Project", "项目")}</dt><dd>${esc(t.project || "—")}</dd>
           <dt>${T("Category", "分类")}</dt><dd>${esc(t.category || "—")}</dd>
-          <dt>${T("Folders", "目录")}</dt><dd>${dirs.length ? dirs.map((x) => `<span class="path" title="${esc(x)}">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>`).join("")
-            : `<span class="faint" title="${T("Added automatically when a session is bound", "绑定 session 时会自动加上")}">${T("none yet", "还没有")}</span>`}</dd>
+          <dt>${T("Folders", "目录")}</dt><dd>${dirs.map((x) => `<span class="path" title="${esc(x)}"><span class="nm">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>${resEdit ? ` <button class="lnk x" data-action="workdir-remove" data-task="${esc(t.id)}" data-path="${esc(x)}" title="${T("Remove this folder from the task", "从任务里移除这个目录")}">✕</button>` : ""}</span>`).join("")}
+            ${!dirs.length ? `<span class="faint" title="${T("Added by itself when a session is bound; New session uses the project's folder, or asks for one", "绑定 session 时会自动加上；点新 session 时用项目的目录，没有就让你选")}">${T("none yet", "还没有")}</span>` : ""}
+            ${!dirs.length || resEdit ? `<button class="lnk" data-action="workdir-add" data-task="${esc(t.id)}">${T("+ Add", "+ 添加")}</button>` : ""}</dd>
           <dt>${T("Links", "链接")}</dt><dd>
             ${refGroups(t, refs, resEdit)}
             <button class="lnk ${resEdit ? "on" : ""}" data-action="toggle-res" data-task="${esc(t.id)}">${resEdit ? T("Done", "完成") : refs.length ? T("Edit", "编辑") : T("+ Add", "+ 添加")}</button>
@@ -3651,6 +3664,23 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts[key];
       return act("ref", { action: "add", task: d.task, ref: text }, T("Added", "已添加"));
     }
+    case "workdir-add": {
+      try {
+        const t = taskById(d.task);
+        const r = await apiObj("pick-folder", { path: (t && list(t.workdirs)[0]) || "", message: T(`A folder for ${d.task}`, `给 ${d.task} 选一个目录`) });
+        if (r.path) await act("workdir", { action: "add", task: d.task, path: r.path }, T("Folder added", "已添加目录"));
+      } catch (e) { toast(String(e.message || e), true); }
+      return;
+    }
+    case "workdir-remove": {
+      const path = d.path;
+      try {
+        // Undo puts it back where it was (New session starts in the first), even a folder since gone.
+        const out = await api("workdir", { action: "remove", task: d.task, path });
+        toast(T("Folder removed", "已移除目录"), false, () => act("workdir", { action: "restore", task: d.task, path: out }, T("Restored", "已恢复")));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
     case "ref-remove": {
       const ref = d.ref;
       try {
@@ -3788,8 +3818,10 @@ document.addEventListener("click", async (ev) => {
     case "launch": {
       ui.launchMenu = null;
       const t = taskById(d.task);
-      const dir = t && launchDir(t);
-      if (!dir) return toast(T("This task has no directory yet — bind a session or give the project a directory first", "这个任务还没有目录——先绑定一个 session，或者给项目设个目录"), true);
+      if (!t) return;
+      let dir = "";
+      try { dir = await ensureLaunchDir(t); } catch (e) { return toast(String(e.message || e), true); }
+      if (!dir) return toast(T("No folder picked — the session needs one to start in", "没有选目录——session 得有个目录才能开"));
       const place = launchPlace();
       try {
         const r = await apiObj("launch", { task: t.id, title: t.title, dir, where: place, prompt: LAUNCH_PROMPT(t), skip: skipPerms(), focus: !stayOnBoard() });

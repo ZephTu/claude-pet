@@ -99,7 +99,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
@@ -518,7 +518,9 @@ A line, a link or a screenshot jotted without stopping to file it. `hq inbox add
 [--image PATH …] [--sort]` stores it as `N-001`, `N-002` … in `<root>/inbox.json`; `hq inbox sort
 N-001` asks a cheap model where it belongs and files it there:
 
-- `task`: a new card (title, goal, and project / category / workdir when the model is sure);
+- `task`: a new card (title, goal, and project / category when the model is sure). Its workdir is
+  a path the note names, else the closest task's or project's folder (the sorter sees them in
+  full), else the folder the project's tasks use most — so New session can start on it;
 - `todo`: a todo on an open task, `@me`, `@claude` or a colleague;
 - `note`: a log line on an open task (or one closed in the last 14 days);
 - `me`: an `@me` todo on the secretary's card (only once the secretary is set up).
