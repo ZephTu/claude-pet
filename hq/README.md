@@ -331,10 +331,14 @@ still flagged `card over budget` by `hq status`.
 `hq continue T-012 [--title TITLE] [--json]` carries an open task on in a fresh card: the title's
 date (`2026-11-20`, `2026/11/20`, `Nov 20[, 2026]`, `2026 Nov 20`, `[2026年]11月20日`) becomes today's,
 else ` (cont. MM-DD)` is appended (`（续 MM-DD）` for a title with CJK). Goal, Status, the open todos
-as written, Grants, refs, next, project, category, lead and workdirs come along; both logs point at
+as written (an open sub-todo of a closed one comes unindented; checklists in Goal/Status are not
+copied twice), Grants, refs, next, a non-active status, project, category, lead and workdirs come along; both logs point at
 the other; the old card becomes `done` with `next: continued in T-new` and its Focus place goes to
-the new card. Sessions bound to the old card are rebound (their next prompt says so); open asks stay
-on the old card. `--json` prints `{"from", "to", "path", "title", "todos", "sessions", "asks"}`. The
+the new card. Sessions bound to the old card are rebound (their next prompt says so). Open asks
+move to the new card under new ids: the new card's `asks.jsonl` gets an `open` event with
+`moved_from`, the old one a `{"type": "move", "id", "to"}` event, and the old ask reads as state
+`moved`; `hq ask resolve` on an old id resolves the new one. `--json` prints `{"from", "to", "path",
+"title", "todos", "sessions", "asks"}`, `asks` being `[{"from": "T-012.3", "to": "T-031.1"}, …]`. The
 board's **Continue today** button runs it.
 
 ## Projects
@@ -606,7 +610,7 @@ shows the list.
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
-    ├── asks.jsonl            append-only events: {"type":"open"|"resolve", …}
+    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"move", …}
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point

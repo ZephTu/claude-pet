@@ -3707,7 +3707,7 @@ document.addEventListener("click", async (ev) => {
       try {
         const out = JSON.parse(await api("continue", { task: d.task }));
         ui.expanded.add(out.to);
-        toast(T(`Continued in ${out.to}`, `已续到 ${out.to}`) + (out.asks ? T(` — ${out.asks} open ask(s) stay on ${out.from}`, `——${out.asks} 条未回答的 ask 留在 ${out.from}`) : ""));
+        toast(T(`Continued in ${out.to}`, `已续到 ${out.to}`) + (out.asks && out.asks.length ? T(` — ${out.asks.length} open ask(s) moved with it`, `——${out.asks.length} 条未回应的问题一起搬过去了`) : ""));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }

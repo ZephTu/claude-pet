@@ -1186,6 +1186,9 @@ def read_asks(task_dir):
         elif e.get("type") == "reopen" and e.get("id") in asks:
             asks[e["id"]].update(state="open", note="", via=None, resolved_at=None, delivered=None, snoozed_until=None,
                                  granted=None)
+        elif e.get("type") == "move" and e.get("id") in asks:
+            # `hq continue` took it to the new card (`to` is its id there); no longer open here.
+            asks[e["id"]].update(state="moved", moved_to=e.get("to"))
         elif e.get("type") == "snooze" and e.get("id") in asks:
             # "Later" on the board: the ask stays open, out of sight until `until` (local ISO).
             asks[e["id"]]["snoozed_until"] = e.get("until") or None
@@ -1245,7 +1248,11 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
     `settle`: let the answer take the task out of waiting-on-me (settle_status)."""
     if resolution not in RESOLUTIONS:
         die(f"resolution must be one of {', '.join(RESOLUTIONS)}")
-    card, _ = find_ask(aid)
+    card, a = find_ask(aid)
+    if a.get("state") == "moved" and a.get("moved_to"):
+        # Asked on a card since continued (`hq continue`): the answer goes to where the ask is now.
+        aid = a["moved_to"]
+        card, _ = find_ask(aid)
     event = {"type": "resolve", "id": aid, "resolution": resolution, "note": note, "via": via}
     if grant and grant.strip():
         if resolution != "do":
@@ -1969,7 +1976,7 @@ def task_activity(meta, start, end, reported_closed=()):
                  "at": iso(naive(a.get("resolved_at")))}
                 for a in asks if a["state"] != "open" and inw(naive(a.get("resolved_at")))]
     asked = [{"id": a["id"], "text": a.get("text", ""), "at": iso(naive(a.get("ts")))}
-             for a in asks if inw(naive(a.get("ts")))]
+             for a in asks if inw(naive(a.get("ts"))) and a["state"] != "moved"]   # counted where it went
     norm = lambda t: " ".join(str(t).split())
     settled = {norm(x["text"]) for x in done + dropped}
     added = [x for x in added if norm(x["text"]) not in settled]
@@ -2457,8 +2464,9 @@ def _add_refs(card, refs):
     with card_lock(card):
         meta = parse_card(card)
         have = meta.get("refs") if isinstance(meta.get("refs"), list) else []
-        # Only links the card doesn't have: one it has keeps its own title, and stays on a move.
-        keys = {ref_key(r) for r in have}
+        # Only links the card doesn't have (nor its HISTORY.md): one it has keeps its own title, and
+        # stays on a move.
+        keys = {ref_key(r) for r in have} | {ref_key(x[2:]) for x in read_history(card)["Links"]}
         new = [r for r in merge_refs([], refs) if ref_key(r) not in keys]
         if not new:
             return []
@@ -2516,7 +2524,8 @@ def inbox_undo(u):
     if u.get("created"):
         d = os.path.dirname(card)
         same = hashlib.sha256(open(card, "rb").read()).hexdigest() == u["created"]
-        if same and os.listdir(d) == ["TASK.md"]:
+        # HISTORY.md may be there too: a process link in the note went there (the card budget).
+        if same and set(os.listdir(d)) <= {"TASK.md", HISTORY_FILE}:
             shutil.rmtree(d)
             save_focus([i for i in load_focus() if i != u.get("task")])
             return ""
@@ -2536,6 +2545,7 @@ def inbox_undo(u):
             meta = parse_card(card)
             refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
             set_fields(card, {"refs": [r for r in refs if r not in u["refs"]]})
+            history_drop_links(card, {ref_key(r) for r in u["refs"]})    # the process links it added
         else:
             set_fields(card, {})
     if kept:
@@ -3282,7 +3292,7 @@ def process_ref(ref, patterns=None):
     """A link to one step of the work rather than to the thing worked on: a Jenkins build, a GitHub
     Actions run, a comment on a PR or a Jira issue, or a URL matching hq.json "process_links". A
     ref with the key mark, without exactly one URL, or to anything else (a PR, an issue, a page) is
-    a key link. board.js has the same test (processRef); keep them in step."""
+    a key link. Only hq decides this: the board shows the links where hq put them (card or HISTORY.md)."""
     if key_marked(ref):
         return False
     urls = REF_URL_RE.findall(str(ref))
@@ -3315,7 +3325,8 @@ def history_path(card):
 
 
 def read_history(card):
-    """HISTORY.md as {section: [item, …]}: an item is a `- ` line with any lines under it."""
+    """HISTORY.md as {section: [item, …]}: an item is a `- ` line with any lines under it. Under
+    Todos every todo line is an item of its own, indented or not: a closed sub-todo moves alone."""
     out = {s: [] for s in HISTORY_SECTIONS}
     try:
         text = open(history_path(card), encoding="utf-8").read()
@@ -3327,7 +3338,7 @@ def read_history(card):
         if h:
             sec = h.group(1) if h.group(1) in out else None
         elif sec and line.strip() and not line.lstrip().startswith("<!--"):
-            if line.startswith("- ") or not out[sec]:
+            if line.startswith("- ") or not out[sec] or (sec == "Todos" and TODO_RE.match(line)):
                 out[sec].append(line)
             else:
                 out[sec][-1] += "\n" + line
@@ -3412,18 +3423,19 @@ def enforce_budget(card):
         to_todos, to_log = [], []
         # When each todo was last closed, from the tick records (HISTORY.md, or the card's log on a
         # card from before the budget). A todo closed with no record counts as closed long ago.
+        # Ticks carry whole seconds, so ties go by the order the ticks were written in.
         closed_at = {}
-        for item in hist["Log"] + lines:
+        for seq, item in enumerate(hist["Log"] + lines):
             x = LOG_ENTRY_RE.match(item.split("\n", 1)[0])
             tick = TICK_RE.match(x.group(2)) if x else None
             if tick and tick.group(1) != "open":
                 k = todo_plain(tick.group(3)).casefold()
-                closed_at[k] = max(closed_at.get(k, ""), x.group(1).replace("T", " "))
+                closed_at[k] = max(closed_at.get(k, ("", -1)), (x.group(1).replace("T", " "), seq))
         closed = []
         for i, line in enumerate(lines):
             t = TODO_RE.match(line)
             if t and t.group(2) != " " and t.group(3).strip() not in ("...", "…", ""):
-                closed.append((closed_at.get(todo_plain(t.group(3)).casefold(), ""), i))
+                closed.append((closed_at.get(todo_plain(t.group(3)).casefold(), ("", -1)), i))
         closed.sort()
         for _, i in closed[:max(0, len(closed) - CARD_KEEP_CLOSED)]:
             gone.add(i)
@@ -3461,14 +3473,17 @@ def enforce_budget(card):
 # `hq continue T-072`: a long-running task picks up on a fresh card — same project, category, lead,
 # folders, key links and grants; its goal, status, open todos (with their original times) and next
 # step — and the old card is closed, its log pointing at the new one. Sessions bound to the old card
-# move to the new one and hear about it on their next prompt. Open asks stay on the old card.
+# move to the new one and hear about it on their next prompt, and so do the open asks (new ids, so
+# an answer reaches the sessions now bound to the new card).
 SECTION_WORDS = {
     "goal": ("goal", "目标"),
     "status": ("status", "current state", "当前状态", "状态"),
     "todo": ("todo", "待办"),
 }
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-MON_RE = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+# A month name or its abbreviation as a whole word — "Decide 2 options" or "Junit 5" is not a date.
+MON_RE = (r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+          r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\.|\b)")
 
 
 def section_span(lines, kind):
@@ -3514,6 +3529,38 @@ def continued_title(title, day=None):
     return f"{title} (cont. {d.month:02d}-{d.day:02d})"
 
 
+def open_todo_lines(src):
+    """The open todos of a card's lines, as written (owner, text, creation time), for a continued
+    card. Checklists in Goal / Status / Grants (copied with their section) and in ``` fences are not
+    todos to carry. An open sub-todo comes with its parent if that comes too, else unindented."""
+    skip = set()
+    for kind in ("goal", "status"):
+        sp = section_span(src, kind)
+        if sp:
+            skip.update(range(sp[0], sp[1]))
+    g = grants_section(src)
+    if g:
+        skip.update(range(g[0], g[1]))
+    out, stack, fence = [], [], False      # stack: (indent, carried, indent written)
+    for i, l in enumerate(src):
+        if re.match(r"^\s*(```|~~~)", l):
+            fence = not fence
+            continue
+        t = TODO_RE.match(l)
+        if fence or i in skip or not t:
+            continue
+        n = len(t.group(1).expandtabs(4))
+        while stack and stack[-1][0] >= n:
+            stack.pop()
+        parent = stack[-1] if stack else None
+        carry = t.group(2) == " " and t.group(3).strip() not in ("...", "…", "")
+        at = parent[2] + (n - parent[0]) if carry and parent and parent[1] else 0
+        if carry:
+            out.append(" " * at + l.lstrip())
+        stack.append((n, carry, at))
+    return out
+
+
 def continue_task(card, title=None):
     """Continues the task on a new card; returns {"from", "to", "path", "title", "todos", "sessions", "asks"}."""
     old = parse_card(card)
@@ -3538,8 +3585,7 @@ def continue_task(card, title=None):
                 while content and not content[-1].strip():
                     content.pop()
                 lines[d[0] + 1:d[1]] = content + [""]
-        # The open todos, as written (owner, text, creation time).
-        todos = [l for l in src if (lambda t: t and t.group(2) == " " and t.group(3).strip() not in ("...", "…", ""))(TODO_RE.match(l))]
+        todos = open_todo_lines(src)
         if todos:
             d = section_span(lines, "todo")
             if d:
@@ -3567,10 +3613,17 @@ def continue_task(card, title=None):
             fields["refs"] = list(refs)
         if old.get("next"):
             fields["next"] = old["next"]
+        if old.get("status") != "active":
+            fields["status"] = old["status"]         # blocked / waiting-on-me carries on too
+        if str(old.get("waiting_on_me") or "").strip():
+            fields["waiting_on_me"] = old["waiting_on_me"]
         if fields:
             set_fields(path, fields)
     append_log(path, f"continued from {old['id']} ({old.get('title') or ''})")
-    # The old card: closed, pointing at the new one. Its asks stay with it (answered on the board).
+    # Open asks move to the new card, so an answer reaches the sessions bound there and the ask
+    # goes on with the work. Each gets the new card's next id; the old one is marked moved.
+    asks = move_open_asks(old, path)
+    # The old card: closed, pointing at the new one.
     append_log(card, f"continued in {tid} ({title})", touch=False)
     set_fields(card, {"status": "done", "next": f"continued in {tid}"})
     # Focus: the new card takes the old one's place.
@@ -3594,9 +3647,30 @@ def continue_task(card, title=None):
     if moved:
         sessions = parse_card(path).get("sessions") or []
         set_fields(path, {"sessions": list(sessions) + [s[:8] for s in moved if s[:8] not in sessions]})
-    asks = [a for a in read_asks(old["dir"]) if a.get("state") == "open"]
     return {"from": old["id"], "to": tid, "path": path, "title": title, "todos": len(todos),
-            "sessions": moved, "asks": len(asks)}
+            "sessions": moved, "asks": asks}
+
+
+def move_open_asks(old, path):
+    """Moves the old card's open asks (snoozed ones too) to the card at `path`; returns
+    [{"from": old id, "to": new id}, …]."""
+    new = parse_card(path)
+    out = []
+    for a in read_asks(old["dir"]):
+        if a.get("state") != "open":
+            continue
+        have = read_asks(new["dir"])
+        nid = f"{new['id']}.{max([int(x['id'].rsplit('.', 1)[1]) for x in have] or [0]) + 1}"
+        ev = {"type": "open", "id": nid, "task": new["id"], "moved_from": a["id"]}
+        for k in ("text", "session", "grant", "context", "ts"):
+            if a.get(k) is not None:
+                ev[k] = a[k]
+        append_event(new["dir"], ev)
+        if a.get("snoozed_until"):
+            append_event(new["dir"], {"type": "snooze", "id": nid, "until": a["snoozed_until"], "via": "continue"})
+        append_event(old["dir"], {"type": "move", "id": a["id"], "to": nid})
+        out.append({"from": a["id"], "to": nid})
+    return out
 
 
 def cmd_continue(args):
@@ -3610,7 +3684,7 @@ def cmd_continue(args):
     if r["sessions"]:
         print(f"{len(r['sessions'])} session(s) moved to {r['to']}: {', '.join(s[:8] for s in r['sessions'])}")
     if r["asks"]:
-        print(f"{r['asks']} open ask(s) stay on {r['from']}.")
+        print(f"{len(r['asks'])} open ask(s) moved: " + ", ".join(f"{a['from']} → {a['to']}" for a in r["asks"]))
 
 
 def cmd_addtodo(args):
@@ -3677,18 +3751,22 @@ def todo_owner(raw):
     return o.group(1).casefold() if o else None
 
 
-def match_todo(todos, kind, want):
+def match_todo(todos, kind, want, settled=()):
     """The todo a `done:` / `drop:` line means: (todo, None) to change, (None, None) when it is
     already settled (a repeat, or ticked on the board meanwhile), (None, problem) otherwise.
 
     Exact text first, over every todo whatever its state — so a repeated `done: rerun the suite`
     can't fall through to a substring match and tick `rerun the suite on CI` instead. A
-    substring is tried only when no todo has that exact text, and only among open ones."""
+    substring is tried only when no todo has that exact text, and only among open ones.
+    `settled` holds the closed todos in HISTORY.md as (owner, text): a repeat of one that has
+    moved off the card is settled too, not a substring hunt."""
     owner = todo_owner(want)
     key = " ".join(todo_plain(want).split()).casefold()
     mine = [x for x in todos if owner is None or todo_owner(x[2].group(3)) == owner]
     open_ = [x for x in mine if x[2].group(2) == " "]
     exact = [x for x in mine if x[3].casefold() == key]
+    if not exact and key and any(t == key and (owner is None or o == owner) for o, t in settled):
+        return None, None
     if exact:
         live = [x for x in exact if x[2].group(2) == " "]
         if not live:
@@ -3743,6 +3821,9 @@ def _apply_update(card, entries, via):
     text = open(card, encoding="utf-8").read()
     lines = text.split("\n")
     todos = card_todos(lines)
+    hist = read_history(card)
+    settled = [(todo_owner(t.group(3)), todo_plain(t.group(3)).casefold())
+               for t in (TODO_RE.match(i.split("\n", 1)[0]) for i in hist["Todos"]) if t]
     picked = set()
     for k, v in entries:
         if k not in UPDATE_KEYS:
@@ -3769,7 +3850,7 @@ def _apply_update(card, entries, via):
         elif k == "todo":
             adds.append(v)
         elif k in ("done", "drop"):
-            pick, problem = match_todo(todos, k, v)
+            pick, problem = match_todo(todos, k, v, settled)
             if problem:
                 problems.append(problem)
             elif pick and pick[0] not in picked:
@@ -3834,7 +3915,8 @@ def _apply_update(card, entries, via):
         known = {os.path.normpath(h) for h in have}
         fields["workdirs"] = have + [d for d in dict.fromkeys(dirs) if d not in known]
     set_fields(card, fields)            # also stamps `updated`, so a `touch` block is a touch
-    logged = open(card, encoding="utf-8").read()
+    # A log line already there — on the card, or moved to HISTORY.md past the budget — isn't added again.
+    logged = open(card, encoding="utf-8").read() + "\n" + "\n".join(hist["Log"])
     for msg in dict.fromkeys(logs):
         if not re.search(r"^- \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: " + re.escape(msg) + r"\s*$", logged, re.M):
             append_log(card, msg)
@@ -5520,7 +5602,10 @@ def _hook_main():
             # Once, in place of the SessionStart this session had before it was bound.
             moved = s.get("continued_from")
             lines.append((f"The task this session was on, {moved}, was continued in {meta['id']}: this session is now "
-                          f"bound to {meta['id']}. Its card carries {moved}'s open todos, state and key links."
+                          f"bound to {meta['id']}. Its card carries {moved}'s open todos, state and key links"
+                          + (lambda m: f"; its open asks moved too ({m})." if m else ".")(", ".join(
+                              f"{a['moved_from']} is now {a['id']}" for a in read_asks(meta["dir"])
+                              if a.get("moved_from") and a["state"] == "open"))
                           if moved else "The user bound this session to an HQ task from the board.") + "\n" + protocol(meta))
             if brief:
                 lines.append(brief)

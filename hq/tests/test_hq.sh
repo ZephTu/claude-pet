@@ -1499,6 +1499,39 @@ import json,sys
 t=[x for x in json.load(sys.stdin)['tasks'] if x['id']=='$BT'][0]
 h=t['history']; assert any('note 1' in l for l in h['log']) and any(x['text']=='step 1' for x in h['todos']) and any('runs/all/9' in x for x in h['links']), h
 assert t['historyInfo']['log'] >= 12, t['historyInfo']" && ok "board json carries the history" || fail "board history"
+# A repeated done: for a todo already in HISTORY.md is a no-op (no substring match on another
+# open todo); the block's other lines still apply. A repeated log: already in HISTORY.md is not re-added.
+"$HQ" addtodo "$BT" "@claude step 1 again" >/dev/null
+stop sess-bud "$(printf 'ok\n```hq-update\ndone: step 1\nlog: note 1\nlog: after the repeat\n```')" >/dev/null
+grep -q '^- \[ \] @claude step 1 again' "$BC" && grep -q ': after the repeat$' "$BC" && ! grep -q ': note 1$' "$BC" \
+  && ok "hq-update: done:/log: already in HISTORY.md are not applied again" || fail "settled repeat: $(grep 'step 1\|note 1\|repeat' "$BC")"
+# Closed in the same second: the order they were ticked in decides which stay on the card.
+OT="$("$HQ" new "Tie order" --no-focus | head -1)"; OC="$(ls "$T"/root/tasks/$OT-*/TASK.md)"
+for i in 1 2 3 4 5 6 7; do "$HQ" addtodo "$OT" "@claude job $i" >/dev/null; done
+for i in 7 6 5 4 3 2 1; do "$HQ" todo "$OT" "$i" done --text "job $i" >/dev/null; done
+! grep -q 'job [67] ' "$OC" && [ "$(grep -c '^- \[x\] @claude job [1-5] ' "$OC")" = 5 ] && ok "budget: same-second ticks keep the latest closed on the card" || fail "tie order: $(grep '^- \[' "$OC")"
+# A closed todo with nested lines in HISTORY.md: each todo line is its own item.
+python3 - "$(dirname "$OC")/HISTORY.md" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = s.replace("## Todos\n", "## Todos\n- [x] @me parent n\n  - [x] @claude child n\n", 1); open(p, "w", encoding="utf-8").write(s)
+PY
+"$HQ" board --json | python3 -c "
+import json,sys
+t=[x for x in json.load(sys.stdin)['tasks'] if x['id']=='$OT'][0]; xs=[d['text'] for d in t['history']['todos']]
+assert 'parent n' in xs and 'child n' in xs, xs" && ok "board json: a nested closed todo in HISTORY.md shows as its own item" || fail "nested history todo"
+# Taking a quick note back removes the process link it sent to HISTORY.md, and a card it made
+# (which has only TASK.md and HISTORY.md) is removed.
+NJ="$(hqi inbox add --json -- "build https://jenkins.example.com/job/y/5/ failed" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+answer '{"kind":"todo","task":"'"$BT"'","owner":"claude","text":"look at build 5","refs":["https://jenkins.example.com/job/y/5/"],"confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" "$NJ" >/dev/null
+grep -q 'job/y/5/' "$BH" && ! brefs | grep -q 'job/y/5' && hqi inbox move -- "$NJ" unsorted >/dev/null && ! grep -q 'job/y/5/' "$BH" \
+  && ok "taking a note back removes its process link from HISTORY.md" || fail "inbox undo history: $(grep 'job/y' "$BH")"
+NJ="$(hqi inbox add --json -- "new job https://jenkins.example.com/job/z/1/" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+answer '{"kind":"task","title":"Jenkins card","text":"t","refs":["https://jenkins.example.com/job/z/1/"],"confidence":0.9,"reason":"r","alternatives":[]}'
+JT="$(hqi inbox sort --claude "$FAKE" --json "$NJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+[ -f "$(ls -d "$T"/root/tasks/$JT-*)/HISTORY.md" ] && hqi inbox move -- "$NJ" unsorted >/dev/null && ! ls -d "$T"/root/tasks/$JT-* >/dev/null 2>&1 \
+  && ok "taking back an untouched new card removes it, HISTORY.md and all" || fail "inbox undo card with history: $(ls "$T"/root/tasks/$JT-* 2>&1)"
 "$HQ" unbind --session sess-bud >/dev/null
 python3 - "$SRC/bin/hq" <<'PY' && ok "continued_title re-dates a dated title, or marks it continued"
 import datetime as dt, importlib.util, importlib.machinery, sys
@@ -1512,6 +1545,7 @@ assert f("卡片预算", d) == "卡片预算（续 11-23）" and f("Card budget"
 assert f("4.2.7 release", d) == "4.2.7 release (cont. 11-23)"
 assert f("run Nov 20, 2025 x", d) == "run Nov 23, 2026 x" and f("2025年11月20日 回归", d) == "2026年11月23日 回归"
 assert f("Nov 20, then", d) == "Nov 23, then"
+assert f("Decide 2 options", d) == "Decide 2 options (cont. 11-23)" and f("Junit 5 upgrade", d) == "Junit 5 upgrade (cont. 11-23)"
 PY
 # hq continue: the work goes on on a new card; the old one is closed and points at it.
 CT="$("$HQ" new "Nightly 2026-01-05" --category benchmark --workdir "$T" --no-focus | head -1)"; CC="$(ls "$T"/root/tasks/$CT-*/TASK.md)"
@@ -1522,17 +1556,32 @@ s = s.replace("<what done looks like>", "Nightly green").replace("<where it stan
 open(p, "w", encoding="utf-8").write(s)
 PY
 "$HQ" addtodo "$CT" "@claude open one" >/dev/null; "$HQ" addtodo "$CT" "@me closed one" >/dev/null; "$HQ" todo "$CT" 2 done >/dev/null
+python3 - "$CC" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"(?m)^(- \[x\] @me closed one[^\n]*\n)", lambda m: m.group(1) + "  - [ ] @claude child still open\n", s, count=1)
+s = s.replace("Nightly green\n", "Nightly green\n- [ ] acceptance: p99 < 10ms\n", 1)
+open(p, "w", encoding="utf-8").write(s)
+PY
 "$HQ" grant add "$CT" "rerun a failed plan with the same parameters" >/dev/null
 "$HQ" ref add "$CT" "PR #8 https://github.com/o/r/pull/8" >/dev/null; "$HQ" set "$CT" "next=rerun the two plans" >/dev/null
 "$HQ" focus add "$CT" >/dev/null
-"$HQ" ask add "$CT" "Which plan first?" >/dev/null
+"$HQ" ask add "$CT" "Which plan first?" >/dev/null; "$HQ" ask add "$CT" "Rerun both?" >/dev/null
+"$HQ" set "$CT" "status=blocked" >/dev/null
 "$HQ" bind "$CT" --session sess-cont >/dev/null; hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
 out="$("$HQ" continue "$CT" --json)"
 NT="$(echo "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["to"])')"; NC="$(ls "$T"/root/tasks/$NT-*/TASK.md)"
-echo "$out" | python3 -c "import json,sys,datetime; r=json.load(sys.stdin); assert r['title']=='Nightly '+datetime.date.today().isoformat() and r['todos']==1 and r['sessions']==['sess-cont'] and r['asks']==1, r" \
+echo "$out" | python3 -c "import json,sys,datetime; r=json.load(sys.stdin); assert r['title']=='Nightly '+datetime.date.today().isoformat() and r['todos']==2 and r['sessions']==['sess-cont'] and r['asks']==[{'from':'$CT.1','to':r['to']+'.1'},{'from':'$CT.2','to':r['to']+'.2'}], r" \
   && ok "hq continue makes the new card (title re-dated) and says what came along" || fail "continue: $out"
 grep -q '^- \[ \] @claude open one <!--t:' "$NC" && ! grep -q 'closed one' "$NC" && grep -q '^Nightly green$' "$NC" && grep -q '^two plans left$' "$NC" \
   && grep -q '^- rerun a failed plan with the same parameters <!--g:' "$NC" && ok "the new card has the goal, status, open todos (with their times) and grants" || fail "new card: $(cat "$NC")"
+[ "$(grep -c 'acceptance: p99' "$NC")" = 1 ] && grep -q '^- \[ \] @claude child still open' "$NC" && grep -q '^status: blocked' "$NC" \
+  && ok "continue: a goal checklist is not copied twice, an open child of a closed todo comes unindented, status carries" || fail "continue extras: $(cat "$NC")"
+"$HQ" board --json | python3 -c "
+import json,sys
+ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; o={a['id']:a for a in ts['$CT']['asks']}; n={a['id']:a for a in ts['$NT']['asks']}
+assert o['$CT.1']['state']=='moved' and n['$NT.1']['state']=='open' and n['$NT.1']['text']=='Which plan first?' and n['$NT.1'].get('moved_from')=='$CT.1', (o, n)" \
+  && ok "continue moves open asks to the new card under new ids" || fail "asks moved"
 "$HQ" board --json | python3 -c "
 import json,sys
 ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; n=ts['$NT']; o=ts['$CT']
@@ -1540,7 +1589,14 @@ assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun 
 assert o['status']=='done' and 'continued in $NT' in o['body'] and 'continued from $CT' in n['body'], o" && ok "links, next, category and folders carried over; the old card is done and points at the new one" || fail "continue cards"
 "$HQ" focus --json | python3 -c "import json,sys; ids=json.load(sys.stdin)['ids']; assert '$NT' in ids and '$CT' not in ids, ids" && ok "the new card takes the old one's place in Focus" || fail "focus after continue"
 c="$(hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-echo "$c" | grep -q "$CT, was continued in $NT" && ok "a session on the old card is moved and told on its next prompt" || fail "rebind note: $c"
+echo "$c" | grep -q "$CT, was continued in $NT" && echo "$c" | grep -q "$CT.1 is now $NT.1" && ok "a session on the old card is moved and told on its next prompt, asks included" || fail "rebind note: $c"
+"$HQ" ask resolve "$NT.1" do --via board --note "nightly first" >/dev/null
+ctxof sess-cont | grep -q "^- $NT.1 \"Which plan first?\" → answer: nightly first" && ok "an answer to a moved ask reaches the session" || fail "moved ask answer: $(ctxof sess-cont)"
+"$HQ" ask resolve "$CT.2" drop --via board >/dev/null
+"$HQ" board --json | python3 -c "
+import json,sys
+n={a['id']:a for a in [x for x in json.load(sys.stdin)['tasks'] if x['id']=='$NT'][0]['asks']}; assert n['$NT.2']['state']=='drop', n" \
+  && ok "resolving a moved ask by its old id resolves the new one" || fail "old id redirect"
 "$HQ" continue "$CT" 2>/dev/null && fail "continued a done task" || ok "only an open task can be continued"
 "$HQ" unbind --session sess-cont >/dev/null
 
