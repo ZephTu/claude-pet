@@ -546,6 +546,40 @@ import json,sys; d=json.load(sys.stdin)
 assert d["found"] and d["skills"]==[{"name":"review","desc":"Review the diff, now with tests"},{"name":"hud:setup","desc":"Configure: the HUD"},{"name":"hud","desc":"The bare plugin"},{"name":"late","desc":"Turned up later"}], d
 ' && ok "peek --commands: the newest full listing plus later additions and changes, plugin names with colons" || fail "peek --commands listing"
 "$HQ" peek "$KSID" --commands | head -1 | grep -qx "/review  Review the diff, now with tests" && ok "peek --commands prints /name  description lines" || fail "peek --commands text"
+# Skills marked disable-model-invocation are left out of the listing but can still be typed: read
+# from ~/.claude, the project's .claude (and the folders above it) and enabled plugins.
+KP="$T/kproj/sub"; mkdir -p "$KP/.claude/commands" "$T/kproj/.claude/skills/up" "$HOME/.claude/skills/grill-me" "$HOME/.claude/skills/shown" "$HOME/.claude/skills/review" "$HOME/.claude/skills/nouser" "$HOME/.claude/commands" "$T/kplug/skills/ship" "$T/kplug/commands" "$T/koff/skills/off"
+printf -- '---\nname: grill-me\ndescription: "A relentless interview"\ndisable-model-invocation: true\n---\nbody\n' > "$HOME/.claude/skills/grill-me/SKILL.md"
+printf -- '---\ndescription: Callable, so already listed\n---\n' > "$HOME/.claude/skills/shown/SKILL.md"
+printf -- '---\ndescription: Same name as a listed one\ndisable-model-invocation: true\n---\n' > "$HOME/.claude/skills/review/SKILL.md"
+printf -- '---\ndescription: Hidden from you too\ndisable-model-invocation: true\nuser-invocable: false\n---\n' > "$HOME/.claude/skills/nouser/SKILL.md"
+printf -- '---\ndescription: A user command\ndisable-model-invocation: true\n---\n' > "$HOME/.claude/commands/deploy.md"
+printf -- '---\ndescription: From the project\ndisable-model-invocation: true\n---\n' > "$KP/.claude/commands/proj.md"
+printf -- '---\ndescription: From the folder above\ndisable-model-invocation: true\n---\n' > "$T/kproj/.claude/skills/up/SKILL.md"
+printf -- '---\ndescription: Ship it\ndisable-model-invocation: true\n---\n' > "$T/kplug/skills/ship/SKILL.md"
+printf -- '---\ndescription: Plugin command\ndisable-model-invocation: true\n---\n' > "$T/kplug/commands/tidy.md"
+printf -- '---\ndescription: Plugin is off\ndisable-model-invocation: true\n---\n' > "$T/koff/skills/off/SKILL.md"
+cp "$HOME/.claude/settings.json" "$T/ksettings.bak" 2>/dev/null || echo '{}' > "$T/ksettings.bak"
+python3 - "$HOME" "$T" <<'PY'
+import json, os, sys
+home, t = sys.argv[1:]
+p = os.path.join(home, ".claude/settings.json")
+d = json.load(open(p)) if os.path.exists(p) else {}
+d["enabledPlugins"] = {"kp@m": True, "koff@m": False}
+json.dump(d, open(p, "w"))
+os.makedirs(os.path.join(home, ".claude/plugins"), exist_ok=True)
+json.dump({"plugins": {"kp@m": [{"installPath": t + "/kplug"}], "koff@m": [{"installPath": t + "/koff"}]}},
+          open(os.path.join(home, ".claude/plugins/installed_plugins.json"), "w"))
+PY
+sed -i '' "1s|^|{\"type\":\"user\",\"cwd\":\"$KP\",\"message\":{\"content\":\"hi\"}}\n|" "$HOME/.claude/projects/-tmp-repo/$KSID.jsonl" 2>/dev/null \
+  || sed -i "1s|^|{\"type\":\"user\",\"cwd\":\"$KP\",\"message\":{\"content\":\"hi\"}}\n|" "$HOME/.claude/projects/-tmp-repo/$KSID.jsonl"
+"$HQ" peek "$KSID" --commands --json | python3 -c '
+import json,sys; d=json.load(sys.stdin); names=[x["name"] for x in d["skills"]]
+assert names[:4]==["review","hud:setup","hud","late"], names
+assert names[4:]==["grill-me","deploy","proj","up","kp:ship","kp:tidy"], names
+assert d["skills"][4]=={"name":"grill-me","desc":"A relentless interview"} and d["skills"][0]["desc"]=="Review the diff, now with tests", d
+' && ok "peek --commands: adds skills and commands hidden from Claude (user, project and folders above, enabled plugins), once each" || fail "peek --commands hidden skills"
+rm -rf "$HOME/.claude/skills" "$HOME/.claude/commands/deploy.md" "$HOME/.claude/plugins/installed_plugins.json"; mv "$T/ksettings.bak" "$HOME/.claude/settings.json"
 : > "$HOME/.claude/projects/-tmp-repo/$KSID.jsonl"
 "$HQ" peek "$KSID" --commands --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d=={"found":True,"skills":[]}, d' && ok "peek --commands: an empty transcript has no skills" || fail "peek --commands empty"
 "$HQ" peek feedface-0000-0000-0000-000000000000 --commands --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d=={"found":False,"skills":[]}, d' && ok "peek --commands: an unknown session is not found" || fail "peek --commands unknown"
