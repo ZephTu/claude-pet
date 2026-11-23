@@ -284,7 +284,7 @@ from `templates/PROJECT.md`; projects without one still work):
 name: perf                 # the short id: cards' project:, the folder, the CLI
 title: 性能基线与回归        # the display name
 kind: goal                 # goal = has an end · duty = a standing responsibility
-status: active             # active | paused | done | abandoned
+status: active             # active | paused | done | abandoned (a duty: active | paused)
 due: 2026-12-19            # a goal's deadline
 jira: ["QA-9397"]          # epics it tracks
 fixVersions: ["4.2.7"]
@@ -298,18 +298,25 @@ updated: 2026-11-23
 ## Log                     ← or 决策记录
 ```
 
-**The brief.** A session bound to a task whose project has a PROJECT.md is told, whenever it
-starts (SessionStart of any source, and `hq bind` from inside it): the project, its kind, due
-date and status, the first line of its goal, and the Brief section — background, conventions,
-commands, pitfalls — whatever repo the session works in. The brief is capped at 2000 characters
-(past that it is cut, pointing at PROJECT.md). `sessions.json` keeps a hash of what each session
-was given; UserPromptSubmit gives it again only when it changed (the brief was edited, or the
-task moved to another project), and says so when it is gone. HTML comments and lone
-`<placeholder>` lines from the template are not passed on. `hq project brief NAME` prints
-exactly what sessions get.
+Headings are read in either language, or both (`## 目标 / Goal`). A section runs to the next
+Goal / Done when / Brief / Grants / Log heading, so other `##` headings (a brief's own
+`## Commands`) stay inside it. Two projects whose names differ only in case are refused: on
+macOS they would be one folder.
+
+**The brief.** A session bound to a task whose project has a non-empty Brief is told, whenever
+it starts (SessionStart of any source, and `hq bind` from inside it): the project, its kind, due
+date and status, the first line of its goal, and the Brief — background, conventions, commands,
+pitfalls — whatever repo the session works in. The brief is capped at 2000 characters (past that
+it is cut, pointing at PROJECT.md). `sessions.json` keeps a hash of what each session was given;
+UserPromptSubmit gives it again only when it changed (any of those parts was edited, or the task
+moved to another project), and says so when it is gone (emptied, the file removed, or the task
+moved to a project without one). HTML comments and lone `<placeholder>` lines from the template
+are not passed on. `hq project brief NAME` prints exactly what sessions get. A PROJECT.md that
+can't be read is treated as missing, and a hook never fails a turn: an error goes to stderr.
 
 ```
-hq project list [--json]                    # with kind, status, due; "[no PROJECT.md]" if none
+hq project list [--json]                    # open / done / on-you counts, kind, status, due;
+                                            #   "[no PROJECT.md]" if none
 hq project show NAME [--json]               # the file, plus task counts: open, done, done in 7
                                             #   days, waiting on you (open asks + @me todos)
 hq project brief NAME
@@ -323,7 +330,10 @@ hq project auto | order NAME…
 
 Goal, done-when and the brief are edited in PROJECT.md directly. `hq board --json` gives each
 project its PROJECT.md fields (`defined` says whether there is one) and `stats`, and each task a
-`repo`: the git repo of its first workdir, a worktree counted as its main repo.
+`repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
+as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
+card's `closed` date — written when a task becomes done or abandoned — not `updated`, which any
+later log line moves.
 
 ## Categories
 

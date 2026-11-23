@@ -259,21 +259,32 @@ def set_fields(path, fields):
 
 
 def _set_fields(path, fields):
+    """Set frontmatter fields — only inside the `---` block (one is added when the file has
+    none), so a body line that happens to start with `status:` is never touched. Values are one
+    line: a newline in one could otherwise write new lines, even a section, into the file."""
     text = open(path, encoding="utf-8").read()
+    m = re.match(r"^---\n(.*?)\n---\n?", text, re.S)
+    fm, body = (m.group(1), text[m.end():]) if m else ("", text)
+    fields = dict(fields)
+    if fields.get("status") in ("done", "abandoned") and "closed" not in fields:
+        # When it was closed — `updated` moves with every later log line or edit.
+        old = re.search(r"^status:[ \t]*(\S*)", fm, re.M)
+        if not old or old.group(1) != fields["status"]:
+            fields["closed"] = today()
     for k, v in fields.items():
         if isinstance(v, list):
             val = json.dumps(v, ensure_ascii=False)
-        elif k in ("waiting_on_me", "next", "title"):
-            val = '"' + str(v).replace('"', "'") + '"'
         else:
-            val = str(v)
-        if re.search(rf"^{k}:", text, re.M):
-            text = re.sub(rf"^{k}:.*$", lambda _: f"{k}: {val}", text, count=1, flags=re.M)
+            val = re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", str(v)).strip()
+            if k in ("waiting_on_me", "next", "title"):
+                val = '"' + val.replace('"', "'") + '"'
+        if re.search(rf"^{re.escape(k)}:", fm, re.M):
+            fm = re.sub(rf"^{re.escape(k)}:.*$", lambda _: f"{k}: {val}", fm, count=1, flags=re.M)
         else:
-            text = text.replace("\n---", f"\n{k}: {val}\n---", 1)
+            fm = (fm + "\n" if fm else "") + f"{k}: {val}"
     if "updated" not in fields:
-        text = re.sub(r"^updated:.*$", f"updated: {today()}", text, count=1, flags=re.M)
-    atomic_write(path, text)
+        fm = re.sub(r"^updated:.*$", f"updated: {today()}", fm, count=1, flags=re.M)
+    atomic_write(path, f"---\n{fm}\n---\n" + body)
 
 
 def append_log(path, msg, touch=True):
@@ -413,6 +424,7 @@ PROJECT_SECTIONS = {            # heading words (either language; "A / B" headin
     "done_when": re.compile(r"^(?:done when|healthy when|完成标准|健康标准)$", re.I),
     "brief": re.compile(r"^(?:brief|project brief|简报|项目简报)$", re.I),
 }
+PROJECT_END_RE = re.compile(r"^(?:log|decision log|decisions|决策记录|日志)$", re.I)
 PROJECT_SET_KEYS = ("title", "kind", "status", "due", "jira", "fixVersions")
 BRIEF_CHARS = 2000              # of the brief a session is given; the rest: read PROJECT.md
 
@@ -428,6 +440,12 @@ def check_project_name(name):
     return name
 
 
+def same_name_project(name, names, but=None):
+    """A listed project whose name differs from `name` only in case: on macOS both would be one
+    folder, so one PROJECT.md."""
+    return next((n for n in names if n != name and n != but and n.lower() == name.lower()), None)
+
+
 def project_file(name):
     if not name or "/" in name or name.startswith("."):
         return None
@@ -435,18 +453,22 @@ def project_file(name):
 
 
 def project_sections(body):
-    """{goal, done_when, brief: text} from a PROJECT.md body. Headings inside code fences don't
-    count; template hints (HTML comments, a lone `<placeholder>` line) are dropped."""
+    """{goal, done_when, brief: text} from a PROJECT.md body. A section runs to the next Goal /
+    Done when / Brief / Grants / Log heading; other `##` headings stay inside it. Headings inside
+    code fences don't count; template hints (HTML comments, a lone `<placeholder>` line) are dropped."""
     out, key, fence = {}, None, False
     for line in body.split("\n"):
         if re.match(r"^\s*(```|~~~)", line):
             fence = not fence
         elif not fence and line.startswith("## "):
             words = [w.strip() for w in line[3:].split("/")]
-            key = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
-            if key:
-                out.setdefault(key, [])
-            continue
+            new = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
+            if new or is_grants_heading(line) or any(PROJECT_END_RE.match(w) for w in words):
+                key = new
+                if key:
+                    out.setdefault(key, [])
+                continue
+            # Any other `##` heading (a brief's "## Commands") belongs to the section it is in.
         if key:
             out[key].append(line)
     clean = {}
@@ -468,7 +490,10 @@ def load_project(name):
     path = project_file(name)
     if not path or not os.path.isfile(path):
         return None
-    meta, body = parse_frontmatter(open(path, encoding="utf-8").read())
+    try:   # read by every hook of every session on its tasks: a bad file must not break them
+        meta, body = parse_frontmatter(open(path, encoding="utf-8", errors="replace").read())
+    except OSError:
+        return None
     sec = project_sections(body)
     kind, status = str(meta.get("kind") or "").lower(), str(meta.get("status") or "").lower()
     return {"name": name, "file": path, "title": str(meta.get("title") or ""),
@@ -533,10 +558,10 @@ def check_project_fields(pairs):
 
 def project_brief_text(meta):
     """What a session bound to this task is told about its project: what the project is, then its
-    brief. Empty when the task has no project or the project has no PROJECT.md."""
+    brief. Empty when the task has no project, or its project has no PROJECT.md or an empty brief."""
     name = meta.get("project") or ""
     pr = load_project(name) if name else None
-    if not pr:
+    if not pr or not pr["brief"]:
         return ""
     bits = [{"goal": "a goal", "duty": "a standing duty"}.get(pr["kind"], ""),
             f"due {pr['due']}" if pr["due"] else "", pr["status"] if pr["status"] != "active" else ""]
@@ -573,7 +598,14 @@ def repo_of(path):
                 m = re.match(r"gitdir:\s*(.+)", open(g, encoding="utf-8").read().strip())
             except OSError:
                 m = None
-            parts = os.path.normpath(os.path.join(d, m.group(1))).split(os.sep) if m else []
+            gitdir = os.path.normpath(os.path.join(d, m.group(1))) if m else ""
+            try:      # a worktree's gitdir names the repo's own git dir in `commondir`
+                common = os.path.normpath(os.path.join(gitdir, open(os.path.join(gitdir, "commondir"), encoding="utf-8").read().strip()))
+                name = os.path.basename(os.path.dirname(common)) if os.path.basename(common) == ".git" else os.path.basename(common)
+                return name[:-4] if name.endswith(".git") and len(name) > 4 else name
+            except OSError:
+                pass
+            parts = gitdir.split(os.sep) if gitdir else []
             if ".git" in parts:          # <main>/.git/worktrees/<name> (or .git/modules/… of a submodule)
                 return parts[len(parts) - 1 - parts[::-1].index(".git") - 1]
             return os.path.basename(d)
@@ -608,7 +640,7 @@ def project_stats(name, metas, now=None):
         elif s in ("done", "abandoned"):
             st[s] += 1
             try:
-                if s == "done" and (now - dt.date.fromisoformat(str(m.get("updated", "")))).days < 7:
+                if s == "done" and (now - dt.date.fromisoformat(str(m.get("closed") or m.get("updated", "")))).days < 7:
                     st["done_7d"] += 1
             except ValueError:
                 pass
@@ -648,11 +680,18 @@ def cmd_project(args):
         rows = [dict(project_info(pr), count=usage.get(pr["name"], 0), listed=True) for pr in projects]
         rows += [dict(project_info({"name": n, "paths": []}), count=c, listed=False)
                  for n, c in usage.items() if n and n not in names]
+        for m in metas:
+            m["asks"] = read_asks(m["dir"])
+        for r in rows:
+            r["stats"] = project_stats(r["name"], metas)
         if args.json:
             print(json.dumps(rows, ensure_ascii=False, indent=1))
             return
         for r in rows:
-            print(f"{r['name']:<22} {r['count']:>3} task(s)  {project_line(r):<34} {', '.join(r['paths']) or '-'}"
+            st = r["stats"]
+            print(f"{r['name']:<22} {st['open']:>3} open {st['done']:>3} done"
+                  + (f" ({st['on_me']} on you)" if st["on_me"] else "")
+                  + f"  {project_line(r):<34} {', '.join(r['paths']) or '-'}"
                   + ("" if r["listed"] else "   (not in list — used on cards)"))
         if usage.get(""):
             print(f"{'(no project)':<22} {usage['']:>3} task(s)")
@@ -712,13 +751,16 @@ def cmd_project(args):
         return
     if a == "brief":
         # Exactly what a session on one of its tasks is given (task id shown as T-…).
-        print(project_brief_text({"id": "T-…", "project": name}) or f"(project {name!r} has no PROJECT.md)")
+        print(project_brief_text({"id": "T-…", "project": name}) or f"(project {name!r} has no PROJECT.md or no brief: sessions are told nothing about it)")
         return
     if a == "set":
         if len(args.names) < 2 and not (args.kind or args.title or args.due):
             die(f"usage: hq project set NAME key=value ... (keys: {', '.join(PROJECT_SET_KEYS)})")
         fields = check_project_fields(args.names[1:] + [f"{k}={v}" for k, v in
                                       (("kind", args.kind), ("title", args.title), ("due", args.due)) if v])
+        cur = load_project(name) or {}
+        if fields.get("kind", cur.get("kind")) == "duty" and fields.get("status", cur.get("status")) in ("done", "abandoned"):
+            die("a duty is active or paused — it has no end (make it kind=goal first, if it does)")
         ensure_project(name)
         print(ensure_project_file(name, fields))
         return
@@ -726,8 +768,12 @@ def cmd_project(args):
         name = check_project_name(name)
         if name in names:
             die(f"project {name!r} already exists")
+        if same_name_project(name, names):
+            die(f"project {same_name_project(name, names)!r} already exists — names that differ only in case would share a folder")
         fields = check_project_fields([f"{k}={v}" for k, v in
                                        (("kind", args.kind), ("title", args.title), ("due", args.due)) if v])
+        if same_name_project(name, list(usage)):
+            die(f"tasks use {same_name_project(name, list(usage))!r} — names that differ only in case would share a folder")
         save_projects(projects + [{"name": name, "paths": [os.path.abspath(os.path.expanduser(x)) for x in args.path or []]}])
         print(ensure_project_file(name, fields))
     elif a == "paths":
@@ -741,14 +787,22 @@ def cmd_project(args):
         new = check_project_name(args.names[1])
         if new in names and new != name:
             die(f"{new!r} already exists — to merge, use: hq project remove {name!r} --to {new!r}")
+        if same_name_project(new, names, but=name):
+            die(f"{same_name_project(new, names, but=name)!r} already exists — names that differ only in case would share a folder")
         if not known:
             die(f"no project {name!r}")
         old_file, new_file = project_file(name), project_file(new)
         if old_file and os.path.isfile(old_file) and new != name:
-            if os.path.exists(os.path.dirname(new_file)):
-                die(f"{os.path.dirname(new_file)} already exists — move it away first")
-            os.makedirs(projects_dir(), exist_ok=True)
-            os.rename(os.path.dirname(old_file), os.path.dirname(new_file))
+            old_dir, new_dir = os.path.dirname(old_file), os.path.dirname(new_file)
+            if new.lower() == name.lower():
+                # Only the case changes: on a case-insensitive disk new_dir "exists" — it is old_dir.
+                tmp = f"{old_dir}.renaming-{os.getpid()}"
+                os.rename(old_dir, tmp)
+                os.rename(tmp, new_dir)
+            else:
+                if os.path.exists(new_dir):
+                    die(f"{new_dir} already exists — move it away first")
+                os.rename(old_dir, new_dir)
             set_fields(new_file, {"name": new})
             append_log(new_file, f"renamed {name!r} → {new!r}", touch=False)
         if name in names:
@@ -768,16 +822,21 @@ def cmd_project(args):
             if to == name:
                 die("--to must be a different project")
             ensure_project(to)
-        save_projects([pr for pr in load_projects() if pr["name"] != name])
-        n = relabel("project", name, to, "project removed") if n_used else 0
         f = project_file(name)
         kept = ""
         if f and os.path.isdir(os.path.dirname(f)):
-            # Never deleted: put aside, to read or move back by hand.
-            dest = os.path.join(projects_dir(), ".removed", f"{name}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+            # Never deleted: put aside, to read or move back by hand. First, so a failure here
+            # leaves hq.json and the cards as they were.
+            base = os.path.join(projects_dir(), ".removed", f"{name}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}")
+            dest, i = base, 1
+            while os.path.exists(dest):
+                i += 1
+                dest = f"{base}-{i}"
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             os.rename(os.path.dirname(f), dest)
             kept = f"; its folder is now {dest}"
+        save_projects([pr for pr in load_projects() if pr["name"] != name])
+        n = relabel("project", name, to, "project removed") if n_used else 0
         print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else "") + kept)
 
 
@@ -842,7 +901,14 @@ def age_days(meta):
 # "yes, and from now on just do it" to. The wording is the rule. A hidden <!--g:TIME ASK-ID-->
 # says when, and from which ask (none: added by hand). Plain bullets, never `- [ ]`: every
 # checkbox line on a card is a todo. Revoking deletes the line and logs it.
-GRANTS_HEADING_RE = re.compile(r"^##[ \t]*(?:Grants|Standing grants|授权|常设授权)[ \t]*$", re.I)
+GRANTS_WORD_RE = re.compile(r"^(?:Grants|Standing grants|授权|常设授权)$", re.I)
+
+
+def is_grants_heading(line):
+    """`## Grants`, `## 授权`, or a two-language `## 授权 / Grants`."""
+    return line.startswith("##") and not line.startswith("###") and \
+        any(GRANTS_WORD_RE.match(w.strip()) for w in line[2:].split("/"))
+
 GRANT_LINE_RE = re.compile(r"^[-*][ \t]+(?!\[[ xX\-]\][ \t])(.+?)[ \t]*$")
 GRANT_STAMP_RE = re.compile(r"\s*<!--\s*g:([^>]*?)\s*-->\s*$")
 GRANT_SUGGEST_RE = re.compile(r"\s*\[(?:grant|授权)[:：]\s*([^\[\]]+?)\s*\]\s*$", re.I)
@@ -860,7 +926,7 @@ def grants_section(lines):
             fence = not fence
         elif fence:
             continue
-        elif head is None and GRANTS_HEADING_RE.match(l):
+        elif head is None and is_grants_heading(l):
             head = i
         elif head is not None and l.startswith("## "):
             return head, i
@@ -1051,6 +1117,8 @@ def cmd_grant(args):
         name = check_category(args.project)
         if name not in [x["name"] for x in load_projects()] and not load_project(name):
             die(f"no project {name!r}")
+        if args.action == "add":
+            user_only()
         card = project_file(name) if args.action != "add" else ensure_project_file(name)
         if not os.path.isfile(card or ""):
             die(f"project {name!r} has no PROJECT.md, so no grants")
@@ -3353,6 +3421,14 @@ def emit(event, context):
 
 
 def hook_main():
+    # A hook that fails shows an error in every session bound to that task, each turn: never.
+    try:
+        _hook_main()
+    except Exception as e:  # noqa: BLE001 — SystemExit (die) still passes
+        print(f"hq hook: {type(e).__name__}: {e}", file=sys.stderr)
+
+
+def _hook_main():
     try:
         payload = json.load(sys.stdin)
     except ValueError:

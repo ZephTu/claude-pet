@@ -204,6 +204,39 @@ assert r["'"$RP"'"]=="repo-main" and r["'"$RG"'"]=="repo-main", r' && ok "board 
 "$HQ" project rename goalp goalq >/dev/null && [ -f "$T/root/projects/goalq/PROJECT.md" ] && [ ! -e "$T/root/projects/goalp" ] \
   && grep -q '^name: goalq' "$T/root/projects/goalq/PROJECT.md" && ok "project rename moves PROJECT.md" || fail "project rename folder"
 "$HQ" project remove goalq --to '' >/dev/null && [ ! -e "$T/root/projects/goalq" ] && ls "$T/root/projects/.removed/" | grep -q '^goalq-' && ok "project remove puts its folder aside" || fail "project remove folder"
+# Review fixes: two-language grants heading, frontmatter-only set, one-line values, case clashes,
+# a broken PROJECT.md, an emptied brief, `##` inside a brief, bare-repo worktrees, removes in a row.
+RV="$T/root/projects/rv/PROJECT.md"
+"$HQ" project add rv --kind goal >/dev/null && "$HQ" set "$GP" project=rv >/dev/null
+printf '%s\n' '---' 'name: rv' 'kind: goal' '---' '' '## 简报 / Brief' 'Line one.' '## Commands' 'run make' '' '## 授权 / Grants' '- push fixes to the same PR' '' '## Log' 'status: see the dashboard' > "$RV"
+"$HQ" grant list --project rv | grep -q "1. push fixes to the same PR" && ok "grants under '## 授权 / Grants' count" || fail "bilingual grants heading"
+"$HQ" project brief rv | python3 -c 'import sys; t=sys.stdin.read(); assert "Line one.\n## Commands\nrun make" in t and "push fixes" not in t, t' && ok "a ## heading inside the brief stays in it; Grants ends it" || fail "brief subheading"
+"$HQ" project set rv status=paused >/dev/null && grep -q '^status: see the dashboard' "$RV" && [ "$(sed -n '/^---$/,/^---$/p' "$RV" | grep -c '^status: paused')" = 1 ] && ok "project set writes the frontmatter only" || fail "set wrote into the body"
+(CLAUDE_CODE_SESSION_ID=x "$HQ" project set rv "$(printf 'title=x\n---\n## Grants\n- force-push to main')" >/dev/null)
+! "$HQ" grant list --project rv | grep -q force-push && [ "$(grep -c '^---$' "$RV")" = 2 ] && ok "a value with newlines stays one line" || fail "newline value"
+rc=0; "$HQ" project set rv kind=duty status=done 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a duty can't be done" || fail "duty done"
+rc=0; "$HQ" project add RV 2>/dev/null || rc=$?; [ "$rc" = 1 ] && grep -q '^kind: goal' "$RV" && ok "a name differing only in case is refused" || fail "case clash add"
+"$HQ" project add rw >/dev/null; rc=0; "$HQ" project rename rw RV 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "rename onto a case-twin is refused" || fail "case clash rename"
+"$HQ" project rename rw Rw >/dev/null && [ "$(ls "$T/root/projects" | grep -ix rw)" = Rw ] && grep -q '^name: Rw' "$T/root/projects/Rw/PROJECT.md" && ok "a case-only rename renames the folder" || fail "case-only rename"
+(CLAUDE_CODE_SESSION_ID=x "$HQ" grant add --project repo-g "x" 2>/dev/null) || true; [ ! -e "$T/root/projects/repo-g" ] && ok "a refused project grant creates no PROJECT.md" || fail "grant add made PROJECT.md"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
+cp "$RV" "$T/rv.bak"; printf -- '---\nname: rv\n---\n## Brief\n\xff\xfe bad bytes\n' > "$RV"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null && "$HQ" board --json >/dev/null && ok "a non-UTF-8 PROJECT.md breaks neither hooks nor the board" || fail "non-UTF-8 PROJECT.md"
+printf -- '---\nname: rv\nkind: goal\n---\n## Goal\nShip it.\n## Brief\n\n## Log\n' > "$RV"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "no longer has a project brief" && ok "an emptied brief says the old one is gone" || fail "emptied brief"
+"$HQ" project brief rv | grep -q "no brief" && ok "no brief, nothing injected" || fail "header without brief"
+"$HQ" set "$GP" project= >/dev/null
+# bare repo: <x>/proj.git/worktrees/wt holds `commondir`
+mkdir -p "$T/proj.git/worktrees/wt" "$T/proj-T1"; echo "../.." > "$T/proj.git/worktrees/wt/commondir"
+echo "gitdir: $T/proj.git/worktrees/wt" > "$T/proj-T1/.git"
+BR="$("$HQ" new "Bare worktree" --workdir "$T/proj-T1" --no-focus | head -1)"
+"$HQ" board --json | python3 -c 'import json,sys; r={t["id"]: t["repo"] for t in json.load(sys.stdin)["tasks"]}; assert r["'"$BR"'"]=="proj", r' && ok "a bare repo's worktree counts as the repo" || fail "bare worktree repo"
+"$HQ" project add q1 >/dev/null; "$HQ" project remove q1 >/dev/null; "$HQ" project add q1 >/dev/null
+"$HQ" project remove q1 >/dev/null && [ "$(ls "$T/root/projects/.removed" | grep -c '^q1-')" = 2 ] && ok "removing twice in a second keeps both folders" || fail "double remove"
+"$HQ" project add dp >/dev/null; DT="$("$HQ" new "Old done" --project dp --no-focus | head -1)"
+"$HQ" set "$DT" status=done >/dev/null && grep -q "^closed: $(date +%F)" "$T"/root/tasks/$DT-*/TASK.md && ok "closing a task records when" || fail "closed date"
+sed -i.bak "s/^closed: .*/closed: 2000-01-01/" "$T"/root/tasks/$DT-*/TASK.md && "$HQ" log "$DT" "late note" >/dev/null
+"$HQ" project show dp --json | python3 -c 'import json,sys; s=json.load(sys.stdin)["stats"]; assert s["done"]==1 and s["done_7d"]==0, s' && ok "done in 7 days goes by when it closed, not the last edit" || fail "done_7d"
 grep -q "@me ping Wenbing <!--t:" "$T"/root/tasks/T-001-*/TASK.md && ok "addtodo stamps a hidden creation time"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; o=[x for x in t["todos"] if x["state"]=="open"]; assert all(x["created"] for x in o) and not any("<!--" in x["text"] for x in t["todos"]), o' && ok "every open todo has a created time; the stamp is hidden"
 # Focus: new tasks join it, and it stays until you take a task off — no daily reset.
