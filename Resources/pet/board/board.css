@@ -1107,6 +1107,8 @@ main.single { grid-template-columns: 1fr; }
 .qnote.it.unsorted { box-shadow: inset 3px 0 0 var(--amber); background: var(--panel); margin: 2px -10px; }
 .qnote.it.dropped .t { color: var(--faint); text-decoration: line-through; }
 .qnote.it .src { margin-top: 2px; overflow-wrap: anywhere; }
+.qnote.it .feed-msgs { margin-top: 2px; font-size: 12px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.qnote.it .feed-msgs.open { display: block; }
 .qnote.it .src .by { color: var(--faint); }
 .qnote.it .src .bad { color: var(--red); }
 .qnote.it .sorting { color: var(--teal); }

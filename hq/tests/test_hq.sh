@@ -1359,6 +1359,88 @@ answer '{"kind":"task","title":"Docs","text":"t","project":"pone","workdir":"doc
 NF3="$(hqi inbox sort --claude "$FAKE" --json N-009 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 card "$NF3" | grep -q "^workdirs: \[\"$T/w1/docs\"\]" && ok "a folder named by its last part is looked up in the note's project first" || fail "project-first folder match"
 
+# hq feed zulip: mentions and DMs from a fake Zulip, one inbox item per conversation, sorted in the
+# feed's mode (a log line is filed, a todo waits, a skip is put away).
+"$HQ" feed | grep -q "zulip: not set up" && ok "feed without a zuliprc: not set up" || fail "feed no zuliprc"
+ZS="$T/zulip"; mkdir -p "$ZS"
+cat > "$ZS/server.py" <<'PY'
+import http.server, json, sys, urllib.parse, os
+D = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
+        if self.headers.get("Authorization") != "Basic bWVAZXhhbXBsZS5jb206c2VjcmV0":
+            return self.reply(401, {"result": "error", "msg": "bad key"})
+        if u.path == "/api/v1/users/me":
+            return self.reply(200, {"result": "success", "user_id": 1})
+        msgs = json.load(open(os.path.join(D, "messages.json")))
+        op = json.loads(q["narrow"])[0]["operand"]
+        msgs = [m for m in msgs if (m["type"] == "private") if op == "dm"] if op == "dm" else [m for m in msgs if "mentioned" in m["flags"]]
+        if q["anchor"] == "newest":
+            out = msgs[-int(q["num_before"]):]
+        else:
+            out = [m for m in msgs if m["id"] > int(q["anchor"])][:int(q["num_after"])]
+        self.reply(200, {"result": "success", "messages": out, "found_newest": True})
+    def reply(self, code, d):
+        b = json.dumps(d).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(D, "port"), "w").write(str(s.server_port))
+s.serve_forever()
+PY
+zmsg() {  # id type(dm|stream) sender_id sender_name text [mentioned]
+  python3 - "$ZS/messages.json" "$@" <<'PY'
+import json, sys, time, os
+p, mid, typ, sid, name, text = sys.argv[1:7]
+ms = json.load(open(p)) if os.path.exists(p) else []
+m = {"id": int(mid), "timestamp": int(time.time()), "sender_id": int(sid), "sender_full_name": name,
+     "content": text, "flags": ["mentioned"] if len(sys.argv) > 7 else []}
+if typ == "dm":
+    m.update(type="private", display_recipient=[{"id": 1, "full_name": "Me"}, {"id": 7, "full_name": "Alice Wu"}])
+else:
+    m.update(type="stream", stream_id=3, display_recipient="QE team", subject="release 4.2.7")
+ms.append(m); json.dump(ms, open(p, "w"))
+PY
+}
+zmsg 100 dm 7 "Alice Wu" "the 4.2.7 perf plan passed on rc3"
+zmsg 101 dm 1 "Me" "great, thanks"
+zmsg 102 stream 9 "Bob Li" "@**Me** please review the release notes" m
+python3 "$ZS/server.py" "$ZS" & ZPID=$!; trap 'kill "$ZPID" 2>/dev/null; rm -rf "$T"' EXIT
+for _ in $(seq 50); do [ -s "$ZS/port" ] && break; sleep 0.1; done
+printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
+"$HQ" feed zulip --dry-run | grep -q "3 messages, 2 conversations (dry run" && [ ! -e "$T/root/secretary/feed/state.json" ] && ok "feed --dry-run: reads, saves nothing" || fail "feed dry run"
+FJ="$("$HQ" feed zulip --no-sort --json)"
+echo "$FJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==3 and r["conversations"]==2 and len(r["items"])==2, r' && ok "feed zulip: one item per conversation" || fail "feed items"
+FA="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][0])')"; FB="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][1])')"
+hqi inbox --json | python3 -c '
+import json,sys
+x={n["id"]:n for n in json.load(sys.stdin)["items"]}["'"$FA"'"]
+assert x["via"]=="zulip" and x["state"]=="unsorted" and x["msgs"]==[100,101], x
+t=x["text"].split("\n")
+assert t[0].startswith("Zulip · DM with Alice Wu · http://127.0.0.1:") and "#narrow/dm/7-Alice-Wu" in t[0], t
+assert t[1].endswith("Alice Wu: the 4.2.7 perf plan passed on rc3") and t[2].endswith("me: great, thanks"), t' && ok "feed item: conversation link, who said what, own lines as context" || fail "feed item text"
+ls "$T"/root/secretary/feed/zulip/*.jsonl >/dev/null && [ "$(cat "$T"/root/secretary/feed/zulip/*.jsonl | wc -l | tr -d ' ')" = 3 ] && ok "feed keeps the raw messages locally" || fail "feed raw"
+! grep -q secret "$T/root/secretary/feed/state.json" && ok "feed state holds no key" || fail "key in state"
+answer '{"kind":"note","task":"'"$ITA"'","text":"Alice on Zulip: 4.2.7 perf plan passed on rc3","confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$FA" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["task"]=="'"$ITA"'", x' && card "$ITA" | grep -q "Alice on Zulip: 4.2.7 perf plan" && grep -q "reached the user on Zulip" "$FAKE_DIR/args" && ok "feed sort: a confident log line is filed, with the feed's prompt" || fail "feed note"
+card "$ITA" | grep -q "#narrow/dm/7-Alice-Wu" && ok "feed sort: the conversation link becomes a ref" || fail "feed ref"
+answer '{"kind":"todo","task":"'"$ITB"'","owner":"me","text":"Review the release notes (Bob)","confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$FB" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and x["dest"]["kind"]=="todo", x' && ! card "$ITB" | grep -q "release notes" && ok "feed sort: a todo waits for a click, however sure" || fail "feed todo waits"
+[ -z "$("$HQ" feed zulip --json --no-sort | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["items"]))')" ] && ok "feed: the next scan starts after the last message" || fail "feed cursor"
+zmsg 103 dm 7 "Alice Wu" "lunch?"
+zmsg 104 dm 1 "Me" "sure"
+answer '{"kind":"skip","confidence":0.9,"reason":"chit-chat","alternatives":[]}'
+FC="$("$HQ" feed zulip --claude "$FAKE" --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==2 and r["skipped"]==1, r; print(r["items"][0])')" && ok "feed zulip sorts what it adds; a skip is counted" || fail "feed sort run"
+! hqi inbox --json | grep -q "\"$FC\"" && hqi inbox --all --json | grep -q "\"$FC\"" && ok "a skipped item is hidden from the board, kept for --all" || fail "skip hidden"
+hqi inbox restore --json -- "$FC" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and not x["skipped"], x' && ok "a skipped item can be restored" || fail "skip restore"
+zmsg 105 dm 1 "Me" "one more thing"
+[ "$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["messages"], len(r["items"]))')" = "1 0" ] && ok "feed: a conversation with only your own new lines adds nothing" || fail "feed own only"
+"$HQ" feed | grep -q "zulip: last scan .*1 messages" && ok "feed status shows the last scan" || fail "feed status"
+printf '[api]\nemail=me@example.com\nkey=wrong\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
+{ "$HQ" feed zulip 2>&1 || true; } | grep -q "HTTP 401 bad key" && ok "feed: a Zulip error is reported" || fail "feed error"
+kill "$ZPID" 2>/dev/null; wait "$ZPID" 2>/dev/null || true; rm -f "$HOME/.zuliprc"
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

@@ -447,6 +447,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "secretary-send": return await secretary.send(str("text"))
         case "secretary-stop": return secretary.stop()
         case "secretary-reports": return await secretary.setReports(on: body["on"] as? Bool == true)
+        case "secretary-feed": return await secretary.setFeed(on: body["on"] as? Bool == true)
+        case "secretary-feed-now": return await secretary.feedNow()
         case "jobs": return (JobsController.shared.list(), nil)
         case "job-save": return await JobsController.shared.save(body["job"] as? [String: Any] ?? [:])
         case "job-enable": return await JobsController.shared.setEnabled(str("id"), body["on"] as? Bool ?? false)

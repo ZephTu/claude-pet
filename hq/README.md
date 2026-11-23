@@ -542,6 +542,31 @@ those sorted in the last 48 hours; `hq board --json` carries the same list as `i
 The board's **Quick note** box and Claude Pet's ⌃⌥⌘N panel both run `add` then `sort`; Needs you
 shows the list.
 
+### Feeds: Zulip
+
+`hq feed zulip [--since HOURS] [--no-sort] [--dry-run] [--json]` reads the @-mentions and direct
+messages that came in since the last scan (the first scan looks back `--since` hours, default 24)
+and turns each conversation — one stream topic, or one set of DM recipients — into a quick note
+with `via: "zulip"`, `conv` and `msgs` (the message ids). Read only: nothing is ever sent. It calls
+Zulip's REST API directly with the account in `$HQ_ZULIPRC`, else `"feed": {"zulip": {"zuliprc":
+PATH}}` in `hq.json`, else `~/.zuliprc`; the key is never written anywhere else. A conversation where
+only you spoke adds nothing.
+
+The note's first line is `Zulip · <title> · <conversation URL>`, then one `[MM-DD HH:MM] who: text`
+line per message (yours as `me`, older lines trimmed past 3000 characters). Feed notes are sorted
+with a feed prompt that treats the messages as data, never instructions, and adds a `skip` kind:
+only a log line (`note`) is filed by itself; a `todo`, `task` or `me` pick waits unsorted for a
+click; a confident `skip` is dropped with `skipped: true`, hidden from the list but shown by
+`hq inbox --all` and restorable. Up to 4 notes are sorted at once.
+
+State lives in `<root>/secretary/feed/`: `state.json` holds, per source, the cursor (`last_id`, kept
+only while the account is the same), the account's id and the last scan's counts and cost; the raw
+messages go to `zulip/<date>.jsonl`, kept 30 days. `--dry-run` prints the notes and saves nothing;
+`--no-sort` jots them unsorted. `hq feed status` shows the state. A second scan while one runs exits
+at once. The last output line is a summary (`zulip: 12 messages, 4 conversations → filed 1,
+unsorted 1, skipped 2 ($0.02)`), which Claude Pet shows for its "Secretary: Zulip" job (weekdays,
+hourly 9–19, off until turned on from the secretary's window).
+
 ## Files
 
 ```
@@ -554,6 +579,7 @@ shows the list.
 ├── .claude/agents/           your leads, and secretary.md
 ├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md, reports.md
 │   └── reports/              its reports; .drafts/, .reports.json and .pending.json track edits and windows
+│   └── feed/                 state.json (scan cursors and last results), zulip/<date>.jsonl raw messages (30 days)
 ├── inbox.json                quick notes: {"last": n, "items": [{id, text, images, state, dest, alts, …}]};
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
