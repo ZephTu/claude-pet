@@ -3111,7 +3111,9 @@ PEEK_RECENT = 600   # a Peek this many seconds before the jump counts as "read i
 
 
 def jump_summary(days, now=None):
-    """Jumps of the last `days` days from the pet's jump log, counted by state x source."""
+    """Jumps of the last `days` days from the pet's jump log, counted by state x source. A click
+    that opened the session's task on the board instead (terminal "board", Settings → "Clicking a
+    Session Opens") is no jump to a terminal: counted apart, as boardOpens."""
     since = (now or time.time()) - days * 86400
     events = []
     try:
@@ -3128,6 +3130,8 @@ def jump_summary(days, now=None):
                     events.append(e)
     except FileNotFoundError:
         pass
+    board_opens = sum(1 for e in events if e.get("terminal") == "board")
+    events = [e for e in events if e.get("terminal") != "board"]
     grid, by_state, by_source, peeked = {}, {}, {}, {}
     for e in events:
         st, src = (str(e.get(k)) if e.get(k) not in (None, "") else "?" for k in ("state", "source"))
@@ -3138,7 +3142,7 @@ def jump_summary(days, now=None):
         if isinstance(e.get("peekedAgo"), int) and e["peekedAgo"] <= PEEK_RECENT:
             peeked[st] = peeked.get(st, 0) + 1
     order = lambda known, seen: [k for k in known if k in seen] + sorted(k for k in seen if k not in known)
-    return {"days": days, "total": len(events), "grid": grid, "byState": by_state, "bySource": by_source,
+    return {"days": days, "total": len(events), "boardOpens": board_opens, "grid": grid, "byState": by_state, "bySource": by_source,
             "peekedFirst": peeked, "states": order(JUMP_STATES, by_state),
             "sources": order(JUMP_SOURCES, by_source)}
 
@@ -3148,8 +3152,10 @@ def cmd_jumps(args):
     if args.json:
         print(json.dumps(r, ensure_ascii=False, indent=1))
         return
+    opens = (f"; {r['boardOpens']} clicks opened the task on the board instead, not counted"
+             if r["boardOpens"] else "")
     if not r["total"]:
-        print(f"no jumps in the last {args.days} days (log: {PET_JUMPS})")
+        print(f"no jumps in the last {args.days} days (log: {PET_JUMPS}){opens}")
         return
     cols = r["sources"]
     w = max([len("state")] + [len(x) for x in r["states"]])
@@ -3160,7 +3166,7 @@ def cmd_jumps(args):
         print(f"{st:<{w}}  " + "  ".join(f"{row.get(c, 0) or '.':>{len(c)}}" for c in cols)
               + f"  {r['byState'][st]:>5}  {r['peekedFirst'].get(st, 0):>6}")
     print(f"{'total':<{w}}  " + "  ".join(f"{r['bySource'][c]:>{len(c)}}" for c in cols) + f"  {r['total']:>5}")
-    print(f"\npeeked = its Peek was open on the board in the {PEEK_RECENT // 60} minutes before the jump")
+    print(f"\npeeked = its Peek was open on the board in the {PEEK_RECENT // 60} minutes before the jump{opens}")
 
 
 def find_transcript(prefix):

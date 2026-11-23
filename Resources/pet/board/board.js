@@ -79,7 +79,7 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
-  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null,
+  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
   drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
@@ -376,9 +376,12 @@ async function loadFlags() {
 // From the pet: a click on a session opens its task here (Settings → "Clicking a session on the
 // pet opens"), with that session picked out and its conversation open.
 window.hqReveal = (id, sid) => refresh().then(() => {
-  if (sid && id && id !== secId() && taskById(id)) ui.hlSession = sid;
+  clearTimeout(ui.hlTimer);   // a second click soon after the last Peek closed: keep the new pick
+  ui.hlSession = sid && id && id !== secId() && taskById(id) ? sid : null;
+  // Draw the pick first: revealTask only scrolls to a card already in Focus, without a redraw.
+  render();
   if (id) revealTask(id);
-  if (ui.hlSession === sid && sid) openPeek(sid);
+  if (ui.hlSession) openPeek(sid);
 });
 
 // ------------------------------------------------------------------ render
@@ -2129,7 +2132,8 @@ function closePeek() {
   if (ui.hlSession && ui.modal && ui.modal.sid === ui.hlSession) {
     const sid = ui.hlSession;
     requestAnimationFrame(() => { const row = document.querySelector(".bsess.hl, .fs.hl"); if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
-    setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
+    clearTimeout(ui.hlTimer);
+    ui.hlTimer = setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
   }
   ui.modal = null;
   $("#modal").hidden = true;

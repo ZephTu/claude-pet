@@ -68,7 +68,9 @@ too. One JSON object per line: `at`, `session`, `source`, `state`, and when know
 (board tab), `task`, `project`, `context` (% of the auto-compact window), `waited` (seconds in
 that state; for `interrupted`, since it went quiet), `peekedAgo` (seconds since its Peek was
 last opened — refreshes while open don't count — since the pet started), `terminal` (left out when
-none was found).
+none was found; `board` when the click opened the session's task on the board instead — Settings →
+"Clicking a Session Opens". Those are not jumps to a terminal: `hq jumps` leaves them out of the
+counts and reports them as `boardOpens`).
 
 Re-run `hq/install.sh` to upgrade. `hq/uninstall.sh` removes hooks, commands and CLI and
 leaves your cards alone.

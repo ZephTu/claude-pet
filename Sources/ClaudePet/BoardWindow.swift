@@ -15,6 +15,11 @@ final class BoardWindow: NSWindow {
     /// Retained for as long as the web view: WKWebView does not own it.
     private let scheme: PetSchemeHandler?
     private let bridge = BoardBridge()
+    /// Whether the page has finished loading. Until then a script run on it finds none of its
+    /// functions: what `present` asks for waits in `pending` (the last ask wins) — otherwise the
+    /// first click after launch, or after a language change, opened the board but not the task.
+    private var loaded = false
+    private var pending: String?
 
     init() {
         let config = WKWebViewConfiguration()
@@ -39,6 +44,7 @@ final class BoardWindow: NSWindow {
         isReleasedWhenClosed = false
         minSize = NSSize(width: 760, height: 480)
         contentView = webView
+        webView.navigationDelegate = self
         // See PetPanel: handlers go on the view's live configuration copy.
         webView.configuration.userContentController.addScriptMessageHandler(
             bridge, contentWorld: .page, name: "hq")
@@ -55,7 +61,13 @@ final class BoardWindow: NSWindow {
     /// The language changed: reload whatever page is showing, in the new one.
     func reloadForLanguage() {
         webView.configuration.userContentController.installLanguageScript()
+        loaded = false
         webView.reload()
+    }
+
+    /// Runs a script on the page now, or once it has loaded.
+    private func run(_ script: String) {
+        if loaded { webView.evaluateJavaScript(script) } else { pending = script }
     }
 
     /// Brings the board forward and gives it the keyboard. The pet is an
@@ -75,15 +87,15 @@ final class BoardWindow: NSWindow {
         orderFrontRegardless()
         makeKey()
         if task.isEmpty {
-            webView.evaluateJavaScript("window.hqRefresh && window.hqRefresh();")
+            run("window.hqRefresh && window.hqRefresh();")
         } else if task == "jobs" {
-            webView.evaluateJavaScript("window.hqShowJobs && window.hqShowJobs();")
+            run("window.hqShowJobs && window.hqShowJobs();")
         } else {
             // Ids look like T-123; anything else is not passed into the page.
             let safe = task.range(of: #"^T-\d+$"#, options: .regularExpression) != nil ? task : ""
             // Session ids are uuids; the same rule.
             let sid = session.range(of: #"^[0-9A-Za-z-]+$"#, options: .regularExpression) != nil ? session : ""
-            webView.evaluateJavaScript("window.hqReveal && window.hqReveal('\(safe)', '\(sid)');")
+            run("window.hqReveal && window.hqReveal('\(safe)', '\(sid)');")
         }
     }
 
@@ -1249,6 +1261,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                     continuation.resume(returning: Result(status: -1, out: "", err: error.localizedDescription))
                 }
             }
+        }
+    }
+}
+
+extension BoardWindow: WKNavigationDelegate {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loaded = true
+        if let script = pending {
+            pending = nil
+            webView.evaluateJavaScript(script)
         }
     }
 }
