@@ -39,6 +39,9 @@ captured automatically and sessions don't get the task rules.
 
 **Reading:** `hq sessions` / `hq peek` (and the board's Sessions column) read live sessions'
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
+`hq sessions --json` gives each one's `finished` — `{task, status, at}` once that session's own
+hq-update moved its task from open to done or abandoned (the board then applies its
+"Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
 `{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`),
 `turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply
@@ -441,7 +444,7 @@ small and reports in a fixed shape. Small tasks don't need one — the bound ses
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point
 ├── config.json               {"root": "<root>"}
-└── state/sessions.json       session id → bound task, delivery cursor, turn start
+└── state/sessions.json       session id → bound task, delivery cursor, turn start, finished
 ```
 
 `hq board --json` is the read API for UIs (the Claude Pet panel uses it); `hq ask resolve`,
