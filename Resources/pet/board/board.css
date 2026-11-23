@@ -519,6 +519,16 @@ main { height: calc(100% - 46px - 30px); }
 .sp { color: var(--faint); } .sp::before { content: "· "; }
 .sp.warn b, .sp.warn { color: var(--amber); } .sp.bad b, .sp.bad { color: var(--red); }
 .sgroup.jump { cursor: pointer; } .sgroup.jump:hover { color: var(--text); }
+/* Ask before stopping a finished task's sessions */
+#confirm { position: fixed; inset: 0; background: var(--scrim); z-index: 22; display: flex;
+  align-items: center; justify-content: center; padding: 28px; }
+#confirm[hidden] { display: none; }
+#confirm .panel { width: min(520px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 18px 20px;
+  background: var(--bg); border-radius: 14px; box-shadow: var(--shadow), 0 0 0 1px var(--line); }
+.cf-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+.cf-list li { display: flex; align-items: center; gap: 8px; }
+.cf-remember { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12.5px; cursor: pointer; }
+.cf-btns { justify-content: flex-end; gap: 8px; }
 /* Settings window */
 #settings { position: fixed; inset: 0; background: var(--scrim); z-index: 18; display: flex;
   align-items: center; justify-content: center; padding: 28px; }

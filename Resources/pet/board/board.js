@@ -1469,15 +1469,49 @@ async function stopAll(list, lead = "") {
   toast(lead + (errs.length ? T(`Stopped ${ok}; ${errs.join("; ")}`, `已停止 ${ok} 个；${errs.join("；")}`) : T(`stopped ${ok} session${ok === 1 ? "" : "s"} — conversations are kept`, `已停止 ${ok} 个 session——对话保留`)), errs.length > 0);
   await refresh();
 }
-// Finishing a task here (done or abandoned) ends its live sessions too: picking the status is the
-// decision, so no second click. Conversations are kept and Resume picks them up. A task finished
-// elsewhere (a session's own hq-update, `hq set`) only gets the "still running" bar.
+// Finishing a task here (done or abandoned) while it has live sessions asks whether to stop them
+// too, unless an answer was remembered (Settings → Sessions changes it). Conversations are kept and
+// Resume picks them up. A task finished elsewhere (a session's own hq-update, `hq set`) only gets
+// the "still running" bar.
+const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
 async function setStatus(id, status) {
   const live = isOpen({ status }) ? [] : liveFor(id);
-  if (!live.length) return act("set", { task: id, fields: [`status=${status}`] }, T("Status saved", "状态已保存"));
   try { await api("set", { task: id, fields: [`status=${status}`] }); }
   catch (e) { toast(String(e.message || e), true); return refresh(); }
-  return stopAll(live, T("Status saved; ", "状态已保存；"));
+  if (live.length && finishStop() === "stop") return stopAll(live, T("Status saved; ", "状态已保存；"));
+  toast(T("Status saved", "状态已保存"));
+  await refresh();
+  if (live.length && finishStop() === "ask") { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
+}
+// The question, in its own small window over the board. Its list is the task's sessions at the
+// moment of answering, not of asking.
+function drawFinishAsk() {
+  const box = $("#confirm");
+  const a = ui.finishAsk;
+  const live = a ? liveFor(a.task) : [];
+  if (!a || !live.length) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
+  const word = esc(STATUS_SHORT[a.status] || a.status);
+  const n = live.length;
+  box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Stop its sessions?", "停掉它的 session？")}">
+    <div class="stitle">${T(`${esc(a.task)} is ${esc(a.status)} — stop ${n === 1 ? "its session" : `its ${n} sessions`} too?`, `${esc(a.task)} ${word}，要把它的 ${n} 个 session 也停掉吗？`)}</div>
+    <div class="meta">${T("Their Claude Code processes end; conversations are kept and Resume picks them up.", "结束它们的 Claude Code 进程；对话保留，之后可以 Resume 续上。")}</div>
+    <ul class="cf-list">${live.map((s) => `<li><span class="dot ${dotClass(s)}"></span>${esc(s.title || s.project || s.sessionId.slice(0, 8))} <span class="meta">${esc(statusWord(s))}</span></li>`).join("")}</ul>
+    <label class="cf-remember"><input type="checkbox" id="cf-remember"> ${T("Remember my answer and don't ask again (Settings → Sessions changes it)", "记住我的选择，以后不再问（可以在 设置 → Sessions 里改）")}</label>
+    <div class="row cf-btns"><button class="btn ghost" data-action="finish-keep">${T("Leave them running", "不停")}</button>
+      <button class="btn primary" data-action="finish-stop">${n === 1 ? T("Stop it", "停掉") : T("Stop all", "全部停掉")}</button></div>
+  </div>`;
+  box.hidden = false;
+  box.querySelector("[data-action=finish-stop]").focus();
+}
+function answerFinishAsk(stop) {
+  const a = ui.finishAsk;
+  const remember = stop !== null && $("#cf-remember") && $("#cf-remember").checked;
+  if (remember) savePref("hq-finish-stop", stop ? "stop" : "keep");
+  ui.finishAsk = null;
+  drawFinishAsk();
+  const live = a && stop ? liveFor(a.task) : [];
+  if (live.length) return stopAll(live, remember ? T("Remembered; ", "已记住；") : "");
+  if (remember) { toast(T("Remembered — finishing a task leaves its sessions running", "已记住——以后结束任务时不停 session")); render(); }
 }
 
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.
@@ -1655,6 +1689,8 @@ function renderSessionSettings() {
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
     ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
+    ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
+      `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
     ${row(T("Active first", "活跃的在前"), T("Tasks (and project groups) with a live session come first, most recently active first. Off: your own order", "有 session 在跑的任务（和项目组）排最前，最近有动静的在前。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
   </div>`;
@@ -2061,6 +2097,7 @@ setInterval(() => {
 
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
+  if (ui.finishAsk && ev.target === $("#confirm")) return answerFinishAsk(null);
   if (ui.modal && ev.target === $("#modal")) closePeek();
   if (ui.settings && ev.target === $("#settings")) closeSettings();
 });
@@ -2912,6 +2949,8 @@ document.addEventListener("click", async (ev) => {
       ui.stopArmed = null;
       return act("stop-session", { session: d.session }, T("Stopped — its conversation is kept", "已停止——对话保留"));
     case "stop-task-sessions": return stopMany(liveFor(d.task), "task:" + d.task, T(`${d.task}'s sessions`, ` ${d.task} 的 session`));
+    case "finish-stop": return answerFinishAsk(true);
+    case "finish-keep": return answerFinishAsk(false);
     case "stop-strays": return stopMany(strays(), "strays", T("the sessions on finished tasks", "已结束任务上的 session"));
     case "stop":
       // WKWebView shows no confirm() dialog, so confirm with a second click instead.
@@ -2970,6 +3009,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "finish-stop-pref") { savePref("hq-finish-stop", el.value); return render(); }
   if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
   if (["set-status", "set-project", "set-category"].includes(d.action)) {
@@ -3034,6 +3074,7 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
+  if (ev.key === "Escape" && ui.finishAsk) { ev.preventDefault(); return answerFinishAsk(null); }
   if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
