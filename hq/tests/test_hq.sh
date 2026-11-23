@@ -1250,6 +1250,79 @@ echo "mine" >> "$T/root/.claude/agents/secretary.md"; "$HQ" secretary init --jso
 tail -1 "$T/root/.claude/agents/secretary.md" | grep -q mine && ok "init keeps an edited agent definition" || fail "edited agent overwritten"
 rm "$T/root/secretary/reports.md"; "$HQ" report daily --no-gh >/dev/null; grep -q "报告格式" "$T/root/secretary/reports.md" && ok "hq report remakes a missing reports.md" || fail "reports.md remade"
 
+# hq inbox: quick notes, sorted by a (fake) cheap model; a move takes back exactly what it wrote.
+# Run as the pet runs it where that is possible: /usr/bin/python3 is 3.9 on macOS, whose argparse
+# handles positionals after options differently from newer ones.
+hqi() { if [ -x /usr/bin/python3 ]; then /usr/bin/python3 "$HQ" "$@"; else "$HQ" "$@"; fi; }
+export FAKE_DIR="$T/fake"; mkdir -p "$FAKE_DIR"
+FAKE="$T/fake-claude"
+cat > "$FAKE" <<'SH'
+#!/bin/bash
+printf '%s\n' "$@" > "$FAKE_DIR/args"; cat > "$FAKE_DIR/stdin"; echo "${HQ_HOOK_CHILD:-}" > "$FAKE_DIR/env"
+[ -f "$FAKE_DIR/slow" ] && sleep 2
+[ -f "$FAKE_DIR/junk" ] && { echo "model overloaded" >&2; exit 1; }
+printf '{"structured_output": %s, "total_cost_usd": 0.002}' "$(cat "$FAKE_DIR/answer")"
+SH
+chmod +x "$FAKE"
+answer() { echo "$1" > "$FAKE_DIR/answer"; }
+ITA="$("$HQ" new "Inbox target A" | head -1)"; ITB="$("$HQ" new "Inbox target B" | head -1)"
+card() { cat "$T"/root/tasks/"$1"-*/TASK.md; }
+NSEC="$("$HQ" secretary --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+hqi inbox add --json -- "-n fix the flaky login test" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["id"]=="N-001" and x["state"]=="unsorted" and x["via"]=="cli" and x["text"]=="-n fix the flaky login test", x' && ok "inbox add: N-001, unsorted, text kept as typed" || fail "inbox add"
+answer '{"kind":"todo","task":"'"$ITA"'","owner":"claude","text":"Fix the flaky login test","confidence":0.9,"reason":"about A","alternatives":[{"kind":"note","task":"'"$ITB"'","text":"flaky login test"}]}'
+hqi inbox sort --claude "$FAKE" --json N-001 | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["kind"]=="todo" and x["task"]=="'"$ITA"'" and x["alts"][0]["task"]=="'"$ITB"'" and x["cost"]==0.002 and "undo" not in x, x' && ok "inbox sort: a confident answer is filed at once" || fail "inbox sort confident"
+card "$ITA" | grep -q -- "- \[ \] @claude Fix the flaky login test" && ok "inbox sort: the todo lands on the card" || fail "sorted todo not on card"
+grep -qx -- "--model" "$FAKE_DIR/args" && grep -qx haiku "$FAKE_DIR/args" && grep -qx -- "--tools" "$FAKE_DIR/args" && [ "$(cat "$FAKE_DIR/env")" = 1 ] && grep -q "$ITA | Inbox target A" "$FAKE_DIR/stdin" && grep -q "fix the flaky login test" "$FAKE_DIR/stdin" && ok "sorter: haiku, no tools, hooks off, open tasks and the note in the prompt" || fail "sorter call"
+hqi inbox move --json --task="$ITB" -- N-001 note >/dev/null
+! card "$ITA" | grep -q "flaky login" && card "$ITB" | grep -q ": flaky login test" && ok "inbox move: takes the todo back, logs on the other task" || fail "inbox move to note"
+hqi inbox --json | python3 -c 'import json,sys; x=[n for n in json.load(sys.stdin)["items"] if n["id"]=="N-001"][0]; assert x["alts"][0]["kind"]=="todo" and x["alts"][0]["task"]=="'"$ITA"'" and x["by"]=="user", x' && ok "inbox move: where it was becomes the first alternative" || fail "old dest not kept"
+{ hqi inbox drop N-001 2>&1 || true; } | grep -q "is filed" && ok "inbox drop refuses a filed note" || fail "drop filed"
+hqi inbox move -- N-001 unsorted | grep -q "N-001 → unsorted" && ! card "$ITB" | grep -q "flaky login" && ok "inbox move to unsorted: takes the log line back" || fail "move unsorted"
+hqi inbox drop --json -- N-001 | grep -q '"state": "dropped"' && hqi inbox restore --json -- N-001 | grep -q '"state": "unsorted"' && ok "inbox drop, then restore" || fail "drop/restore"
+# Not sure: stays unsorted, with the guess; filing it by hand as a new task, then taking that back.
+hqi inbox add -- "maybe try duckdb for the report" >/dev/null
+answer '{"kind":"task","title":"Try DuckDB for the report","text":"Try DuckDB","project":"nope","confidence":0.4,"reason":"unclear","alternatives":[]}'
+N_BEFORE="$(ls "$T/root/tasks" | wc -l)"
+hqi inbox sort --claude "$FAKE" --json N-002 | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and x["dest"]["title"]=="Try DuckDB for the report" and "project" not in x["dest"], x' && [ "$(ls "$T/root/tasks" | wc -l)" = "$N_BEFORE" ] && ok "inbox sort: unsure stays unsorted with its guess; an unknown project is left out" || fail "sort unsure"
+NT="$(hqi inbox move --json -- N-002 task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted", x; print(x["task"])')"
+card "$NT" | grep -q "Created from quick note N-002" && card "$NT" | grep -q "> maybe try duckdb for the report" && ok "inbox move to task: a new card with the note quoted" || fail "move to task"
+hqi inbox move -- N-002 unsorted >/dev/null
+! ls -d "$T"/root/tasks/"$NT"-* >/dev/null 2>&1 && ok "taking back an untouched new card removes it" || fail "new card not removed"
+NT="$(hqi inbox move --json -- N-002 task | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+"$HQ" log "$NT" "started on it" >/dev/null
+hqi inbox move -- N-002 unsorted | grep -q "N-002 → unsorted" && card "$NT" | grep -q "^status: abandoned" && ok "taking back a card that was worked on abandons it instead" || fail "edited card kept"
+hqi inbox move --json -- N-002 me | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["task"]=="'"$NSEC"'", x' && card "$NSEC" | grep -q -- "- \[ \] @me Try DuckDB" && ok "inbox move to me: an @me todo on the secretary's card" || fail "move to me"
+{ hqi inbox move --task=T-999 -- N-002 todo 2>&1 || true; } | grep -q "no such open task" && ok "inbox move to a task that doesn't exist is refused" || fail "move to missing task"
+# Refs: only those in the note; a titled ref already on the card is left as it is.
+"$HQ" ref add "$ITA" -- "PR 5 https://example.com/pull/5" >/dev/null
+hqi inbox add -- "review said https://example.com/pull/5 needs a test, see https://example.com/doc" >/dev/null
+answer '{"kind":"note","task":"'"$ITA"'","text":"PR 5 needs a test","refs":["https://example.com/pull/5","https://made.up/x"],"confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" N-003 >/dev/null
+card "$ITA" | grep -q "PR 5 https://example.com/pull/5" && card "$ITA" | grep -q "https://example.com/doc" && ! card "$ITA" | grep -q "made.up" && ok "refs: only links in the note, the titled one kept" || fail "inbox refs"
+hqi inbox move -- N-003 unsorted >/dev/null
+card "$ITA" | grep -q "PR 5 https://example.com/pull/5" && ! card "$ITA" | grep -q "example.com/doc" && ok "taking a note back removes only the refs it added" || fail "refs undo"
+touch "$FAKE_DIR/junk"; hqi inbox add -- "something" >/dev/null
+hqi inbox sort --claude "$FAKE" --json N-004 | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and "overloaded" in x["error"], x' && ok "a failed sort leaves the note unsorted with the error" || fail "sort error"
+rm "$FAKE_DIR/junk"
+"$HQ" board --json | python3 -c 'import json,sys; b=json.load(sys.stdin)["inbox"]; assert [x["id"] for x in b]==["N-004","N-003","N-002","N-001"] and all("undo" not in x for x in b), b' && ok "board --json carries the inbox, newest first" || fail "board inbox"
+hqi inbox | grep -q "^N-002 " && ok "inbox lists notes" || fail "inbox list"
+# The board's argument order: every option first, the action word after "--".
+hqi inbox --json --via=board -- add "-x from the board" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["id"]=="N-005" and x["via"]=="board" and x["text"]=="-x from the board", x' && ok "inbox: options first, then -- add TEXT (the board's form)" || fail "board arg order"
+# A sort that fails after the note was moved by hand leaves the move alone.
+touch "$FAKE_DIR/junk" "$FAKE_DIR/slow"
+hqi inbox sort --claude "$FAKE" N-005 >/dev/null 2>&1 & SORT_PID=$!
+for _ in $(seq 50); do grep -q '"state": "sorting"' "$T/root/inbox.json" && break; sleep 0.1; done
+hqi inbox --json --text=board-note -- move N-005 me >/dev/null
+wait "$SORT_PID"; rm -f "$FAKE_DIR/junk" "$FAKE_DIR/slow"
+hqi inbox --json | python3 -c 'import json,sys; x=[n for n in json.load(sys.stdin)["items"] if n["id"]=="N-005"][0]; assert x["state"]=="sorted" and not x.get("error"), x' && [ "$(card "$NSEC" | grep -c "@me board-note")" = 1 ] && ok "a sort failing after a hand move leaves the move in place" || fail "sort error over move"
+# Pruned by the last change: an old note dropped today can still be restored.
+hqi inbox add -- "an old thought" >/dev/null
+python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); [x.update(at="2020-01-01T00:00:00Z") for x in d["items"] if x["id"]=="N-006"]; json.dump(d, open(p,"w"))' "$T/root/inbox.json"
+hqi inbox drop -- N-006 >/dev/null && hqi inbox restore --json -- N-006 | grep -q '"state": "unsorted"' && ok "an old note dropped today can still be restored" || fail "old note pruned"
+# A note can't be filed onto the card it made itself (taking it back would delete that card).
+NT2="$(hqi inbox move --json --title="Card from a note" -- N-006 task | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+{ hqi inbox move --task="$NT2" -- N-006 note 2>&1 || true; } | grep -q "was made from N-006" && ls -d "$T"/root/tasks/"$NT2"-* >/dev/null 2>&1 && ok "filing a note onto the card it created is refused, the card stays" || fail "self card move"
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

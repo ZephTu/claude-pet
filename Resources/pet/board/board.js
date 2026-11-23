@@ -80,7 +80,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -120,6 +120,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 // reloads when the language changes).
 if (LANG === "zh") {
   $("#search").placeholder = "筛选任务";
+  $("#capture").placeholder = "记一笔…（回车）";
+  $(".capture").title = "记一句话、一个链接或粘贴一张截图；回车后自动分拣（新任务、某个任务的待办或记录、你的待办），去向在 Needs you 里看";
   $("#search").title = "三个页面都筛选：任务按编号、标题、关联、分类、项目；问题和待办也按自己的文字";
   $("#new-task").textContent = "新建任务";
   $("#secretary-btn").textContent = "秘书";
@@ -613,7 +615,7 @@ function render() {
   // (Scheduled has none: its jobs are only read while that page is showing.)
   const tabN = { today: focusIds().filter((id) => id !== secId()).length, all: listed().filter(isOpen).length, needs: need };
   $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
-    `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="${T("Unanswered asks and your todos", "未回应的问题和你的待办")}"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
+    `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="${T("Unanswered asks, your todos and unsorted notes", "未回应的问题、你的待办和未分拣的记录")}"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
   $("#all").hidden = ui.mode !== "all";
   $("#needs").hidden = ui.mode !== "needs";
@@ -624,6 +626,8 @@ function render() {
     $("#today-sessions").innerHTML = renderTodaySessions();
     $("#newtask-form").innerHTML = ""; delete $("#newtask-form").dataset.drawn;
   }
+  $("#notes").innerHTML = renderNotes();
+  renderCaptureAtts();
   $("#asks").innerHTML = renderAsks();
   $("#mytodos").innerHTML = renderMyTodos();
   $("#newtask-form").hidden = !ui.newTask || ui.mode === "today";
@@ -688,7 +692,7 @@ function paintTaskIds() {
 // What Needs you holds: unanswered asks (not the ones put off till later) and your open todos.
 function needCount() {
   const open = tasks().filter(isOpen);
-  return tasks().reduce((n, t) => n + openAsks(t).length, 0) +
+  return unsortedNotes().length + tasks().reduce((n, t) => n + openAsks(t).length, 0) +
     open.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
 }
 // The status bar at the bottom: where things stand, at a glance — sessions by state, tasks by
@@ -700,13 +704,15 @@ function renderCounts() {
   const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
   const mine = all.reduce((n, t) => n + t.todos.filter((x) => x.state === "open" && x.owner === "me").length + (t.waiting_on_me ? 1 : 0), 0);
   const part = (n, label, cls = "") => n ? `<span class="sp ${cls}"><b>${n}</b> ${label}</span>` : "";
+  const loose = unsortedNotes().length;
   // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
   // you (click → Needs you), and the quota on the right.
   $("#counts").innerHTML =
     `<span class="sgroup" title="${T("Live Claude Code sessions", "正在运行的 Claude Code session")}"><b>${ui.sessions.length}</b> ${T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session")}` +
       `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
-    (asks || mine || later ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
-      `${asks ? `<b>${asks}</b> ${T(`ask${asks === 1 ? "" : "s"}`, "个问题")}` : ""}${asks && mine ? " · " : ""}${mine ? `<b>${mine}</b> ${T(`todo${mine === 1 ? "" : "s"}`, "条待办")}` : ""}` +
+    (asks || mine || later || loose ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
+      [asks ? `<b>${asks}</b> ${T(`ask${asks === 1 ? "" : "s"}`, "个问题")}` : "", mine ? `<b>${mine}</b> ${T(`todo${mine === 1 ? "" : "s"}`, "条待办")}` : "",
+       loose ? `<b>${loose}</b> ${T(`unsorted note${loose === 1 ? "" : "s"}`, "条未分拣")}` : ""].filter(Boolean).join(" · ") +
       `${later ? `<span class="sp">${T(`${later} for later`, `${later} 条稍后再答`)}</span>` : ""}</span>` : "");
   $("#quota").innerHTML = usageChips();
 }
@@ -967,6 +973,138 @@ function renderMyTodos() {
         <div class="meta src">${r.to === "drop" ? T("won't do", "不做") : T("done", "已完成")} ${ago(new Date(r.at).toISOString())} · ${T("undo available for an hour", "1 小时内可以撤销")} · <span class="tid link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
       <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">${T("Undo", "撤销")}</button>
     </div>`).join("") + `</div>`;
+}
+
+// ---- quick notes (`hq inbox`): a line, link or screenshot jotted in the header box or with the
+// pet's shortcut (⌃⌥⌘N). A cheap model files it — a new task, a todo or a log line on a task, or
+// your own todo — and what it isn't sure of waits here. Every note can be moved with a click.
+const notes = () => (ui.board && ui.board.inbox) || [];
+const unsortedNotes = () => notes().filter((x) => x.state === "unsorted");
+function destLabel(d) {
+  if (!d || d.kind === "unsorted") return T("unsorted", "未分拣");
+  if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
+  if (d.kind === "todo") return `${d.task} ${T("todo", "待办")} @${d.owner || "me"}`;
+  if (d.kind === "note") return `${d.task} ${T("log", "记录")}`;
+  return T("your todo", "我的待办");
+}
+// Where a note could go: the model's pick and its alternatives, each once.
+function noteGuesses(x) {
+  const seen = new Set(), out = [];
+  for (const d of [x.dest, ...(x.alts || [])]) {
+    if (!d || !d.kind) continue;
+    const k = [d.kind, d.task || "", d.kind === "task" ? d.title : ""].join("|");
+    if (!seen.has(k)) { seen.add(k); out.push(d); }
+  }
+  return out;
+}
+function destChip(x, d, extra = "") {
+  return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.text || d.title || "")}">${esc(destLabel(d))}</button>`;
+}
+// A title for "New task" when the model didn't offer one: the note's first line.
+function noteTitle(x) {
+  const g = noteGuesses(x).find((d) => d.kind === "task");
+  if (g) return g.title;
+  const line = String(x.text || "").split("\n")[0].trim();
+  return line.length > 60 ? line.slice(0, 59) + "…" : line || T("Quick note", "快速记录");
+}
+function renderNotes() {
+  const all = notes();
+  if (!all.length) return "";
+  const f = filterText();
+  const items = all.filter((x) => !f || [x.text, x.dest && (x.dest.text || x.dest.title), x.task].join(" ").toLowerCase().includes(f));
+  const open = unsortedNotes().length;
+  const picker = (x) => {
+    const k = "note-pick:" + x.id;
+    // Preselect the task it is filed on — not a card it created, which it can't be filed onto.
+    const pick = ui.drafts[k] || (x.dest && x.dest.kind === "task" ? "" : x.task) || "";
+    const choices = tasks().filter(isOpen).filter((t) => t.id !== secId());
+    return `<div class="qnote-pick">
+      <select data-key="${esc(k)}"><option value="">${T("Choose a task…", "选一个任务…")}</option>
+        ${choices.map((t) => `<option value="${esc(t.id)}" ${t.id === pick ? "selected" : ""}>${esc(t.id)} · ${esc(t.title)}</option>`).join("")}</select>
+      <button class="btn small" data-action="note-to-task" data-id="${esc(x.id)}" data-kind="todo" ${pick ? "" : "disabled"}>${T("As a todo", "作为待办")}</button>
+      <button class="btn small" data-action="note-to-task" data-id="${esc(x.id)}" data-kind="note" ${pick ? "" : "disabled"}>${T("As a log line", "作为记录")}</button>
+      <span class="spacer"></span>
+      ${x.dest && x.dest.kind === "task" && x.state === "sorted" ? "" : destChip(x, { kind: "task", title: noteTitle(x) })}
+      ${!secId() || (x.dest && x.dest.kind === "me" && x.state === "sorted") ? "" : destChip(x, { kind: "me" })}
+      ${x.state === "sorted" ? destChip(x, { kind: "unsorted" }, "ghost") : ""}
+    </div>`;
+  };
+  const imgs = (x) => (x.images || []).map((p, i) => `<span class="chip link" data-action="open" data-path="${esc(p)}" title="${esc(p)}">${T("image", "图")} ${i + 1}</span>`).join(" ");
+  const row = (x) => {
+    const isOpen = ui.noteOpen.has(x.id);
+    const d = x.dest;
+    let meta = "", chips = "", side = "";
+    if (x.state === "sorting") meta = `<span class="sorting">${T("Sorting…", "分拣中…")}</span>`;
+    else if (x.state === "dropped") {
+      meta = T("deleted", "已删掉");
+      side = `<button class="btn small" data-action="note-restore" data-id="${esc(x.id)}">${T("Restore", "恢复")}</button>`;
+    } else if (x.state === "unsorted") {
+      meta = x.error ? `<span class="bad">${T("Couldn't sort", "没分拣成")}: ${esc(x.error)}</span>`
+        : x.reason ? `${T("Not sure", "没把握")} · ${esc(x.reason)}` : (x.by === "user" ? T("moved back here", "改回了未分拣") : "");
+      chips = noteGuesses(x).map((g) => destChip(x, g)).join("") +
+        `<button class="chip link ghost" data-action="note-change" data-id="${esc(x.id)}">${isOpen ? T("Fewer", "收起") : T("Somewhere else…", "放别处…")}</button>`;
+      side = `<button class="icon x" title="${T("Delete (you can restore it)", "删掉（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">✕</button>`;
+    } else {
+      const tid = x.task || (d && d.task);
+      const where = d && d.kind === "task" ? T("new task", "新任务") : d && d.kind === "todo" ? `${T("todo", "待办")} @${esc(d.owner || "me")}`
+        : d && d.kind === "note" ? T("log", "记录") : T("your todo", "我的待办");
+      meta = `→ ${tid ? `<span class="tid link" data-action="goto" data-task="${esc(tid)}">${esc(tid)}</span> ` : ""}${where}: ${esc(d ? d.text || d.title || "" : "")}` +
+        `<span class="by">${x.by === "user" ? T(" · moved by you", " · 你改的") : ""}</span>`;
+      chips = isOpen ? noteGuesses(x).filter((g) => !(g.kind === d.kind && (g.task || "") === (d.task || ""))).map((g) => destChip(x, g)).join("") : "";
+      side = `<button class="btn small ${isOpen ? "" : "ghost"}" data-action="note-change" data-id="${esc(x.id)}" title="${T("Put it somewhere else", "放到别处")}">${T("Move", "改")}</button>`;
+    }
+    return `<div class="qnote it ${x.state}">
+      <div class="it-t"><span class="t">${esc(x.text)}</span> ${imgs(x)}
+        <div class="meta src">${meta}</div>
+        ${chips ? `<div class="dests">${chips}</div>` : ""}
+        ${isOpen && ["unsorted", "sorted"].includes(x.state) ? picker(x) : ""}
+      </div>
+      <span class="age" title="${esc(new Date(x.at).toLocaleString())}">${ago(x.at).replace(" ago", "").replace(/前$/, "")}</span>
+      ${side}
+    </div>`;
+  };
+  return `<div class="group-title">${T("Quick notes", "记下的")} ${open ? `<span class="n hot">${open}</span>` : ""}<span class="meta">${T("unsorted, and the last two days", "未分拣的，和最近两天的")}</span></div>${filterNote(items.length, all.length)}<div class="inbox-list notes">${items.map(row).join("")}</div>`;
+}
+// Moves a note; the toast's Undo puts it back where it was.
+async function noteMove(id, dest, quiet) {
+  const x = notes().find((n) => n.id === id);
+  const back = x && x.state === "sorted" ? x.dest : { kind: "unsorted" };
+  try {
+    const r = await apiObj("note-move", Object.assign({ id }, dest));
+    ui.noteOpen.delete(id);
+    if (!quiet) toast(`${id} → ${destLabel(r.state === "sorted" ? r.dest : null)}${r.left ? ` (${r.left})` : ""}`, false, () => noteMove(id, back, true));
+  } catch (e) { toast(String(e.message || e), true); }
+  return refresh();
+}
+async function captureSubmit() {
+  const box = $("#capture");
+  const text = box.value.trim();
+  const atts = ui.atts.capture || [];
+  const images = atts.map((a) => a.path);
+  if (!text && !images.length) return;
+  box.value = "";
+  delete ui.atts.capture;
+  saveDrafts();
+  renderCaptureAtts();
+  let x;
+  try { x = await apiObj("note-add", { text, images }); }
+  catch (e) {
+    // Put back what was typed and pasted, unless something new is already in the box.
+    if (!box.value && !(ui.atts.capture || []).length) { box.value = text; ui.atts.capture = atts; renderCaptureAtts(); }
+    return toast(String(e.message || e), true);
+  }
+  toast(T("Noted — sorting…", "记下了，正在分拣…"));
+  refresh();
+  try {
+    const r = await apiObj("note-sort", { id: x.id });
+    if (r.state === "sorted") toast(`${T("Filed", "已放到")}: ${destLabel(r.dest)}`, false, () => noteMove(r.id, { kind: "unsorted" }, true));
+    else toast(T("Not sure where it goes — it's waiting in Needs you", "没把握放哪——在 Needs you 里等你挑"));
+  } catch (e) { toast(String(e.message || e), true); }
+  refresh();
+}
+function renderCaptureAtts() {
+  const list = ui.atts.capture || [];
+  $("#capture-atts").innerHTML = list.map((a, i) => `<span class="att mini" title="${esc(a.path)}"><img src="${a.url}" alt=""><button class="icon" title="${T("Remove", "移除")}" data-action="att-remove" data-session="capture" data-i="${i}">✕</button></span>`).join("");
 }
 
 function renderWaitingUnused() {
@@ -3040,17 +3178,17 @@ document.addEventListener("paste", (ev) => {
   addImages(box.dataset.session || box.dataset.att, files);
 });
 document.addEventListener("dragover", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
   ev.preventDefault();
   zone.classList.add("dropping");
 });
 document.addEventListener("dragleave", (ev) => {
-  const zone = ev.target.closest && ev.target.closest(".send, .card.ask");
+  const zone = ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
   if (zone) zone.classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
@@ -3344,6 +3482,17 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
+    case "note-move": return noteMove(d.id, JSON.parse(d.dest));
+    case "note-to-task": {
+      // What the picker shows, preselected or chosen.
+      const sel = el.closest(".qnote-pick") && el.closest(".qnote-pick").querySelector("select");
+      const task = (sel && sel.value) || ui.drafts["note-pick:" + d.id];
+      if (task) { delete ui.drafts["note-pick:" + d.id]; return noteMove(d.id, { kind: d.kind, task }); }
+      return;
+    }
+    case "note-change": ui.noteOpen.has(d.id) ? ui.noteOpen.delete(d.id) : ui.noteOpen.add(d.id); return render();
+    case "note-drop": return act("note-drop", { id: d.id }, T("Deleted — Restore brings it back", "已删掉——点恢复可以找回"));
+    case "note-restore": return act("note-restore", { id: d.id }, T("Restored", "已恢复"));
     case "jump": return act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
     case "decide": {
       if (d.behavior === "allow" && !(ui.allowArmed && ui.allowArmed.ask === d.ask)) {
@@ -3999,7 +4148,9 @@ document.addEventListener("keydown", async (ev) => {
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
+  if (el.id === "capture" && ev.key === "Escape") { el.blur(); return; }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
+  if (el.id === "capture") { ev.preventDefault(); return captureSubmit(); }   // focus stays: jot the next one
   if (el.tagName === "TEXTAREA" && el.dataset.session) return;   // Enter is a new line; only Send sends
   if (el.dataset.field) { ev.preventDefault(); return; }   // fields save with their Save button
   if (el.dataset.enter) {

@@ -34,6 +34,7 @@
   <a href="#zh-board">All 与 Needs you</a>
   <a href="#zh-jobs">定时任务</a>
   <a href="#zh-secretary">秘书</a>
+  <a href="#zh-quick">记一笔</a>
   <a href="#zh-pet">和小猫的联动</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
@@ -83,8 +84,8 @@
 <h1 id="zh-board">All 与 Needs you</h1>
 <h2>顶栏</h2>
 <ul>
-<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>秘书</b>（见<a href="#zh-secretary">秘书</a>）、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
-<li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），旁边是 <b>记一笔</b> 输入框（见<a href="#zh-quick">记一笔</a>），右边是搜索框、<b>秘书</b>（见<a href="#zh-secretary">秘书</a>）、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
+<li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题、待办和没分拣的记录各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
 <li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
 <li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、在宠物上点击 session 时打开什么、active first。</li>
@@ -112,6 +113,7 @@
 <b>一个任务有好几个 session 时</b>：回应只送给提问的那个 session，同一任务下的其他 session 收不到，不会两边做同一件事；它们看到的"未回应的问题"里，别人问的会标注 "asked by another session on this task"。只有提问的 session 已经结束或者解绑了，回应才交给这个任务下一个开始新一轮的 session（只交给一个）。<br>
 <b>说明里带图片</b>：在说明框里 Cmd+V 粘贴截图，或把图片拖到这条问题上（PNG / JPEG / GIF / WebP，≤ 20MB），下方显示缩略图（✕ 去掉）；回应时图片路径附在说明后面，Claude 会读取它。<br>
 <b>一个任务有多条问题时一起回应</b>：同一任务下有两条以上未回应的问题时，按钮变成"选择"——点一下整个按钮填上颜色（可以 绿、以后都可以 青绿（下面展开同样的授权编辑框）、不要 红、稍后 黄、不了解背景 灰、转待办 蓝；再点取消，可以改选），不会马上发出；在某条的说明框里打字会自动选上"可以"（删光文字就取消；你手动选过的不会被改）；每条都选好后，点底部的 <b>发送 N 个回答</b>，全部记下，并合成<b>一条</b>消息发给提问的 session。底部只有一个 <b>现在发给 ‹session›</b> 勾选框，管这一组。没选的问题留着，下次再答。Undo 会把这一批全部重新打开。</li>
+<li><b>记下的</b>：在 Asks 下面，用 <b>记一笔</b> 记下、还没分拣好的记录，以及最近两天分拣过的，见<a href="#zh-quick">记一笔</a>。没有就不显示。</li>
 <li><b>Your todos</b>：所有任务里 <code>@me</code> 的待办，最新的在最前，每条标着已经等了多久（超过 3 天变黄）。点方框 = 做完；点 ✕ = 不做。</li>
 <li>Needs you 是一栏：上面是 <b>Claude is asking</b>（没有问题时只剩一行"Claude has nothing waiting on an answer from you."），下面是 <b>Your todos</b>（放了 3 天以上的，右边的时间变成橙色）。分工是：<b>Asks</b> = 需要你<b>回答</b>的问题；<b>Your todos</b> = 需要你<b>去做</b>的事（所有任务里的 <code>@me</code> 待办）。session 需要你动手时会加 <code>@me</code> 待办，需要你回答时会提 ask。</li>
 <li><b>点条目的文字</b>会打开<b>上下文窗口</b>（见下）；点任务编号标签会在 All 页的任务列表里定位到这个任务（所在的项目组折叠着、或被搜索过滤掉时会自动展开、清除）。</li>
@@ -223,10 +225,29 @@
 <li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
 </ul>
 
+<h1 id="zh-quick">记一笔</h1>
+<p>想到一件事、看到一个链接、截了一张图，不想停下手上的活去找它属于哪个任务：记一笔就走。一个便宜的模型（默认 Haiku）会看一遍所有开着的任务、项目、分类和秘书的记忆，替你决定放到哪里：</p>
+<table>
+<tr><th>放到</th><th>写成什么</th></tr>
+<tr><td><b>新任务</b></td><td>新建一张任务卡：标题、目标（你写的原话附在后面），有把握时填上项目、分类、工作目录</td></tr>
+<tr><td><b>某个任务的待办</b></td><td>那个任务里的一条待办：<code>@me</code>（你要做的）、<code>@claude</code>（session 要做的）或者同事的名字</td></tr>
+<tr><td><b>某个任务的记录</b></td><td>那个任务日志里的一行（发现、决定、数字、链接、谁说了什么）；刚关掉 14 天内的任务也可以</td></tr>
+<tr><td><b>我的待办</b></td><td>不属于任何任务的私事（"给牙医打电话"）：秘书任务卡上的一条 <code>@me</code> 待办，出现在 Your todos 里。没设置秘书时不提供这个选项</td></tr>
+</table>
+<p>记录里的链接会作为关联资源加到那个任务上；截图的路径跟着记录一起写进去。模型有把握（置信度 ≥ 0.7）就直接放好；没把握、或者太短看不懂，就留在 <b>未分拣</b>，在 Needs you 里等你挑。</p>
+<ul>
+<li><b>在哪儿记</b>：看板顶栏的 <b>记一笔</b> 输入框，回车记下（光标留在框里，可以接着记下一条；Esc 离开）。可以 Cmd+V 粘贴截图，或把图片拖到框上，框里显示小缩略图。不开看板时，用小猫菜单里的 <b>记一笔…</b>，或者在 <b>设置</b> 里打开 <b>记一笔 (⌃⌥⌘N)</b> 后按 ⌃⌥⌘N：屏幕上方弹出一个小框，不会把小猫的窗口带到前面。回车记下并关掉，Shift+回车换行，可以粘贴截图，Esc 关闭。快捷键默认关着。</li>
+<li><b>记下之后</b>：看板底部提示"已放到：T-012 待办 @me"之类，带 <b>撤销</b>；用快捷键记的，小猫会说出放到了哪里。分拣大约要几秒，期间记录显示"分拣中…"。</li>
+<li><b>Needs you 里的"记下的"</b>：没分拣的排在一起，标着黄色。每条下面是模型的猜测和备选，点一个就放过去；<b>放别处…</b> 展开一个任务下拉框（作为待办 / 作为记录），以及 <b>新任务</b>、<b>我的待办</b>；✕ 删掉（可以恢复）。分拣好的显示"→ T-012 待办 @me：…"，点 <b>改</b> 换地方：原来写进去的待办、记录和关联资源会撤回，再写到新地方；新建的任务卡会删掉（建好之后被改过的就不删，只标成已放弃）。也可以改回未分拣。原来的去处会留作备选，改错了点一下就回去。</li>
+<li>分拣好的记录在列表里留两天，之后只在 <code>hq inbox --all</code> 里看得到（保存 30 天）。顶栏的搜索框也会过滤这些记录。</li>
+<li><b>换模型</b>：<code>hq.json</code> 里写 <code>"inbox": {"model": "sonnet"}</code>，或者设环境变量 <code>HQ_INBOX_MODEL</code>。每次分拣用 <code>claude -p</code> 单独跑一次，不读你的设置和 MCP，没有工具（有截图时只能 Read），花费记在记录里。</li>
+</ul>
+
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
 <li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
 <li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session（设成 <b>看板上它的任务</b> 时，打开看板上它的任务）。</li>
+<li><b>记一笔</b>：小猫菜单里的 <b>记一笔…</b> 打开记一笔的小框；在 <b>设置</b> 里打开 <b>记一笔 (⌃⌥⌘N)</b> 后，任何时候按 ⌃⌥⌘N 都能打开。记下后小猫会说放到了哪里，见<a href="#zh-quick">记一笔</a>。</li>
 
 </ul>
 
@@ -288,6 +309,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>任务现在怎么样，不经过模型：状态、下一步、当前状态、最近 3 条 Log、没做完的待办和没回答的问题（各等了多久）、session（状态、最后动静、上下文占比、最后几句话），以及上面的 ⚠ 异常标记，外加「完成了还有 session 在跑」。不给编号就是所有没完成的任务（加上完成了但还有 session 在跑的）；<code>--focus</code> 只看 Focus 的，<code>--flagged</code> 只看有标记的</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录；<code>--meta --json</code> 还带工具调用、本轮用时 / token 和 Claude 的待办）· 某次工具调用的完整输入和输出</td></tr>
 <tr><td><code>hq secretary [init --lang zh|en] [--json]</code></td><td>看秘书的文件和任务卡在不在。<code>init</code> 只补上缺的（agent 定义、记忆文件、它自己的任务卡，任务卡编号记在 <code>hq.json</code> 的 <code>secretary</code> 里），已有的不动。看板上的 <b>秘书 → 设置</b> 跑的就是它</td></tr>
+<tr><td><code>hq inbox [--all] [--json]</code> · <code>hq inbox add TEXT [--image P] [--sort]</code> · <code>hq inbox sort|drop|restore N-001</code> · <code>hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--text …] [--owner …] [--title …]</code></td><td>记一笔（见<a href="#zh-quick">记一笔</a>）：列出没分拣的和最近两天分拣过的（<code>--all</code> 全部）· 记下一条（<code>--sort</code> 接着分拣）· 让模型分拣 / 删掉 / 恢复 · 放到指定的地方（会撤回上一个去处写进去的东西）</td></tr>
 <tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>秘书写报告用的事实：按项目列出这段时间的 Log、勾掉和新加的待办、回答了的问题、合并和还开着的 PR（用 <code>gh</code> 查，<code>--no-gh</code> 不查）、没动的任务，还有等你两天及以上的事，以及你对之前报告（包括今天已写的那份）的修改（diff）。<code>auto</code>（默认）周五是周报、其他日子是日报；日报从上一份报告用到的事实截止处算起，周报从周一算起。<code>keep</code> 存下刚写好的报告的底稿，下次就能看出你改了什么；<code>list</code> 列出写过的报告</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数；点击后打开看板上任务的那些不算跳终端，单独报一个数</td></tr>
 </table>
@@ -394,7 +416,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 ~/.claude/hq/bin/hq                       命令行工具 + hook 入口
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
-&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则、秘书的任务卡
+&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则、秘书的任务卡、分拣用的模型
+&lt;任务根目录&gt;/inbox.json                    记一笔的记录（分拣好的、删掉的保存 30 天）
 &lt;任务根目录&gt;/.claude/agents/secretary.md   秘书的定义
 &lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks / reports.md）
 &lt;任务根目录&gt;/secretary/reports/           秘书写的日报、周报（.drafts/ 里是它写完时的底稿）
@@ -412,6 +435,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-board">All and Needs you</a>
   <a href="#en-jobs">Scheduled jobs</a>
   <a href="#en-secretary">Secretary</a>
+  <a href="#en-quick">Quick notes</a>
   <a href="#en-pet">With the cat</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
@@ -461,8 +485,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">All and Needs you</h1>
 <h2>Top bar</h2>
 <ul>
-<li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count); the filter box, <b>Secretary</b> (see <a href="#en-secretary">Secretary</a>), <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
-<li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks and todos (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
+<li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count), then the <b>Quick note</b> box (see <a href="#en-quick">Quick notes</a>); the filter box, <b>Secretary</b> (see <a href="#en-secretary">Secretary</a>), <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
+<li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks, todos and unsorted notes (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
 <li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
 <li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, what clicking a session on the pet opens, active first.</li>
@@ -489,6 +513,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <b>Several sessions on one task</b>: an answer goes only to the session that asked, never to the others on the task, so two of them don't do the same work; in their list of open asks, the ones another session raised are marked "asked by another session on this task". Only when the asker has ended or left the task does its answer go to the next session on the task to start a turn — to one of them.<br>
 <b>Images in a note</b>: Cmd+V a screenshot into the note box, or drop an image on the ask (PNG / JPEG / GIF / WebP, ≤ 20 MB); a thumbnail shows below (✕ removes it). The image's path goes with your note, and Claude reads it.<br>
 <b>Several asks on one task, answered together</b>: when a task has two or more open asks, the buttons only <i>pick</i> — a click fills the button with its colour (Yes green, Yes always teal (the same grant editor opens below), No red, Later amber, No context grey, To todo blue; again to clear, or pick another), nothing is sent yet. Typing a note on one picks Yes for you (emptying the note takes it back; a pick you clicked yourself is left alone). When you've picked them all, <b>Send N answers</b> at the bottom records every one and sends them to the session that asked as <b>one</b> message; the single <b>send to ‹session› now</b> box there covers the group. Asks you didn't pick stay open. Undo reopens the whole batch.</li>
+<li><b>Quick notes</b> — under the asks: notes jotted with <b>Quick note</b> that are still unsorted, and those sorted in the last two days; see <a href="#en-quick">Quick notes</a>. Hidden when there are none.</li>
 <li><b>Your todos</b> — every <code>@me</code> todo across tasks, newest first, each showing how long it has waited (amber after 3 days). Box = done, ✕ = won't do.</li>
 <li>Needs you is one column — <b>Claude is asking</b> on top (with nothing open it shrinks to one line, "Claude has nothing waiting on an answer from you."), <b>Your todos</b> below (the age on the right turns amber after 3 days): <b>Asks</b> = questions for you to <b>answer</b>; <b>Your todos</b> = things for you to <b>do</b> (every <code>@me</code> todo). A session that needs you to act adds an <code>@me</code> todo; one that needs an answer raises an ask.</li>
 <li><b>Click an item's text</b> to open its <b>context window</b> (below); click the task id chip to find the task in All's task list (its folded project group opens, a search that hides it is cleared).</li>
@@ -630,10 +655,29 @@ After the status word comes how much context the session carries (e.g. <code>210
 <li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
 </ul>
 
+<h1 id="en-quick">Quick notes</h1>
+<p>A thought, a link or a screenshot you don't want to stop and file: jot it and get back to work. A cheap model (Haiku by default) reads the open tasks, the projects, the categories and the secretary's memory, and decides where it goes:</p>
+<table>
+<tr><th>Goes to</th><th>Written as</th></tr>
+<tr><td><b>A new task</b></td><td>a new card: title and goal (your words quoted below it), plus project, category and workdir when it is sure</td></tr>
+<tr><td><b>A todo on a task</b></td><td>a todo on that task: <code>@me</code> (yours to do), <code>@claude</code> (for its session) or a colleague's name</td></tr>
+<tr><td><b>A log line on a task</b></td><td>one line in that task's log (a finding, a decision, a number, a link, what someone said); a task closed in the last 14 days is fine too</td></tr>
+<tr><td><b>Your todo</b></td><td>something personal that belongs to no task ("call the dentist"): an <code>@me</code> todo on the secretary's card, so it shows in Your todos. Not offered until the secretary is set up</td></tr>
+</table>
+<p>Links in the note are added to that task's refs; screenshot paths go along with what is written. When the model is sure (confidence ≥ 0.7) the note is filed at once; when it isn't, or the note is too short to act on, it stays <b>unsorted</b> and waits for you in Needs you.</p>
+<ul>
+<li><b>Where to jot</b>: the <b>Quick note</b> box in the board's top bar — Enter files it (focus stays, so you can type the next one; Esc leaves). Paste a screenshot with Cmd+V or drop an image on the box; it shows as a small thumbnail. Without the board open: <b>Quick Note…</b> in the cat's menu, or ⌃⌥⌘N once <b>Quick Note (⌃⌥⌘N)</b> is on in <b>Settings</b>. A small box opens near the top of the screen without bringing the pet forward: Enter files it and closes, Shift-Enter starts a new line, a screenshot can be pasted, Esc closes. The shortcut is off by default.</li>
+<li><b>After you jot</b>: a toast at the bottom of the board says where it went ("Filed: T-012 todo @me"), with <b>Undo</b>; from the shortcut, the cat says it. Sorting takes a few seconds, while the note shows "Sorting…".</li>
+<li><b>Quick notes in Needs you</b>: unsorted ones are marked amber. Under each are the model's guess and alternatives; click one to file it there. <b>Somewhere else…</b> opens a task picker (as a todo / as a log line) plus <b>new task</b> and <b>your todo</b>; ✕ deletes it (Restore brings it back). A filed note reads "→ T-012 todo @me: …"; <b>Move</b> puts it somewhere else: the todo, log line and refs it added are taken back out and written at the new place, and a card it created is deleted (or, if it was edited since, marked abandoned). It can go back to unsorted too. Where it was stays as an alternative, so a wrong move is one click to undo.</li>
+<li>Filed notes stay in the list for two days, after which only <code>hq inbox --all</code> shows them (they are kept 30 days). The top bar's filter box filters them too.</li>
+<li><b>Another model</b>: <code>"inbox": {"model": "sonnet"}</code> in <code>hq.json</code>, or the <code>HQ_INBOX_MODEL</code> environment variable. Each sort is one <code>claude -p</code> run of its own that ignores your settings and MCP servers and has no tools (only Read, when there are screenshots); its cost is kept on the note.</li>
+</ul>
+
 <h1 id="en-pet">With the cat</h1>
 <ul>
 <li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
 <li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked (to its task on the board, when clicks are set to open it there).</li>
+<li><b>Quick notes</b>: <b>Quick Note…</b> in the cat's menu opens the quick-note box; with <b>Quick Note (⌃⌥⌘N)</b> on in <b>Settings</b>, ⌃⌥⌘N opens it from anywhere. The cat says where the note went; see <a href="#en-quick">Quick notes</a>.</li>
 
 </ul>
 
@@ -691,6 +735,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>where tasks stand, built without a model: status, next step, state, the last 3 Log entries, open todos and unanswered asks (each with how long it has waited), sessions (state, last activity, context share, last messages), and the ⚠ flags above, plus "done with a session still running". No ids: every open task (plus done ones with a session still running); <code>--focus</code> only Focus's, <code>--flagged</code> only flagged ones</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts; <code>--meta --json</code> adds its tool calls, this turn's time and tokens, and Claude's todos) · one tool call's full input and output</td></tr>
 <tr><td><code>hq secretary [init --lang en|zh] [--json]</code></td><td>whether the secretary's files and card are there. <code>init</code> adds only what is missing (the agent definition, the memory files, and its own card, whose id goes under <code>secretary</code> in <code>hq.json</code>) and leaves the rest alone. The board's <b>Secretary → Set up</b> runs it</td></tr>
+<tr><td><code>hq inbox [--all] [--json]</code> · <code>hq inbox add TEXT [--image P] [--sort]</code> · <code>hq inbox sort|drop|restore N-001</code> · <code>hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--text …] [--owner …] [--title …]</code></td><td>quick notes (see <a href="#en-quick">Quick notes</a>): list the unsorted ones and those sorted in the last two days (<code>--all</code>: everything) · jot one (<code>--sort</code> sorts it right away) · have the model sort one / delete / restore it · file it where you say (what its last place got is taken back out)</td></tr>
 <tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>the facts the secretary writes its reports from: by project, the period's Log entries, todos ticked and added, asks answered, PRs merged or still open (looked up with <code>gh</code>; <code>--no-gh</code> skips that), tasks that didn't move, what has waited on you for two days or more, and your edits to earlier reports, today's included (as diffs). <code>auto</code> (the default) is the weekly report on Fridays and the daily one otherwise; a daily report starts where the last report's facts ended, a weekly one on Monday. <code>keep</code> keeps a copy of a report just written, so your edits show next time; <code>list</code> lists the reports</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before; clicks that opened the task on the board instead are not counted as jumps, only reported as a number of their own</td></tr>
 </table>
@@ -797,7 +842,8 @@ next: "run baseline on clusters A/C"
 ~/.claude/hq/bin/hq                    CLI and hook entry point
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
 ~/.claude/hq/state/sessions.json       session → task bindings
-&lt;root&gt;/hq.json                         projects, categories, link rules, the secretary's card
+&lt;root&gt;/hq.json                         projects, categories, link rules, the secretary's card, the sorting model
+&lt;root&gt;/inbox.json                      quick notes (filed and deleted ones kept 30 days)
 &lt;root&gt;/.claude/agents/secretary.md     the secretary's definition
 &lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks / reports.md)
 &lt;root&gt;/secretary/reports/             its daily and weekly reports (.drafts/ holds each as it wrote it)
