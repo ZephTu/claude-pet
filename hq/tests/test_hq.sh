@@ -1044,6 +1044,28 @@ transcript "$P/$SS2.jsonl" '[
 "$HQ" status "$S2" --json | python3 -c '
 import json,sys; t=json.load(sys.stdin)["tasks"][0]
 assert t["sessions"][0]["background"]==[] and [f["kind"] for f in t["flags"]]==["idle-waiting"], t' && ok "status: TaskStop ends a background run launched far back" || fail "status TaskStop beyond the tail"
+# Claude Code exiting kills a run and writes the notice only as a queued prompt (a queue-operation line).
+transcript "$P/$SS2.jsonl" '[
+ {"type":"assistant","message":{"id":"c5","content":[{"type":"tool_use","id":"w3","name":"Bash","input":{"command":"wait-for-run 888","run_in_background":true}}]},"timestamp":"@99"},
+ {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w3","content":"Command running in background with ID: bgw3"}]},"toolUseResult":{"backgroundTaskId":"bgw3"},"timestamp":"@99"}]'
+"$HQ" status "$S2" --json | python3 -c 'import json,sys; b=json.load(sys.stdin)["tasks"][0]["sessions"][0]["background"]; assert b==["Bash: wait-for-run 888"], b' \
+  || fail "status background before the kill"
+transcript "$P/$SS2.jsonl" '[{"type":"queue-operation","operation":"enqueue","timestamp":"@98","content":"<task-notification>\n<task-id>bgw3</task-id>\n<tool-use-id>w3</tool-use-id>\n<status>killed</status>\n</task-notification>"}]'
+"$HQ" status "$S2" --json | python3 -c 'import json,sys; b=json.load(sys.stdin)["tasks"][0]["sessions"][0]["background"]; assert b==[], b' \
+  && ok "status: a run killed when Claude Code exited (notice only queued) is not background after a resume" || fail "status killed-on-exit run"
+# A launch whose call is too far above its result to find still counts, under its tool's name.
+python3 - "$P/$SS2.jsonl" <<'PY'
+import json, sys
+row = lambda o: json.dumps(o, separators=(",", ":")) + "\n"
+with open(sys.argv[1], "a") as f:
+    f.write(row({"type": "assistant", "message": {"id": "c6", "content": [{"type": "tool_use", "id": "w4", "name": "Bash", "input": {"command": "far-away", "run_in_background": True}}]}, "timestamp": "2026-01-02T00:00:00Z"}))
+    for i in range(450):
+        f.write(row({"type": "progress", "data": {"n": i}, "timestamp": "2026-01-02T00:00:00Z"}))
+    f.write(row({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "w4", "content": "started"}]}, "toolUseResult": {"backgroundTaskId": "bgw4"}, "timestamp": "2026-01-02T00:00:00Z"}))
+PY
+"$HQ" status "$S2" --json | python3 -c 'import json,sys; b=json.load(sys.stdin)["tasks"][0]["sessions"][0]["background"]; assert b==["Bash: …"], b' \
+  && ok "status: a background run whose call is too far above its result still counts" || fail "status background launch lookback"
+transcript "$P/$SS2.jsonl" '[{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>bgw4</task-id>\n<status>completed</status>\n</task-notification>"},"timestamp":"@97"}]'
 "$HQ" set "$S2" "next=wait on Ping for the numbers" >/dev/null
 
 # S3: done, with a session still running on it. S4: open, untouched for weeks, and over budget.

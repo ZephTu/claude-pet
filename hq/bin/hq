@@ -8,6 +8,7 @@ session — carries the state. See hq/README.md.
 Python 3.9+ standard library only (macOS /usr/bin/python3 works).
 """
 import argparse
+import collections
 import contextlib
 import datetime as dt
 import fcntl
@@ -2428,8 +2429,8 @@ def background_id(tur):
 
 
 # What a line that starts, ends or stops a background call has in it, as written to the transcript.
-BG_MARKERS = ('"backgroundTaskId"', '"isAsync"', "<task-notification>",
-              *(f'"{n}"' for n in sorted(STOP_TOOLS)))
+BG_MARKERS = (b'"backgroundTaskId"', b'"isAsync"', b"<task-notification>",
+              *(f'"{n}"'.encode() for n in sorted(STOP_TOOLS)))
 BG_LAUNCH_LOOKBACK = 400   # lines between a call and its result (hooks and progress lines sit between)
 
 
@@ -2437,53 +2438,75 @@ def background_entries(path):
     """From the whole transcript, the entries that launch, finish or stop background calls (each
     launch with the call that made it), oldest first: enough for peek_timeline to tell which are
     still running. A long run can be launched far back in a session that kept talking, out of
-    reach of any tail read; a substring check keeps reading tens of MB cheap."""
+    reach of any tail read. Read line by line with a byte check first, so tens or hundreds of MB
+    cost little time and memory."""
     if not path or not os.path.exists(path):
         return []
+    keep, stops = {}, set()   # line no. → entry; stop calls (bytes ids) whose result hasn't come yet
+    recent = collections.deque(maxlen=BG_LAUNCH_LOOKBACK)   # (line no., line) to find a launch's call in
     with open(path, "rb") as f:
-        lines = f.read().decode("utf-8", "ignore").split("\n")
-    keep, stops = {}, set()   # line → entry; stop calls whose result hasn't come yet
-    for i, line in enumerate(lines):
-        if line.startswith(('{"type":"api-request', '{"type":"queue-operation')):
-            continue   # copies of the request or the queue, not the conversation
-        if not (any(m in line for m in BG_MARKERS) or any(s in line for s in stops)):
-            continue
-        try:
-            o = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(o, dict):
-            continue
-        c = (o.get("message") or {}).get("content")
-        if o.get("type") == "assistant" and isinstance(c, list):
-            calls = [x.get("id") for x in c if isinstance(x, dict) and x.get("type") == "tool_use"
-                     and x.get("name") in STOP_TOOLS and x.get("id")]
-            if calls:
-                stops.update(calls)
-                keep[i] = o
-        elif o.get("type") == "user" and isinstance(c, list):
-            for x in c:
-                if not (isinstance(x, dict) and x.get("type") == "tool_result"):
-                    continue
-                tid = x.get("tool_use_id") or ""
-                if tid in stops:
-                    stops.discard(tid)
+        for i, line in enumerate(f):
+            if line.startswith(b'{"type":"api-request'):
+                continue   # a copy of the request, not the conversation
+            hit = any(m in line for m in BG_MARKERS) or any(s in line for s in stops)
+            if not hit:
+                recent.append((i, line))
+                continue
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(o, dict):
+                continue
+            if o.get("type") == "queue-operation":
+                # When Claude Code exits with a run going, it kills the run and writes the notice
+                # only here: as the queued prompt it never got to deliver.
+                t = o.get("content")
+                if o.get("operation") == "enqueue" and isinstance(t, str) and "<task-notification>" in t[:200]:
+                    keep[i] = {"type": "attachment", "timestamp": o.get("timestamp"),
+                               "attachment": {"type": "queued_command", "prompt": t}}
+                continue
+            recent.append((i, line))
+            c = (o.get("message") or {}).get("content")
+            if o.get("type") == "assistant" and isinstance(c, list):
+                calls = [x.get("id") for x in c if isinstance(x, dict) and x.get("type") == "tool_use"
+                         and x.get("name") in STOP_TOOLS and x.get("id")]
+                if calls:
+                    stops.update(x.encode() for x in calls)
                     keep[i] = o
-                elif tid and ('"backgroundTaskId"' in line or '"isAsync"' in line):
+            elif o.get("type") == "user" and isinstance(c, list):
+                for x in c:
+                    if not (isinstance(x, dict) and x.get("type") == "tool_result"):
+                        continue
+                    tid = x.get("tool_use_id") or ""
+                    if tid.encode() in stops:
+                        stops.discard(tid.encode())
+                        keep[i] = o
+                    elif tid and (b'"backgroundTaskId"' in line or b'"isAsync"' in line):
+                        keep[i] = o
+                        keep.update(launch_call(recent, tid, o, i))
+                if notification_text(o):
                     keep[i] = o
-                    # The call that launched it: what the row is called.
-                    for j in range(i - 1, max(-1, i - BG_LAUNCH_LOOKBACK), -1):
-                        if tid in lines[j] and '"tool_use"' in lines[j] and '"assistant"' in lines[j]:
-                            try:
-                                keep[j] = json.loads(lines[j])
-                            except ValueError:
-                                pass
-                            break
-            if notification_text(o):
+            elif notification_text(o):
                 keep[i] = o
-        elif notification_text(o):
-            keep[i] = o
     return [keep[i] for i in sorted(keep)]
+
+
+def launch_call(recent, tid, result, at):
+    """{line no.: entry} for the call a background result answers: its row in peek_timeline. Not
+    found (too far back): a stand-in, so the run still counts, under its tool's name alone."""
+    b = tid.encode()
+    for j, line in reversed(recent):
+        if b in line and b'"tool_use"' in line and b'"assistant"' in line:
+            try:
+                return {j: json.loads(line)}
+            except ValueError:
+                break
+    tur = result.get("toolUseResult") if isinstance(result.get("toolUseResult"), dict) else {}
+    name = "Bash" if tur.get("backgroundTaskId") else "Agent"
+    return {at - 0.5: {"type": "assistant", "timestamp": result.get("timestamp"),
+                 "message": {"content": [{"type": "tool_use", "id": tid, "name": name,
+                                          "input": {"command": "…", "description": "…"}}]}}}
 
 
 def note_status(st):
