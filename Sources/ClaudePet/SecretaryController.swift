@@ -56,7 +56,14 @@ final class SecretaryController {
         let runs = store.runs(Self.jobID)
         o["job"] = store.load(Self.jobID) != nil
         o["sessionId"] = state["sessionId"] as? String ?? ""
-        o["running"] = running
+        let busy = running
+        o["running"] = busy
+        if busy {
+            // When this run began: the chat's live turn is the one whose message came after it
+            // (`claude -p` never marks a turn done in the transcript).
+            let began = launched?.at ?? runs.first(where: { $0.status == .running })?.started
+            if let began { o["runStart"] = Jobs.iso(began) }
+        }
         if let r = runs.first {
             // The last run when it went wrong, or was skipped (quota): the chat says why.
             o["last"] = ["status": r.status.rawValue, "summary": r.summary, "at": Jobs.iso(r.ended ?? r.started),
@@ -197,6 +204,16 @@ final class SecretaryController {
         // Its memory, or one of its reports (`secretary/reports/`).
         return url.pathExtension == "md"
             && (parent == folder.path || parent == folder.appending(path: "reports").path)
+    }
+
+    /// For the board's top bar, polled with the pet's state: whether the secretary is answering,
+    /// and when its last run ended (a long quiet shows it asleep).
+    var glance: [String: Any] {
+        var o: [String: Any] = ["busy": running]
+        if let r = store.runs(Self.jobID).first(where: { $0.status != .skipped }) {
+            o["lastAt"] = Jobs.iso(r.ended ?? r.started)
+        }
+        return o
     }
 
     // MARK: - Internals

@@ -124,7 +124,6 @@ if (LANG === "zh") {
   $(".capture").title = "记一句话、一个链接或粘贴一张截图；回车后自动分拣（新任务、某个任务的待办或记录、你的待办），去向在 Needs you 里看";
   $("#search").title = "三个页面都筛选：任务按编号、标题、关联、分类、项目；问题和待办也按自己的文字";
   $("#new-task").textContent = "新建任务";
-  $("#secretary-btn").textContent = "秘书";
   $("#secretary-btn").title = "秘书：问它各个任务怎么样了、什么在等你；它的建议出现在 Needs you";
   $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
@@ -323,6 +322,8 @@ async function refresh(force) {
     ui.dots = pet.dots || {};
     ui.usage = pet.usage || null;
     ui.clickTarget = pet.clickTarget || "";   // empty: no pet behind this board (--render-board)
+    ui.skin = pet.skin || ui.skin || "cat";    // the secretary wears the pet's face
+    ui.secGlance = pet.secretary || null;
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
@@ -619,6 +620,7 @@ function render() {
   });
 
   renderCounts();
+  drawSecretaryButton();
   // Four pages, each two columns: Focus (the tasks you keep in view), All, Needs you (every
   // unanswered ask and your todos) with its count on the tab, and Scheduled (jobs.js).
   if (!["today", "all", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
@@ -1508,8 +1510,15 @@ function canonicalUrl(url) {
 // canonical form (trailing `/).,;:` never count); anything else (no URL, a ticket key, or two or
 // more URLs) is its text with whitespace collapsed. Never the URL a links rule builds: hq doesn't
 // know those.
+// The key mark (`! ` before a ref, hq's KEY_MARK): a link the card keeps even when it is a build,
+// a run or a comment — those otherwise go to HISTORY.md. It is not part of what the link is.
+const keyMarked = (ref) => new RegExp(`^(?:${PY_SPACE.source})?!`).test(String(ref));
+function unmarkedRef(ref) {
+  const text = String(ref).replace(PY_TRIM, "");
+  return text.startsWith("!") ? text.slice(1).replace(new RegExp(`^(?:${PY_SPACE.source})`), "") : text;
+}
 function refKey(ref) {
-  const text = String(ref);
+  const text = unmarkedRef(ref);
   const urls = text.match(REF_URL_RE) || [];
   if (urls.length === 1) return canonicalUrl(urls[0]);
   return text.split(PY_SPACE).filter(Boolean).join(" ");
@@ -1544,8 +1553,11 @@ function mergeRefs(refs) {
   return order.map((k) => {
     const rs = groups.get(k);
     if (new Set(rs).size === 1) return rs[0];
-    const exact = rs.filter(refUrlIsCanonical);
-    return withCanonicalUrl(exact.length ? exact[exact.length - 1] : rs[rs.length - 1]);
+    // The key mark stays with the link whichever entry's title wins.
+    const mark = rs.some(keyMarked) ? "! " : "";
+    const us = rs.map(unmarkedRef);
+    const exact = us.filter(refUrlIsCanonical);
+    return mark + withCanonicalUrl(exact.length ? exact[exact.length - 1] : us[us.length - 1]);
   });
 }
 // Where a link lives, for the Links groups in a task's right rail (kindOfUrl is about what it is).
@@ -1562,18 +1574,19 @@ function refSource(url) {
 }
 // ---- ref keys: end
 function resolveRef(ref) {
-  const url = (String(ref).match(new RegExp(REF_URL_RE.source)) || [])[0];
+  const text = unmarkedRef(ref);
+  const url = (text.match(new RegExp(REF_URL_RE.source)) || [])[0];
   if (url) {
-    const label = String(ref).replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
+    const label = text.replace(url, "").replace(/[\s:：,，-]+$/, "").trim();
     return { ref, url, kind: kindOfUrl(url), label: label || url.replace(/^https?:\/\//, "").slice(0, 70) };
   }
   for (const rule of (ui.board && Array.isArray(ui.board.links) ? ui.board.links : [])) {
     let re;
     try { re = new RegExp(rule.match); } catch (e) { continue; }
-    const m = String(ref).match(re);
-    if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: ref };
+    const m = text.match(re);
+    if (m) return { ref, url: String(rule.url).replace(/\$(\d)/g, (_, n) => m[Number(n)] || ""), kind: rule.kind || "link", label: text };
   }
-  return { ref, url: "", kind: "none", label: ref };
+  return { ref, url: "", kind: "none", label: text };
 }
 // The Links of a task's right rail, grouped by where they live, newest first; past REF_GROUP_SHOWN
 // a group folds behind "N more" (unfolded for this board's life, per task and group).
@@ -1590,13 +1603,32 @@ function refGroups(t, refs, editing) {
     return `<div class="ref-g"><div class="ref-gh">${esc(name)} <span class="meta">${rs.length}</span></div>
       ${(all ? rs : rs.slice(0, REF_GROUP_SHOWN)).map(item).join("")}
       ${more > 0 ? `<button class="lnk ref-more" data-action="ref-more" data-group="${esc(key)}">${all ? T("Show fewer", "收起") : T(`${more} more`, `还有 ${more} 条`)}</button>` : ""}</div>`;
-  }).join("");
+  }).join("") + processGroup(t, editing);
+}
+// Process links — a build, a run, a comment — live in the task's HISTORY.md, not on the card (so
+// sessions don't read them): one folded group, newest first. Edit offers to keep one on the card.
+function processGroup(t, editing) {
+  const rs = list(t.history && t.history.links).map(resolveRef).reverse();
+  if (!rs.length) return "";
+  const key = `${t.id}:process`, open = ui.refMore.has(key);
+  const item = (r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+      ${editing ? `<button class="icon" title="${T("Keep on the card — a key link sessions see", "留在卡上——作为 session 会看到的关键链接")}" data-action="ref-pin" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">↑</button>
+        <button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`;
+  return `<div class="ref-g proc"><button class="lnk ref-gh" data-action="ref-more" data-group="${esc(key)}"
+      title="${T("Builds, runs and comments — kept in HISTORY.md, not read by sessions", "构建、运行和评论——放在 HISTORY.md 里，session 不读")}">${open ? "▾" : "▸"} ${T("Process", "过程")} <span class="meta">${rs.length}</span></button>
+    ${open ? rs.map(item).join("") : ""}</div>`;
 }
 function logEntries(t) {
   // `- 2026-11-20 20:05:18: text` (hq log writes the time since 11/20); older lines carry the day only.
-  return String(t.body || "").split("\n")
+  const parse = (text) => String(text || "").split("\n")
     .map((l) => l.match(/^\s*-\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?):\s+(.*)$/))
     .filter(Boolean).map((m) => ({ date: m[1].replace("T", " "), text: m[2] }));
+  // What the card budget moved to HISTORY.md (todo ticks, older entries) reads in its place by time.
+  const hist = parse(list(t.history && t.history.log).join("\n"));
+  const card = parse(t.body);
+  if (!hist.length) return card;
+  return hist.concat(card).map((e, i) => [e, i])
+    .sort((a, b) => (a[0].date < b[0].date ? -1 : a[0].date > b[0].date ? 1 : a[1] - b[1])).map((x) => x[0]);
 }
 const PLUS = '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>';
 const LINK = '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg>';
@@ -1655,7 +1687,10 @@ function renderTaskBody(t) {
   const isRecent = (x) => ui.recent.some((r) => r.task === t.id && r.i === x.i && Date.now() - r.at < RECENT_MS);
   const ownerRank = (x) => (x.owner === "me" ? 0 : x.owner === "claude" ? 1 : x.owner ? 2 : 3);
   const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
-  const finished = t.todos.filter((x) => x.state !== "open");
+  // Closed todos the card budget moved to HISTORY.md follow the card's own, read-only.
+  const histDone = list(t.history && t.history.todos).map((x) => ({ ...x, hist: true }));
+  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse());
+  const anyTodos = t.todos.length + histDone.length;
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
   const shownDone = foldDone ? finished.filter(isRecent) : finished;
   const hiddenDone = finished.length - shownDone.length;
@@ -1667,6 +1702,8 @@ function renderTaskBody(t) {
     const mark = x.state === "done" ? "✓" : x.state === "dropped" ? "–" : "";
     const next = x.state === "open" ? "done" : "open";
     const who = x.owner ? `<span class="who ${x.owner === "me" ? "me" : x.owner === "claude" ? "cl" : ""}">${esc(OWNER_LABEL(x.owner))}</span>` : `<span class="who"></span>`;
+    if (x.hist) return `<div class="todo ${x.state} hist" title="${T("In HISTORY.md (card budget)", "在 HISTORY.md 里（卡片预算）")}">
+      <span class="box ${x.state}">${mark}</span>${who}<span class="t">${esc(x.text)}</span></div>`;
     return `<div class="todo ${x.state}">
       <span class="box ${x.state}" title="${x.state === "open" ? T("Mark done", "标为完成") : T("Reopen", "恢复")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       ${who}<span class="t">${esc(x.text)}</span>
@@ -1687,7 +1724,7 @@ function renderTaskBody(t) {
     }
     return out.concat(shownDone.map(todoRow)).join("");
   };
-  const todoState = (!t.todos.length ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
+  const todoState = (!anyTodos ? "" : `<span class="meta">${openTodos.length ? T(`${openTodos.length} open`, `${openTodos.length} 条未完成`) : T("all done", "全部完成")}${finished.length ? T(` · ${finished.length} finished`, ` · ${finished.length} 条已结束`) : ""}</span>`) +
     (finished.length > FINISHED_SHOWN
       ? `<button class="btn small ghost" data-action="done-toggle" data-task="${esc(t.id)}">${ui.doneOpen.has(t.id) ? T("Hide finished", "收起已结束的") : T(`Show ${hiddenDone} finished`, `显示 ${hiddenDone} 条已结束的`)}</button>` : "") +
     tidyButton(t);
@@ -1715,6 +1752,8 @@ function renderTaskBody(t) {
       <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
         title="${editNext ? T("Done editing", "改完了") : T("Edit status, project, category and next", "修改状态、项目、分类和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
       <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Open the card file", "用编辑器打开任务卡文件")}">${T("Open card", "打开任务卡")}</button>
+      ${isOpen(t) && t.id !== secId() ? `<button class="btn small" data-action="continue" data-task="${esc(t.id)}" data-confirm="${T("Continue?", "续？")}"
+        title="${T("Continue on a new card dated today: open todos, status, next step, key links and grants come along; this card is closed and its sessions move over", "续到一张今天的新卡：未完成待办、当前状态、下一步、关键链接和授权都带过去；这张卡关闭，绑定的 session 一起换过去")}">${T("Continue today", "续到今天")}</button>` : ""}
       ${launchSplit(t)}
     </div>`;
   const head = editNext ? `<div class="now editing">
@@ -1774,7 +1813,7 @@ function renderTaskBody(t) {
         ${adding("todo") ? `<div class="row nowrap addbox">
             <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
             <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>` : ""}
-        ${t.todos.length ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
+        ${anyTodos ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
 
         ${secHead(T("Grants", "授权"), t, "grant", T("Add a standing grant — a kind of step sessions on this task take without asking", "加一条常设授权——这个任务的 session 不用问就可以做的一类事"), (t.grants || []).length || null)}
         ${adding("grant") ? `<div class="addbox"><div class="row nowrap">
@@ -2313,8 +2352,8 @@ async function refreshPeek(first) {
     if (m.sec.sessionId && m.sec.sessionId !== m.sid) m.sid = m.sec.sessionId;
     // Its card's state and its open asks too: answering one here (or in Needs you) redraws it.
     const card = taskById(secId());
-    const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.contextPct, m.sec.state,
-      card ? pendingAsks(card).map((a) => [a.id, isLater(a)]) : null]);
+    const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.state, m.sec.reports, m.sec.schedule, m.sec.files,
+      m.sec.runStart, ui.skin, ui.secGlance && ui.secGlance.lastAt, secIdleWord(ui.secGlance && ui.secGlance.lastAt), card ? (card.asks || []).map((a) => [a.id, a.state, isLater(a), a.note]) : null]);
     secChanged = secSig !== m.secSig;
     m.secSig = secSig;
   }
@@ -2343,7 +2382,8 @@ async function refreshPeek(first) {
   // above it (status, todos). While Claude works, its token count changes on every poll; that
   // alone only redraws those lines, so the list you are reading or scrolling is left alone.
   const bodySig = JSON.stringify([msgs, act.items, s ? liveState(s) : null]);
-  const sig = bodySig + "\u0001" + JSON.stringify([act.turn, act.todos, s ? s.waitingOn || "" : null]);
+  // (The secretary's window shows neither tokens nor todos: only the turn ending counts there.)
+  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, s ? s.waitingOn || "" : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
@@ -2395,7 +2435,7 @@ function redrawPeek(m) {
 // mid-composition too). False when the window has not drawn them yet: then the caller rebuilds.
 function drawPeekLive() {
   const m = ui.modal, live = $("#modal .plive");
-  if (!live) return false;
+  if (!live || m.secretary) return false;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   live.innerHTML = peekStatus(m, s, peekRun(m, s)) + peekTodos(m);
   $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
@@ -2425,29 +2465,19 @@ function drawPeek(toBottom) {
   const m = ui.modal;
   if (m.held) { clearTimeout(m.held); m.held = null; }   // this draw is the one it was holding
   if (m.next) applyPeek(m, m.next);                       // so it shows what it was holding too
+  if (m.secretary) return drawSecretary(toBottom);       // its own window: a chat
   const box = $("#modal");
   // The reply box is rebuilt with the rest; keep the cursor in it.
   const active = document.activeElement;
   // (By its key: the secretary's window also has its asks' note boxes.)
   const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd, active.dataset.key] : null;
   const taScrolls = textScrolls(box);
-  const body = box.querySelector(".peek-body");
-  const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
-  const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
-  // Peek keeps the last 30 messages, so when one arrives the oldest drops off and everything moves
-  // up. Remember the first message in view and where it sat, and put it back there.
-  let anchor = null;
-  if (body && !atBottom && m.keys) {
-    const top = body.getBoundingClientRect().top;
-    const els = [...body.querySelectorAll(".pmsg")];
-    const i = els.findIndex((el) => el.getBoundingClientRect().bottom > top);
-    if (i >= 0 && m.keys[i]) anchor = { key: m.keys[i], off: els[i].getBoundingClientRect().top - top };
-  }
+  const scroll = peekScrollGrab(box, m);
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
-  const key = peekKey(m);
-  const prompt = !m.secretary && m.live && canMessage(s) && onPrompt(s);
-  const canSend = m.secretary ? !(m.sec && m.sec.running) : m.live && canMessage(s);
-  const noSend = m.secretary ? T("It is replying — wait for it, or Stop it", "它正在回复——等它说完，或者先停下") : m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
+  const key = m.sid;
+  const prompt = m.live && canMessage(s) && onPrompt(s);
+  const canSend = m.live && canMessage(s);
+  const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
   // Messages, with each run of tool calls between them as one block (see peekBlocks).
   const blocks = msgs === null ? null : peekBlocks(m.items || msgs.map((x) => ({ kind: "msg", ...x })));
@@ -2455,17 +2485,15 @@ function drawPeek(toBottom) {
   const run = peekRun(m, s);
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
-    : !blocks.length ? `<div class="empty">${m.secretary ? secretaryIntro() : m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
+    : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
       </div>`).join("");
   const keepDraft = box.querySelector(".pfoot textarea") ? null : draft("msg:" + key);
-  const chip = m.secretary ? (m.sec && m.sec.running ? ` <span class="chip">${T("replying…", "回复中…")}</span>` : "")
-    : m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
-  const sub = m.secretary ? `${secretaryMemory(m)} · ${T("click outside or Esc to close", "点外面或按 Esc 关闭")}`
-    : `${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
+  const chip = m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
+  const sub = `${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
@@ -2476,12 +2504,10 @@ function drawPeek(toBottom) {
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
-    ${m.secretary ? secretaryReports(m) + secretaryFeed(m) + secretaryWatch(m) : ""}
     <div class="peek-body">${list}</div>
-    ${m.secretary ? secretaryAsks() : ""}
-    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.secretary ? noSend : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
+    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
-        placeholder="${prompt ? ON_PROMPT() : canSend ? (m.secretary ? T("Ask your secretary — e.g. how are T-072 and T-071 doing, and what is blocking them?", "问秘书——比如：T-072 和 T-071 怎么样了、卡点是什么？") : T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片")) : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
+        placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
       ${sendButton(key, canSend && !prompt)}
     </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${canSend ? attachStrip(key) : ""}
   </div>`;
@@ -2493,22 +2519,81 @@ function drawPeek(toBottom) {
   }
   restoreTextScrolls(box, taScrolls);
   slashPlace();
+  peekScrollPut(box, m, scroll, toBottom);
+}
+// Where the reader is in the conversation, to put the rebuilt one back there: at the bottom
+// (newest) it follows new messages. Peek keeps the last 30 messages, so when one arrives the
+// oldest drops off and everything moves up: remember the first message in view (by m.keys, one
+// per .pmsg) and where it sat.
+function peekScrollGrab(box, m) {
+  const body = box.querySelector(".peek-body");
+  const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+  const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
+  let anchor = null;
+  if (body && !atBottom && m.keys) {
+    const top = body.getBoundingClientRect().top;
+    const els = [...body.querySelectorAll(".pmsg")];
+    const i = els.findIndex((el) => el.getBoundingClientRect().bottom > top);
+    if (i >= 0 && m.keys[i]) anchor = { key: m.keys[i], off: els[i].getBoundingClientRect().top - top };
+  }
+  return { atBottom, prevTop, anchor };
+}
+function peekScrollPut(box, m, sc, toBottom) {
   const nb = box.querySelector(".peek-body");
-  if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
-  nb.scrollTop = prevTop;
-  const j = anchor ? m.keys.indexOf(anchor.key) : -1;
+  if (!nb) return;
+  if (toBottom || sc.atBottom) { nb.scrollTop = nb.scrollHeight; return; }
+  nb.scrollTop = sc.prevTop;
+  const j = sc.anchor && m.keys ? m.keys.indexOf(sc.anchor.key) : -1;
   if (j >= 0) {
     const el = nb.querySelectorAll(".pmsg")[j];
-    nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - anchor.off;
+    nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - sc.anchor.off;
   }
 }
 
 // ------------------------------------------------------------------ secretary
 // A standing chat with the secretary (SecretaryController): an agent that knows the board, in a
-// fixed background session in the HQ root — one run of its job per message, shown here in Peek.
-// Its proposals are asks on its own card, answered in Needs you; a yes wakes it to carry them out.
+// fixed background session in the HQ root — one run of its job per message. Its window reads like
+// a chat with a person, not like Peek: its tool calls and in-between messages are hidden, each turn
+// shows only its last reply, its proposals (asks on its own card) are answered right where it
+// raised them, and it wears the pet's face. A yes wakes it to carry them out.
 const SEC = "secretary";   // the reply box's key, and its send button's session
 const peekKey = (m) => (m.secretary ? SEC : m.sid);
+
+// Where the face sits in each state's picture (384 px square): centre x, centre y, diameter.
+// A skin without an entry borrows the cat's boxes; a state without one, its idle box.
+const FACE = {
+  cat:        { idle: [192, 136, 240], reading: [188, 128, 236], working: [176, 132, 236], sleeping: [172, 148, 236] },
+  cultivator: { idle: [192, 140, 224], reading: [172, 116, 216], working: [170, 136, 212], sleeping: [180, 136, 212] },
+};
+// The pet's face, cut from the current skin's picture for that state, `size` px across.
+function face(state, size, cls = "") {
+  const skin = ui.skin || "cat";
+  const boxes = FACE[skin] || FACE.cat;
+  const st = boxes[state] ? state : "idle";
+  const [cx, cy, d] = boxes[st];
+  const k = size / d;
+  return `<span class="av ${cls}" aria-hidden="true" style="width:${size}px;height:${size}px;background-image:url('../skins/${encodeURIComponent(skin)}/assets/${st}.png');background-size:${(384 * k).toFixed(1)}px;background-position:${(size / 2 - cx * k).toFixed(1)}px ${(size / 2 - cy * k).toFixed(1)}px"></span>`;
+}
+// Quiet for an hour: it shows asleep (a message wakes it).
+const secAsleep = (iso) => Boolean(iso) && secsSince(iso) > 3600;
+// What the idle status line says about the time, so an open window redraws when that changes.
+const secIdleWord = (iso) => (iso ? (secAsleep(iso) ? "asleep:" : "") + ago(iso) : "");
+
+// The top bar's button: its face (asleep, or ringed while it replies) and how many of its
+// proposals wait on you. Redrawn only when that changes, so the ring's breathing doesn't restart.
+function drawSecretaryButton() {
+  const b = $("#secretary-btn");
+  if (!b) return;
+  const g = ui.secGlance || {};
+  const t = secId() && taskById(secId());
+  const n = t ? openAsks(t).length : 0;
+  const mood = g.busy ? "working" : secAsleep(g.lastAt) ? "sleeping" : "idle";
+  const html = `<span class="secface${g.busy ? " ring" : ""}">${face(mood, 20, mood === "sleeping" ? "dim" : "")}</span>${T("Secretary", "秘书")}${n ? `<span class="badge" title="${T(`${n} proposal${n === 1 ? "" : "s"} waiting on you`, `${n} 条建议在等你回应`)}">${n}</span>` : ""}`;
+  if (b.dataset.sig === html) return;
+  b.dataset.sig = html;
+  b.innerHTML = html;
+}
+
 async function openSecretary() {
   let st;
   try { st = ui.secretary = await apiObj("secretary"); } catch (e) { return toast(String(e.message || e), true); }
@@ -2521,7 +2606,7 @@ function drawSecretarySetup(busy) {
   const files = st.files || {};
   const box = $("#modal");
   box.innerHTML = `<div class="panel sec-setup" role="dialog" aria-label="${T("Secretary", "秘书")}">
-    <div class="phead"><div><div class="stitle">${T("Secretary", "秘书")}</div><div class="meta">${T("not set up on this board yet", "这个看板还没设置秘书")}</div></div>
+    <div class="phead">${face("idle", 36)}<div><div class="stitle">${T("Secretary", "秘书")}</div><div class="meta">${T("not set up on this board yet", "这个看板还没设置秘书")}</div></div>
       <span style="flex:1"></span><button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button></div>
     <div class="sec-body">
       <p>${T("The secretary is a Claude session that knows this board. Ask it where things stand and what is waiting on you; it answers from the cards and sessions, and proposes changes (a new task, a note, a todo, closing a task) as questions in <b>Needs you</b>. It changes nothing until you say yes, and it doesn't do the work itself.",
@@ -2547,86 +2632,283 @@ async function setupSecretary() {
   refresh();
   return openPeek(ui.secretary.sessionId || "", null, { secretary: ui.secretary });
 }
-// The line above the conversation while it isn't replying.
-function secretaryLead(m) {
-  const st = m.sec || {}, last = st.last;
-  if (st.waking) return { cls: "busy", lead: T("Carrying out what you said yes to in a moment…", "马上去办你同意的建议…") };
-  if (last && (last.failed || last.status === "skipped")) {
-    return { cls: "wait", lead: `${last.status === "skipped" ? T("Last message skipped:", "上一条被跳过：") : T("Last reply didn't finish:", "上一次没回完：")} <span class="plabel">${esc(last.summary || last.status)}</span>` };
+
+// Messages the board or its schedule sent on your behalf: a line in the middle, not your bubble.
+const SEC_NOTES = [
+  [/^(Scheduled run:|定时运行：)/, "report", () => T("Scheduled: the report that is due", "定时：写今天该写的报告")],
+  [/^(Write the report that is due now|现在写今天该写的报告)/, "report", () => T("You asked for the report now", "你让它现在写一份报告")],
+  [/^(I answered your proposals on the board|我在看板上回应了你的建议)/, "wake", () => T("You answered its proposals", "你回应了它的建议")],
+];
+const secNote = (text) => { const n = SEC_NOTES.find(([re]) => re.test(String(text || "").trim())); return n ? { kind: n[1], text: n[2]() } : null; };
+// What it is doing, from the call it is in: a word for the typing bubble and the face to wear.
+function secDoing(t) {
+  const r = (mood, en, zh) => ({ mood, text: T(en, zh) });
+  if (!t) return r("working", "Writing…", "在写回复…");
+  const name = t.title || "", label = t.label || "";
+  const sub = name === "Bash" ? (label.match(/(?:^|[\s/])hq\s+(\S+)/) || [])[1] || "" : "";
+  if (sub === "report") return /\bkeep\b/.test(label) ? r("working", "Filing the report…", "在存报告…") : r("reading", "Gathering what happened…", "在收集进展…");
+  if (["status", "board", "asks", "project"].includes(sub)) return r("reading", "Looking over the board…", "在看看板…");
+  if (["peek", "history"].includes(sub)) return r("reading", "Checking what the sessions said…", "在看 session 说了什么…");
+  if (sub === "show") return r("reading", "Reading a task card…", "在翻任务卡…");
+  if (sub) return r("working", "Updating the board…", "在改看板…");
+  if (["Write", "Edit", "MultiEdit"].includes(name)) return /daily|weekly/.test(label) ? r("working", "Writing the report…", "在写报告…") : r("working", "Writing it down…", "在记下来…");
+  if (name === "Read") return /TASK\.md/.test(label) ? r("reading", "Reading a task card…", "在翻任务卡…") : r("reading", "Reading up…", "在翻资料…");
+  if (name === "Grep" || name === "Glob") return r("reading", "Looking something up…", "在查东西…");
+  return r("working", "Working on it…", "在忙…");
+}
+// Its reply without HQ's bookkeeping blocks (card updates, recorded answers), and the proposals
+// its hq-asks block raised, one line each.
+function secSplit(text) {
+  const asks = [];
+  const keep = String(text || "").split(/^```/m).map((p, i) => {
+    if (i % 2 === 0) return p;
+    const nl = p.indexOf("\n");
+    const lang = nl >= 0 ? p.slice(0, nl).trim() : "";
+    if (!lang.startsWith("hq-")) return "```" + p + "```";
+    if (lang === "hq-asks") asks.push(...p.slice(nl + 1).split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s*/, "").trim()).filter(Boolean));
+    return "";
+  });
+  return { text: keep.join("").replace(/\n{3,}/g, "\n\n").trim(), asks };
+}
+// The ask's text as hq records it: without a trailing [grant: …] / [授权：…] suggestion.
+const askKey = (s) => String(s || "").replace(/\s*\[(?:grant|授权)[:：][^\[\]]*\]\s*$/i, "").replace(/\s+/g, " ").trim();
+const RES_WORD = (s) => (RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === s) || [])[1] || { later: T("Ask later", "以后再问") }[s] || s;
+// One of its proposals: open, a card to answer (the same answers as in Needs you, minus
+// "Yes, always": a standing grant is never for the secretary); answered, one line.
+function secPropose(a) {
+  if (a.state === "open" && !isLater(a)) {
+    return `<div class="propose"><div class="ph2">${T("Proposal", "建议")} · ${esc(a.id)}</div><div class="ptext">${esc(a.text)}</div>
+      <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" placeholder="${T("note (optional) — it is your answer", "说明（可选）——写了就按说明办")}">${esc(draft("note:" + a.id))}</textarea>
+      <div class="acts">${RESOLUTIONS.filter(([r]) => r !== "always").map(([r, label, tip]) =>
+        `<button class="pb ${r === "do" ? "yes" : ""}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${ui.resolving.has(a.id) ? "disabled" : ""}>${label}</button>`).join("")}</div></div>`;
   }
-  return { cls: "idle", lead: T("Ready", "待命") };
+  const said = a.state === "open" ? T("Later", "稍后再答") : RES_WORD(a.state);
+  return `<div class="propose done"><div class="ptext">${esc(a.text)}</div>
+    <div class="answered">${T("You:", "你：")} <b>${esc(said)}</b>${a.note ? ` · ${esc(a.note)}` : ""}</div></div>`;
 }
-// Above the conversation: what it is keeping an eye on for you (its card's state, which its
-// hq-update writes).
-function secretaryWatch(m) {
-  const lines = (m.sec && m.sec.state) || [];
-  if (!lines.length) return "";
-  return `<div class="sec-watch"><span class="sec-watch-h">${T("Keeping an eye on", "它在替你盯的事")}</span>
-    ${lines.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
+// Clock time for the line between turns: today's as 14:05, older ones with their date.
+function secWhen(iso) {
+  const d = new Date(iso), now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
-// Its reports (`hq report`, written to secretary/reports/): the newest, each opening in your editor
-// (what you change there it learns from), the evening schedule's switch, and "write one now".
-function secretaryReports(m) {
-  const st = m.sec || {}, sch = st.schedule || {}, reports = st.reports || [];
-  const kindWord = (k) => (k === "weekly" ? T("weekly", "周报") : T("daily", "日报"));
-  const links = reports.map((r) => `<button class="lnk" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — the secretary learns from your edits", "打开编辑——秘书会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}</button>`).join(" · ");
-  const hm = `${String(sch.hour ?? 18).padStart(2, "0")}:${String(sch.minute ?? 30).padStart(2, "0")}`;
-  const when = sch.kind === "weekdays" ? T(`weekdays ${hm}, the weekly one on Fridays`, `工作日 ${hm}，周五写周报`)
-    : sch.kind === "daily" ? T(`daily ${hm}, the weekly one on Fridays`, `每天 ${hm}，周五写周报`) : T("on its schedule in Scheduled", "按“定时任务”里设的时间");
-  const busy = st.running || ui.sending.has(SEC);
-  return `<div class="sec-reports">
-    <span class="sec-watch-h">${T("Reports", "报告")}</span>${links || `<span class="meta">${T("none yet", "还没有")}</span>`}
-    <span style="flex:1"></span>
-    ${sch.reports === false
-      // Its scheduled runs ask what the user wrote in Scheduled; turning reports on replaces that.
-      ? `<span class="meta" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs: your own prompt, no reports", "定时运行：用你自己的 prompt，不写报告") : T("Evening report off", "定时报告：关")}</span>
-    <button class="btn small ghost" data-action="secretary-reports" data-on="1">${sch.enabled ? T("Write reports instead", "改成写报告") : T("Turn on", "开启")}</button>`
-      : `<span class="meta" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}">${sch.enabled ? T(`Evening report on: ${when}`, `定时报告：开（${when}）`) : T(`Evening report off (${when})`, `定时报告：关（${when}）`)}</span>
-    <button class="btn small ghost" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}">${sch.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>`}
-    <button class="btn small" data-action="secretary-report-now" ${busy ? "disabled" : ""} title="${T("Ask for the report that is due now", "让它现在写今天该写的报告")}">${T("Write one now", "现在写一份")}</button>
-  </div>`;
-}
-// The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to the quick notes,
-// sorted there. Its switch, how the last scan went, and "scan now".
-function secretaryFeed(m) {
-  const f = (m.sec || {}).feed || {};
+// The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to
+// the quick notes and are sorted there. Its switch, "scan now" and how the last scan went, for the ⋯ menu.
+function secFeedItems(st) {
+  const f = st.feed || {};
   const hourly = f.kind === "cron" && f.cron === "0 9-19 * * 1-5";
-  const when = hourly ? T("hourly on weekdays, 9–19", "工作日 9–19 点每小时") : T("on its schedule in Scheduled", "按“定时任务”里设的时间");
+  const when = hourly ? T("weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("as set in Scheduled", "按定时任务的设置");
   const last = f.last;
-  const lastLine = last ? `<span class="meta ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary.slice(0, 90))}` : ""}</span>` : "";
-  return `<div class="sec-reports">
-    <span class="sec-watch-h">Zulip · Jira</span>
-    <span class="meta" title="${T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away. Jira needs its site and token: see the guide", "Zulip 上 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子一条记录。属于某个任务的情况直接记进它的 Log，待办和新任务等你点，其余的收起。Jira 要先设站点和 token，见说明")}${f.next ? " · " + T(`Next: ${esc(f.next)}`, `下一次：${esc(f.next)}`) : ""}">${f.enabled ? T(`Scan on: ${when}`, `扫描：开（${when}）`) : T("Scan off", "扫描：关")}</span>
-    ${lastLine}
-    <span style="flex:1"></span>
-    <button class="btn small ghost" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}">${f.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>
-    <button class="btn small" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}>${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</button>
-  </div>`;
+  const tip = T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
+    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+  return `<hr><div class="ph">Zulip · Jira</div>
+    <button class="pi" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
+    <button class="pi" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
-// Its memory files, each opening in your editor.
-function secretaryMemory(m) {
+const localDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const kindWord = (k) => (k === "weekly" ? T("Weekly report", "周报") : T("Daily report", "日报"));
+
+// The conversation as chat rows: {side: "me" | "it" | "note" | "when", key, html, copy}.
+function secRows(m, busy, doing) {
   const st = m.sec || {};
-  const files = Object.keys(st.files || {}).filter((f) => st.files[f]);
-  if (!st.memory || !files.length) return T("Secretary", "秘书");
-  return `${T("memory:", "记忆：")} ${files.map((f) => `<button class="lnk" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(f.replace(/\.md$/, ""))}</button>`).join(" · ")}`;
+  const items = m.items || (m.msgs || []).map((x) => ({ kind: "msg", ...x }));
+  const turns = [];
+  for (const it of items) {
+    if (it.kind === "msg" && it.role === "user") { turns.push({ user: it, replies: [] }); continue; }
+    if (!turns.length) turns.push({ user: null, replies: [] });
+    if (it.kind === "msg") turns[turns.length - 1].replies.push(it);
+  }
+  const card = secId() && taskById(secId());
+  const asks = card ? card.asks || [] : [];
+  const shown = new Map();   // ask id → the row showing its card
+  const rows = [];
+  let lastTs = 0;
+  const when = (ts) => {
+    const t = new Date(ts).getTime();
+    if (!isNaN(t) && t - lastTs > 30 * 60 * 1000) rows.push({ side: "when", key: `w|${ts}`, html: esc(secWhen(ts)) });
+    if (!isNaN(t)) lastTs = t;
+  };
+  // The turn it is in: the last one, if its message came after the run began. The transcript lags
+  // the run by a few seconds; until the new message is in, every turn shown is finished, and the
+  // message just sent from here stands in for it.
+  const liveStart = busy && st.runStart ? new Date(st.runStart).getTime() : 0;
+  const lastTurn = turns[turns.length - 1];
+  const liveIdx = !busy || !lastTurn ? -1
+    : liveStart ? (lastTurn.user && new Date(lastTurn.user.ts).getTime() >= liveStart - 1000 ? turns.length - 1 : -1)
+    : lastTurn.replies.length ? -1 : turns.length - 1;
+  turns.forEach((turn, i) => {
+    const live = i === liveIdx;
+    let note = null;
+    if (turn.user) {
+      when(turn.user.ts);
+      note = secNote(turn.user.text);
+      if (note) rows.push({ side: "note", key: `n|${turn.user.ts}`, html: esc(note.text) });
+      else rows.push({ side: "me", key: `u|${turn.user.ts}`, html: esc(turn.user.text).replace(/\n/g, "<br>"), copy: { who: "you", text: turn.user.text } });
+    }
+    if (live) return;   // its in-between messages stay hidden: the typing bubble stands for them
+    // The turn's last reply that says something (one holding only a card update says nothing).
+    let reply = null, parts = null;
+    for (let j = turn.replies.length - 1; j >= 0 && !reply; j--) {
+      const p = secSplit(turn.replies[j].text);
+      if (p.text || p.asks.length) { reply = turn.replies[j]; parts = p; }
+    }
+    if (!reply) return;
+    if (!turn.user) when(reply.ts);
+    const scope = `${reply.role}|${reply.ts}`;
+    if (parts.text) {
+      const report = note && note.kind === "report" && (st.reports || []).find((r) => r.date === localDate(reply.ts));
+      const html = note && note.kind === "report"
+        ? `<div class="report"><div class="rh">📄 <b>${report ? `${kindWord(report.kind)} · ${esc(report.date.slice(5))}` : T("Report", "报告")}</b></div>
+            <div class="rb md">${markdown(parts.text, scope)}</div>
+            ${report ? `<div class="rf"><button class="lnk" data-action="open" data-path="${esc(report.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${T("Open the full report", "打开全文")}</button></div>` : ""}</div>`
+        : `<div class="bub md">${markdown(parts.text, scope)}</div>`;
+      rows.push({ side: "it", key: `a|${reply.ts}`, html, copy: { who: "it", text: parts.text } });
+    }
+    // Each line to the ask hq made of it: the same text, closest in time to this reply (an
+    // earlier, answered ask can share the text). Asked again, hq keeps one open ask: the newest
+    // message holds its card, the older one keeps just the line.
+    const at = new Date(reply.ts).getTime();
+    for (const line of parts.asks) {
+      const plain = `<div class="propose done"><div class="ptext">${esc(askKey(line))}</div></div>`;
+      let a = null;
+      for (const x of asks) {
+        if ((x.session && x.session !== m.sid) || askKey(x.text) !== askKey(line)) continue;
+        if (!a || Math.abs(new Date(x.ts).getTime() - at) < Math.abs(new Date(a.ts).getTime() - at)) a = x;
+      }
+      if (a && shown.has(a.id)) rows[shown.get(a.id)].html = rows[shown.get(a.id)].plain;
+      if (a) shown.set(a.id, rows.length);
+      rows.push({ side: "it", key: `q|${reply.ts}|${line}`, html: a ? secPropose(a) : plain, plain });
+    }
+  });
+  // Proposals still waiting whose message has scrolled out of what Peek keeps (or that came
+  // before this window was set up): at the end, so none is out of reach.
+  const left = asks.filter((a) => a.state === "open" && !isLater(a) && !shown.has(a.id));
+  if (left.length) {
+    rows.push({ side: "note", key: "n|left", html: T("Still waiting on you", "这些还在等你回应") });
+    for (const a of left) rows.push({ side: "it", key: `q|left|${a.id}`, html: secPropose(a) });
+  }
+  const sent = m.sentMsg;
+  if (busy && liveIdx < 0 && sent && (!liveStart || sent.at >= liveStart - 2000)) {
+    const n = secNote(sent.text);
+    rows.push(n ? { side: "note", key: "n|sent", html: esc(n.text) }
+                : { side: "me", key: "u|sent", html: esc(sent.text).replace(/\n/g, "<br>"), copy: { who: "you", text: sent.text } });
+  }
+  if (busy || st.waking) {
+    rows.push({ side: "it", key: "typing", typing: true, html: `<div class="bub typing" aria-label="${T("typing", "正在输入")}"><i></i><i></i><i></i></div>`,
+                doing: st.waking && !busy ? T("Carrying out what you said yes to…", "去办你同意的事…") : doing.text });
+  } else if (st.last && (st.last.failed || st.last.status === "skipped")) {
+    rows.push({ side: "note", key: `x|${st.last.at}`, warn: true,
+                html: `<span class="warn">${st.last.status === "skipped" ? T("Your last message was skipped:", "上一条被跳过：") : T("Its last reply didn't finish:", "上一次没回完：")}</span> ${esc(st.last.summary || st.last.status)}` });
+  }
+  return rows;
 }
-// Its proposals, answered right here: the same asks as in Needs you, one answer each.
-function secretaryAsks() {
-  const t = taskById(secId());
-  if (!t) return "";
-  const asks = openAsks(t), later = laterAsks(t);
-  if (!asks.length && !later.length) return "";
-  return `<div class="sec-asks">
-    <div class="sec-asks-h">${T("It asks you", "它在问你")} <span class="meta">${asks.length}</span>${later.length ? `<span class="meta"> · ${T(`${later.length} for later, in Needs you`, `${later.length} 条稍后再答，在 Needs you 里`)}</span>` : ""}</div>
-    ${asks.map((a) => askCard(t, a, { peek: true })).join("")}</div>`;
+
+// The window. Same data as Peek (the session's transcript, its card, its job), drawn as a chat.
+function drawSecretary(toBottom) {
+  const m = ui.modal, st = m.sec || {};
+  const box = $("#modal");
+  const active = document.activeElement;
+  const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd, active.dataset.key] : null;
+  const taScrolls = textScrolls(box);
+  const scroll = peekScrollGrab(box, m);
+  const run = peekRun(m, {});
+  const busy = run.state === "busy";
+  const doing = secDoing(run.current);
+  const lastAt = (ui.secGlance && ui.secGlance.lastAt) || (st.last && st.last.at);
+  const mood = busy || st.waking ? doing.mood : secAsleep(lastAt) ? "sleeping" : "idle";
+  const failed = !busy && st.last && (st.last.failed || st.last.status === "skipped");
+  const status = busy ? doing.text : st.waking ? T("Carrying out what you said yes to in a moment…", "马上去办你同意的事…")
+    : failed ? T("Its last reply didn't finish", "上一次没回完")
+    : mood === "sleeping" ? T(`Resting · last replied ${ago(lastAt)} — a message wakes it`, `在休息 · ${ago(lastAt)}回过话，发消息就会叫醒它`)
+    : lastAt ? T(`Here · last replied ${ago(lastAt)}`, `在 · ${ago(lastAt)}回过话`) : T("Here", "在");
+
+  let rows = m.msgs === null ? null : secRows(m, busy, doing);
+  if (rows && !rows.some((r) => r.side !== "when")) {
+    rows = [{ side: "it", key: "intro", html: `<div class="bub">${T("Hi — I keep an eye on the board for you. Ask me how a task is doing, what is waiting on you, or what looks stuck. If something on the board should change, I'll ask you first.",
+      "你好，我替你盯着看板。可以问我哪个任务怎么样了、什么在等你、哪些看着卡住了。看板上要改什么，我会先问你。")}</div>` }];
+  }
+  // Its face goes on the last of its rows in a run, like a chat app.
+  m.chat = [];
+  const body = rows === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>` : rows.map((r, i) => {
+    if (r.side === "when") return `<div class="pmsg when">${r.html}</div>`;
+    if (r.side === "note") return `<div class="pmsg snote ${r.warn ? "warn" : ""}">${r.html}</div>`;
+    const ci = r.copy ? m.chat.push(r.copy) - 1 : -1;
+    const copy = ci >= 0 ? `<button class="copy" data-action="sec-copy" data-i="${ci}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button>` : "";
+    const inner = copy && /^<div class="(bub|report)/.test(r.html) ? r.html.replace(/<\/div>$/, `${copy}</div>`) : r.html;
+    if (r.side === "me") return `<div class="pmsg row me"><div class="bub">${r.html}${copy}</div></div>`;
+    const lastOfRun = !rows[i + 1] || rows[i + 1].side !== "it";
+    return `<div class="pmsg row it ${lastOfRun ? "" : "cont"}">${lastOfRun ? face(r.typing ? mood : "idle", 28) : `<span class="av-gap"></span>`}<div class="it-col">${inner}${r.doing ? `<div class="doing">${esc(r.doing)}</div>` : ""}</div></div>`;
+  }).join("");
+  m.keys = rows ? rows.map((r) => r.key) : null;
+
+  const sch = st.schedule || {}, reports = st.reports || [];
+  const hm = `${String(sch.hour ?? 18).padStart(2, "0")}:${String(sch.minute ?? 30).padStart(2, "0")}`;
+  const when = sch.kind === "weekdays" ? T(`weekdays ${hm}`, `工作日 ${hm}`) : sch.kind === "daily" ? T(`daily ${hm}`, `每天 ${hm}`) : T("as set in Scheduled", "按定时任务的设置");
+  const dayWord = (date) => { const n = Math.round((new Date(localDate(new Date().toISOString())) - new Date(date)) / 86400000);
+    return n === 0 ? T("today", "今天") : n === 1 ? T("yesterday", "昨天") : T(`${n} days ago`, `${n} 天前`); };
+  const repPop = `<div class="pop" role="menu"><div class="ph">${T("Reports", "报告")}</div>
+    ${reports.length ? reports.map((r) => `<button class="pi" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")
+      : `<div class="pi off">${T("None yet", "还没有")}</div>`}
+    <hr><button class="pi" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button></div>`;
+  const MEM = { "profile.md": T("About you", "关于你"), "people.md": T("Colleagues", "同事"), "playbooks.md": T("Recurring processes", "常做的流程"), "reports.md": T("How reports are written", "报告怎么写") };
+  const mem = Object.keys(st.files || {}).filter((f) => st.files[f]);
+  const evening = sch.reports === false
+    // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
+    ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
+    : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
+  const morePop = `<div class="pop" role="menu">${evening}${secFeedItems(st)}
+    ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
+    <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
+  const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
+
+  const watch = st.state || [];
+  const watchHtml = watch.length ? `<div class="watch ${m.watchOpen ? "open" : ""}">
+      <div class="watch-h" data-action="sec-watch"><span class="eye">◉</span><span>${T(`Keeping an eye on ${watch.length} thing${watch.length === 1 ? "" : "s"}`, `替你盯着 ${watch.length} 件事`)}${m.watchOpen ? "" : ` · ${esc(watch[0])}`}</span><span class="car">${m.watchOpen ? "▴" : "▾"}</span></div>
+      ${m.watchOpen ? `<ul>${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>` : "";
+
+  const key = "msg:" + SEC;
+  const keepDraft = box.querySelector(".c-foot textarea") ? null : draft(key);
+  const QUICK = [[T("What is waiting on me?", "有什么在等我？")], [T("What looks stuck?", "哪些看着卡住了？")], [T("What happened today?", "今天做了什么？")],
+                 [T("Draft a message", "帮我起草消息"), T("Draft a message to ", "帮我起草一条消息，发给 ")]];
+  const quick = busy || st.waking ? "" : `<div class="quick">${QUICK.map(([label, fill]) => `<button class="chipq" data-action="sec-quick" ${fill ? `data-fill="${esc(fill)}"` : `data-text="${esc(label)}"`}>${esc(label)}</button>`).join("")}</div>`;
+  const sendBtn = busy
+    ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>`
+    : `<button class="sendc" data-action="send" data-session="${SEC}" ${ui.sending.has(SEC) || st.waking ? "disabled" : ""} title="${T("Send (Enter)", "发送（回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
+
+  box.innerHTML = `<div class="panel sec-chat" role="dialog" aria-label="${T("Secretary", "秘书")}">
+    <div class="c-head">
+      ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
+      <span class="secface${busy ? " ring" : ""}">${face(mood, 44, mood === "sleeping" ? "dim" : "")}</span>
+      <div class="c-who"><div class="c-name">${T("Secretary", "秘书")}</div>
+        <div class="c-status"><span class="sdot ${busy || st.waking ? "busy" : failed ? "bad" : mood === "sleeping" ? "off" : ""}"></span><span>${esc(status)}</span></div></div>
+      ${ibtn("rep", T("Reports", "报告"), `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>`)}
+      ${ibtn("more", T("More", "更多"), `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`)}
+      <button class="ibtn" data-action="close-modal" aria-label="${T("Close", "关闭")}" title="${T("Close (Esc)", "关闭 (Esc)")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    ${watchHtml}
+    <div class="peek-body c-body">${body}</div>
+    <div class="c-foot">${quick}
+      <div class="inrow"><textarea class="grow" rows="1" data-key="${key}" data-session="${SEC}" placeholder="${T("Message your secretary — paste or drop images too", "跟秘书说点什么——也可以粘贴或拖入图片")}">${esc(keepDraft ?? draft(key))}</textarea>${sendBtn}</div>
+      ${attachStrip(SEC)}
+    </div>
+  </div>`;
+  box.hidden = false;
+  fitAllGrow(box);
+  if (typing) {
+    const ta = [...box.querySelectorAll("textarea")].find((x) => x.dataset.key === typing[2]);
+    if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); }
+  }
+  restoreTextScrolls(box, taScrolls);
+  peekScrollPut(box, m, scroll, toBottom);
 }
-function secretaryIntro() {
-  return T(`Ask it where things stand: “How are T-072 and T-071 doing, and what is blocking them?”, “What is waiting on me?”, “What looks stuck?”. It looks things up on the board each time and marks what waits on you with ⚑.`,
-           `问它各个任务的情况：“T-072 和 T-071 怎么样了、卡点是什么？”“有什么在等我？”“哪些看着卡住了？”。它每次都现查看板，等你处理的事会用 ⚑ 标出来。`);
-}
-// preset: a message of the window's own ("Write one now"); the draft in the box stays as it is.
+// preset: a message of the window's own ("Write one now", a quick question); the draft in the
+// box stays as it is.
 async function sendSecretary(preset) {
   if (ui.sending.has(SEC)) return;
+  if (ui.modal && ui.modal.secretary && ui.modal.sec && ui.modal.sec.running) {
+    return toast(T("It is still replying — wait for it, or stop it", "它还在回复——等它说完，或者先让它停下"), true);
+  }
   const key = "msg:" + SEC;
   const text = preset || (ui.drafts[key] || "").trim();
   const images = preset ? [] : ui.atts[SEC] || [];
@@ -2637,7 +2919,7 @@ async function sendSecretary(preset) {
   try {
     await api("secretary-send", { text: message });
     if (!preset) { delete ui.drafts[key]; delete ui.atts[SEC]; }
-    if (ui.modal && ui.modal.secretary && ui.modal.sec) ui.modal.sec.running = true;
+    if (ui.modal && ui.modal.secretary && ui.modal.sec) { ui.modal.sec.running = true; ui.modal.sentMsg = { text: message, at: Date.now() }; }
   } catch (e) {
     toast(String(e.message || e), true);
   } finally {
@@ -2756,8 +3038,6 @@ function peekStatus(m, s, run) {
   } else if (run.state === "waiting") {
     cls = "wait";
     lead = s.waitingOn ? `${T("Waiting for your OK:", "等你批准：")} <span class="plabel">${esc(s.waitingOn)}</span>` : T("Waiting for your answer in the terminal", "在终端里等你回答");
-  } else if (m.secretary) {
-    ({ cls, lead } = secretaryLead(m));
   } else if (m.live) {
     cls = "idle"; lead = T("Idle — its turn is over", "空闲——这一轮已结束");
   } else {
@@ -2770,9 +3050,7 @@ function peekStatus(m, s, run) {
     bits.push(`<span title="${T("Tokens Claude wrote this turn (thinking included)", "这一轮 Claude 输出的 token（含思考）")}">↓ ${fmtTok(turn.tokens)} tokens</span>`);
     if (turn.context) bits.push(`<span title="${T("Context size at its latest reply", "最近一次回复时的上下文大小")}">${T("context", "上下文")} ${fmtTok(turn.context)}</span>`);
   }
-  if (m.secretary && m.sec && m.sec.contextPct != null) bits.push(`<span title="${T("How full its context is; it is compacted past the job's threshold", "上下文用了多少；超过任务设的阈值会自动 compact")}">${T("context", "上下文")} ${m.sec.contextPct}%</span>`);
-  const stop = m.secretary && run.state === "busy" ? `<button class="btn small" data-action="secretary-stop">${T("Stop", "停止")}</button>` : "";
-  return `<div class="pstatus ${cls}"><span class="pdot"></span><span class="plead">${lead}</span><span style="flex:1"></span><span class="pbits">${bits.join(" · ")}</span>${stop}</div>`;
+  return `<div class="pstatus ${cls}"><span class="pdot"></span><span class="plead">${lead}</span><span style="flex:1"></span><span class="pbits">${bits.join(" · ")}</span></div>`;
 }
 // Claude's own todo list (TodoWrite / TaskCreate), as it last left it.
 function peekTodos(m) {
@@ -3218,17 +3496,17 @@ document.addEventListener("paste", (ev) => {
   addImages(box.dataset.session || box.dataset.att, files);
 });
 document.addEventListener("dragover", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
   ev.preventDefault();
   zone.classList.add("dropping");
 });
 document.addEventListener("dragleave", (ev) => {
-  const zone = ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (zone) zone.classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
@@ -3365,6 +3643,12 @@ document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
   const el = ev.target.closest("[data-action]");
+  // The secretary's menus close on any click but their own button's, or the evening report's
+  // or the scan's switch (you see it flip).
+  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
+    ui.modal.pop = null;
+    drawPeek(false);   // (an item clicked in it still acts: its dataset outlives the redraw)
+  }
   if (!el || el.tagName === "SELECT") return;
   const d = el.dataset;
   // Removing or unbinding asks twice: the first click turns the button into a red "Unbind?" for
@@ -3593,6 +3877,23 @@ document.addEventListener("click", async (ev) => {
     case "secretary-stop":
       try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
       return refreshPeek();
+    case "sec-pop":
+      if (ui.modal) { ui.modal.pop = ui.modal.pop === d.pop ? null : d.pop; drawPeek(false); }
+      return;
+    case "sec-watch":
+      if (ui.modal) { ui.modal.watchOpen = !ui.modal.watchOpen; drawPeek(false); }
+      return;
+    case "sec-quick":
+      if (d.text) return sendSecretary(d.text);
+      if (!(ui.drafts["msg:" + SEC] || "").trim()) { ui.drafts["msg:" + SEC] = d.fill || ""; saveDrafts(); }
+      drawPeek(false);
+      { const ta = document.querySelector(`#modal textarea[data-key="msg:${SEC}"]`); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
+      return;
+    case "sec-copy": {
+      const c = ui.modal && ui.modal.chat && ui.modal.chat[Number(d.i)];
+      if (c) await copyText(c.text, T("Message copied", "已复制消息"));
+      return;
+    }
     case "copy-msg": {
       const m = ui.modal && ui.modal.msgs[Number(d.i)];
       if (m) await copyText(m.text, T("Message copied", "已复制消息"));
@@ -3636,6 +3937,10 @@ document.addEventListener("click", async (ev) => {
       return;
     }
     case "copy-all":
+      if (ui.modal && ui.modal.secretary) {
+        await copyText((ui.modal.chat || []).map((c) => `${c.who === "you" ? T("You", "你") : T("Secretary", "秘书")}:\n${c.text}`).join("\n\n"), T("Conversation copied", "已复制对话"));
+        return;
+      }
       if (ui.modal) await copyText(ui.modal.msgs.map((m) => `${m.role === "user" ? "You" : "Claude"}:\n${m.text}`).join("\n\n"), T("Conversation copied", "已复制对话"));
       return;
     case "link":
@@ -3695,7 +4000,17 @@ document.addEventListener("click", async (ev) => {
       const text = (ui.drafts[key] || "").trim();
       if (!text) return;
       delete ui.drafts[key];
-      return act("ref", { action: "add", task: d.task, ref: text }, T("Added", "已添加"));
+      // Added by hand: a key link, kept on the card even when it is a build or a comment.
+      return act("ref", { action: "pin", task: d.task, ref: text }, T("Added", "已添加"));
+    }
+    case "ref-pin": return act("ref", { action: "pin", task: d.task, ref: d.ref }, T("Kept on the card", "已留在卡上"));
+    case "continue": {
+      try {
+        const out = JSON.parse(await api("continue", { task: d.task }));
+        ui.expanded.add(out.to);
+        toast(T(`Continued in ${out.to}`, `已续到 ${out.to}`) + (out.asks && out.asks.length ? T(` — ${out.asks.length} open ask(s) moved with it`, `——${out.asks.length} 条未回应的问题一起搬过去了`) : ""));
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
     }
     case "workdir-add": {
       try {
@@ -3717,13 +4032,14 @@ document.addEventListener("click", async (ev) => {
     case "ref-remove": {
       const ref = d.ref;
       try {
-        // ✕ removes every entry with this link; hq prints them ({"removed": [{i, ref}, …]}) and
-        // Undo puts them all back where they were. An older hq prints nothing: re-add this one.
+        // ✕ removes every entry with this link, on the card and in HISTORY.md; hq prints them
+        // ({"removed": [{i, ref}, …], "history": [ref, …]}) and Undo puts them all back where they
+        // were. An older hq prints nothing: re-add this one.
         const out = await api("ref", { action: "remove", task: d.task, ref });
-        let removed = null;
-        try { removed = JSON.parse(out).removed; } catch (e) { /* older hq */ }
-        const undo = Array.isArray(removed) && removed.length
-          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(removed) }, T("Restored", "已恢复"))
+        let gone = null;
+        try { gone = JSON.parse(out); } catch (e) { /* older hq */ }
+        const undo = gone && (list(gone.removed).length || list(gone.history).length)
+          ? () => act("ref", { action: "restore", task: d.task, ref: JSON.stringify(gone) }, T("Restored", "已恢复"))
           : () => act("ref", { action: "add", task: d.task, ref }, T("Restored", "已恢复"));
         toast(T("Removed", "已移除"), false, undo);
       } catch (e) { toast(String(e.message || e), true); }
@@ -4208,6 +4524,7 @@ document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.finishAsk) { ev.preventDefault(); return answerFinishAsk(null); }
   if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
+  if (ev.key === "Escape" && ui.modal && ui.modal.pop) { ev.preventDefault(); ui.modal.pop = null; return drawPeek(false); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {

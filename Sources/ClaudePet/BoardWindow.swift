@@ -174,8 +174,12 @@ final class BoardWindow: NSWindow {
     /// The pet as the app icon: the current skin's idle picture on a rounded
     /// tile in the board's colour, drawn once per skin.
     private static var iconCache: (skin: String, image: NSImage)?
+    /// The skin the pet wears now (the board draws the secretary with its face).
+    static func currentSkin() -> String {
+        UserDefaults.standard.string(forKey: "petSkin") ?? PetSkins.defaultID
+    }
     private static func dockIcon() -> NSImage? {
-        let skin = UserDefaults.standard.string(forKey: "petSkin") ?? PetSkins.defaultID
+        let skin = currentSkin()
         if let cached = iconCache, cached.skin == skin { return cached.image }
         guard let root = Bundle.module.url(forResource: "pet", withExtension: nil) else { return nil }
         let picture = [skin, PetSkins.defaultID].lazy
@@ -283,6 +287,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             var pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
             if let usage = Self.usage?() { pet["usage"] = usage }
             if let target = Self.clickTarget?() { pet["clickTarget"] = target }
+            pet["skin"] = BoardWindow.currentSkin()
+            pet["secretary"] = SecretaryController.shared.glance
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
         case "click-target":
@@ -355,6 +361,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(args)
         case "ref": return await hq(["ref", str("action"), str("task"), "--", str("ref")])
         case "workdir": return await hq(["workdir", str("action"), str("task"), "--", str("path")])
+        case "continue": return await hq(["continue", str("task"), "--json"])
         case "addtodo": return await hq(["addtodo", str("task"), "--", str("text")])
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])

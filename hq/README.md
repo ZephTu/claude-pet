@@ -99,7 +99,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
@@ -152,7 +152,8 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    Only the lines that changed. `todo` / `done` / `drop` / `log` / `ref` / `workdir` may
    repeat; `state` lines replace the card's Status (当前状态) section; `done` / `drop` match an
    open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
-   that fits only one open todo). `project: NAME` moves the task to an existing project — a
+   that fits only one open todo). A `ref:` to one build, run or comment (a process link) goes to
+   the task's HISTORY.md, not the card; `ref!:` keeps it on the card. `project: NAME` moves the task to an existing project — a
    name not in `hq.json` refuses the whole block, since only the user makes projects. A block holding just `touch` stamps the card when nothing
    changed. Only a block at the end of the reply counts, at the start of a line and outside any
    other fence; one shown mid-reply, or made of template placeholders (`<…>`), is an example.
@@ -288,6 +289,57 @@ on a Chinese card) and remove it when the last grant is revoked.
 - [ ] @Wenbing restart the qebot pod     ← waiting on someone else
 - [x] done   ·   - [-] dropped
 ```
+
+### Card budget: HISTORY.md and `hq continue`
+
+Every session that starts on a task reads its card, so the card keeps what is in use now and the
+rest moves to `HISTORY.md` beside it on every write (`enforce_budget`; nothing is deleted):
+
+- closed todos past the 5 most recently closed (`CARD_KEEP_CLOSED`; when a todo closed comes from
+  its tick record);
+- todo ticks (`todo #3 → done (board): …`), written straight to history;
+- log entries past the newest 20 (`CARD_KEEP_LOG`);
+- process links (`process_ref`): one Jenkins build, one GitHub Actions run, a comment on a GitHub
+  PR / issue or a Jira issue, or a URL matching a regex in `hq.json`'s `"process_links": […]`
+  (searched in the full URL). A ref starting with `! ` (the key mark) is a key link whatever it
+  points at: `hq ref pin T-012 <url>` and an `hq-update` `ref!:` line write it that way, and the
+  board's Add pins. The board's `processRef` is the same test — keep them in step.
+
+```markdown
+# T-012 — history
+
+<!-- What no longer fits on TASK.md (the card budget): … Oldest first. -->
+
+## Links
+- Build 41 https://jenkins.example.com/job/x/41/
+
+## Todos
+- [x] @claude rerun on build 81599 <!--t:2026-11-20T10:00:00+08:00-->
+
+## Log
+- 2026-11-20 10:31:02: todo #2 → done (board): rerun on build 81599
+```
+
+`hq board --json` gives each task `history` (`log`, `links`, `todos` as parsed todos) and
+`historyInfo` (counts and path); the board merges them back in — log by time, history todos
+read-only among the finished ones, process links folded in a last **Process** group with ↑ (pin).
+A starting session gets one line saying how much history there is and where. `hq ref remove`
+removes the link from HISTORY.md too and prints `{"removed": […], "history": […]}` ("history" only
+when any went from there); `hq ref restore` puts both back. Over 16 KB, 30 links or 30 todos is
+still flagged `card over budget` by `hq status`.
+
+`hq continue T-012 [--title TITLE] [--json]` carries an open task on in a fresh card: the title's
+date (`2026-11-20`, `2026/11/20`, `Nov 20[, 2026]`, `2026 Nov 20`, `[2026年]11月20日`) becomes today's,
+else ` (cont. MM-DD)` is appended (`（续 MM-DD）` for a title with CJK). Goal, Status, the open todos
+as written (an open sub-todo of a closed one comes unindented; checklists in Goal/Status are not
+copied twice), Grants, refs, next, a non-active status, project, category, lead and workdirs come along; both logs point at
+the other; the old card becomes `done` with `next: continued in T-new` and its Focus place goes to
+the new card. Sessions bound to the old card are rebound (their next prompt says so). Open asks
+move to the new card under new ids: the new card's `asks.jsonl` gets an `open` event with
+`moved_from`, the old one a `{"type": "move", "id", "to"}` event, and the old ask reads as state
+`moved`; `hq ask resolve` on an old id resolves the new one. `--json` prints `{"from", "to", "path",
+"title", "todos", "sessions", "asks"}`, `asks` being `[{"from": "T-012.3", "to": "T-031.1"}, …]`. The
+board's **Continue today** button runs it.
 
 ## Projects
 
@@ -458,6 +510,11 @@ overwrites what the user wrote:
   as `"secretary": {"task": "T-…"}` in `hq.json`, and `hq board --json` reports it as
   `"secretary"`.
 
+The agent definition tells it to talk like a colleague in a chat: the answer first, in a few plain
+sentences, lists only for truly separate items, no narrated steps, and for a report only the gist
+(the window links the file). The board's window shows only each turn's last reply, so that is all
+the user reads.
+
 `init` also replaces an agent definition that is still exactly an older shipped version (matched
 by its sha256), so existing setups pick up new instructions; one the user edited is kept.
 
@@ -603,7 +660,8 @@ unsorted 1, skipped 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → filed 1, unsor
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
-    └── asks.jsonl            append-only events: {"type":"open"|"resolve", …}
+    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"move", …}
+    └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point
 ├── config.json               {"root": "<root>"}
