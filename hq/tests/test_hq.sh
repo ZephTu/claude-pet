@@ -331,6 +331,17 @@ printf '%s\n' \
   > "$HOME/.claude/projects/-tmp-repo/$DSID.jsonl"
 "$HQ" peek "$DSID" --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [(x["role"],x["text"]) for x in m]==[("user","open the PR"),("assistant","opening"),("user","open the PR"),("user","see [Image #1]")], m' && ok "peek shows a prompt written twice once, and keeps a queued prompt with an image" || fail "peek doubled a prompt or lost a queued image prompt"
 
+# peek: screenshots make a transcript big without adding messages. The n messages are found
+# however many megabytes of images sit between them.
+ISID=feedface-5555-2222-3333-444455556666
+IMG=$(python3 -c 'print("A" * 4_000_000)')
+{ for i in 1 2 3; do
+    printf '{"type":"user","message":{"content":"ask %s"},"timestamp":"2026-01-01T00:0%s:00Z"}\n' "$i" "$i"
+    printf '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"r%s","content":[{"type":"image","source":{"type":"base64","data":"%s"}}]}]},"timestamp":"2026-01-01T00:0%s:01Z"}\n' "$i" "$IMG" "$i"
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":"answer %s"}]},"timestamp":"2026-01-01T00:0%s:02Z"}\n' "$i" "$i"
+  done; } > "$HOME/.claude/projects/-tmp-repo/$ISID.jsonl"
+"$HQ" peek "$ISID" -n 6 --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [x["text"] for x in m]==["ask 1","answer 1","ask 2","answer 2","ask 3","answer 3"], m' && ok "peek reads past megabytes of screenshots to find its n messages" || fail "peek stopped short behind screenshots"
+
 # peek --meta: tool calls between the messages, paired with their results; Claude's todo list;
 # the turn in progress. Request records repeating a call must not hide its diff in --tool.
 ASID=feedface-3333-2222-3333-444455556666

@@ -67,6 +67,11 @@ for (const id of ["quota-50","quota-92","quota-empty","readout","readout-bad",
     check(`${id}${mir ? " mirrored" : ""}: bubble inside the window`,
           g.bubble && g.bubble.l >= 0 && g.bubble.r <= g.stageW + 0.5,
           g.bubble ? `${Math.round(g.bubble.l)}..${Math.round(g.bubble.r)} of ${g.stageW}` : "hidden");
+    // Centred over the pet's head (x=400, or 80 mirrored — PetLayout), not
+    // pushed to the window's edge: off-centre is what a narrow skin shows up.
+    const mid = g.bubble ? (g.bubble.l + g.bubble.r) / 2 : NaN;
+    check(`${id}${mir ? " mirrored" : ""}: bubble centred on the pet`,
+          Math.abs(mid - (mir ? 80 : 400)) <= 1, String(mid));
   }
 }
 
@@ -210,16 +215,19 @@ check("a running row does not — its number is a duration",
 check("nor does a blocked one — that is how long it has waited",
       clocks.live.filter(r => r.proj === "blocked-repo").every(r => !r.ago));
 
-// ---- narrowing must not cost the readout its content ------------------------
-// `wantKeys` is what each fixture's DATA implies, not a fixed list: a session
-// with nothing in flight and nothing quiet has one clock, and printing three
-// would be the bug.
-for (const [id, want, wantKeys] of [["combo-readout", false, ["turn"]],
-                                    ["combo-readout-full", true, ["tool", "turn", "quiet"]]]) {
+// ---- the 148pt readout keeps its content -----------------------------------
+// Every bubble is laid out for 148pt, centred on the pet, whether or not the
+// list is open. `wantKeys` is what each fixture's DATA implies, not a fixed
+// list: a session with nothing in flight and nothing quiet has one clock, and
+// printing three would be the bug.
+const CLOCKS = ["tool", "turn", "quiet"];
+for (const [id, wantKeys] of [["combo-readout", ["turn"]],
+                              ["combo-readout-full", ["tool", "turn", "quiet"]]]) {
   const r = await scenario(`?only=${id}`, `
     const d = document.querySelector('iframe').contentDocument;
     const b = d.getElementById('bubble');
-    return { crowded: d.getElementById('stage').classList.contains('crowded'),
+    const box = b.getBoundingClientRect();
+    return { width: box.width, top: box.top,
              path: !!b.querySelector('.dwhere'), tree: !!b.querySelector('.dtree'),
              meter: !!b.querySelector('.qbar'),
              keys: [...b.querySelectorAll('.dkey')].map(e => e.textContent),
@@ -227,14 +235,15 @@ for (const [id, want, wantKeys] of [["combo-readout", false, ["turn"]],
              clipped: [...b.querySelectorAll('.dkey, .dval')]
                         .filter(e => e.scrollWidth > e.clientWidth + 0.5).length };
   `);
-  const tag = want ? "crowded" : "roomy";
-  check(`${tag} readout: narrows only when the list is really in the way`, r.crowded === want);
-  check(`${tag} readout: keeps every kind of fact`,
+  const clocks = r.keys.filter(k => CLOCKS.includes(k));
+  check(`${id}: readout is at most 148pt wide`, r.width <= 148.5, String(r.width));
+  check(`${id}: readout's top is inside the window`, r.top >= 0, String(r.top));
+  check(`${id}: readout keeps every kind of fact`,
         r.path && r.tree && r.meter && r.last, JSON.stringify(r));
-  check(`${tag} readout: names exactly the clocks it has`,
-        r.keys.length === wantKeys.length && wantKeys.every(k => r.keys.includes(k)),
-        r.keys.join(",") + " want " + wantKeys.join(","));
-  check(`${tag} readout: no clock is cut off`, r.clipped === 0, String(r.clipped));
+  check(`${id}: readout names exactly the clocks it has`,
+        clocks.length === wantKeys.length && wantKeys.every(k => clocks.includes(k)),
+        clocks.join(",") + " want " + wantKeys.join(","));
+  check(`${id}: no clock is cut off`, r.clipped === 0, String(r.clipped));
 }
 
 // ---- the controls the list is the only way to reach -------------------------

@@ -9,37 +9,12 @@ const panel = document.getElementById("panel");
 const stage = document.getElementById("stage");
 const notices = document.getElementById("notices");
 
-/* The bubble's bottom edge in stage coordinates: 280 (stage height) - 138
-   (#bubble's `bottom`). The list grows upward from the bottom too, so this is
-   the line at which the two start sharing a corner. */
-const BUBBLE_FLOOR = 142;
-/* Right edge of the list (2 + 310) plus a gap, taken off the bubble's own right
-   anchor (480 - 14). What is left is the clear strip above the pet. */
-const CLEAR_STRIP = 466 - 312 - 6;
-
-/**
- * Does the list currently reach up into the bubble's corner?
- *
- * Measured, not assumed: the list is as tall as its contents, so four rows
- * leave the bubble alone and twenty do not. Only when the two would really
- * intersect does the bubble give up width — capping it unconditionally would
- * squeeze the hover readout in the common case for nothing.
- */
-function syncCrowding() {
-  const crowded = !panel.hidden && !bubble.hidden
-    && panel.getBoundingClientRect().top < BUBBLE_FLOOR;
-  stage.classList.toggle("crowded", crowded);
-}
-
 /**
  * Tell Swift where the panel and bubble actually ended up, so the window can
  * pass clicks through everywhere else. Layout is content-dependent, so this is
  * measured rather than assumed.
  */
 function reportLayout() {
-  // Before measuring, not after: crowding changes how wide the bubble is, and
-  // Swift is told the rect it ends up with rather than the one it started from.
-  syncCrowding();
   placeNotices();
   const box = (el) => {
     if (el.hidden) return null;
@@ -181,7 +156,7 @@ let shown = "";
  */
 function variant(name) {
   bubble.classList.remove.apply(bubble.classList, VARIANTS);
-  // Everything except the alarm shares the soft, wrapping, right-anchored base.
+  // Everything except the alarm shares the soft, wrapping base.
   if (name && name !== "alert") bubble.classList.add("chat");
   else bubble.classList.remove("chat");
   if (name) bubble.classList.add(name);
@@ -189,7 +164,7 @@ function variant(name) {
 }
 
 /* Messages the open list is already carrying, so they step aside rather than
-   draw across its top-right corner — mirrors Chatter.yieldsToList, which is
+   say it twice — mirrors Chatter.yieldsToList, which is
    where the reasoning lives. A quota warning stays (nothing in the list says
    it) and so does the alarm. */
 const YIELDS = { notice: true, chat: true };
@@ -1113,7 +1088,7 @@ window.showDetail = function (d) {
 
   // The facts, as a label / value grid \u2014 the same reading as the quota card.
   // A `wide` value spans the rest of the row; the clocks are pairs, which the
-  // crowded strip lays two to a row (see pet.css).
+  // 148pt card lays two to a row (see pet.css).
   const grid = document.createElement("div");
   grid.className = "dgrid";
   function pair(label, wide, short) {
@@ -1136,17 +1111,18 @@ window.showDetail = function (d) {
     bar.appendChild(fill);
     meter.appendChild(bar);
     span(meter, "qpct", pct + "%");
-    // "210k / 300k": the tokens behind the share, and the window it is of.
-    if (d.contextTokens) {
-      span(meter, "dmodel", tokensShort(d.contextTokens) + " / " + tokensShort(d.contextBudget));
-    }
+    // "210k": the tokens behind the share. Not "of 300k" as well — beside the
+    // bar in the 148pt card that was cut to "210k/3", and the share already
+    // says how full the window is.
+    if (d.contextTokens) span(meter, "dmodel", tokensShort(d.contextTokens));
     meter.dataset.level = fill.dataset.level;
-    if (d.model) span(meter, "dmodel", d.model);
-  } else if (d.model) {
-    pair(TEXT.dModel, true).textContent = d.model;
   }
+  // Its own row: after the meter on the same line it was cut to "son…".
+  if (d.model) pair(TEXT.dModel, true).textContent = d.model;
 
-  if (d.turns) pair(TEXT.dTurns, true).textContent = String(d.turns);
+  // A pair, not a row of its own: it sits beside the first clock, which keeps
+  // the card one line shorter.
+  if (d.turns) pair(TEXT.dTurns).textContent = String(d.turns);
 
   if (d.turn || d.tool) {
     // The row shows ONE number; this is where it says which one. With a call in
@@ -1159,7 +1135,7 @@ window.showDetail = function (d) {
 
   // Commands the session left running after its turn ended.
   (d.background || []).slice(0, 3).forEach(function (line) {
-    const bg = row("dlast");
+    const bg = row("dlast dbg");
     span(bg, "ddot", "\u21bb").classList.add("bg");
     span(bg, "dtext", line);
   });
@@ -1174,10 +1150,18 @@ window.showDetail = function (d) {
   }
 
   bubble.hidden = false;
-  // Crowding decides the bubble's width, and the width decides how many lines
-  // the path takes, so the path is fitted only once that is settled.
-  syncCrowding();
-  if (pathEl) fitPath(pathEl, pathParts);
+  // The width decides how many lines the path takes, so the path is fitted
+  // only once the card is laid out. A card with every row in it can still run
+  // out of the top of the window: the path gives up its second line, then the
+  // background commands go, newest first — what the session is doing now and
+  // where it is matter more.
+  const over = () => bubble.getBoundingClientRect().top < 2;
+  if (pathEl) {
+    fitPath(pathEl, pathParts, PATH_LINES);
+    if (over()) fitPath(pathEl, pathParts, 1);
+  }
+  const bgRows = bubble.querySelectorAll(".dbg");
+  for (let i = bgRows.length - 1; i >= 0 && over(); i--) bgRows[i].remove();
   reportLayout();
 };
 
@@ -1185,8 +1169,8 @@ window.showDetail = function (d) {
 let pathEl = null;
 let pathParts = null;
 
-/* Lines the path may take. The bubble hangs from a fixed floor (BUBBLE_FLOOR)
-   and grows upward, and in the crowded strip the rows below already use most
+/* Lines the path may take. The bubble hangs from a fixed floor (#bubble's
+   `bottom`) and grows upward, and in 148pt the rows below already use most
    of that height: a third line pushes the top of the card out of the window. */
 const PATH_LINES = 2;
 
@@ -1208,16 +1192,16 @@ function setPath(el, parts) {
 }
 
 /**
- * Shorten the path until it fits in PATH_LINES, fish-style: middle directories
+ * Shorten the path until it fits in `lines`, fish-style: middle directories
  * collapse to their first letter, outermost first, so `~/Documents/code-projects/claude-pet`
  * becomes `~/D/code-projects/claude-pet` before it becomes `~/D/c/claude-pet`.
  * The last component is never shortened — it is the one that names the session.
  * Measured rather than counted: character widths vary too much in a
  * proportional font for a length cap to be right.
  */
-function fitPath(el, parts) {
+function fitPath(el, parts, lines) {
   const lh = parseFloat(getComputedStyle(el).lineHeight) || 15;
-  const fits = () => el.getBoundingClientRect().height <= lh * PATH_LINES + 1;
+  const fits = () => el.getBoundingClientRect().height <= lh * lines + 1;
   const short = parts.slice();
   // Index 0 is "~" (or "" for an absolute path) and is already as short as it gets.
   for (let i = 1; i < short.length - 1 && !fits(); i++) {
