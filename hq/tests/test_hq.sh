@@ -1417,7 +1417,7 @@ PY
 zmsg 100 dm 7 "Alice Wu" "the 4.2.7 perf plan passed on rc3"
 zmsg 101 dm 1 "Me" "great, thanks"
 zmsg 102 stream 9 "Bob Li" "@**Me** please review the release notes" m
-python3 "$ZS/server.py" "$ZS" & ZPID=$!; trap 'kill "$ZPID" 2>/dev/null; rm -rf "$T"' EXIT
+python3 "$ZS/server.py" "$ZS" & ZPID=$!; trap 'kill "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
 for _ in $(seq 50); do [ -s "$ZS/port" ] && break; sleep 0.1; done
 printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
 "$HQ" feed zulip --dry-run | grep -q "3 messages, 2 conversations (dry run" && [ ! -e "$T/root/secretary/feed/state.json" ] && ok "feed --dry-run: reads, saves nothing" || fail "feed dry run"
@@ -1535,7 +1535,7 @@ jira QA-1 comment u-7 "Alice Wu" "[~accountid:me-1] can you take this one?"
 jira QA-2 old u-8 "Bob Li" "long ago"
 jira QA-2 status u-8 "Bob Li" "In Progress"
 jira QA-3 comment me-1 "Me" "my own note"
-python3 "$JS/server.py" "$JS" & JPID=$!; trap 'kill "$JPID" "$ZPID" 2>/dev/null; rm -rf "$T"' EXIT
+python3 "$JS/server.py" "$JS" & JPID=$!; trap 'kill "$JPID" "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
 for _ in $(seq 50); do [ -s "$JS/port" ] && break; sleep 0.1; done
 export HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok
 "$HQ" feed jira --site "http://127.0.0.1:$(cat "$JS/port")" --dry-run | grep -q "jira: 2 issues (dry run" && [ ! -e "$T/root/secretary/feed/jira" ] && ok "feed jira --dry-run: reads, saves nothing" || fail "jira dry run"
