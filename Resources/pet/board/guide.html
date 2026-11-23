@@ -210,7 +210,7 @@
 <li><b>它能做什么</b>：它在后台跑，没人在旁边批准，所以只预先允许三样：读文件（Read / Grep / Glob）、运行 <code>~/.claude/hq/bin/hq</code>、改 <code>secretary/</code> 下的文件。其他操作都会被拒绝，除非你在 Claude Code 设置里另外允许了。外部系统它只读；消息和邮件只起草，写在回复里。</li>
 <li><b>它的建议，在它的窗口里或 Needs you 里回答</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为问题出现在秘书窗口底部的"它在问你"里（就在输入框上方），同时也出现在 <b>Needs you</b>，标着绿色的 <b>秘书</b>，点它打开秘书窗口。两边是同一批问题，在哪边回答都行。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议。点了 Yes，它大约 10 秒后自己醒来照做（比撤销按钮在的时间长，点了 <b>撤销</b> 它就不做），每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。点 <b>转待办</b> 表示这件事你自己做：它变成你的 @me 待办，秘书不会去做。</li>
 <li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
-<li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它，项目和分类的计数也不算它；它的问题照样在 Needs you 里。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
+<li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
 </ul>
 
 <h1 id="zh-pet">和小猫的联动</h1>
@@ -604,7 +604,7 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li><code>playbooks.md</code>: recurring processes, such as release tests and RCAs.</li>
   </ul>
   You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
-<li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out, and so do the project and category counts; its questions still show in Needs you. Its questions have no "Yes, always": grants are never given to the secretary.</li>
+<li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
 </ul>
 
 <h1 id="en-pet">With the cat</h1>

@@ -431,7 +431,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                   FileManager.default.fileExists(atPath: path) else {
                 return (nil, L("not a task card or project file", "不是任务卡或项目文件"))
             }
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            NSWorkspace.shared.open(URL(fileURLWithPath: path).resolvingSymlinksInPath())
             return (["ok": true], nil)
         default:
             return (nil, L("unknown operation", "未知操作"))

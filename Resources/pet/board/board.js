@@ -600,7 +600,7 @@ function render() {
   const need = needCount();
   // Each tab carries its count; only Needs you's is lit, because only it asks something of you.
   // (Scheduled has none: its jobs are only read while that page is showing.)
-  const tabN = { today: focusIds().length, all: listed().filter(isOpen).length, needs: need };
+  const tabN = { today: focusIds().filter((id) => id !== secId()).length, all: listed().filter(isOpen).length, needs: need };
   $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
     `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="${T("Unanswered asks and your todos", "未回应的问题和你的待办")}"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
@@ -775,13 +775,14 @@ function askCard(t, a, opt = {}) {
   return `
     <div class="card ask ${pick ? "picked" : ""}">
       <div class="meta">${meta}</div>
-      <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
+      ${opt.peek ? `<div class="ask-text">${esc(a.text)}</div>`
+        : `<div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>`}
       <div class="row askrow">
         <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" ${opt.peek ? "" : `data-att="${esc(attKey)}"`} placeholder="${opt.peek ? T("note", "说明") : T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
         ${res.map(([r, label, tip]) => opt.group
           ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)}${T(" — pick, then Send below", "——先选，再点下面的发送")}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
           : `<button class="btn small res-${r} ${r === "always" && ui.granting.has(a.id) ? "on" : ""}" title="${esc(tip)}" data-action="${r === "always" ? "grant-open" : "resolve"}" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
-        ${opt.peek || ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
+        ${opt.peek || sec || ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
       </div>
       ${opt.peek ? "" : attachStrip(attKey)}
       ${!opt.peek && (opt.group ? pick === "always" : ui.granting.has(a.id)) ? grantBox(t, a, opt) : ""}
@@ -2040,7 +2041,7 @@ function renderOnboarding() {
   </div>`;
 }
 
-function categoryCount(name) { return listed().filter((t) => (t.category || "") === name).length; }
+function categoryCount(name) { return tasks().filter((t) => (t.category || "") === name).length; }
 
 function renderCategories() {
   const cats = categories();
@@ -2852,6 +2853,8 @@ function anyGroupOpen() {
 function revealTask(id) {
   const t = taskById(id);
   if (!t) return toast(T(`${id} not found`, `找不到 ${id}`), true);
+  // The secretary's card isn't in the lists: its window is where it lives.
+  if (id === secId()) return openSecretary();
   // In Today, a task on today's list is its card there: bring that card's top edge to the top
   // of the column, without opening its details. Anything else is shown in All.
   if (ui.mode !== "all") {
