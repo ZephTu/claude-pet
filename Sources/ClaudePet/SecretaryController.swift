@@ -50,7 +50,14 @@ final class SecretaryController {
         let runs = store.runs(Self.jobID)
         o["job"] = store.load(Self.jobID) != nil
         o["sessionId"] = state["sessionId"] as? String ?? ""
-        o["running"] = running
+        let busy = running
+        o["running"] = busy
+        if busy {
+            // When this run began: the chat's live turn is the one whose message came after it
+            // (`claude -p` never marks a turn done in the transcript).
+            let began = launched?.at ?? runs.first(where: { $0.status == .running })?.started
+            if let began { o["runStart"] = Jobs.iso(began) }
+        }
         if let r = runs.first {
             // The last run when it went wrong, or was skipped (quota): the chat says why.
             o["last"] = ["status": r.status.rawValue, "summary": r.summary, "at": Jobs.iso(r.ended ?? r.started),

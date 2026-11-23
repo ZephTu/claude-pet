@@ -2306,7 +2306,7 @@ async function refreshPeek(first) {
     // Its card's state and its open asks too: answering one here (or in Needs you) redraws it.
     const card = taskById(secId());
     const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.state, m.sec.reports, m.sec.schedule, m.sec.files,
-      ui.skin, ui.secGlance && ui.secGlance.lastAt, card ? (card.asks || []).map((a) => [a.id, a.state, isLater(a), a.note]) : null]);
+      m.sec.runStart, ui.skin, ui.secGlance && ui.secGlance.lastAt, secIdleWord(ui.secGlance && ui.secGlance.lastAt), card ? (card.asks || []).map((a) => [a.id, a.state, isLater(a), a.note]) : null]);
     secChanged = secSig !== m.secSig;
     m.secSig = secSig;
   }
@@ -2529,6 +2529,8 @@ function face(state, size, cls = "") {
 }
 // Quiet for an hour: it shows asleep (a message wakes it).
 const secAsleep = (iso) => Boolean(iso) && secsSince(iso) > 3600;
+// What the idle status line says about the time, so an open window redraws when that changes.
+const secIdleWord = (iso) => (iso ? (secAsleep(iso) ? "asleep:" : "") + ago(iso) : "");
 
 // The top bar's button: its face (asleep, or ringed while it replies) and how many of its
 // proposals wait on you. Redrawn only when that changes, so the ring's breathing doesn't restart.
@@ -2616,12 +2618,13 @@ function secSplit(text) {
     const nl = p.indexOf("\n");
     const lang = nl >= 0 ? p.slice(0, nl).trim() : "";
     if (!lang.startsWith("hq-")) return "```" + p + "```";
-    if (lang === "hq-asks") asks.push(...p.slice(nl + 1).split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean));
+    if (lang === "hq-asks") asks.push(...p.slice(nl + 1).split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s*/, "").trim()).filter(Boolean));
     return "";
   });
   return { text: keep.join("").replace(/\n{3,}/g, "\n\n").trim(), asks };
 }
-const askKey = (s) => String(s || "").replace(/\s*\[grant:[^\]]*\]\s*$/i, "").replace(/\s+/g, " ").trim();
+// The ask's text as hq records it: without a trailing [grant: …] / [授权：…] suggestion.
+const askKey = (s) => String(s || "").replace(/\s*\[(?:grant|授权)[:：][^\[\]]*\]\s*$/i, "").replace(/\s+/g, " ").trim();
 const RES_WORD = (s) => (RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === s) || [])[1] || { later: T("Ask later", "以后再问") }[s] || s;
 // One of its proposals: open, a card to answer (the same answers as in Needs you, minus
 // "Yes, always": a standing grant is never for the secretary); answered, one line.
@@ -2658,7 +2661,7 @@ function secRows(m, busy, doing) {
   }
   const card = secId() && taskById(secId());
   const asks = card ? card.asks || [] : [];
-  const shown = new Set();
+  const shown = new Map();   // ask id → the row showing its card
   const rows = [];
   let lastTs = 0;
   const when = (ts) => {
@@ -2666,12 +2669,16 @@ function secRows(m, busy, doing) {
     if (!isNaN(t) && t - lastTs > 30 * 60 * 1000) rows.push({ side: "when", key: `w|${ts}`, html: esc(secWhen(ts)) });
     if (!isNaN(t)) lastTs = t;
   };
-  // The turn it is in: from its start (the transcript can lag the run by a moment: until the new
-  // message is in, the last turn with no reply yet).
-  const liveStart = busy && m.turn && !m.turn.done ? new Date(m.turn.start).getTime() : 0;
+  // The turn it is in: the last one, if its message came after the run began. The transcript lags
+  // the run by a few seconds; until the new message is in, every turn shown is finished, and the
+  // message just sent from here stands in for it.
+  const liveStart = busy && st.runStart ? new Date(st.runStart).getTime() : 0;
+  const lastTurn = turns[turns.length - 1];
+  const liveIdx = !busy || !lastTurn ? -1
+    : liveStart ? (lastTurn.user && new Date(lastTurn.user.ts).getTime() >= liveStart - 1000 ? turns.length - 1 : -1)
+    : lastTurn.replies.length ? -1 : turns.length - 1;
   turns.forEach((turn, i) => {
-    const live = busy && i === turns.length - 1
-      && (liveStart ? !turn.user || new Date(turn.user.ts).getTime() >= liveStart - 5000 : !turn.replies.length);
+    const live = i === liveIdx;
     let note = null;
     if (turn.user) {
       when(turn.user.ts);
@@ -2698,10 +2705,20 @@ function secRows(m, busy, doing) {
         : `<div class="bub md">${markdown(parts.text, scope)}</div>`;
       rows.push({ side: "it", key: `a|${reply.ts}`, html, copy: { who: "it", text: parts.text } });
     }
+    // Each line to the ask hq made of it: the same text, closest in time to this reply (an
+    // earlier, answered ask can share the text). Asked again, hq keeps one open ask: the newest
+    // message holds its card, the older one keeps just the line.
+    const at = new Date(reply.ts).getTime();
     for (const line of parts.asks) {
-      const a = asks.find((x) => !shown.has(x.id) && (!x.session || x.session === m.sid) && askKey(x.text) === askKey(line));
-      if (a) shown.add(a.id);
-      rows.push({ side: "it", key: `q|${reply.ts}|${line}`, html: a ? secPropose(a) : `<div class="propose done"><div class="ptext">${esc(askKey(line))}</div></div>` });
+      const plain = `<div class="propose done"><div class="ptext">${esc(askKey(line))}</div></div>`;
+      let a = null;
+      for (const x of asks) {
+        if ((x.session && x.session !== m.sid) || askKey(x.text) !== askKey(line)) continue;
+        if (!a || Math.abs(new Date(x.ts).getTime() - at) < Math.abs(new Date(a.ts).getTime() - at)) a = x;
+      }
+      if (a && shown.has(a.id)) rows[shown.get(a.id)].html = rows[shown.get(a.id)].plain;
+      if (a) shown.set(a.id, rows.length);
+      rows.push({ side: "it", key: `q|${reply.ts}|${line}`, html: a ? secPropose(a) : plain, plain });
     }
   });
   // Proposals still waiting whose message has scrolled out of what Peek keeps (or that came
@@ -2710,6 +2727,12 @@ function secRows(m, busy, doing) {
   if (left.length) {
     rows.push({ side: "note", key: "n|left", html: T("Still waiting on you", "这些还在等你回应") });
     for (const a of left) rows.push({ side: "it", key: `q|left|${a.id}`, html: secPropose(a) });
+  }
+  const sent = m.sentMsg;
+  if (busy && liveIdx < 0 && sent && (!liveStart || sent.at >= liveStart - 2000)) {
+    const n = secNote(sent.text);
+    rows.push(n ? { side: "note", key: "n|sent", html: esc(n.text) }
+                : { side: "me", key: "u|sent", html: esc(sent.text).replace(/\n/g, "<br>"), copy: { who: "you", text: sent.text } });
   }
   if (busy || st.waking) {
     rows.push({ side: "it", key: "typing", typing: true, html: `<div class="bub typing" aria-label="${T("typing", "正在输入")}"><i></i><i></i><i></i></div>`,
@@ -2752,7 +2775,7 @@ function drawSecretary(toBottom) {
     if (r.side === "note") return `<div class="pmsg snote ${r.warn ? "warn" : ""}">${r.html}</div>`;
     const ci = r.copy ? m.chat.push(r.copy) - 1 : -1;
     const copy = ci >= 0 ? `<button class="copy" data-action="sec-copy" data-i="${ci}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button>` : "";
-    const inner = copy && r.html.startsWith(`<div class="bub`) ? r.html.replace(/<\/div>$/, `${copy}</div>`) : r.html;
+    const inner = copy && /^<div class="(bub|report)/.test(r.html) ? r.html.replace(/<\/div>$/, `${copy}</div>`) : r.html;
     if (r.side === "me") return `<div class="pmsg row me"><div class="bub">${r.html}${copy}</div></div>`;
     const lastOfRun = !rows[i + 1] || rows[i + 1].side !== "it";
     return `<div class="pmsg row it ${lastOfRun ? "" : "cont"}">${lastOfRun ? face(r.typing ? mood : "idle", 28) : `<span class="av-gap"></span>`}<div class="it-col">${inner}${r.doing ? `<div class="doing">${esc(r.doing)}</div>` : ""}</div></div>`;
@@ -2836,7 +2859,7 @@ async function sendSecretary(preset) {
   try {
     await api("secretary-send", { text: message });
     if (!preset) { delete ui.drafts[key]; delete ui.atts[SEC]; }
-    if (ui.modal && ui.modal.secretary && ui.modal.sec) ui.modal.sec.running = true;
+    if (ui.modal && ui.modal.secretary && ui.modal.sec) { ui.modal.sec.running = true; ui.modal.sentMsg = { text: message, at: Date.now() }; }
   } catch (e) {
     toast(String(e.message || e), true);
   } finally {
@@ -3413,17 +3436,17 @@ document.addEventListener("paste", (ev) => {
   addImages(box.dataset.session || box.dataset.att, files);
 });
 document.addEventListener("dragover", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
   ev.preventDefault();
   zone.classList.add("dropping");
 });
 document.addEventListener("dragleave", (ev) => {
-  const zone = ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (zone) zone.classList.remove("dropping");
 });
 document.addEventListener("drop", (ev) => {
-  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture");
+  const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (!zone || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
   ev.preventDefault();
   zone.classList.remove("dropping");
@@ -3796,7 +3819,7 @@ document.addEventListener("click", async (ev) => {
       return;
     case "sec-quick":
       if (d.text) return sendSecretary(d.text);
-      ui.drafts["msg:" + SEC] = d.fill || "";
+      if (!(ui.drafts["msg:" + SEC] || "").trim()) { ui.drafts["msg:" + SEC] = d.fill || ""; saveDrafts(); }
       drawPeek(false);
       { const ta = document.querySelector(`#modal textarea[data-key="msg:${SEC}"]`); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
       return;
