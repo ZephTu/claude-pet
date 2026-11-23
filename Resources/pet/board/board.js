@@ -1067,6 +1067,16 @@ function renderNotes() {
       ${x.state === "sorted" ? destChip(x, { kind: "unsorted" }, "ghost") : ""}
     </div>`;
   };
+  // A conversation or issue from `hq feed`: its first line is "Zulip · <title> · <url>" (or
+  // "Jira · …"); the lines after it are clamped to a few until the note is opened.
+  const feedText = (x, isOpen) => {
+    const [head, ...body] = String(x.text || "").split("\n");
+    const parts = head.split(" · ");
+    const url = parts.length >= 3 ? parts.pop() : "";
+    const [src, ...title] = parts;
+    return `<span class="t"><span class="chip">${esc(src)}</span> ${url ? `<a href="#" data-action="link" data-url="${esc(url)}" title="${esc(url)}">${esc(title.join(" · "))}</a>` : esc(title.join(" · "))}</span>
+      <div class="feed-msgs ${isOpen ? "open" : ""}">${esc(body.join("\n"))}</div>`;
+  };
   const imgs = (x) => (x.images || []).map((p, i) => `<span class="chip link" data-action="open" data-path="${esc(p)}" title="${esc(p)}">${T("image", "图")} ${i + 1}</span>`).join(" ");
   const row = (x) => {
     const isOpen = ui.noteOpen.has(x.id);
@@ -1092,7 +1102,7 @@ function renderNotes() {
       side = `<button class="btn small ${isOpen ? "" : "ghost"}" data-action="note-change" data-id="${esc(x.id)}" title="${T("Put it somewhere else", "放到别处")}">${T("Move", "改")}</button>`;
     }
     return `<div class="qnote it ${x.state}">
-      <div class="it-t"><span class="t">${esc(x.text)}</span> ${imgs(x)}
+      <div class="it-t">${["zulip", "jira"].includes(x.via) ? feedText(x, isOpen) : `<span class="t">${esc(x.text)}</span>`} ${imgs(x)}
         <div class="meta src">${meta}</div>
         ${chips ? `<div class="dests">${chips}</div>` : ""}
         ${isOpen && ["unsorted", "sorted"].includes(x.state) ? picker(x) : ""}
@@ -2752,6 +2762,19 @@ function secWhen(iso) {
   if (d.toDateString() === now.toDateString()) return hm;
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
+// The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to
+// the quick notes and are sorted there. Its switch, "scan now" and how the last scan went, for the ⋯ menu.
+function secFeedItems(st) {
+  const f = st.feed || {};
+  const hourly = f.kind === "cron" && f.cron === "0 9-19 * * 1-5";
+  const when = hourly ? T("weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("as set in Scheduled", "按定时任务的设置");
+  const last = f.last;
+  const tip = T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
+    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+  return `<hr><div class="ph">Zulip · Jira</div>
+    <button class="pi" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
+    <button class="pi" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
+}
 const localDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const kindWord = (k) => (k === "weekly" ? T("Weekly report", "周报") : T("Daily report", "日报"));
 
@@ -2903,7 +2926,7 @@ function drawSecretary(toBottom) {
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
     : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
-  const morePop = `<div class="pop" role="menu">${evening}
+  const morePop = `<div class="pop" role="menu">${evening}${secFeedItems(st)}
     ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
   const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
@@ -3688,8 +3711,8 @@ document.addEventListener("click", async (ev) => {
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
   const el = ev.target.closest("[data-action]");
   // The secretary's menus close on any click but their own button's, or the evening report's
-  // switch (you see it flip).
-  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports"].includes(el.dataset.action))) {
+  // or the scan's switch (you see it flip).
+  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
     ui.modal.pop = null;
     drawPeek(false);   // (an item clicked in it still acts: its dataset outlives the redraw)
   }
@@ -3917,6 +3940,12 @@ document.addEventListener("click", async (ev) => {
       catch (e) { return toast(String(e.message || e), true); }
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
       return toast(d.on === "1" ? T("Evening report on", "定时报告已开启") : T("Evening report off", "定时报告已关闭"));
+    case "secretary-feed":
+    case "secretary-feed-now":
+      try { ui.secretary = await apiObj(d.action, { on: d.on === "1" }); }
+      catch (e) { return toast(String(e.message || e), true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
+      return toast(d.action === "secretary-feed-now" ? T("Scanning…", "正在扫描…") : d.on === "1" ? T("Scan on", "扫描已开启") : T("Scan off", "扫描已关闭"));
     case "secretary-report-now":
       return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":

@@ -1263,7 +1263,7 @@ export FAKE_DIR="$T/fake"; mkdir -p "$FAKE_DIR"
 FAKE="$T/fake-claude"
 cat > "$FAKE" <<'SH'
 #!/bin/bash
-printf '%s\n' "$@" > "$FAKE_DIR/args"; cat > "$FAKE_DIR/stdin"; echo "${HQ_HOOK_CHILD:-}" > "$FAKE_DIR/env"
+printf '%s\n' "$@" > "$FAKE_DIR/args"; cat > "$FAKE_DIR/stdin"; echo "${HQ_HOOK_CHILD:-}" > "$FAKE_DIR/env"; echo "${HQ_JIRA_TOKEN:-none}" > "$FAKE_DIR/token"
 [ -f "$FAKE_DIR/slow" ] && sleep 2
 [ -f "$FAKE_DIR/junk" ] && { echo "model overloaded" >&2; exit 1; }
 printf '{"structured_output": %s, "total_cost_usd": 0.002}' "$(cat "$FAKE_DIR/answer")"
@@ -1363,6 +1363,218 @@ hqi inbox add -- "docs work for pone" >/dev/null
 answer '{"kind":"task","title":"Docs","text":"t","project":"pone","workdir":"docs","confidence":0.9,"reason":"r","alternatives":[]}'
 NF3="$(hqi inbox sort --claude "$FAKE" --json N-009 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 card "$NF3" | grep -q "^workdirs: \[\"$T/w1/docs\"\]" && ok "a folder named by its last part is looked up in the note's project first" || fail "project-first folder match"
+
+# hq feed zulip: mentions and DMs from a fake Zulip, one inbox item per conversation, sorted in the
+# feed's mode (a log line is filed, a todo waits, a skip is put away).
+"$HQ" feed | grep -q "zulip: not set up" && ok "feed without a zuliprc: not set up" || fail "feed no zuliprc"
+ZS="$T/zulip"; mkdir -p "$ZS"
+cat > "$ZS/server.py" <<'PY'
+import http.server, json, sys, urllib.parse, os
+D = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
+        if self.headers.get("Authorization") != "Basic bWVAZXhhbXBsZS5jb206c2VjcmV0":
+            return self.reply(401, {"result": "error", "msg": "bad key"})
+        if u.path == "/api/v1/users/me":
+            return self.reply(200, {"result": "success", "user_id": 1})
+        msgs = json.load(open(os.path.join(D, "messages.json")))
+        op = json.loads(q["narrow"])[0]["operand"]
+        msgs = [m for m in msgs if (m["type"] == "private") if op == "dm"] if op == "dm" else [m for m in msgs if "mentioned" in m["flags"]]
+        if int(q["num_before"]):
+            top = float("inf") if q["anchor"] == "newest" else int(q["anchor"])
+            out = [m for m in msgs if m["id"] <= top][-int(q["num_before"]):]
+        else:
+            out = [m for m in msgs if m["id"] > int(q["anchor"])][:int(q["num_after"])]
+            inj = os.path.join(D, "inject.json")
+            if os.path.exists(inj):  # messages that come in while the scan reads
+                allm = json.load(open(os.path.join(D, "messages.json"))) + json.load(open(inj))
+                json.dump(allm, open(os.path.join(D, "messages.json"), "w")); os.remove(inj)
+        newest = not msgs or not out or out[-1]["id"] == msgs[-1]["id"]
+        self.reply(200, {"result": "success", "messages": out, "found_newest": newest})
+    def reply(self, code, d):
+        b = json.dumps(d).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(D, "port"), "w").write(str(s.server_port))
+s.serve_forever()
+PY
+zmsg() {  # id type(dm|stream) sender_id sender_name text [mentioned]; $ZFILE: another file
+  python3 - "${ZFILE:-$ZS/messages.json}" "$@" <<'PY'
+import json, sys, time, os
+p, mid, typ, sid, name, text = sys.argv[1:7]
+ms = json.load(open(p)) if os.path.exists(p) else []
+m = {"id": int(mid), "timestamp": int(time.time()), "sender_id": int(sid), "sender_full_name": name,
+     "content": text, "flags": ["mentioned"] if len(sys.argv) > 7 else []}
+if typ == "dm":
+    m.update(type="private", display_recipient=[{"id": 1, "full_name": "Me"}, {"id": 7, "full_name": "Alice Wu"}])
+else:
+    m.update(type="stream", stream_id=3, display_recipient="QE team", subject="release 4.2.7")
+ms.append(m); json.dump(ms, open(p, "w"))
+PY
+}
+zmsg 100 dm 7 "Alice Wu" "the 4.2.7 perf plan passed on rc3"
+zmsg 101 dm 1 "Me" "great, thanks"
+zmsg 102 stream 9 "Bob Li" "@**Me** please review the release notes" m
+python3 "$ZS/server.py" "$ZS" & ZPID=$!; trap 'kill "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
+for _ in $(seq 50); do [ -s "$ZS/port" ] && break; sleep 0.1; done
+printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
+"$HQ" feed zulip --dry-run | grep -q "3 messages, 2 conversations (dry run" && [ ! -e "$T/root/secretary/feed/state.json" ] && ok "feed --dry-run: reads, saves nothing" || fail "feed dry run"
+FJ="$("$HQ" feed zulip --no-sort --json)"
+echo "$FJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==3 and r["conversations"]==2 and len(r["items"])==2, r' && ok "feed zulip: one item per conversation" || fail "feed items"
+FA="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][0])')"; FB="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][1])')"
+hqi inbox --json | python3 -c '
+import json,sys
+x={n["id"]:n for n in json.load(sys.stdin)["items"]}["'"$FA"'"]
+assert x["via"]=="zulip" and x["state"]=="unsorted" and x["msgs"]==[100,101], x
+t=x["text"].split("\n")
+assert t[0].startswith("Zulip · DM with Alice Wu · http://127.0.0.1:") and "#narrow/dm/7-Alice-Wu" in t[0], t
+assert t[1].endswith("Alice Wu: the 4.2.7 perf plan passed on rc3") and t[2].endswith("me: great, thanks"), t' && ok "feed item: conversation link, who said what, own lines as context" || fail "feed item text"
+ls "$T"/root/secretary/feed/zulip/*.jsonl >/dev/null && [ "$(cat "$T"/root/secretary/feed/zulip/*.jsonl | wc -l | tr -d ' ')" = 3 ] && ok "feed keeps the raw messages locally" || fail "feed raw"
+! grep -q secret "$T/root/secretary/feed/state.json" && ok "feed state holds no key" || fail "key in state"
+answer '{"kind":"note","task":"'"$ITA"'","text":"Alice on Zulip: 4.2.7 perf plan passed on rc3","confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$FA" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["task"]=="'"$ITA"'", x' && card "$ITA" | grep -q "Alice on Zulip: 4.2.7 perf plan" && grep -q "reached the user on Zulip" "$FAKE_DIR/args" && ok "feed sort: a confident log line is filed, with the feed's prompt" || fail "feed note"
+card "$ITA" | grep -q "#narrow/dm/7-Alice-Wu" && ok "feed sort: the conversation link becomes a ref" || fail "feed ref"
+answer '{"kind":"todo","task":"'"$ITB"'","owner":"me","text":"Review the release notes (Bob)","confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$FB" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and x["dest"]["kind"]=="todo", x' && ! card "$ITB" | grep -q "release notes" && ok "feed sort: a todo waits for a click, however sure" || fail "feed todo waits"
+[ -z "$("$HQ" feed zulip --json --no-sort | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["items"]))')" ] && ok "feed: the next scan starts after the last message" || fail "feed cursor"
+zmsg 103 dm 7 "Alice Wu" "lunch?"
+zmsg 104 dm 1 "Me" "sure"
+answer '{"kind":"skip","confidence":0.9,"reason":"chit-chat","alternatives":[]}'
+FC="$("$HQ" feed zulip --claude "$FAKE" --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==2 and r["skipped"]==1, r; print(r["items"][0])')" && ok "feed zulip sorts what it adds; a skip is counted" || fail "feed sort run"
+! hqi inbox --json | grep -q "\"$FC\"" && hqi inbox --all --json | grep -q "\"$FC\"" && ok "a skipped item is hidden from the board, kept for --all" || fail "skip hidden"
+hqi inbox restore --json -- "$FC" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and not x["skipped"], x' && ok "a skipped item can be restored" || fail "skip restore"
+zmsg 105 dm 1 "Me" "one more thing"
+[ "$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["messages"], len(r["items"]))')" = "1 0" ] && ok "feed: a conversation with only your own new lines adds nothing" || fail "feed own only"
+"$HQ" feed | grep -q "zulip: last scan .*1 messages" && ok "feed status shows the last scan" || fail "feed status"
+zmsg 106 dm 7 "Alice Wu" "ping"
+ZFILE="$ZS/inject.json" zmsg 107 stream 9 "Bob Li" "@**Me** one more" m
+ZFILE="$ZS/inject.json" zmsg 108 dm 7 "Alice Wu" "the plan is at https://example.com/plan-doc"
+[ "$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["messages"])')" = 1 ] && [ ! -e "$ZS/inject.json" ] && ok "feed zulip: messages that come in mid-scan are left out" || fail "feed zulip mid-scan"
+FD="$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==2 and len(r["items"])==2, r; print(r["items"][1])')" && ok "feed zulip: …and come with the next scan, from both narrows" || fail "feed zulip next scan"
+answer '{"kind":"note","task":"'"$ITB"'","text":"Alice shared the plan","confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$FD" >/dev/null
+card "$ITB" | grep -q "Alice shared the plan" && card "$ITB" | grep -q "#narrow/dm/7-Alice-Wu" && ! card "$ITB" | grep -q "example.com/plan-doc" && ok "feed sort: only the conversation link becomes a ref, not links in the messages" || fail "feed refs first line"
+printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://localhost:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
+"$HQ" feed zulip --dry-run | grep -q "^zulip: 9 messages" && ok "feed zulip: another server starts over (the cursor is per site)" || fail "feed zulip site"
+printf 'email=me@example.com\nkey=SUPERSECRET\n' > "$HOME/.zuliprc"
+"$HQ" feed zulip >"$T/out" 2>&1 || true; "$HQ" feed status --json >>"$T/out"; "$HQ" feed all >>"$T/out" 2>&1 || true
+! grep -q SUPERSECRET "$T/out" && grep -q "can't read .*zuliprc (line 1): it should be an \[api\] section" "$T/out" && tail -1 "$T/out" | grep -q "^zulip failed: can't read" && ok "feed: an unreadable zuliprc fails feed all, and no error quotes the key" || fail "zuliprc error: $(cat "$T/out")"
+printf '[api]\nemail=me@example.com\nkey=wrong\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
+{ "$HQ" feed zulip 2>&1 || true; } | grep -q "HTTP 401 bad key" && ok "feed: a Zulip error is reported" || fail "feed error"
+kill "$ZPID" 2>/dev/null; wait "$ZPID" 2>/dev/null || true; rm -f "$HOME/.zuliprc"
+
+# hq feed jira: issues you are assignee, reporter or watcher of, from a fake Jira; one item per issue
+# with what changed since the last scan, from someone else.
+"$HQ" feed | grep -q "jira: not set up" && ok "feed without a Jira site: not set up" || fail "feed no jira"
+{ "$HQ" feed all 2>&1 || true; } | grep -q "no feed is set up" && ok "feed all with nothing set up says so" || fail "feed all none"
+JS="$T/jira"; mkdir -p "$JS"
+cat > "$JS/server.py" <<'PY'
+import http.server, json, sys, urllib.parse, os, datetime as dt
+D = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path); q = dict(urllib.parse.parse_qsl(u.query))
+        for pre, host in (("/same", "127.0.0.1"), ("/away", "localhost")):
+            if u.path.startswith(pre):
+                self.send_response(302)
+                self.send_header("Location", f"http://{host}:{self.server.server_port}{u.path[len(pre):]}?{u.query}")
+                self.send_header("Content-Length", "0"); self.end_headers(); return
+        if self.headers.get("Authorization") != "Basic bWVAZXhhbXBsZS5jb206dG9r":
+            return self.reply(401, {"errorMessages": ["Client must be authenticated"]})
+        if u.path == "/rest/api/2/myself":
+            return self.reply(200, {"accountId": "me-1", "displayName": "Me"})
+        assert u.path == "/rest/api/2/search/jql" and "changelog" in q["expand"], self.path
+        mins = int(q["jql"].split("updated >= -")[1].split("m")[0])
+        cut = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=mins)
+        iss = [i for i in json.load(open(os.path.join(D, "issues.json")))
+               if dt.datetime.strptime(i["fields"]["updated"], "%Y-%m-%dT%H:%M:%S.%f%z") >= cut]
+        if os.path.exists(os.path.join(D, "dup")):  # two pages, the second repeats the first
+            return self.reply(200, {"issues": iss, "isLast": False, "nextPageToken": "p2"} if "nextPageToken" not in q
+                              else {"issues": iss, "isLast": True})
+        self.reply(200, {"issues": iss, "isLast": True})
+    def reply(self, code, d):
+        b = json.dumps(d).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(D, "port"), "w").write(str(s.server_port))
+s.serve_forever()
+PY
+jira() {  # key event(new|comment|status|old|late) author_id author_name [text]: adds to the fake issues
+  python3 - "$JS/issues.json" "$@" <<'PY'
+import json, sys, os, datetime as dt
+p, key, ev, aid, name = sys.argv[1:6]; text = sys.argv[6] if len(sys.argv) > 6 else ""
+ts = lambda h=0: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%S.000+0000")
+iss = json.load(open(p)) if os.path.exists(p) else []
+i = next((x for x in iss if x["key"] == key), None)
+if not i:
+    i = {"key": key, "fields": {"summary": f"Fix the loader ({key})", "status": {"name": "Open"}, "priority": {"name": "Major"},
+         "issuetype": {"name": "Bug"}, "assignee": {"accountId": "me-1", "displayName": "Me"},
+         "reporter": {"accountId": aid, "displayName": name}, "created": ts(100), "updated": ts(100),
+         "description": "", "comment": {"comments": []}}, "changelog": {"histories": []}}
+    iss.append(i)
+f, who = i["fields"], {"accountId": aid, "displayName": name}
+nid = str(1 + sum(len(x["fields"]["comment"]["comments"]) + len(x["changelog"]["histories"]) for x in iss))
+if ev == "new":
+    f["created"] = ts(); f["description"] = text
+elif ev == "comment":
+    f["comment"]["comments"].append({"id": nid, "author": who, "body": text, "created": ts(), "updated": ts()})
+elif ev == "status":
+    i["changelog"]["histories"].append({"id": nid, "author": who, "created": ts(), "items": [{"field": "status", "fromString": "Open", "toString": text}]})
+elif ev in ("old", "late"):  # a comment from 50 hours ago; one from 3 minutes ago that search only now finds
+    h = 50 if ev == "old" else 0.05
+    f["comment"]["comments"].append({"id": nid, "author": who, "body": text, "created": ts(h), "updated": ts(h)})
+f["updated"] = ts({"old": 50, "late": 0.05}.get(ev, 0))
+json.dump(iss, open(p, "w"))
+PY
+}
+jira QA-1 new u-7 "Alice Wu" "the loader drops rows"
+jira QA-1 comment u-7 "Alice Wu" "[~accountid:me-1] can you take this one?"
+jira QA-2 old u-8 "Bob Li" "long ago"
+jira QA-2 status u-8 "Bob Li" "In Progress"
+jira QA-3 comment me-1 "Me" "my own note"
+python3 "$JS/server.py" "$JS" & JPID=$!; trap 'kill "$JPID" "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
+for _ in $(seq 50); do [ -s "$JS/port" ] && break; sleep 0.1; done
+export HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok
+"$HQ" feed jira --site "http://127.0.0.1:$(cat "$JS/port")" --dry-run | grep -q "jira: 2 issues (dry run" && [ ! -e "$T/root/secretary/feed/jira" ] && ok "feed jira --dry-run: reads, saves nothing" || fail "jira dry run"
+grep -q '"site": "http://127.0.0.1:' "$T/root/hq.json" && ok "feed jira --site is remembered in hq.json" || fail "jira site saved"
+JJ="$("$HQ" feed jira --no-sort --json)"
+echo "$JJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conversations"]==2 and len(r["items"])==2, r' && ok "feed jira: one item per issue; an issue with only your own changes adds nothing" || fail "jira items"
+hqi inbox --json | python3 -c '
+import json,sys
+xs={n["id"]:n for n in json.load(sys.stdin)["items"]}
+x=[n for n in xs.values() if n.get("issue")=="QA-2"][0]; t=x["text"].split("\n")
+assert x["via"]=="jira", x
+assert t[0].startswith("Jira · QA-2: Fix the loader (QA-2) · http://127.0.0.1:") and t[0].endswith("/browse/QA-2"), t
+assert "you: assignee" in t[1] and t[2].endswith("Bob Li: status: Open → In Progress") and len(t)==3, t
+a=[n for n in xs.values() if n.get("issue")=="QA-1"][0]["text"]
+assert "Alice Wu: created it: the loader drops rows" in a and "Alice Wu: commented: @me can you take this one?" in a, a' && ok "feed jira item: issue link, its state, your role, what changed (old comments left out, mentions of you as @me)" || fail "jira item text"
+ls "$T"/root/secretary/feed/jira/*.jsonl >/dev/null && ! grep -q '"tok"\|tok"' "$T/root/secretary/feed/state.json" && ok "feed jira keeps the raw issues, and no token" || fail "jira raw"
+[ -z "$("$HQ" feed jira --json --no-sort | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["items"]))')" ] && ok "feed jira: the next scan re-reads the last minutes but adds nothing it has seen" || fail "jira cursor"
+jira QA-3 late u-8 "Bob Li" "found it late"
+"$HQ" feed jira --json --no-sort | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conversations"]==1, r' && ok "feed jira: a change Jira's search finds late, from before the cursor, still comes" || fail "jira late"
+jira QA-1 comment u-7 "Alice Wu" "any news?"
+answer '{"kind":"skip","confidence":0.9,"reason":"nothing new","alternatives":[]}'
+"$HQ" feed all --claude "$FAKE" >"$T/out" 2>&1; tail -1 "$T/out" | grep -q "^jira 1 → filed 0, unsorted 0, skipped 1" && grep -q "one Jira issue the user is assignee" "$FAKE_DIR/args" && [ "$(cat "$FAKE_DIR/token")" = none ] && ok "feed all scans what is set up, sorts with the Jira prompt (not given the token), sums up on one line" || fail "feed all"
+touch "$JS/dup"; jira QA-1 comment u-7 "Alice Wu" "and?"
+"$HQ" feed jira --dry-run | grep -q "^jira: 1 issues" && ok "feed jira: an issue on two pages is one item" || fail "jira dup pages"
+rm "$JS/dup"
+JP="$(cat "$JS/port")"
+HQ_JIRA_SITE="http://127.0.0.1:$JP/same" "$HQ" feed jira --dry-run | grep -q "^jira: " && ok "feed jira: the token follows a redirect on the same host" || fail "jira same-host redirect"
+{ HQ_JIRA_SITE="http://127.0.0.1:$JP/away" "$HQ" feed jira --dry-run 2>&1 || true; } | grep -q "HTTP 401" && ok "feed jira: …but not to another host" || fail "jira redirect away"
+printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:1\n' > "$HOME/.zuliprc"
+python3 -c 'import fcntl,os,sys,time; os.makedirs(os.path.dirname(sys.argv[1]),exist_ok=True); f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(60)' "$HOME/.claude/hq/state/locks/feed-zulip.lock" "$T/locked" & LPID=$!
+for _ in $(seq 50); do [ -e "$T/locked" ] && break; sleep 0.1; done
+! "$HQ" feed all --no-sort >"$T/out" 2>&1 && tail -1 "$T/out" | grep -q "^jira 1 · zulip failed: a zulip scan is already running" && ok "feed all: a source already scanning fails, the others still run" || fail "feed all lock: $(cat "$T/out")"
+kill "$LPID" 2>/dev/null; wait "$LPID" 2>/dev/null || true; rm -f "$HOME/.zuliprc"
+"$HQ" feed | grep -q "jira: last scan .*1 issues" && ok "feed status shows the Jira scan" || fail "jira status"
+export HQ_JIRA_TOKEN=wrong
+{ "$HQ" feed jira 2>&1 || true; } | grep -q "HTTP 401 Client must be authenticated" && ok "feed: a Jira error is reported" || fail "jira error"
+! "$HQ" feed all >"$T/out" 2>&1 && tail -1 "$T/out" | grep -q "jira failed: Jira myself: HTTP 401" && ok "feed all: a failed source fails the run, named on the last line" || fail "feed all failure"
+unset HQ_JIRA_EMAIL HQ_JIRA_TOKEN
+kill "$JPID" 2>/dev/null; wait "$JPID" 2>/dev/null || true
 
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
@@ -1601,6 +1813,60 @@ n={a['id']:a for a in [x for x in json.load(sys.stdin)['tasks'] if x['id']=='$NT
   && ok "resolving a moved ask by its old id resolves the new one" || fail "old id redirect"
 "$HQ" continue "$CT" 2>/dev/null && fail "continued a done task" || ok "only an open task can be continued"
 "$HQ" unbind --session sess-cont >/dev/null
+
+# hq garden: what a weekly look over the board would tidy, and what was proposed already.
+GS="$("$HQ" secretary --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+# Earlier sections leave look-alike cards ("p1 docs", "p2 docs 1"): out of the way, but $S4.
+for x in $("$HQ" board --json | python3 -c 'import json,sys; print(" ".join(t["id"] for t in json.load(sys.stdin)["tasks"] if t["status"] in ("active","blocked","waiting-on-me")))'); do
+  [ "$x" = "$S4" ] || [ "$x" = "$GS" ] || "$HQ" set "$x" status=abandoned >/dev/null
+done
+G1="$("$HQ" new "Rerun perf baseline on 4.2.7" --no-focus | head -1)"
+G2="$("$HQ" new "perf baseline rerun for 4.2.7 release" --no-focus | head -1)"
+G3="$("$HQ" new "Loader crash on upgrade" --no-focus | head -1)"
+G4="$("$HQ" new "Write the customer reply" --no-focus | head -1)"
+G5="$("$HQ" new "Rerun perf baseline on 4.2.7 — part 2 after $G1." --no-focus | head -1)"
+"$HQ" ref add "$G3" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
+"$HQ" ref add "$G4" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
+"$HQ" ref add "$G4" "build 7 https://jenkins.example.com/job/x/7/" >/dev/null
+"$HQ" garden --json > "$T/g.json"
+python3 - "$T/g.json" "$S4" "$G1" "$G2" "$G3" "$G4" "$G5" "$GS" <<'PY2' && ok "garden: a zombie over budget, look-alike titles, a shared ticket; cards naming each other last" || fail "garden findings"
+import json, sys
+g = json.load(open(sys.argv[1])); s4, g1, g2, g3, g4, g5, sec = sys.argv[2:]
+kinds = [(f["kind"], f["task"]) for f in g["findings"]]
+assert ("zombie", s4) in kinds and ("over-budget", s4) in kinds, kinds
+assert all(t != sec for _, t in kinds), kinds
+pairs = [tuple(p["tasks"]) for p in g["duplicates"]]
+assert (g1, g2) in pairs, pairs
+shared = [p for p in g["duplicates"] if tuple(p["tasks"]) == (g3, g4)]
+assert shared and shared[0]["sharedLinks"] == ["TSE-4242", "https://jira.example.com/browse/TSE-4242"], shared
+assert pairs.index((g3, g4)) < pairs.index((g1, g2)), pairs      # a shared link first
+named = [p for p in g["duplicates"] if g5 in p["tasks"] and g1 in p["tasks"]]
+assert named and named[0]["mention"] and g["duplicates"][-1]["mention"], g["duplicates"]
+assert all(not f["settled"] for f in g["findings"]), g["findings"]
+PY2
+# A hand-made card without an id is skipped, not a crash (the weekly report runs garden too).
+mkdir -p "$T/root/tasks/noid" && printf -- '---\ntitle: "Rerun perf baseline by hand"\nstatus: active\n---\n\n## Goal\nx\n' > "$T/root/tasks/noid/TASK.md"
+"$HQ" garden --json >/dev/null && ok "garden skips a card without an id" || fail "garden on a card without an id"
+rm -rf "$T/root/tasks/noid"
+"$HQ" garden | grep -q "^zombie: $S4 " && "$HQ" garden | grep -q "^duplicate? $G3 " && ok "garden prints the findings as text" || fail "garden text: $("$HQ" garden)"
+"$HQ" ask add "$GS" "Close $S4 as abandoned (quiet since 2020)?" >/dev/null
+GA="$("$HQ" asks "$GS" | grep -o "$GS\.[0-9]*" | tail -1)"
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert f and all(x["settled"]=="open ask '"$GA"'" for x in f), f' && ok "garden: an open ask about a task settles its findings" || fail "garden open ask"
+"$HQ" garden | grep -q "already proposed" && ok "garden text lists what was proposed already" || fail "garden already proposed"
+"$HQ" ask resolve "$GA" drop >/dev/null
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert f and all(x["settled"].startswith("declined") for x in f), f' && ok "garden: a no stands while the card is unchanged" || fail "garden declined"
+sleep 1; "$HQ" log "$S4" "picked up again" >/dev/null
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert [x["kind"] for x in f]==["over-budget"] and f[0]["settled"] is None, f' && ok "garden: a card written since the no is proposed again (and no longer a zombie)" || fail "garden after change"
+"$HQ" report weekly --no-gh --json | python3 -c 'import json,sys; g=json.load(sys.stdin)["garden"]; assert g["duplicates"], g' \
+  && "$HQ" report weekly --no-gh | grep -q "^## Tidying the board" && ! "$HQ" report daily --no-gh | grep -q "Tidying" \
+  && ok "the weekly report's facts end with the board's tidying; the daily's don't" || fail "garden in weekly report"
+for x in "$G1" "$G2" "$G3" "$G4" "$G5"; do "$HQ" set "$x" status=abandoned >/dev/null; done
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

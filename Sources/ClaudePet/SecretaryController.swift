@@ -14,12 +14,18 @@ import Foundation
 ///   (`hq report` picks which);
 /// - the session is bound to the secretary's card, so the hq hooks give it the card's rules, file
 ///   its `hq-asks` as asks in Needs you, and tell it the answers at its next turn;
-/// - the board shows the conversation in Peek, by the session's id.
+/// - the board shows the conversation in Peek, by the session's id;
+/// - a second job, `secretary-feed`, brings in what reached the user on Zulip and Jira: a shell job
+///   running `hq feed all` hourly on weekdays (off until turned on from the window), which files
+///   each conversation or issue into the inbox for the sorter.
 @MainActor
 final class SecretaryController {
     static let shared = SecretaryController()
 
     static let jobID = "secretary"
+    static let feedJobID = "secretary-feed"
+    /// Weekdays, every hour from 9:00 to 19:00.
+    static let feedSchedule = Schedule(kind: .cron, cron: "0 9-19 * * 1-5")
     private var jobs: JobsController { JobsController.shared }
     private var store: JobStore { jobs.store }
 
@@ -77,7 +83,53 @@ final class SecretaryController {
                              "hour": sch.hour, "minute": sch.minute,
                              "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
         }
+        o["feed"] = feedStatus()
         return (o, nil)
+    }
+
+    /// The scan's job: on or off, when next, and how its last run went.
+    private func feedStatus() -> [String: Any] {
+        guard let job = store.load(Self.feedJobID) else { return ["job": false, "enabled": false] }
+        var f: [String: Any] = ["job": true, "enabled": job.enabled, "kind": job.schedule.kind.rawValue,
+                                "cron": job.schedule.cron, "running": store.runs(Self.feedJobID).first(where: { $0.status != .skipped })?.status == .running,
+                                "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
+        if let r = store.runs(Self.feedJobID).first {
+            f["last"] = ["status": r.status.rawValue, "summary": r.summary, "at": Jobs.iso(r.ended ?? r.started), "failed": r.failed]
+        }
+        return f
+    }
+
+    /// The scan on or off. Made on first use; the user may change its schedule in Scheduled, and
+    /// what makes it the scan (a shell job running `hq feed all` in the task root) is put back.
+    func setFeed(on: Bool) async -> (Any?, String?) {
+        if info["root"] == nil, let err = await refreshInfo() { return (nil, err) }
+        guard let root = info["root"] as? String, !root.isEmpty else { return (nil, L("No HQ root", "找不到 HQ 根目录")) }
+        let command = Self.feedCommand
+        var job = store.load(Self.feedJobID) ?? Job(
+            id: Self.feedJobID, name: L("Secretary: scan Zulip · Jira", "秘书：扫描 Zulip · Jira"), kind: .shell, command: command,
+            cwd: root, schedule: Self.feedSchedule, enabled: false, timeoutMinutes: 15, notify: .failure)
+        if store.load(Self.feedJobID) == nil || job.kind != .shell || job.command != command || job.directory != root {
+            job.kind = .shell; job.command = command; job.cwd = root
+            if let err = await save(job) { return (nil, err) }
+        }
+        let r = await jobs.setEnabled(Self.feedJobID, on)
+        if let err = r.1 { return (nil, err) }
+        return await status()
+    }
+
+    /// One scan now (the job is made, off, if it isn't there yet).
+    func feedNow() async -> (Any?, String?) {
+        if store.load(Self.feedJobID) == nil {
+            let r = await setFeed(on: false)
+            if let err = r.1 { return (nil, err) }
+        }
+        let r = jobs.runNow(Self.feedJobID)
+        if let err = r.1 { return (nil, err) }
+        return await status()
+    }
+
+    static var feedCommand: String {
+        "'\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/hq/bin/hq' feed all"
     }
 
     /// Scaffolds what is missing and makes the job. `lang`: the board's language, for the memory
