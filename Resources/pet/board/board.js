@@ -122,6 +122,8 @@ if (LANG === "zh") {
   $("#search").placeholder = "筛选任务";
   $("#search").title = "三个页面都筛选：任务按编号、标题、关联、分类、项目；问题和待办也按自己的文字";
   $("#new-task").textContent = "新建任务";
+  $("#secretary-btn").textContent = "秘书";
+  $("#secretary-btn").title = "秘书：问它各个任务怎么样了、什么在等你；它的建议出现在 Needs you";
   $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
   $("#all .vhead h1").textContent = "所有任务";
@@ -2036,7 +2038,15 @@ async function copyText(text, msg) {
 }
 
 async function openPeek(sid, back, opt = {}) {
-  const s = ui.sessions.find((x) => x.sessionId === sid || x.sessionId.startsWith(sid));
+  if (opt.secretary) {
+    ui.modal = { type: "peek", secretary: true, sec: opt.secretary, sid, title: T("Secretary", "秘书"), project: "", cwd: "",
+                 live: false, msgs: null, sig: "", back: back || null, items: null, turn: null, todos: null, details: {},
+                 openTools: new Set(), openGroups: new Set(), fullTools: new Set(), todoOpen: false, starting: false,
+                 startedAt: Date.now() };
+    drawPeek(true);
+    return refreshPeek(true);
+  }
+  const s = sid && ui.sessions.find((x) => x.sessionId === sid || x.sessionId.startsWith(sid));
   ui.modal = { type: "peek", sid: s ? s.sessionId : sid, title: (s && (s.title || s.project)) || opt.title || sid.slice(0, 8),
                project: s ? s.project : "", cwd: s ? s.cwd : "", live: Boolean(s), msgs: null, sig: "", back: back || null,
                items: null, turn: null, todos: null, details: {}, openTools: new Set(), openGroups: new Set(),
@@ -2055,12 +2065,25 @@ async function refreshPeek(first) {
   const m = ui.modal;
   if (!m) return;
   let msgs, act = { items: null, turn: null, todos: null };
-  try { msgs = await apiJSON("peek", { session: m.sid, opened: Boolean(first) }); } catch (e) { return toast(String(e.message || e), true); }
+  let secChanged = false;
+  if (m.secretary) {
+    // Its state first: the session's id is handed out with the first message, and whether it is
+    // replying decides the send box.
+    try { m.sec = ui.secretary = await apiObj("secretary"); } catch (e) { return toast(String(e.message || e), true); }
+    if (ui.modal !== m) return;
+    if (m.sec.sessionId && m.sec.sessionId !== m.sid) m.sid = m.sec.sessionId;
+    const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.contextPct]);
+    secChanged = secSig !== m.secSig;
+    m.secSig = secSig;
+  }
+  try {
+    msgs = m.secretary && !m.sid ? [] : await apiJSON("peek", { session: m.sid, opened: Boolean(first) });
+  } catch (e) { return toast(String(e.message || e), true); }
   if (ui.modal !== m) return;
   // A session that has come up (or ended) since the window opened: send box on or off.
   const s = ui.sessions.find((x) => x.sessionId === m.sid);
-  let changed = false;
-  if (Boolean(s) !== m.live) {
+  let changed = secChanged;
+  if (!m.secretary && Boolean(s) !== m.live) {
     m.live = Boolean(s); changed = true;
     if (s) { m.title = s.title || s.project || m.title; m.project = s.project; m.cwd = s.cwd; m.starting = false; }
   }
@@ -2177,9 +2200,10 @@ function drawPeek(toBottom) {
     if (i >= 0 && m.keys[i]) anchor = { key: m.keys[i], off: els[i].getBoundingClientRect().top - top };
   }
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
-  const prompt = m.live && canMessage(s) && onPrompt(s);
-  const canSend = m.live && canMessage(s);
-  const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
+  const key = peekKey(m);
+  const prompt = !m.secretary && m.live && canMessage(s) && onPrompt(s);
+  const canSend = m.secretary ? !(m.sec && m.sec.running) : m.live && canMessage(s);
+  const noSend = m.secretary ? T("It is replying — wait for it, or Stop it", "它正在回复——等它说完，或者先停下") : m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
   // Messages, with each run of tool calls between them as one block (see peekBlocks).
   const blocks = msgs === null ? null : peekBlocks(m.items || msgs.map((x) => ({ kind: "msg", ...x })));
@@ -2187,17 +2211,21 @@ function drawPeek(toBottom) {
   const run = peekRun(m, s);
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
-    : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
+    : !blocks.length ? `<div class="empty">${m.secretary ? secretaryIntro() : m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
     : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
       </div>`).join("");
-  const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + m.sid);
+  const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + key);
+  const chip = m.secretary ? (m.sec && m.sec.running ? ` <span class="chip">${T("replying…", "回复中…")}</span>` : "")
+    : m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
+  const sub = m.secretary ? T("its proposals wait in Needs you · click outside or Esc to close", "它的建议在 Needs you 里等你 · 点外面或按 Esc 关闭")
+    : `${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
-      <div><div class="stitle">${esc(m.title)}${m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`}</div><div class="meta">${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}</div></div>
+      <div><div class="stitle">${esc(m.title)}${chip}</div><div class="meta">${sub}</div></div>
       <span style="flex:1"></span>
       <button class="btn small" data-action="copy-all">${T("Copy all", "全部复制")}</button>
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
@@ -2205,11 +2233,11 @@ function drawPeek(toBottom) {
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
-    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
-      <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
-        placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + m.sid))}</textarea>
-      ${sendButton(m.sid, canSend && !prompt)}
-    </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${canSend ? attachStrip(m.sid) : ""}
+    <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.secretary ? noSend : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
+      <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
+        placeholder="${prompt ? ON_PROMPT() : canSend ? (m.secretary ? T("Ask your secretary — e.g. how are T-072 and T-071 doing, and what is blocking them?", "问秘书——比如：T-072 和 T-071 怎么样了、卡点是什么？") : T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片")) : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
+      ${sendButton(key, canSend && !prompt)}
+    </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${canSend ? attachStrip(key) : ""}
   </div>`;
   box.hidden = false;
   fitAllGrow(box);
@@ -2223,6 +2251,85 @@ function drawPeek(toBottom) {
     const el = nb.querySelectorAll(".pmsg")[j];
     nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - anchor.off;
   }
+}
+
+// ------------------------------------------------------------------ secretary
+// A standing chat with the secretary (SecretaryController): an agent that knows the board, in a
+// fixed background session in the HQ root — one run of its job per message, shown here in Peek.
+// Its proposals are asks on its own card, answered in Needs you; a yes wakes it to carry them out.
+const SEC = "secretary";   // the reply box's key, and its send button's session
+const peekKey = (m) => (m.secretary ? SEC : m.sid);
+async function openSecretary() {
+  let st;
+  try { st = ui.secretary = await apiObj("secretary"); } catch (e) { return toast(String(e.message || e), true); }
+  if (!st.ready || !st.job) { ui.modal = { type: "secretary-setup" }; return drawSecretarySetup(); }
+  return openPeek(st.sessionId || "", null, { secretary: st });
+}
+function drawSecretarySetup(busy) {
+  const st = ui.secretary || {};
+  const file = (p, ok) => `<li><code>${esc(p)}</code>${ok ? ` <span class="meta">${T("(there — kept)", "（已有——保留）")}</span>` : ""}</li>`;
+  const files = st.files || {};
+  const box = $("#modal");
+  box.innerHTML = `<div class="panel sec-setup" role="dialog" aria-label="${T("Secretary", "秘书")}">
+    <div class="phead"><div><div class="stitle">${T("Secretary", "秘书")}</div><div class="meta">${T("not set up on this board yet", "这个看板还没设置秘书")}</div></div>
+      <span style="flex:1"></span><button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button></div>
+    <div class="sec-body">
+      <p>${T("The secretary is a Claude session that knows this board. Ask it where things stand and what is waiting on you; it answers from the cards and sessions, and proposes changes (a new task, a note, a todo, closing a task) as questions in <b>Needs you</b>. It changes nothing until you say yes, and it doesn't do the work itself.",
+             "秘书是一个了解这个看板的 Claude session。问它各个任务怎么样了、什么在等你；它从任务卡和 session 里找答案，要改看板（建任务、记一笔、加待办、关任务）就作为问题放进 <b>Needs you</b>，你说同意它才动手。它自己不干活。")}</p>
+      <p>${T("Setting it up creates:", "设置会创建：")}</p>
+      <ul>
+        ${file(st.agent || ".claude/agents/secretary.md", st.agentExists)}
+        ${Object.keys(files).map((f) => file(`${st.memory || "secretary"}/${f}`, files[f])).join("")}
+        <li>${st.task ? T(`its card, ${esc(st.task)} (there — kept)`, `它自己的任务卡 ${esc(st.task)}（已有——保留）`) : T("its own task card, “Secretary” (its notebook; its asks are its proposals)", "它自己的任务卡“秘书”（它的笔记本；它的提问就是它的建议）")}</li>
+        <li>${T("a job “Secretary” in Scheduled, with no schedule: it runs when you message it", "“定时任务”页里的一个任务“秘书”，不定时：你发消息它才运行")}</li>
+      </ul>
+      <p class="meta">${T("The memory files (who you are, your colleagues, your recurring processes) are yours to edit; the secretary proposes changes to them as a diff.", "记忆文件（你是谁、同事、常做的流程）你可以直接改；秘书要改它们会先给你看 diff。")}</p>
+      <div class="row"><span style="flex:1"></span><button class="btn primary" data-action="secretary-setup" ${busy ? "disabled" : ""}>${busy ? T("Setting up…", "设置中…") : T("Set up", "设置")}</button></div>
+    </div>
+  </div>`;
+  box.hidden = false;
+}
+async function setupSecretary() {
+  drawSecretarySetup(true);
+  try { ui.secretary = await apiObj("secretary-setup", { lang: LANG }); }
+  catch (e) { toast(String(e.message || e), true); return drawSecretarySetup(); }
+  toast(T("Secretary set up", "秘书设置好了"));
+  refresh();
+  return openPeek(ui.secretary.sessionId || "", null, { secretary: ui.secretary });
+}
+// The line above the conversation while it isn't replying.
+function secretaryLead(m) {
+  const st = m.sec || {}, last = st.last;
+  if (st.waking) return { cls: "busy", lead: T("Carrying out what you said yes to in a moment…", "马上去办你同意的建议…") };
+  if (last && (last.failed || last.status === "skipped")) {
+    return { cls: "wait", lead: `${last.status === "skipped" ? T("Last message skipped:", "上一条被跳过：") : T("Last reply didn't finish:", "上一次没回完：")} <span class="plabel">${esc(last.summary || last.status)}</span>` };
+  }
+  return { cls: "idle", lead: T("Ready", "待命") };
+}
+function secretaryIntro() {
+  return T(`Ask it where things stand: “How are T-072 and T-071 doing, and what is blocking them?”, “What is waiting on me?”, “What looks stuck?”. It looks things up on the board each time and marks what waits on you with ⚑.`,
+           `问它各个任务的情况：“T-072 和 T-071 怎么样了、卡点是什么？”“有什么在等我？”“哪些看着卡住了？”。它每次都现查看板，等你处理的事会用 ⚑ 标出来。`);
+}
+async function sendSecretary() {
+  if (ui.sending.has(SEC)) return;
+  const key = "msg:" + SEC;
+  const text = (ui.drafts[key] || "").trim();
+  const images = ui.atts[SEC] || [];
+  if (!text && !images.length) return;
+  const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  ui.sending.add(SEC);
+  if (ui.modal && ui.modal.secretary) drawPeek(true);
+  try {
+    await api("secretary-send", { text: message });
+    delete ui.drafts[key];
+    delete ui.atts[SEC];
+    if (ui.modal && ui.modal.secretary && ui.modal.sec) ui.modal.sec.running = true;
+  } catch (e) {
+    toast(String(e.message || e), true);
+  } finally {
+    ui.sending.delete(SEC);
+  }
+  if (ui.modal && ui.modal.secretary) { drawPeek(true); refreshPeek(); }
 }
 
 // ------------------------------------------------------------------ peek activity
@@ -2251,7 +2358,7 @@ function peekBlocks(items) {
 }
 // What the session is doing now, as far as Peek can tell: its state, and the call it is in.
 function peekRun(m, s) {
-  const state = m.live ? liveState(s) : "";
+  const state = m.secretary ? (m.sec && m.sec.running ? "busy" : "") : m.live ? liveState(s) : "";
   const turnOpen = state === "busy" || state === "waiting";
   const pending = turnOpen ? (m.items || []).filter((t) => t.kind === "tool" && t.status === "pending") : [];
   return { state, turnOpen, pending: new Set(pending.map((t) => t.id)), current: pending[pending.length - 1] || null };
@@ -2335,6 +2442,8 @@ function peekStatus(m, s, run) {
   } else if (run.state === "waiting") {
     cls = "wait";
     lead = s.waitingOn ? `${T("Waiting for your OK:", "等你批准：")} <span class="plabel">${esc(s.waitingOn)}</span>` : T("Waiting for your answer in the terminal", "在终端里等你回答");
+  } else if (m.secretary) {
+    ({ cls, lead } = secretaryLead(m));
   } else if (m.live) {
     cls = "idle"; lead = T("Idle — its turn is over", "空闲——这一轮已结束");
   } else {
@@ -2347,7 +2456,9 @@ function peekStatus(m, s, run) {
     bits.push(`<span title="${T("Tokens Claude wrote this turn (thinking included)", "这一轮 Claude 输出的 token（含思考）")}">↓ ${fmtTok(turn.tokens)} tokens</span>`);
     if (turn.context) bits.push(`<span title="${T("Context size at its latest reply", "最近一次回复时的上下文大小")}">${T("context", "上下文")} ${fmtTok(turn.context)}</span>`);
   }
-  return `<div class="pstatus ${cls}"><span class="pdot"></span><span class="plead">${lead}</span><span style="flex:1"></span><span class="pbits">${bits.join(" · ")}</span></div>`;
+  if (m.secretary && m.sec && m.sec.contextPct != null) bits.push(`<span title="${T("How full its context is; it is compacted past the job's threshold", "上下文用了多少；超过任务设的阈值会自动 compact")}">${T("context", "上下文")} ${m.sec.contextPct}%</span>`);
+  const stop = m.secretary && run.state === "busy" ? `<button class="btn small" data-action="secretary-stop">${T("Stop", "停止")}</button>` : "";
+  return `<div class="pstatus ${cls}"><span class="pdot"></span><span class="plead">${lead}</span><span style="flex:1"></span><span class="pbits">${bits.join(" · ")}</span>${stop}</div>`;
 }
 // Claude's own todo list (TodoWrite / TaskCreate), as it last left it.
 function peekTodos(m) {
@@ -2760,7 +2871,7 @@ async function addImages(sid, files) {
     } catch (e) { toast(String(e.message || e), true); }
   }
   if (added && sid.startsWith("ask:")) autoPick(sid.slice(4), true);   // an image is an answer too
-  if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false); }
+  if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && peekKey(ui.modal) === sid) drawPeek(false); }
 }
 document.addEventListener("paste", (ev) => {
   const box = ev.target.closest && ev.target.closest("textarea[data-session], [data-att]");
@@ -2800,6 +2911,7 @@ function sendButton(sid, enabled) {
 }
 
 async function send(sid) {
+  if (sid === SEC) return sendSecretary();
   if (ui.sending.has(sid)) return;
   const key = "msg:" + sid;
   const text = (ui.drafts[key] || "").trim();
@@ -3096,7 +3208,7 @@ document.addEventListener("click", async (ev) => {
     case "att-remove":
       (ui.atts[d.session] || []).splice(Number(d.i), 1);
       render();
-      if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === d.session) drawPeek(false);
+      if (ui.modal && ui.modal.type === "peek" && peekKey(ui.modal) === d.session) drawPeek(false);
       return;
     case "toggle-msg": {
       if (ui.msgOpen.has(d.session)) { ui.msgOpen.delete(d.session); delete ui.drafts["msg:" + d.session]; return render(); }
@@ -3116,6 +3228,11 @@ document.addEventListener("click", async (ev) => {
     }
     case "ctx-goto": closePeek(); return revealTask(d.task);
     case "close-modal": return closePeek();
+    case "open-secretary": return openSecretary();
+    case "secretary-setup": return setupSecretary();
+    case "secretary-stop":
+      try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
+      return refreshPeek();
     case "copy-msg": {
       const m = ui.modal && ui.modal.msgs[Number(d.i)];
       if (m) await copyText(m.text, T("Message copied", "已复制消息"));
@@ -3566,6 +3683,7 @@ const SLASH_BUILTIN = () => [
 const SLASH_MAX = 50;
 const slashCache = {};   // sessionId → { at, skills, loading, failed }
 function slashQuery(el) {
+  if (el.dataset.session === SEC) return null;
   const m = /^\/([^\s]*)$/.exec(el.value);
   return m && !el.disabled && el.selectionStart === el.value.length ? m[1].toLowerCase() : null;
 }

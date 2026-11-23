@@ -33,6 +33,7 @@
   <a href="#zh-today">三个页面 · Focus</a>
   <a href="#zh-board">All 与 Needs you</a>
   <a href="#zh-jobs">定时任务</a>
+  <a href="#zh-secretary">秘书</a>
   <a href="#zh-pet">和小猫的联动</a>
   <a href="#zh-link">session 和看板怎么联动</a>
   <a href="#zh-cli">命令行用法</a>
@@ -82,7 +83,7 @@
 <h1 id="zh-board">All 与 Needs you</h1>
 <h2>顶栏</h2>
 <ul>
-<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · All · Needs you · 定时任务</b>（标签上是各自的数字），右边是搜索框、<b>秘书</b>（见<a href="#zh-secretary">秘书</a>）、<b>新建任务</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
 <li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题和待办各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
 <li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
@@ -200,6 +201,18 @@
 <li><b>读不到文件夹？</b>如果任务要读 <code>~/Documents</code>、桌面等受保护的位置而失败，到"系统设置 → 隐私与安全性"给 pet-emit 授权（"文件与文件夹"或"完全磁盘访问权限"）。</li>
 </ul>
 
+<h1 id="zh-secretary">秘书</h1>
+<p>顶栏的 <b>秘书</b> 打开一个常驻的对话窗口，对面是一个了解这个看板的 Claude。可以问它"T-072 和 T-071 怎么样了、卡点是什么""有什么在等我""哪些看着卡住了"。它每次都先现查任务卡和 session（<code>hq status</code>、<code>hq asks</code>、<code>hq board</code>……）再回答，等你处理的事用 <b>⚑</b> 标出来。它只管"信息 → 看板 → 你的注意力"这条线，<b>自己不干活</b>：要做的事，它会告诉你属于哪个任务，你在那个任务上点 ▶ 新开 session。</p>
+<ul>
+<li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里一个不定时的任务"秘书"。</li>
+<li><b>对话窗口</b>就是 Peek。发一条消息就是把这个任务跑一次，消息就是这次的 prompt；回复和工具调用照常显示。它回复期间，发送按钮是灰的，状态行写"回复中"，旁边有 <b>停止</b>。上一条失败了，或者因为额度被跳过，状态行会写明原因。这里没有斜杠命令。</li>
+<li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；也可以给它加个时间表，比如每天早上让它把看板看一遍。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
+<li><b>它能做什么</b>：它在后台跑，没人在旁边批准，所以只预先允许三样：读文件（Read / Grep / Glob）、运行 <code>~/.claude/hq/bin/hq</code>、改 <code>secretary/</code> 下的文件。其他操作都会被拒绝，除非你在 Claude Code 设置里另外允许了。外部系统它只读；消息和邮件只起草，写在回复里。</li>
+<li><b>它的建议在 Needs you 里等你</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为它那张卡上的问题出现在 <b>Needs you</b>。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议。点了 Yes，它几秒后自己醒来照做，每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。</li>
+<li><b>记忆</b>：<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
+<li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么。这张卡默认不放进 Focus。</li>
+</ul>
+
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
 <li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
@@ -264,6 +277,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>从已有对话建议项目、列出 session（只读，除非加 --apply-projects）</td></tr>
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>任务现在怎么样，不经过模型：状态、下一步、当前状态、最近 3 条 Log、没做完的待办和没回答的问题（各等了多久）、session（状态、最后动静、上下文占比、最后几句话），以及上面的 ⚠ 异常标记，外加「完成了还有 session 在跑」。不给编号就是所有没完成的任务（加上完成了但还有 session 在跑的）；<code>--focus</code> 只看 Focus 的，<code>--flagged</code> 只看有标记的</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录；<code>--meta --json</code> 还带工具调用、本轮用时 / token 和 Claude 的待办）· 某次工具调用的完整输入和输出</td></tr>
+<tr><td><code>hq secretary [init --lang zh|en] [--json]</code></td><td>看秘书的文件和任务卡在不在。<code>init</code> 只补上缺的（agent 定义、记忆文件、它自己的任务卡，任务卡编号记在 <code>hq.json</code> 的 <code>secretary</code> 里），已有的不动。看板上的 <b>秘书 → 设置</b> 跑的就是它</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数</td></tr>
 </table>
 <p><b>跳终端记录</b>：每次从看板、小猫或快捷键跳回终端，小猫都会在 <code>~/.claude/pet/jumps.jsonl</code> 追加一行：时间、session、绑定的任务、当时的状态、context 占比、在这个状态里待了多久（打断的从没动静时算起）、从哪里点的、跳之前多久打开过它的 Peek（只算打开那一下，开着时的自动刷新不算；小猫重启后清零）。找不到终端、没跳成的也记。只存在本机，不含对话内容；用来看哪些情况还非得回终端不可。</p>
@@ -369,7 +383,10 @@ next: "fix 分支跑 Jenkins 并提 PR"
 ~/.claude/hq/bin/hq                       命令行工具 + hook 入口
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
-&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则</pre>
+&lt;任务根目录&gt;/hq.json                       项目、分类、链接规则、秘书的任务卡
+&lt;任务根目录&gt;/.claude/agents/secretary.md   秘书的定义
+&lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks）
+~/.claude/pet/jobs/secretary/             秘书的 session（定时任务"秘书"）</pre>
 <p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
 </div>
 </article>
@@ -382,6 +399,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-today">Three pages · Focus</a>
   <a href="#en-board">All and Needs you</a>
   <a href="#en-jobs">Scheduled jobs</a>
+  <a href="#en-secretary">Secretary</a>
   <a href="#en-pet">With the cat</a>
   <a href="#en-link">How sessions and the board connect</a>
   <a href="#en-cli">Command line</a>
@@ -431,7 +449,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">All and Needs you</h1>
 <h2>Top bar</h2>
 <ul>
-<li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count); the filter box, <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
+<li>The top bar holds only things you click: <b>Focus · All · Needs you · Scheduled</b> on the left (each with its count); the filter box, <b>Secretary</b> (see <a href="#en-secretary">Secretary</a>), <b>New task</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
 <li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks and todos (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
 <li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
@@ -548,6 +566,46 @@ After the status word comes how much context the session carries (e.g. <code>210
 <li><b>Can't read a folder?</b> If a job fails reading <code>~/Documents</code>, the Desktop or another protected place, allow pet-emit in System Settings → Privacy &amp; Security (Files and Folders, or Full Disk Access).</li>
 </ul>
 
+<h1 id="en-secretary">Secretary</h1>
+<p><b>Secretary</b> in the top bar opens a standing conversation with a Claude that knows this board. Ask it "How are T-072 and T-071 doing, and what is blocking them?", "What is waiting on me?" or "What looks stuck?". It looks up the cards and sessions every time before it answers (<code>hq status</code>, <code>hq asks</code>, <code>hq board</code>…), and it marks what waits on you with <b>⚑</b>. Its job is the path information → board → your attention, and <b>it doesn't do the work itself</b>: it tells you which task a piece of work belongs to, and you start it there with ▶ New session.</p>
+<ul>
+<li><b>The first time</b>, <b>Secretary</b> lists what it would create, and nothing is created until you click <b>Set up</b>. Files that are already there are always kept. It creates:
+  <ul>
+  <li><code>.claude/agents/secretary.md</code> in the task root: who it is and its rules. You can edit it freely.</li>
+  <li>its memory files: <code>secretary/profile.md</code>, <code>people.md</code> and <code>playbooks.md</code>;</li>
+  <li>its own task card, "Secretary";</li>
+  <li>a job called "Secretary" on the <b>Scheduled</b> page, with no schedule.</li>
+  </ul></li>
+<li><b>The window</b> is Peek. Each message you send is one run of that job, with your message as its prompt; replies and tool calls show as usual. While it replies, Send is greyed out, and the status line says it is replying, with a <b>Stop</b> button. If the last message failed, or was skipped because of quota, the status line says why. There are no slash commands.</li>
+<li><b>One session</b>: every message continues the same conversation (<code>--resume</code>).
+  <ul>
+  <li>Past the job's context threshold (50% by default), the conversation is compacted first.</li>
+  <li>When the weekly or 5-hour quota is used past the job's limit (90% by default), the message is skipped, so the secretary can't use up your quota.</li>
+  <li>To change these, the model or the time limit, edit "Secretary" on the Scheduled page. You can also give it a schedule, for example a look over the board every morning.</li>
+  <li>Its folder, agent, same-session mode and allowed tools are what make it the secretary. If you change them, they are put back at the next message.</li>
+  </ul></li>
+<li><b>What it may do</b>: it runs in the background with nobody there to approve a step, so only three things are allowed up front:
+  <ul>
+  <li>reading files (Read, Grep, Glob);</li>
+  <li>running <code>~/.claude/hq/bin/hq</code>;</li>
+  <li>editing files under <code>secretary/</code>.</li>
+  </ul>
+  Anything else is refused, unless your Claude Code settings allow it anyway. It only reads outside systems; messages and emails are only drafted, in its reply.</li>
+<li><b>Its proposals wait in Needs you.</b> Creating a task, adding a note or a todo to a task (such as <code>@me send the reply to Atul</code>), closing a task, or changing its memory: each shows up in <b>Needs you</b> as a question on its card. Answer with <b>Yes</b>, <b>No</b> or <b>Later</b>; a note you add changes or replaces the proposal.
+  <ul>
+  <li>After a <b>Yes</b>, it wakes up within seconds and carries it out, then reports one line per proposal in its window. If it is replying at the time, it waits until that reply ends.</li>
+  <li>After a <b>No</b>, it leaves it, and doesn't propose it again unless something changed.</li>
+  </ul></li>
+<li><b>Memory</b>: it reads all three files at the start of every conversation.
+  <ul>
+  <li><code>profile.md</code>: who you are, your language, what matters in each project.</li>
+  <li><code>people.md</code>: your colleagues, who they are and what they own.</li>
+  <li><code>playbooks.md</code>: recurring processes, such as release tests and RCAs.</li>
+  </ul>
+  You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
+<li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you. The card stays off Focus.</li>
+</ul>
+
 <h1 id="en-pet">With the cat</h1>
 <ul>
 <li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
@@ -608,6 +666,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq scan [--days 60] [--apply-projects --only a,b]</code></td><td>suggest projects and list sessions from existing transcripts (read-only unless --apply-projects)</td></tr>
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>where tasks stand, built without a model: status, next step, state, the last 3 Log entries, open todos and unanswered asks (each with how long it has waited), sessions (state, last activity, context share, last messages), and the ⚠ flags above, plus "done with a session still running". No ids: every open task (plus done ones with a session still running); <code>--focus</code> only Focus's, <code>--flagged</code> only flagged ones</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts; <code>--meta --json</code> adds its tool calls, this turn's time and tokens, and Claude's todos) · one tool call's full input and output</td></tr>
+<tr><td><code>hq secretary [init --lang en|zh] [--json]</code></td><td>whether the secretary's files and card are there. <code>init</code> adds only what is missing (the agent definition, the memory files, and its own card, whose id goes under <code>secretary</code> in <code>hq.json</code>) and leaves the rest alone. The board's <b>Secretary → Set up</b> runs it</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before</td></tr>
 </table>
 <p><b>Jump log</b>: every jump back to a terminal — from the board, the pet or the hotkey — adds one line to <code>~/.claude/pet/jumps.jsonl</code>: the time, the session, its task, its state, its context use, how long it had been in that state (for an interrupted one, since it went quiet), where you clicked, and how long before you opened its Peek (opening it counts, not the refreshes while it stays open; forgotten when the pet restarts). Clicks whose terminal can't be found are logged too. It stays on this machine and holds no conversation text; it is there to show which situations still need the terminal.</p>
@@ -713,7 +772,10 @@ next: "run baseline on clusters A/C"
 ~/.claude/hq/bin/hq                    CLI and hook entry point
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
 ~/.claude/hq/state/sessions.json       session → task bindings
-&lt;root&gt;/hq.json                         projects, categories, link rules</pre>
+&lt;root&gt;/hq.json                         projects, categories, link rules, the secretary's card
+&lt;root&gt;/.claude/agents/secretary.md     the secretary's definition
+&lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks)
+~/.claude/pet/jobs/secretary/          the secretary's session (the "Secretary" job)</pre>
 <p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
 </div>
 </article>

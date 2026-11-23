@@ -89,24 +89,31 @@ public struct Job: Codable, Equatable, Sendable {
     /// window. 0: never (Claude Code still compacts on its own when the window is full).
     public var compactAbovePct: Int
     public var notify: Notify
+    /// Claude runs: the agent the session runs as (`--agent`), from the job's folder's
+    /// `.claude/agents/` or the user's. Empty: plain Claude Code. Not on the board's form: set by
+    /// what makes such a job (the secretary).
+    public var agent: String
+    /// Claude runs: tools allowed without a prompt on top of the user's settings
+    /// (`--allowedTools`), e.g. `Bash(~/.claude/hq/bin/hq:*)`. Not on the form either.
+    public var allowedTools: [String]
 
     public init(id: String = Jobs.newID(), name: String = "", kind: Kind = .claude, prompt: String = "",
                 command: String = "", cwd: String = "~", schedule: Schedule = Schedule(),
                 enabled: Bool = true, model: String = "", permission: Permission = .standard,
                 timeoutMinutes: Int = 20, skipWeekPct: Int = 90, skipFiveHourPct: Int = 90,
                 sessionMode: SessionMode = .fresh, keepSessions: Int = 20, compactAbovePct: Int = 50,
-                notify: Notify = .failure) {
+                notify: Notify = .failure, agent: String = "", allowedTools: [String] = []) {
         self.id = id; self.name = name; self.kind = kind; self.prompt = prompt; self.command = command
         self.cwd = cwd; self.schedule = schedule; self.enabled = enabled; self.model = model
         self.permission = permission; self.timeoutMinutes = timeoutMinutes
         self.skipWeekPct = skipWeekPct; self.skipFiveHourPct = skipFiveHourPct
         self.sessionMode = sessionMode; self.keepSessions = keepSessions; self.compactAbovePct = compactAbovePct
-        self.notify = notify
+        self.notify = notify; self.agent = agent; self.allowedTools = allowedTools
     }
 
     enum Keys: String, CodingKey {
         case id, name, kind, prompt, command, cwd, schedule, enabled, model, permission, timeoutMinutes,
-             skipWeekPct, skipFiveHourPct, sessionMode, keepSessions, compactAbovePct, notify
+             skipWeekPct, skipFiveHourPct, sessionMode, keepSessions, compactAbovePct, notify, agent, allowedTools
     }
 
     /// Every field but the id may be missing: a job written by an older version, or by hand,
@@ -121,7 +128,8 @@ public struct Job: Codable, Equatable, Sendable {
                   timeoutMinutes: v(.timeoutMinutes, d.timeoutMinutes),
                   skipWeekPct: v(.skipWeekPct, d.skipWeekPct), skipFiveHourPct: v(.skipFiveHourPct, d.skipFiveHourPct),
                   sessionMode: v(.sessionMode, d.sessionMode), keepSessions: v(.keepSessions, d.keepSessions),
-                  compactAbovePct: v(.compactAbovePct, d.compactAbovePct), notify: v(.notify, d.notify))
+                  compactAbovePct: v(.compactAbovePct, d.compactAbovePct), notify: v(.notify, d.notify),
+                  agent: v(.agent, d.agent), allowedTools: v(.allowedTools, d.allowedTools))
     }
 
     /// What is wrong with it, in a sentence the form can show; nil when it can be saved.
@@ -140,6 +148,7 @@ public struct Job: Codable, Equatable, Sendable {
         if !(1...500).contains(keepSessions) { return L("Keep between 1 and 500 sessions.", "保留的 session 数要在 1 到 500 之间。") }
         if !(0...100).contains(compactAbovePct) { return L("The compaction threshold is a percentage between 0 and 100.", "compact 阈值是 0 到 100 之间的百分比。") }
         if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return L("That model name has odd characters.", "模型名里有奇怪的字符。") }
+        if agent.range(of: #"^[A-Za-z0-9._-]*$"#, options: .regularExpression) == nil { return L("That agent name has odd characters.", "agent 名里有奇怪的字符。") }
         return schedule.problem()
     }
 

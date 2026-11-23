@@ -1478,7 +1478,7 @@ def cmd_board(args):
         links = cfg.get("links", []) if isinstance(cfg, dict) else []
         projects = [dict(project_info(pr), stats=project_stats(pr["name"], metas)) for pr in load_projects()]
         print(json.dumps({"root": hq_root(), "focus": focus_state(), "categories": load_categories(), "projects": projects,
-                          "links": links, "tasks": out},
+                          "links": links, "secretary": secretary_task_id(), "tasks": out},
                          ensure_ascii=False, indent=1))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open" and not snoozed(a)]
@@ -1603,30 +1603,131 @@ def cmd_focus(args):
 
 
 def cmd_new(args):
+    tid, p = new_card(args.title, slug=args.slug, category=args.category or None, project=args.project,
+                      lead=args.lead, workdirs=args.workdir, focus=not args.no_focus)
+    print(tid)
+    print(p)
+
+
+def new_card(title, slug=None, category=None, project=None, lead=None, workdirs=None, focus=True):
     td = tasks_dir()
     nums = [int(m.group(1)) for d in os.listdir(td) for m in [re.match(r"T-(\d+)", d)] if m]
     tid = f"T-{(max(nums) + 1 if nums else 1):03d}"
-    d = os.path.join(td, f"{tid}-{slugify(args.slug or args.title)}")
+    d = os.path.join(td, f"{tid}-{slugify(slug or title)}")
     tpl = os.path.join(hq_root(), "templates", "TASK.md")
     if not os.path.exists(tpl):
         tpl = os.path.join(HOME_DIR, "template", "TASK.md")
     text = open(tpl, encoding="utf-8").read()
     cats = load_categories()
-    category = check_category(args.category) if args.category else (
-        "other" if "other" in cats else (cats[0] if cats else ""))
+    if category is None:
+        category = "other" if "other" in cats else (cats[0] if cats else "")
+    elif category:
+        category = check_category(category)
     ensure_listed(category)
-    workdirs = [os.path.abspath(os.path.expanduser(w)) for w in (args.workdir or [])]
-    project = check_category(args.project) if args.project else project_for_dirs(workdirs)
+    workdirs = [os.path.abspath(os.path.expanduser(w)) for w in (workdirs or [])]
+    project = check_category(project) if project else project_for_dirs(workdirs)
     ensure_project(project)
     os.makedirs(d)
     p = os.path.join(d, "TASK.md")
     atomic_write(p, text)
-    set_fields(p, {"id": tid, "title": args.title, "project": project, "category": category,
-                   "status": "active", "lead": args.lead or "-", "updated": today(), "workdirs": workdirs})
-    if not args.no_focus:
+    set_fields(p, {"id": tid, "title": title, "project": project, "category": category,
+                   "status": "active", "lead": lead or "-", "updated": today(), "workdirs": workdirs})
+    if focus:
         focus_add([tid])            # a new task joins Focus
-    print(tid)
-    print(p)
+    return tid, p
+
+
+# ---------------------------------------------------------------- secretary
+SECRETARY_FILES = ("profile.md", "people.md", "playbooks.md")
+SECRETARY_TITLE = {"zh": "秘书", "en": "Secretary"}
+SECRETARY_GOAL = {
+    "zh": "秘书自己的卡片：秘书的 hq-update 写在这里（它在替你盯什么），它的建议作为这张卡的 ask 出现在 Needs you。"
+          "秘书的定义在 `.claude/agents/secretary.md`，记忆在 `secretary/`。",
+    "en": "The secretary's own card: its hq-update blocks land here (what it is keeping an eye on), and its "
+          "proposals show up in Needs you as this card's asks. Its definition is `.claude/agents/secretary.md`, "
+          "its memory `secretary/`.",
+}
+
+
+def template_dir():
+    """The templates next to this script (a checkout, or the installed copy), else the installed ones."""
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "template")
+    return here if os.path.isdir(here) else os.path.join(HOME_DIR, "template")
+
+
+def secretary_task_id():
+    """The secretary's own task, as recorded in hq.json; None when there is none or its card is gone."""
+    cfg = load_json(root_config_path(), {})
+    sec = cfg.get("secretary") if isinstance(cfg, dict) else None
+    tid = sec.get("task") if isinstance(sec, dict) else None
+    if not isinstance(tid, str) or not re.match(r"^T-\d+$", tid):
+        return None
+    for p in card_paths():
+        d = os.path.basename(os.path.dirname(p))
+        if d == tid or d.startswith(tid + "-"):
+            return tid
+    return None
+
+
+def secretary_info():
+    root = hq_root()
+    agent = os.path.join(root, ".claude", "agents", "secretary.md")
+    memory = os.path.join(root, "secretary")
+    files = {f: os.path.isfile(os.path.join(memory, f)) for f in SECRETARY_FILES}
+    tid = secretary_task_id()
+    return {"root": root, "task": tid, "card": find_card(tid) if tid else None,
+            "agent": agent, "agentExists": os.path.isfile(agent), "memory": memory, "files": files,
+            "ready": bool(tid) and os.path.isfile(agent) and all(files.values())}
+
+
+def secretary_init(lang):
+    """Scaffold what is missing (the agent definition, the memory files, the secretary's own card)
+    and never overwrite what is there: those files are the user's, and the secretary's memory."""
+    lang = lang if lang in SECRETARY_TITLE else "en"
+    tpl = template_dir()
+    info = secretary_info()
+    made = []
+    if not info["agentExists"]:
+        os.makedirs(os.path.dirname(info["agent"]), exist_ok=True)
+        atomic_write(info["agent"], open(os.path.join(tpl, "agents", "secretary.md"), encoding="utf-8").read())
+        made.append(info["agent"])
+    os.makedirs(info["memory"], exist_ok=True)
+    for f, exists in info["files"].items():
+        if exists:
+            continue
+        src = os.path.join(tpl, "secretary", lang, f)
+        if not os.path.isfile(src):
+            src = os.path.join(tpl, "secretary", "en", f)
+        atomic_write(os.path.join(info["memory"], f), open(src, encoding="utf-8").read())
+        made.append(os.path.join(info["memory"], f))
+    if not info["task"]:
+        # Its asks are what Needs you shows; the card itself stays off Focus.
+        cats = load_categories()
+        tid, card = new_card(SECRETARY_TITLE[lang], slug="secretary", category="other" if "other" in cats else "",
+                             lead="secretary", focus=False)
+        text = open(card, encoding="utf-8").read()
+        text = re.sub(r"(?m)^<what done looks like>$", lambda _: SECRETARY_GOAL[lang], text, count=1)
+        atomic_write(card, text)
+        cfg = load_json(root_config_path(), {})
+        if not isinstance(cfg, dict):
+            cfg = {}
+        cfg["secretary"] = {"task": tid}
+        atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+        made.append(card)
+    return dict(secretary_info(), made=made)
+
+
+def cmd_secretary(args):
+    info = secretary_init(args.lang) if args.action == "init" else secretary_info()
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=1))
+        return
+    print(f"task:   {info['task'] or '(none: run hq secretary init)'}")
+    print(f"agent:  {info['agent']}{'' if info['agentExists'] else '  (missing)'}")
+    for f, ok in info["files"].items():
+        print(f"memory: {os.path.join(info['memory'], f)}{'' if ok else '  (missing)'}")
+    for m in info.get("made", []):
+        print(f"created {m}")
 
 
 def cmd_bind(args):
@@ -3731,6 +3832,10 @@ def main():
     p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category"); p.add_argument("--project")
     p.add_argument("--no-focus", action="store_true", help="don't add it to Focus")
     p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
+    p = sub.add_parser("secretary", help="the secretary: hq secretary [init [--lang zh|en]] [--json]")
+    p.add_argument("action", nargs="?", choices=["show", "init"], default="show")
+    p.add_argument("--lang", default="en"); p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_secretary)
     p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
     p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
     p = sub.add_parser("unbind"); p.add_argument("--session"); p.set_defaults(fn=cmd_unbind)
