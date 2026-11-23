@@ -1602,6 +1602,56 @@ n={a['id']:a for a in [x for x in json.load(sys.stdin)['tasks'] if x['id']=='$NT
 "$HQ" continue "$CT" 2>/dev/null && fail "continued a done task" || ok "only an open task can be continued"
 "$HQ" unbind --session sess-cont >/dev/null
 
+# hq garden: what a weekly look over the board would tidy, and what was proposed already.
+GS="$("$HQ" secretary --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+# Earlier sections leave look-alike cards ("p1 docs", "p2 docs 1"): out of the way, but $S4.
+for x in $("$HQ" board --json | python3 -c 'import json,sys; print(" ".join(t["id"] for t in json.load(sys.stdin)["tasks"] if t["status"] in ("active","blocked","waiting-on-me")))'); do
+  [ "$x" = "$S4" ] || [ "$x" = "$GS" ] || "$HQ" set "$x" status=abandoned >/dev/null
+done
+G1="$("$HQ" new "Rerun perf baseline on 4.2.7" --no-focus | head -1)"
+G2="$("$HQ" new "perf baseline rerun for 4.2.7 release" --no-focus | head -1)"
+G3="$("$HQ" new "Loader crash on upgrade" --no-focus | head -1)"
+G4="$("$HQ" new "Write the customer reply" --no-focus | head -1)"
+G5="$("$HQ" new "Rerun perf baseline on 4.2.7 — part 2 after $G1" --no-focus | head -1)"
+"$HQ" ref add "$G3" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
+"$HQ" ref add "$G4" "TSE-4242 https://jira.example.com/browse/TSE-4242" >/dev/null
+"$HQ" ref add "$G4" "build 7 https://jenkins.example.com/job/x/7/" >/dev/null
+"$HQ" garden --json > "$T/g.json"
+python3 - "$T/g.json" "$S4" "$G1" "$G2" "$G3" "$G4" "$G5" "$GS" <<'PY2' && ok "garden: a zombie over budget, look-alike titles, a shared ticket; cards naming each other last" || fail "garden findings"
+import json, sys
+g = json.load(open(sys.argv[1])); s4, g1, g2, g3, g4, g5, sec = sys.argv[2:]
+kinds = [(f["kind"], f["task"]) for f in g["findings"]]
+assert ("zombie", s4) in kinds and ("over-budget", s4) in kinds, kinds
+assert all(t != sec for _, t in kinds), kinds
+pairs = [tuple(p["tasks"]) for p in g["duplicates"]]
+assert (g1, g2) in pairs, pairs
+shared = [p for p in g["duplicates"] if tuple(p["tasks"]) == (g3, g4)]
+assert shared and shared[0]["sharedLinks"] == ["TSE-4242", "https://jira.example.com/browse/TSE-4242"], shared
+assert pairs.index((g3, g4)) < pairs.index((g1, g2)), pairs      # a shared link first
+named = [p for p in g["duplicates"] if g5 in p["tasks"] and g1 in p["tasks"]]
+assert named and named[0]["mention"] and g["duplicates"][-1]["mention"], g["duplicates"]
+assert all(not f["settled"] for f in g["findings"]), g["findings"]
+PY2
+"$HQ" garden | grep -q "^zombie: $S4 " && "$HQ" garden | grep -q "^duplicate? $G3 " && ok "garden prints the findings as text" || fail "garden text: $("$HQ" garden)"
+"$HQ" ask add "$GS" "Close $S4 as abandoned (quiet since 2020)?" >/dev/null
+GA="$("$HQ" asks "$GS" | grep -o "$GS\.[0-9]*" | tail -1)"
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert f and all(x["settled"]=="open ask '"$GA"'" for x in f), f' && ok "garden: an open ask about a task settles its findings" || fail "garden open ask"
+"$HQ" garden | grep -q "already proposed" && ok "garden text lists what was proposed already" || fail "garden already proposed"
+"$HQ" ask resolve "$GA" drop >/dev/null
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert f and all(x["settled"].startswith("declined") for x in f), f' && ok "garden: a no stands while the card is unchanged" || fail "garden declined"
+sleep 1; "$HQ" log "$S4" "picked up again" >/dev/null
+"$HQ" garden --json | python3 -c '
+import json,sys; f=[x for x in json.load(sys.stdin)["findings"] if x["task"]=="'"$S4"'"]
+assert [x["kind"] for x in f]==["over-budget"] and f[0]["settled"] is None, f' && ok "garden: a card written since the no is proposed again (and no longer a zombie)" || fail "garden after change"
+"$HQ" report weekly --no-gh --json | python3 -c 'import json,sys; g=json.load(sys.stdin)["garden"]; assert g["duplicates"], g' \
+  && "$HQ" report weekly --no-gh | grep -q "^## Tidying the board" && ! "$HQ" report daily --no-gh | grep -q "Tidying" \
+  && ok "the weekly report's facts end with the board's tidying; the daily's don't" || fail "garden in weekly report"
+for x in "$G1" "$G2" "$G3" "$G4" "$G5"; do "$HQ" set "$x" status=abandoned >/dev/null; done
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"
