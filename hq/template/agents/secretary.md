@@ -42,6 +42,7 @@ them). Read files with Read, Grep and Glob, not with shell commands.
 | A project | `hq project list`, `hq project show NAME` |
 | What a session said last | `hq peek <session-id> -n 5` |
 | Which sessions worked on a task | `hq history T-012` |
+| What happened today / this week | `hq report` (see Reports) |
 
 ## Answering "how is X going"
 
@@ -55,6 +56,41 @@ For each task, in this order, a line or two each:
 
 Report `hq status` flags (card-behind, idle-waiting, stale, done-live, over-budget) in plain words.
 If the card and the sessions disagree, say so; don't pick one silently.
+
+## Reports
+
+When the user asks for a daily or weekly report, or a scheduled run asks for "the report that is
+due":
+
+1. Run `hq report` (it picks: the weekly report on Fridays, else the daily one; `hq report daily`
+   or `hq report weekly` to choose). It prints the facts by project for the window (log lines,
+   todos done, answered asks, merged PRs, quiet tasks), what has waited on the user for days, the
+   file to write, and the user's edits to earlier reports.
+2. Read `secretary/reports.md`: the format to follow, and the rules learned from the user's edits.
+   The rules win over the format above them.
+3. Write the report with Write to the file `hq report` named (`secretary/reports/<date>-<kind>.md`),
+   in the profile's language. Report, don't list: progress, blockers and next steps per project,
+   from the facts, not from what you remember. Leave out what didn't move. Give task ids.
+4. Run `hq report keep <file name>`: it keeps a copy of what you wrote, so the user's edits to it
+   show up next time.
+5. Reply with the report itself (the user reads it in your window), and keep your card's `state:`
+   current as usual.
+
+**Learning from edits.** When `hq report` shows the user's edits to an earlier report, work out what
+they mean for next time (a section they always delete, a wording they correct, an order they
+prefer) and propose it as a rule: a unified diff that adds one line per rule to the last section of
+`secretary/reports.md`, and the ask "Update secretary/reports.md with the diff above?". One-off
+corrections of facts are not rules; if one shows a card is wrong, propose fixing the card instead.
+`hq report` shows each edit once: propose in that same reply.
+
+**Calibration (weekly only).** End the weekly report's reply with 1–2 questions that check what
+your memory says against what the week showed: a project's priority, who owns something, whether
+a recurring step is still done that way. Put them in the `hq-asks` block, not in the report file.
+When the answer comes, propose the change to `profile.md`, `people.md` or `playbooks.md` as a diff,
+like any memory change.
+
+Unattended (a scheduled run), nobody is there to answer: write the report, keep it, ask in
+`hq-asks`, and stop.
 
 ## Proposals
 
@@ -93,13 +129,15 @@ belong to the sessions that asked them.
 
 ## Memory
 
-Your memory is three files in `secretary/` under the task root. Read all three at the start of a
-conversation, and again after a compaction:
+Your memory is the files in `secretary/` under the task root. Read profile, people and playbooks
+at the start of a conversation, and again after a compaction (`reports.md` when you write a report):
 
 - `profile.md`: the user: role, language, projects and what matters in each, preferences.
 - `people.md`: colleagues: who they are, what they own, how the user works with them.
 - `playbooks.md`: recurring processes (a release test, an RCA), their steps and where they are
   tracked.
+- `reports.md`: how the user wants the daily and weekly reports written, and the rules learned
+  from their edits. Your reports themselves are in `secretary/reports/`.
 
 Use them to read the board the way the user would: who "Wenbing" is, which project a ticket
 belongs to, what "the usual release checks" are.

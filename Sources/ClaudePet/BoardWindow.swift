@@ -401,6 +401,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "secretary-setup": return await secretary.setup(lang: str("lang"))
         case "secretary-send": return await secretary.send(str("text"))
         case "secretary-stop": return secretary.stop()
+        case "secretary-reports": return await secretary.setReports(on: body["on"] as? Bool == true)
         case "jobs": return (JobsController.shared.list(), nil)
         case "job-save": return await JobsController.shared.save(body["job"] as? [String: Any] ?? [:])
         case "job-enable": return await JobsController.shared.setEnabled(str("id"), body["on"] as? Bool ?? false)
@@ -426,7 +427,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "open":
             let path = str("path")
             // A task card, a project's PROJECT.md (the project panel's "Open PROJECT.md"), or one of
-            // the secretary's memory files (its window's links).
+            // the secretary's memory files or reports (its window's links).
             guard path.hasSuffix("/TASK.md") || path.hasSuffix("/PROJECT.md") || secretary.isMemoryFile(path),
                   FileManager.default.fileExists(atPath: path) else {
                 return (nil, L("not a task card or project file", "不是任务卡或项目文件"))

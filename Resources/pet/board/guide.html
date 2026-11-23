@@ -204,12 +204,19 @@
 <h1 id="zh-secretary">秘书</h1>
 <p>顶栏的 <b>秘书</b> 打开一个常驻的对话窗口，对面是一个了解这个看板的 Claude。可以问它"T-072 和 T-071 怎么样了、卡点是什么""有什么在等我""哪些看着卡住了"。它每次都先现查任务卡和 session（<code>hq status</code>、<code>hq asks</code>、<code>hq board</code>……）再回答，等你处理的事用 <b>⚑</b> 标出来。它只管"信息 → 看板 → 你的注意力"这条线，<b>自己不干活</b>：要做的事，它会告诉你属于哪个任务，你在那个任务上点 ▶ 新开 session。</p>
 <ul>
-<li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里一个不定时的任务"秘书"。</li>
+<li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里的任务"秘书"（时间表是工作日 18:30 写报告，先关着，见下面的<b>报告</b>）。</li>
 <li><b>对话窗口</b>就是 Peek。发一条消息就是把这个任务跑一次，消息就是这次的 prompt；回复和工具调用照常显示。它回复期间，发送按钮是灰的，状态行写"回复中"，旁边有 <b>停止</b>。上一条失败了，或者因为额度被跳过，状态行会写明原因。这里没有斜杠命令。</li>
-<li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；也可以给它加个时间表，比如每天早上让它把看板看一遍。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
+<li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；它的时间表就是定时报告的时间，也在那里改。定时运行如果碰上它正在回复，会等这一轮结束（最多 10 分钟）再开始，不会跳过。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
 <li><b>它能做什么</b>：它在后台跑，没人在旁边批准，所以只预先允许三样：读文件（Read / Grep / Glob）、运行 <code>~/.claude/hq/bin/hq</code>、改 <code>secretary/</code> 下的文件。其他操作都会被拒绝，除非你在 Claude Code 设置里另外允许了。外部系统它只读；消息和邮件只起草，写在回复里。</li>
 <li><b>它的建议，在它的窗口里或 Needs you 里回答</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为问题出现在秘书窗口底部的"它在问你"里（就在输入框上方），同时也出现在 <b>Needs you</b>，标着绿色的 <b>秘书</b>，点它打开秘书窗口。两边是同一批问题，在哪边回答都行。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议。点了 Yes，它大约 10 秒后自己醒来照做（比撤销按钮在的时间长，点了 <b>撤销</b> 它就不做），每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。点 <b>转待办</b> 表示这件事你自己做：它变成你的 @me 待办，秘书不会去做。</li>
-<li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
+<li><b>报告</b>：秘书窗口里"报告"一行列出最近几份日报、周报，点一下用编辑器打开。<b>现在写一份</b> 让它马上写今天该写的那份；<b>开启</b> 打开定时报告：工作日晚上 18:30 写日报，周五写周报（时间在 <b>定时任务</b> 页改）。
+  <ul>
+  <li>它先跑 <code>hq report</code> 拿到按项目整理的事实：这段时间任务卡 Log 里记的、勾掉的待办、回答了的问题、合并的 PR（要装了 <code>gh</code>）、没动的任务，以及等你好几天了的事（"你欠别人的"：两天以上的 @me 待办和没回答的问题）。日报从上一份报告写完算起，周报从周一算起。Jira 的变化目前不在里面。</li>
+  <li>写法照 <code>secretary/reports.md</code>：日报每个有进展的项目写进展 / 卡点 / 下一步，周报先写不超过三行的总结。报告写在 <code>secretary/reports/&lt;日期&gt;-daily.md</code> 或 <code>-weekly.md</code>，回复里也会贴一份。</li>
+  <li><b>它会学你的修改</b>：报告写完它会存一份底稿，你直接改报告文件就行。下次写报告时它看到你改了什么（删掉的一节、改过的说法、换过的顺序），会提议在 <code>reports.md</code> 最后一节"从你的修改里学到的"加一条规则，给出 diff，你同意才写。每处修改只提一次。</li>
+  <li><b>周报带校准问题</b>：周报的回复最后有一两个问题，拿它的记忆对一对这一周的情况（某个项目还那么重要吗、某件事还是谁负责）。问题出现在"它在问你"和 Needs you；你回答后，它把对记忆的修改作为 diff 再问你一次。</li>
+  </ul></li>
+<li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件；写报告时还会读 <code>reports.md</code>（报告的写法和学到的规则）。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
 <li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
 </ul>
 
@@ -278,6 +285,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>任务现在怎么样，不经过模型：状态、下一步、当前状态、最近 3 条 Log、没做完的待办和没回答的问题（各等了多久）、session（状态、最后动静、上下文占比、最后几句话），以及上面的 ⚠ 异常标记，外加「完成了还有 session 在跑」。不给编号就是所有没完成的任务（加上完成了但还有 session 在跑的）；<code>--focus</code> 只看 Focus 的，<code>--flagged</code> 只看有标记的</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录；<code>--meta --json</code> 还带工具调用、本轮用时 / token 和 Claude 的待办）· 某次工具调用的完整输入和输出</td></tr>
 <tr><td><code>hq secretary [init --lang zh|en] [--json]</code></td><td>看秘书的文件和任务卡在不在。<code>init</code> 只补上缺的（agent 定义、记忆文件、它自己的任务卡，任务卡编号记在 <code>hq.json</code> 的 <code>secretary</code> 里），已有的不动。看板上的 <b>秘书 → 设置</b> 跑的就是它</td></tr>
+<tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>秘书写报告用的事实：按项目列出这段时间的 Log、勾掉和新加的待办、回答了的问题、合并和还开着的 PR（用 <code>gh</code> 查，<code>--no-gh</code> 不查）、没动的任务，还有等你两天以上的事，以及你对之前报告的修改（diff）。<code>auto</code>（默认）周五是周报、其他日子是日报；日报从上一份报告算起，周报从周一算起。<code>keep</code> 存下刚写好的报告的底稿，下次就能看出你改了什么；<code>list</code> 列出写过的报告</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数</td></tr>
 </table>
 <p><b>跳终端记录</b>：每次从看板、小猫或快捷键跳回终端，小猫都会在 <code>~/.claude/pet/jumps.jsonl</code> 追加一行：时间、session、绑定的任务、当时的状态、context 占比、在这个状态里待了多久（打断的从没动静时算起）、从哪里点的、跳之前多久打开过它的 Peek（只算打开那一下，开着时的自动刷新不算；小猫重启后清零）。找不到终端、没跳成的也记。只存在本机，不含对话内容；用来看哪些情况还非得回终端不可。</p>
@@ -385,7 +393,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
 &lt;任务根目录&gt;/hq.json                       项目、分类、链接规则、秘书的任务卡
 &lt;任务根目录&gt;/.claude/agents/secretary.md   秘书的定义
-&lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks）
+&lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks / reports.md）
+&lt;任务根目录&gt;/secretary/reports/           秘书写的日报、周报（.drafts/ 里是它写完时的底稿）
 ~/.claude/pet/jobs/secretary/             秘书的 session（定时任务"秘书"）</pre>
 <p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
 </div>
@@ -574,14 +583,15 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li><code>.claude/agents/secretary.md</code> in the task root: who it is and its rules. You can edit it freely.</li>
   <li>its memory files: <code>secretary/profile.md</code>, <code>people.md</code> and <code>playbooks.md</code>;</li>
   <li>its own task card, "Secretary";</li>
-  <li>a job called "Secretary" on the <b>Scheduled</b> page, with no schedule.</li>
+  <li>a job called "Secretary" on the <b>Scheduled</b> page, scheduled for reports on weekdays at 18:30 but off until you turn it on (see <b>Reports</b> below).</li>
   </ul></li>
 <li><b>The window</b> is Peek. Each message you send is one run of that job, with your message as its prompt; replies and tool calls show as usual. While it replies, Send is greyed out, and the status line says it is replying, with a <b>Stop</b> button. If the last message failed, or was skipped because of quota, the status line says why. There are no slash commands.</li>
 <li><b>One session</b>: every message continues the same conversation (<code>--resume</code>).
   <ul>
   <li>Past the job's context threshold (50% by default), the conversation is compacted first.</li>
   <li>When the weekly or 5-hour quota is used past the job's limit (90% by default), the message is skipped, so the secretary can't use up your quota.</li>
-  <li>To change these, the model or the time limit, edit "Secretary" on the Scheduled page. You can also give it a schedule, for example a look over the board every morning.</li>
+  <li>To change these, the model or the time limit, edit "Secretary" on the Scheduled page. Its schedule is the time of the evening reports; change it there too.</li>
+  <li>If a scheduled run comes while it is replying, the run waits for the reply to end (up to 10 minutes) instead of being skipped.</li>
   <li>Its folder, agent, same-session mode and allowed tools are what make it the secretary. If you change them, they are put back at the next message.</li>
   </ul></li>
 <li><b>What it may do</b>: it runs in the background with nobody there to approve a step, so only three things are allowed up front:
@@ -597,13 +607,20 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li><b>To todo</b> means you'll do it yourself: it becomes your @me todo, and the secretary leaves it alone.</li>
   <li>After a <b>No</b>, it leaves it, and doesn't propose it again unless something changed.</li>
   </ul></li>
+<li><b>Reports</b>: the "Reports" row in the secretary's window lists its latest daily and weekly reports; a click opens one in your editor. <b>Write one now</b> asks for the report that is due now. <b>Turn on</b> turns on the evening reports: a daily report on weekdays at 18:30, and the weekly one on Fridays (change the time on the Scheduled page).
+  <ul>
+  <li>It starts from <code>hq report</code>, which gathers the facts by project: what the cards' Logs say for the period, todos ticked, asks answered, PRs merged (with <code>gh</code> installed), tasks that didn't move, and what has waited on you for days ("what you owe others": @me todos and unanswered asks older than two days). A daily report covers the time since the last report; a weekly one, the week since Monday. Jira changes aren't included yet.</li>
+  <li>It writes as <code>secretary/reports.md</code> says: in a daily report, progress, blockers and next steps for each project that moved; a weekly one starts with a summary of at most three lines. The report goes to <code>secretary/reports/&lt;date&gt;-daily.md</code> or <code>-weekly.md</code>, and into its reply.</li>
+  <li><b>It learns from your edits</b>: it keeps a copy of each report as written, so just edit the report file. Next time it sees what you changed (a section you deleted, a wording you fixed, an order you prefer) and proposes a rule for the last section of <code>reports.md</code>, "Rules (learned from your edits)", as a diff; it writes only after you say yes. Each edit is brought up once.</li>
+  <li><b>Weekly reports end with calibration questions</b>: one or two questions that check its memory against the week (is that project still a priority, who owns this now). They show under "It asks you" and in Needs you; after you answer, it proposes the change to its memory as a diff.</li>
+  </ul></li>
 <li><b>Memory</b>: it reads all three files at the start of every conversation. <b>memory: profile · people · playbooks</b>, under the window's title, opens each file in your editor.
   <ul>
   <li><code>profile.md</code>: who you are, your language, what matters in each project.</li>
   <li><code>people.md</code>: your colleagues, who they are and what they own.</li>
   <li><code>playbooks.md</code>: recurring processes, such as release tests and RCAs.</li>
   </ul>
-  You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
+  When it writes a report it also reads <code>reports.md</code>: how you want reports written, and the rules learned from your edits. You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
 <li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
 </ul>
 
@@ -668,6 +685,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq status [T-012 …] [--focus] [--flagged] [--json]</code></td><td>where tasks stand, built without a model: status, next step, state, the last 3 Log entries, open todos and unanswered asks (each with how long it has waited), sessions (state, last activity, context share, last messages), and the ⚠ flags above, plus "done with a session still running". No ids: every open task (plus done ones with a session still running); <code>--focus</code> only Focus's, <code>--flagged</code> only flagged ones</td></tr>
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts; <code>--meta --json</code> adds its tool calls, this turn's time and tokens, and Claude's todos) · one tool call's full input and output</td></tr>
 <tr><td><code>hq secretary [init --lang en|zh] [--json]</code></td><td>whether the secretary's files and card are there. <code>init</code> adds only what is missing (the agent definition, the memory files, and its own card, whose id goes under <code>secretary</code> in <code>hq.json</code>) and leaves the rest alone. The board's <b>Secretary → Set up</b> runs it</td></tr>
+<tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>the facts the secretary writes its reports from: by project, the period's Log entries, todos ticked and added, asks answered, PRs merged or still open (looked up with <code>gh</code>; <code>--no-gh</code> skips that), tasks that didn't move, what has waited on you for over two days, and your edits to earlier reports (as diffs). <code>auto</code> (the default) is the weekly report on Fridays and the daily one otherwise; a daily report starts at the last report, a weekly one on Monday. <code>keep</code> keeps a copy of a report just written, so your edits show next time; <code>list</code> lists the reports</td></tr>
 <tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before</td></tr>
 </table>
 <p><b>Jump log</b>: every jump back to a terminal — from the board, the pet or the hotkey — adds one line to <code>~/.claude/pet/jumps.jsonl</code>: the time, the session, its task, its state, its context use, how long it had been in that state (for an interrupted one, since it went quiet), where you clicked, and how long before you opened its Peek (opening it counts, not the refreshes while it stays open; forgotten when the pet restarts). Clicks whose terminal can't be found are logged too. It stays on this machine and holds no conversation text; it is there to show which situations still need the terminal.</p>
@@ -775,7 +793,8 @@ next: "run baseline on clusters A/C"
 ~/.claude/hq/state/sessions.json       session → task bindings
 &lt;root&gt;/hq.json                         projects, categories, link rules, the secretary's card
 &lt;root&gt;/.claude/agents/secretary.md     the secretary's definition
-&lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks)
+&lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks / reports.md)
+&lt;root&gt;/secretary/reports/             its daily and weekly reports (.drafts/ holds each as it wrote it)
 ~/.claude/pet/jobs/secretary/          the secretary's session (the "Secretary" job)</pre>
 <p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
 </div>
