@@ -17,6 +17,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The hq tests read older shipped agent templates from history
+          # (`git show <commit>:…`) to check that `hq secretary init` upgrades them.
+          fetch-depth: 0
 
       - run: swift --version
 

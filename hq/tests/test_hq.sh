@@ -1246,6 +1246,8 @@ assert "'"$RQ"'" in [q["id"] for q in p["quiet"]], p["quiet"]' && ok "not report
 (cd "$SRC/.." && git show 66ec2b4:hq/template/agents/secretary.md) > "$T/root/.claude/agents/secretary.md"
 "$HQ" secretary --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["agentStale"]' && ok "an old unedited agent definition is stale" || fail "agentStale"
 "$HQ" secretary init --json >/dev/null; grep -q "^## Reports" "$T/root/.claude/agents/secretary.md" && ok "init brings a stale agent definition up to date" || fail "stale agent upgrade"
+(cd "$SRC/.." && git show d941986:hq/template/agents/secretary.md) > "$T/root/.claude/agents/secretary.md"
+"$HQ" secretary init --json >/dev/null; grep -q "^## How you talk" "$T/root/.claude/agents/secretary.md" && ok "init brings the pre-chat agent definition up to date" || fail "pre-chat agent upgrade"
 echo "mine" >> "$T/root/.claude/agents/secretary.md"; "$HQ" secretary init --json >/dev/null
 tail -1 "$T/root/.claude/agents/secretary.md" | grep -q mine && ok "init keeps an edited agent definition" || fail "edited agent overwritten"
 rm "$T/root/secretary/reports.md"; "$HQ" report daily --no-gh >/dev/null; grep -q "报告格式" "$T/root/secretary/reports.md" && ok "hq report remakes a missing reports.md" || fail "reports.md remade"
