@@ -465,6 +465,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
             panel.allowsMultipleSelection = false
+            if !str("message").isEmpty { panel.message = str("message") }
             if !str("path").isEmpty { panel.directoryURL = URL(fileURLWithPath: (str("path") as NSString).expandingTildeInPath) }
             guard panel.runModal() == .OK, let url = panel.url else { return (["path": ""], nil) }
             let home = NSHomeDirectory()

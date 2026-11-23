@@ -1337,8 +1337,27 @@ hqi inbox add -- "another for the fold project" >/dev/null
 answer '{"kind":"task","title":"Project folder","text":"t","project":"fold","confidence":0.9,"reason":"r","alternatives":[]}'
 NF2="$(hqi inbox sort --claude "$FAKE" --json N-008 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-a\"\]" && ok "a new task with no folder named takes the one its project's tasks use" || fail "project folder fallback"
-hqi workdir add "$NF2" -- "$T/work/repo-b" && hqi workdir remove "$NF2" -- "$T/work/repo-a" && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\"\]" && ok "hq workdir remove" || fail "workdir remove"
+hqi workdir add "$NF2" -- "$T/work/repo-b" && hqi workdir remove "$NF2" -- "$T/work/repo-a" >/dev/null && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\"\]" && ok "hq workdir remove" || fail "workdir remove"
 { hqi workdir remove "$NF2" -- "$T/work/repo-a" 2>&1 || true; } | grep -q "is not one of" && ok "hq workdir remove: a folder it doesn't have is an error" || fail "workdir remove missing"
+# Undo of a remove puts the folder back where it was (New session starts in the first), even one since gone.
+mkdir -p "$T/work/repo-c"
+hqi workdir add "$NF2" -- "$T/work/repo-a" && OUT="$(hqi workdir remove "$NF2" -- "$T/work/repo-b")" && hqi workdir restore "$NF2" -- "$OUT" && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\", \"$T/work/repo-a\"\]" && ok "hq workdir restore puts a removed folder back in its place" || fail "workdir restore order"
+hqi workdir add "$NF2" -- "$T/work/repo-c" && OUT="$(hqi workdir remove "$NF2" -- "$T/work/repo-c")" && rmdir "$T/work/repo-c" && hqi workdir restore "$NF2" -- "$OUT" && card "$NF2" | grep -q 'work/repo-c"\]' && ok "hq workdir restore brings back a folder that has since gone" || fail "workdir restore gone"
+# A folder written by hand as ~/… is matched like its full path.
+mkdir -p "$HOME/hqwd"
+python3 - "$(ls "$T"/root/tasks/"$WA"-*/TASK.md)" <<'PY2'
+import re, sys; p = sys.argv[1]; s = open(p).read(); open(p, "w").write(re.sub(r'(?m)^workdirs: .*$', 'workdirs: ["~/hqwd"]', s))
+PY2
+hqi workdir add "$WA" -- "$HOME/hqwd" && card "$WA" | grep -q '^workdirs: \["~/hqwd"\]' && hqi workdir remove "$WA" -- "$HOME/hqwd" >/dev/null && card "$WA" | grep -q '^workdirs: \[\]' && ok "hq workdir: a ~/ folder is not added twice and can be removed" || fail "workdir tilde"
+# Two projects each with a "docs": the one the note's project uses wins over the more used one.
+mkdir -p "$T/w1/docs" "$T/w2/docs"
+"$HQ" project add pone >/dev/null 2>&1; "$HQ" project add ptwo >/dev/null 2>&1
+P1="$("$HQ" new "p1 docs" --project pone | head -1)"; hqi workdir add "$P1" -- "$T/w1/docs"
+for i in 1 2; do P2="$("$HQ" new "p2 docs $i" --project ptwo | head -1)"; hqi workdir add "$P2" -- "$T/w2/docs"; done
+hqi inbox add -- "docs work for pone" >/dev/null
+answer '{"kind":"task","title":"Docs","text":"t","project":"pone","workdir":"docs","confidence":0.9,"reason":"r","alternatives":[]}'
+NF3="$(hqi inbox sort --claude "$FAKE" --json N-009 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
+card "$NF3" | grep -q "^workdirs: \[\"$T/w1/docs\"\]" && ok "a folder named by its last part is looked up in the note's project first" || fail "project-first folder match"
 
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"

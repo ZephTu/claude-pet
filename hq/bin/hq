@@ -2386,7 +2386,7 @@ def inbox_workdir(guess, project):
     for m in (parse_card(p) for p in card_paths()):
         for w in m.get("workdirs") or []:
             if isinstance(w, str):
-                seen[(m.get("project") or "", os.path.normpath(w))] += 1
+                seen[(m.get("project") or "", os.path.normpath(os.path.expanduser(w)))] += 1
     used = collections.Counter()
     for (_, w), n in seen.items():
         used[w] += n
@@ -2397,10 +2397,12 @@ def inbox_workdir(guess, project):
             if ok_workdir(w):
                 return w
         else:
-            hits = [(n, w) for w, n in used.items() if os.path.basename(w) == os.path.basename(g.rstrip("/"))
-                    and ok_workdir(w)]
-            if hits:
-                return max(hits)[1]
+            base = os.path.basename(g.rstrip("/"))
+            # The project's own folders first: two projects may each have a "docs".
+            for pool in ([(n, w) for (pj, w), n in seen.items() if project and pj == project], [(n, w) for w, n in used.items()]):
+                hits = [(n, w) for n, w in pool if os.path.basename(w) == base and ok_workdir(w)]
+                if hits:
+                    return max(hits)[1]
     if project:
         pr = next((p for p in load_projects() if p["name"] == project), {})
         for p in pr.get("paths") or []:
@@ -2980,28 +2982,43 @@ def todo_plain(raw):
 def cmd_workdir(args):
     """hq workdir add|remove T-1 PATH: the folders a task's work happens in; the board's New session
     starts in the first. Binding a session adds its folder by itself — this is for a task that has
-    none yet (made on the board or from a quick note) or the wrong one."""
+    none yet (made on the board or from a quick note) or the wrong one. remove prints what it took
+    out as JSON ({"removed": [{i, path}, …]}); `hq workdir restore T-1 '<that JSON>'` puts it back
+    where it was, a folder that has since gone included."""
     card = find_card(args.task)
-    d = os.path.normpath(os.path.abspath(os.path.expanduser(args.path)))
+    norm = lambda w: os.path.normpath(os.path.abspath(os.path.expanduser(w)))
     with card_lock(card):
         meta = parse_card(card)
         have = [w for w in meta.get("workdirs") or [] if isinstance(w, str)] if isinstance(meta.get("workdirs"), list) else []
+        if args.action == "restore":
+            try:
+                back = sorted((int(x["i"]), str(x["path"])) for x in json.loads(args.path)["removed"])
+            except (ValueError, KeyError, TypeError) as e:
+                die(f"restore wants the JSON remove printed: {e}")
+            out = list(have)
+            for i, w in back:
+                if norm(w) not in {norm(x) for x in out}:
+                    out.insert(min(max(i, 0), len(out)), w)
+            _set_fields(card, {"workdirs": out})
+            return
+        d = norm(args.path)
         if args.action == "add":
             if not os.path.isdir(d):
                 die(f"{args.path}: no such folder")
             if not ok_workdir(d):
                 die(f"{args.path}: /, the home folder and the HQ root are never a task's folder")
-            if d in (os.path.normpath(w) for w in have):
+            if d in (norm(w) for w in have):
                 return
             fields = {"workdirs": have + [d]}
             if not meta.get("project") and project_for_path(d):
                 fields["project"] = project_for_path(d)
             _set_fields(card, fields)
         else:
-            left = [w for w in have if os.path.normpath(w) != d]
-            if len(left) == len(have):
+            gone = [{"i": i, "path": w} for i, w in enumerate(have) if norm(w) == d]
+            if not gone:
                 die(f"{args.path} is not one of {meta.get('id', args.task)}'s folders")
-            _set_fields(card, {"workdirs": left})
+            _set_fields(card, {"workdirs": [w for w in have if norm(w) != d]})
+            print(json.dumps({"removed": gone}, ensure_ascii=False))
 
 
 def cmd_ref(args):
@@ -5263,8 +5280,8 @@ def main():
     p = sub.add_parser("ref", help="hq ref add|remove T-1 <url or ticket> | restore T-1 <JSON from remove>")
     p.add_argument("action", choices=["add", "remove", "restore"]); p.add_argument("task"); p.add_argument("ref")
     p.set_defaults(fn=cmd_ref)
-    p = sub.add_parser("workdir", help="hq workdir add|remove T-1 PATH — the task's folders (New session starts in the first)")
-    p.add_argument("action", choices=["add", "remove"]); p.add_argument("task"); p.add_argument("path")
+    p = sub.add_parser("workdir", help="hq workdir add|remove T-1 PATH | restore T-1 <JSON from remove> — the task's folders (New session starts in the first)")
+    p.add_argument("action", choices=["add", "remove", "restore"]); p.add_argument("task"); p.add_argument("path")
     p.set_defaults(fn=cmd_workdir)
     p = sub.add_parser("addtodo", help="append a todo: hq addtodo T-1 '@me send the reply'")
     p.add_argument("task"); p.add_argument("text"); p.set_defaults(fn=cmd_addtodo)
