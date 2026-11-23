@@ -690,6 +690,107 @@ echo "$c" | grep -q "The standing grants of $GT don't apply to $ZT" && echo "$c"
   && ok "re-binding voids the old task's grants and lists the new task's" || fail "rebind grants: $c"
 "$HQ" unbind --session sess-g >/dev/null
 
+# hq status: the card's account, what is open and how long it has waited, the sessions, and flags
+# where they disagree. Transcripts are written with times relative to now.
+mkdir -p "$HOME/.claude/pet/sessions"
+python3 - "$HOME/.claude/settings.json" <<'PY'
+import json, sys
+p = sys.argv[1]; s = json.load(open(p))
+s["modelSettings"] = {"claude-opus-5-5": {"autoCompactWindow": 200000}}
+json.dump(s, open(p, "w"))
+PY
+transcript() {   # transcript <path> <json rows with "@N" for "N minutes ago">
+  python3 - "$1" "$2" <<'PY'
+import datetime as dt, json, re, sys
+now = dt.datetime.now(dt.timezone.utc)
+z = lambda m: (now - dt.timedelta(minutes=int(m))).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+rows = json.loads(re.sub(r'"@(\d+)"', lambda m: json.dumps(z(m.group(1))), sys.argv[2]))
+open(sys.argv[1], "a").write("".join(json.dumps(r) + "\n" for r in rows))
+PY
+}
+backdate() { python3 -c 'import os,sys,time; t=time.time()-float(sys.argv[2])*60; os.utime(sys.argv[1],(t,t))' "$1" "$2"; }
+P="$HOME/.claude/projects/-tmp-repo"
+# S1: its one session ended after running a build the card never heard of; the card says it waits for that build.
+S1="$("$HQ" new "Status probe" --no-focus | head -1)"; S1C="$(ls "$T"/root/tasks/$S1-*/TASK.md)"
+SS1=5ca7e5a1-1111-2222-3333-444455556666
+transcript "$P/$SS1.jsonl" '[
+ {"type":"user","message":{"content":"start the build"},"timestamp":"@130"},
+ {"type":"assistant","message":{"id":"a1","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":99990,"output_tokens":5},"content":[{"type":"text","text":"Starting."},{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"make build"}}]},"timestamp":"@125"},
+ {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b1","content":"ok"}]},"timestamp":"@120"},
+ {"type":"assistant","message":{"id":"a2","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":99990,"output_tokens":5},"content":[{"type":"text","text":"Build #12345 started.\n\n```hq-update\ntouch\n```"}]},"timestamp":"@119"},
+ {"type":"system","subtype":"turn_duration","durationMs":1000,"timestamp":"@119"}]'
+"$HQ" bind "$S1" --session "$SS1" >/dev/null
+"$HQ" set "$S1" "next=wait for build #12345 to finish, then send the report" >/dev/null
+"$HQ" addtodo "$S1" "@me review the report" >/dev/null; "$HQ" addtodo "$S1" "@claude post the numbers" >/dev/null
+"$HQ" addtodo "$S1" "@Ping check the env" >/dev/null; "$HQ" ask add "$S1" "Ship v2?" >/dev/null
+"$HQ" log "$S1" "kicked off the build"; "$HQ" todo "$S1" 1 done >/dev/null; "$HQ" addtodo "$S1" "@me review the report again" >/dev/null
+backdate "$S1C" 180
+"$HQ" status "$S1" --json | python3 -c '
+import json,sys; t=json.load(sys.stdin)["tasks"][0]; k=[f["kind"] for f in t["flags"]]
+assert k==["card-behind","idle-waiting"], t["flags"]
+assert "build #12345 to finish" in t["flags"][1]["says"] and "no live session" in t["flags"][1]["text"], t["flags"]
+td=t["todos"]; assert (td["me"]["count"],td["claude"]["count"],td["others"]["count"])==(1,1,1) and td["others"]["items"][0]["owner"]=="Ping", td
+assert td["me"]["items"][0]["text"]=="review the report again" and td["me"]["items"][0]["since"], td
+assert t["asks"]["count"]==1 and t["asks"]["items"][0]["since"], t["asks"]
+assert t["log"][-1]["text"]=="kicked off the build", t["log"]   # todo ticks are left out
+s=t["sessions"][0]; assert s["state"]=="ended" and not s["live"] and s["idleFor"]>=119*60, s
+assert s["context"]=={"tokens":100000,"budget":200000,"percent":50}, s["context"]
+assert s["messages"][-1]=={"role":"assistant","ts":s["messages"][-1]["ts"],"text":"Build #12345 started."}, s["messages"]
+' && ok "status: card, open todos by owner with their waits, asks, log, the session and its context" || fail "status JSON"
+"$HQ" status "$S1" | grep -q "⚠ card behind: session 5ca7e5a1 worked until" && ok "status: flags a card its session worked past" || fail "status card-behind"
+"$HQ" status "$S1" | grep -q "^  @me todos (1):" && ok "status prints a text summary" || fail "status text"
+# The card written after that work: not behind any more.
+"$HQ" touch "$S1" >/dev/null
+"$HQ" status "$S1" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["idle-waiting"], k' && ok "status: a card written after its session's work is not behind" || fail "status card-behind cleared"
+
+# S2: a live, idle session watching the build in the background — that is waiting, not stuck.
+S2="$("$HQ" new "Status watch" --no-focus | head -1)"
+SS2=5ca7e5a2-1111-2222-3333-444455556666
+transcript "$P/$SS2.jsonl" '[
+ {"type":"user","message":{"content":"watch it"},"timestamp":"@122"},
+ {"type":"assistant","message":{"id":"c1","content":[{"type":"tool_use","id":"w1","name":"Bash","input":{"command":"watch-build 12345","run_in_background":true}}]},"timestamp":"@121"},
+ {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"Command running in background with ID: bgw1"}]},"toolUseResult":{"backgroundTaskId":"bgw1"},"timestamp":"@120"},
+ {"type":"assistant","message":{"id":"c2","content":[{"type":"text","text":"Watching."}]},"timestamp":"@120"}]'
+echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS2\", \"transcript\": \"$P/$SS2.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS2.json"
+"$HQ" bind "$S2" --session "$SS2" >/dev/null
+"$HQ" set "$S2" "next=when the watcher fires, read the build result" >/dev/null
+"$HQ" status "$S2" --json | python3 -c '
+import json,sys; t=json.load(sys.stdin)["tasks"][0]; s=t["sessions"][0]
+assert t["flags"]==[] and s["live"] and s["state"]=="idle" and len(s["background"])==1, t' && ok "status: an idle session with a watcher running in the background is not flagged" || fail "status background watcher"
+transcript "$P/$SS2.jsonl" '[{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<tool-use-id>w1</tool-use-id>\n<status>completed</status>\n</task-notification>","commandMode":"task-notification","origin":{"kind":"task-notification"}},"timestamp":"@100"}]'
+"$HQ" status "$S2" --json | python3 -c '
+import json,sys; f=json.load(sys.stdin)["tasks"][0]["flags"]
+assert [x["kind"] for x in f]==["idle-waiting"] and "idle with nothing in the background" in f[0]["text"], f' && ok "status: once the watcher is done and the session sits idle, the card waiting on it is flagged" || fail "status idle-waiting live"
+"$HQ" set "$S2" "next=wait on Ping for the numbers" >/dev/null
+"$HQ" status "$S2" --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["tasks"][0]["flags"]==[]' && ok "status: waiting on a person is not flagged" || fail "status waiting on a person"
+
+# S3: done, with a session still running on it. S4: open, untouched for weeks, and over budget.
+S3="$("$HQ" new "Status done" --no-focus | head -1)"
+SS3=5ca7e5a3-1111-2222-3333-444455556666
+transcript "$P/$SS3.jsonl" '[{"type":"assistant","message":{"id":"d1","content":[{"type":"text","text":"Done."}]},"timestamp":"@5"}]'
+echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS3\", \"transcript\": \"$P/$SS3.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS3.json"
+"$HQ" bind "$S3" --session "$SS3" >/dev/null; "$HQ" set "$S3" status=done >/dev/null
+S4="$("$HQ" new "Status stale" --no-focus | head -1)"; S4C="$(ls "$T"/root/tasks/$S4-*/TASK.md)"
+python3 - "$S4C" <<'PY'
+import json, re, sys
+p = sys.argv[1]; s = open(p).read()
+s = re.sub(r"^updated: .*$", "updated: 2020-01-01", s, flags=re.M)
+s = re.sub(r"^refs: .*$", "refs: " + json.dumps([f"run {i} https://ci.example/{i}" for i in range(31)]), s, flags=re.M)
+open(p, "w").write(s)
+PY
+"$HQ" status "$S3" "$S4" --json | python3 -c '
+import json,sys; a,b=json.load(sys.stdin)["tasks"]
+assert [f["kind"] for f in a["flags"]]==["done-live"] and a["flags"][0]["sessions"]==["'"$SS3"'"], a["flags"]
+assert [f["kind"] for f in b["flags"]]==["stale","over-budget"] and b["flags"][1]["refs"]==31, b["flags"]
+assert "卡片超预算" in b["flags"][1]["text_zh"], b["flags"]' && ok "status: a done task with a live session, a stale card, a card over budget" || fail "status done-live / stale / over-budget"
+"$HQ" status --json | python3 -c '
+import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]
+assert "'"$S3"'" in ids and "'"$S4"'" in ids, ids' && ok "status with no task: every open task, and a done one only while a session runs on it" || fail "status default selection"
+"$HQ" status --flagged --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert all(i!="'"$S2"'" for i in ids) and "'"$S4"'" in ids, ids' && ok "status --flagged keeps only the flagged tasks" || fail "status --flagged"
+"$HQ" focus add "$S2" >/dev/null
+"$HQ" status --focus --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert "'"$S2"'" in ids and "'"$S4"'" not in ids, ids' && ok "status --focus covers the Focus list" || fail "status --focus"
+rm -rf "$HOME/.claude/pet"
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

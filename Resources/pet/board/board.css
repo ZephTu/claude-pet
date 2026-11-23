@@ -251,6 +251,8 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .fnext { margin: 6px 0 2px 52px; font-size: 12.5px; color: var(--text); }
 .fnext .meta { margin-right: 6px; }
 .fsec { margin: 8px 0 0 52px; }
+.fflags { margin: 6px 0 0 60px; }
+.fflag { font-size: 12px; color: var(--amber); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fsec .card.ask { margin-bottom: 6px; }
 .fcard .task-body { padding-left: 52px; border-top: 1px solid var(--line); margin-top: 10px; }
 .empty-today { color: var(--dim); }
