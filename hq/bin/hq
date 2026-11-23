@@ -2427,6 +2427,65 @@ def background_id(tur):
     return None
 
 
+# What a line that starts, ends or stops a background call has in it, as written to the transcript.
+BG_MARKERS = ('"backgroundTaskId"', '"isAsync"', "<task-notification>",
+              *(f'"{n}"' for n in sorted(STOP_TOOLS)))
+BG_LAUNCH_LOOKBACK = 400   # lines between a call and its result (hooks and progress lines sit between)
+
+
+def background_entries(path):
+    """From the whole transcript, the entries that launch, finish or stop background calls (each
+    launch with the call that made it), oldest first: enough for peek_timeline to tell which are
+    still running. A long run can be launched far back in a session that kept talking, out of
+    reach of any tail read; a substring check keeps reading tens of MB cheap."""
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, "rb") as f:
+        lines = f.read().decode("utf-8", "ignore").split("\n")
+    keep, stops = {}, set()   # line → entry; stop calls whose result hasn't come yet
+    for i, line in enumerate(lines):
+        if line.startswith(('{"type":"api-request', '{"type":"queue-operation')):
+            continue   # copies of the request or the queue, not the conversation
+        if not (any(m in line for m in BG_MARKERS) or any(s in line for s in stops)):
+            continue
+        try:
+            o = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(o, dict):
+            continue
+        c = (o.get("message") or {}).get("content")
+        if o.get("type") == "assistant" and isinstance(c, list):
+            calls = [x.get("id") for x in c if isinstance(x, dict) and x.get("type") == "tool_use"
+                     and x.get("name") in STOP_TOOLS and x.get("id")]
+            if calls:
+                stops.update(calls)
+                keep[i] = o
+        elif o.get("type") == "user" and isinstance(c, list):
+            for x in c:
+                if not (isinstance(x, dict) and x.get("type") == "tool_result"):
+                    continue
+                tid = x.get("tool_use_id") or ""
+                if tid in stops:
+                    stops.discard(tid)
+                    keep[i] = o
+                elif tid and ('"backgroundTaskId"' in line or '"isAsync"' in line):
+                    keep[i] = o
+                    # The call that launched it: what the row is called.
+                    for j in range(i - 1, max(-1, i - BG_LAUNCH_LOOKBACK), -1):
+                        if tid in lines[j] and '"tool_use"' in lines[j] and '"assistant"' in lines[j]:
+                            try:
+                                keep[j] = json.loads(lines[j])
+                            except ValueError:
+                                pass
+                            break
+            if notification_text(o):
+                keep[i] = o
+        elif notification_text(o):
+            keep[i] = o
+    return [keep[i] for i in sorted(keep)]
+
+
 def note_status(st):
     """A task notification's <status> as a row status: finished, stopped on purpose, or failed."""
     st = (st or "").strip()
@@ -3541,7 +3600,9 @@ def session_status(sid, path, now, n_msgs):
     # arriving, which is not the session doing anything.
     last_tool = max([local_dt(it.get("ts")) for it in tools if it.get("ts")] or [None],
                     key=lambda t: t or dt.datetime.min.replace(tzinfo=dt.timezone.utc))
-    background = [one_line(f"{it['title']}: {it['label']}", 80) for it in tools if it["status"] == "background"]
+    # From the whole transcript, not the tail: a run launched long ago may still be going.
+    background = [one_line(f"{it['title']}: {it['label']}", 80) for it in peek_timeline(background_entries(path))
+                  if it["kind"] == "tool" and it["status"] == "background"] if live else []
     st = {"busy": "working", "waiting": "waiting-on-you", "idle": "idle"}.get((rec or {}).get("state"), "idle") \
         if live else "ended"
     # Context: the last real reply's request, as the pet counts it (an API error has no tokens),

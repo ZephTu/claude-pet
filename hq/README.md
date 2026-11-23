@@ -116,7 +116,7 @@ Flags — where the card and the sessions disagree:
 | kind | when |
 |---|---|
 | `card-behind` | a session not mid-turn (neither working nor held at a prompt) called tools more than 10 min after the card was last written |
-| `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min |
+| `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min. A background call counts from its launch to its end (notification or TaskStop) wherever those are in the transcript, not only in the tail `status` reads otherwise |
 | `stale` | open and not updated for 7 days |
 | `done-live` | done or abandoned with a session still running |
 | `over-budget` | the card is over 16 KB, 30 links or 30 todos |
