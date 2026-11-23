@@ -80,7 +80,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -2281,6 +2281,19 @@ function linkifyCode(code) {
   return out + esc(code.slice(last));
 }
 
+// What a folded hq block says on its one line: how many answers, or which card fields changed.
+function hqSummary(lang, items) {
+  if (lang === "hq-resolved") return T(`${items.length} answer${items.length === 1 ? "" : "s"}`, `${items.length} 条`);
+  const tally = {};
+  for (const i of items) { const k = (i.match(/^([a-z]+):/) || [, i.split(/\s/)[0]])[1]; tally[k] = (tally[k] || 0) + 1; }
+  return Object.entries(tally).map(([k, c]) => esc(c > 1 ? `${k} ×${c}` : k)).join(" · ");
+}
+function hashText(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 function markdown(text) {
   const out = [];
   const parts = String(text).split(/^```/m);
@@ -2292,8 +2305,14 @@ function markdown(text) {
       // HQ's own blocks are for people too: a titled list with live links, not a code box.
       if (lang === "hq-asks" || lang === "hq-resolved" || lang === "hq-update") {
         const items = code.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
-        out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${{ "hq-asks": T("Asked you", "问了你"), "hq-resolved": T("Answers recorded", "已记下回答"), "hq-update": T("Card updated", "任务卡已更新") }[lang]}</div>
-          <ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul></div>`);
+        const title = { "hq-asks": T("Asked you", "问了你"), "hq-resolved": T("Answers recorded", "已记下回答"), "hq-update": T("Card updated", "任务卡已更新") }[lang];
+        const list = `<ul>${items.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`;
+        // Questions stay open: they are what the reader has to act on. Recorded answers and card
+        // updates are bookkeeping — folded to one line that says what changed, opened on a click.
+        if (lang === "hq-asks") { out.push(`<div class="hqblock ${lang}"><div class="hqb-t">${title}</div>${list}</div>`); return; }
+        const key = `${lang}|${hashText(code)}`;
+        const open = ui.hqOpen.has(key);
+        out.push(`<div class="hqblock ${lang} fold ${open ? "open" : ""}"><div class="hqb-t hqb-fold" data-action="hqfold" data-key="${esc(key)}" title="${T("Click to show or hide", "点击展开或收起")}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${title} · ${hqSummary(lang, items)}</div>${list}</div>`);
         return;
       }
       out.push(`<pre><code>${linkifyCode(code.replace(/\n$/, ""))}</code></pre>`);
@@ -2810,6 +2829,16 @@ document.addEventListener("click", async (ev) => {
       if (!had || had.err || had._st !== toolStatus(m, d.id)) loadToolDetail(m, d.id);
       return;
     }
+    case "hqfold": {
+      // Toggled in place: a redraw would rebuild the conversation (and lose a text selection).
+      if (String(window.getSelection() || "").trim()) return;
+      const open = !ui.hqOpen.has(d.key);
+      open ? ui.hqOpen.add(d.key) : ui.hqOpen.delete(d.key);
+      const box = el.closest(".hqblock");
+      box.classList.toggle("open", open);
+      el.querySelector(".pcaret").textContent = open ? "▾" : "▸";
+      return;
+    }
     case "pgroup": {
       const m = ui.modal;
       if (!m || String(window.getSelection() || "").trim()) return;
@@ -3115,23 +3144,54 @@ document.addEventListener("change", (ev) => {
 // Text that arrives in one go — a paste, a drop, or a dictation app such as Typeless inserting
 // what it heard — can bring its line breaks as \r\n, \r or U+2028/2029, each of which the box
 // counts as a line of its own, so a paragraph break turned into four or five empty lines. Make
-// those plain \n, and keep at most two empty lines in a row. Only the inserted text is touched,
+// those plain \n, and keep at most one empty line in a row. Only the inserted text is touched,
 // and it goes in through execCommand so Cmd-Z still undoes it; typing, IME commits and autocorrect
 // are left alone.
-const BULK = new Set(["insertFromPaste", "insertFromDrop", "insertFromYank", "insertText"]);
-const tidyBreaks = (v) => v.replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n").replace(/\n{4,}/g, "\n\n\n");
+//
+// What the beforeinput event says it will insert is not always what lands: on a paste WebKit
+// reports the text without its line breaks (or nothing at all), so the breaks slipped past a
+// check made only there. So the range being replaced is remembered, and once the text is in, the
+// part that arrived is tidied in place.
+const BULK = new Set(["insertFromPaste", "insertFromDrop", "insertFromYank", "insertReplacementText", "insertText"]);
+const tidyBreaks = (v) => v.replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n").replace(/\n[ \t\u00a0\u3000]*(?=\n)/g, "\n").replace(/\n{3,}/g, "\n\n");
+let bulkInsert = null;
 document.addEventListener("beforeinput", (ev) => {
   const el = ev.target;
+  bulkInsert = null;
   if (el.tagName !== "TEXTAREA" || !ev.cancelable || ev.isComposing || ui.composing || !BULK.has(ev.inputType)) return;
   const text = ev.data ?? (ev.dataTransfer ? ev.dataTransfer.getData("text/plain") : "");
-  if (!text) return;
+  // A key typed is one character: nothing to tidy, and nothing to check afterwards.
+  if (ev.inputType === "insertText" && text && !/[\n\r\u2028\u2029\u0085]/.test(text) && text.length < 3) return;
   const tidy = tidyBreaks(text);
-  if (tidy === text) return;
-  ev.preventDefault();
-  document.execCommand("insertText", false, tidy);   // fires its own input event, which saves the draft
+  if (text && tidy !== text) {
+    ev.preventDefault();
+    document.execCommand("insertText", false, tidy);   // fires its own input event, which saves the draft
+    return;
+  }
+  bulkInsert = { el, start: el.selectionStart, kept: el.value.length - (el.selectionEnd - el.selectionStart) };
 }, true);
+// After the insert: tidy just the stretch that arrived, selecting it and typing over it so the
+// fix is one more undo step rather than a lost history.
+function tidyInserted(ev) {
+  const b = bulkInsert;
+  bulkInsert = null;
+  const el = ev.target;
+  if (!b || b.el !== el || ev.isComposing || ui.composing) return;
+  const end = b.start + (el.value.length - b.kept);
+  if (end <= b.start) return;
+  // Take in the line breaks either side too, so the arrival can't stack on blank lines already there.
+  let from = b.start, to = end;
+  while (from > 0 && /\s/.test(el.value[from - 1])) from--;
+  while (to < el.value.length && /\s/.test(el.value[to])) to++;
+  const piece = el.value.slice(from, to);
+  const tidy = tidyBreaks(piece);
+  if (tidy === piece) return;
+  el.setSelectionRange(from, to);
+  document.execCommand("insertText", false, tidy);
+}
 document.addEventListener("input", (ev) => {
   const el = ev.target;
+  if (el.tagName === "TEXTAREA" && bulkInsert) tidyInserted(ev);
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   const note = /^note:(.+)$/.exec(el.dataset.key || "");

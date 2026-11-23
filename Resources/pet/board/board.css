@@ -233,6 +233,11 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 .hqblock.hq-update { border-left-color: var(--line); }
 .hqb-t { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
 .hqblock ul { margin: 0; padding-left: 18px; }
+.hqblock.fold { padding-top: 4px; padding-bottom: 4px; }
+.hqblock.fold:not(.open) ul { display: none; }
+.hqb-fold { cursor: pointer; margin: 0; user-select: none; }
+.hqblock.fold.open .hqb-fold { margin-bottom: 2px; }
+.hqb-fold:hover { color: var(--text); }
 .md.quote { border-left: 3px solid var(--line); padding-left: 12px; margin-top: 6px; }
 /* Today */
 /* Focus (#today) */
