@@ -60,7 +60,9 @@ final class BoardWindow: NSWindow {
 
     /// Brings the board forward and gives it the keyboard. The pet is an
     /// accessory app, so it has to activate itself for the window to be key.
-    func present(reveal task: String = "") {
+    /// - Parameter session: with `task`, the session to pick out on that task's card, its
+    ///   conversation opened in Peek — a click on it in the pet, see ClickTarget.
+    func present(reveal task: String = "", session: String = "") {
         showInDock(true)
         // Minimised, it would stay in the Dock: every way of opening the board restores it.
         if isMiniaturized { deminiaturize(nil) }
@@ -79,7 +81,9 @@ final class BoardWindow: NSWindow {
         } else {
             // Ids look like T-123; anything else is not passed into the page.
             let safe = task.range(of: #"^T-\d+$"#, options: .regularExpression) != nil ? task : ""
-            webView.evaluateJavaScript("window.hqReveal && window.hqReveal('\(safe)');")
+            // Session ids are uuids; the same rule.
+            let sid = session.range(of: #"^[0-9A-Za-z-]+$"#, options: .regularExpression) != nil ? session : ""
+            webView.evaluateJavaScript("window.hqReveal && window.hqReveal('\(safe)', '\(sid)');")
         }
     }
 
@@ -218,6 +222,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// A session's conversation was just opened in Peek. The jump log notes how long before a
     /// jump that was — see JumpLog.
     static var onPeek: ((String) -> Void)?
+    /// Settings → "Clicking a Session Opens" ("terminal" or "board"), shared with the pet's
+    /// menu: read with the pet's state, set from the board's settings.
+    static var clickTarget: (() -> String)?
+    static var onClickTarget: ((String) -> Void)?
     /// Answers a session's permission prompt the way the pet's Allow / Deny does — see
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
     /// prompt that was on screen; one that has since gone away approves nothing.
@@ -253,8 +261,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "pet":
             var pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
             if let usage = Self.usage?() { pet["usage"] = usage }
+            if let target = Self.clickTarget?() { pet["clickTarget"] = target }
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
+        case "click-target":
+            Self.onClickTarget?(str("value"))
+            return ("ok", nil)
         case "resolve":
             // "Yes, always" carries the standing grant's wording; hq adds it to the card with the answer.
             let grant = str("grant").isEmpty ? [] : ["--grant=\(str("grant"))"]

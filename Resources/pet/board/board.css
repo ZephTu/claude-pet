@@ -287,6 +287,8 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .proj-row .grip { margin-left: 0; }
 .dragging { opacity: .45; }
 .task.flash, .fcard.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
+/* The session the pet sent you to, on its task's card (window.hqReveal). */
+.bsess.hl, .fs.hl, .bsess.hl:hover, .fs.hl:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
 .toggle.af { margin-left: 0; }
 .pchip { color: var(--blue); }
 .atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
