@@ -233,6 +233,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch body["op"] as? String ?? "" {
         case "board": return await hq(["board", "--json"])
         case "sessions": return await hq(["sessions", "--json"])
+        // The Focus cards' ⚠ lines (polled about once a minute: it reads each task's sessions).
+        case "status": return await hq(["status", "--focus", "--json"])
         case "peek":
             // An open conversation shows the newest reply: that is reading it.
             let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])

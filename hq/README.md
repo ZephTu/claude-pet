@@ -88,6 +88,30 @@ Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
+### Where things stand: `hq status`
+
+`hq status [T-012 …] [--focus] [--flagged] [--json]` sums a task up from the card and its
+sessions, without a model: status, next, the card's state section, the last 3 Log entries, open
+todos (@me / @claude / others, each with how long it has been open), unanswered asks with how long
+they have waited, and the task's sessions (state, last activity, context share, last messages —
+about `hq peek -n 3`). About 1k tokens a task. No ids: every open task, plus done ones with a live
+session; `--focus` the Focus list's; `--flagged` only tasks with a flag. `--json` gives
+`{now, tasks: [{id, …, flags: [{kind, text, text_zh, …}]}]}`.
+
+Flags — where the card and the sessions disagree:
+
+| kind | when |
+|---|---|
+| `card-behind` | a session not mid-turn (neither working nor held at a prompt) called tools more than 10 min after the card was last written |
+| `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min |
+| `stale` | open and not updated for 7 days |
+| `done-live` | done or abandoned with a session still running |
+| `over-budget` | the card is over 16 KB, 30 links or 30 todos |
+
+A task's sessions are the ones bound to it and the ones its card lists, less any since bound to
+another task. The board shows the Focus tasks' flags as ⚠ lines on their cards (`hq status
+--focus --json`, read about once a minute); done tasks leave Focus, so `done-live` shows only here.
+
 ### What a bound session does differently
 
 The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`):
@@ -305,7 +329,7 @@ A task's `workdirs` fill themselves: binding a session to a task adds that sessi
 
 The board has three pages, two columns each. It opens on **Focus**: the tasks you keep in view
 (`<root>/focus.json`, one list — it doesn't reset each day; a task stays until you take it off),
-each with its asks, open todos and sessions. New tasks join automatically. `hq focus
+each with its asks, open todos and sessions, and a ⚠ line for each `hq status` flag. New tasks join automatically. `hq focus
 [add|remove|order]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does);
 an older per-day `focus.json` carries its latest day's list over. **All** is every task and every
 session; **Needs you** is every unanswered ask and your `@me` todos, counted on its tab.
