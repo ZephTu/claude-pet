@@ -1970,24 +1970,62 @@ async function refreshPeek(first) {
   }
   // The session's state counts too: stopping on a permission prompt changes no transcript line,
   // but the status line and the waiting row must say so.
-  const sig = JSON.stringify([msgs, act, s ? [liveState(s), s.waitingOn || ""] : null]);
+  // Two parts: the conversation (messages, tool rows: what a rebuild redraws) and the live lines
+  // above it (status, todos). While Claude works, its token count changes on every poll; that
+  // alone only redraws those lines, so the list you are reading or scrolling is left alone.
+  const bodySig = JSON.stringify([msgs, act.items, s ? liveState(s) : null]);
+  const sig = bodySig + "\u0001" + JSON.stringify([act.turn, act.todos, s ? s.waitingOn || "" : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
   if (!first && sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode)) return;
+  const liveOnly = !first && !changed && bodySig === m.bodySig;
   m.msgs = msgs;
   m.sig = sig;
+  m.bodySig = bodySig;
   Object.assign(m, act);
+  if (liveOnly && drawPeekLive()) return;
   // An opened row whose call has since finished (or failed) shows its new output.
   for (const id of m.openTools) {
     const t = (m.items || []).find((x) => x.id === id);
     if (t && m.details[id] && m.details[id]._st !== t.status) loadToolDetail(m, id);
   }
+  // A rebuild sets the list's scroll position, which stops a trackpad's glide dead: one that
+  // comes while you scroll waits until you have stopped for a moment.
+  if (!first && peekScrolling()) return holdPeek(m);
   drawPeek(first);
 }
+const PEEK_SCROLL_QUIET_MS = 1000;
+const peekScrolling = () => Date.now() - (ui.peekWheelAt || 0) < PEEK_SCROLL_QUIET_MS
+  || (ui.pointerDown && ui.peekPointer);   // dragging its scrollbar
+function holdPeek(m) {
+  if (m.held) return;
+  m.held = setTimeout(function again() {
+    if (ui.modal !== m) return;
+    if (peekScrolling()) { m.held = setTimeout(again, 250); return; }
+    m.held = null;
+    drawPeek(false);
+  }, 250);
+}
+// Just the status line and Claude's todos, in place (the reply box is not touched, so this is safe
+// mid-composition too). False when the window has not drawn them yet: then the caller rebuilds.
+function drawPeekLive() {
+  const m = ui.modal, live = $("#modal .plive");
+  if (!live) return false;
+  const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
+  live.innerHTML = peekStatus(m, s, peekRun(m, s)) + peekTodos(m);
+  return true;
+}
+document.addEventListener("wheel", (ev) => {
+  if (ui.modal && ui.modal.type === "peek" && ev.target.closest && ev.target.closest(".peek-body")) ui.peekWheelAt = Date.now();
+}, { capture: true, passive: true });
+document.addEventListener("mousedown", (ev) => {
+  ui.peekPointer = Boolean(ev.target.closest && ev.target.closest(".peek-body"));
+}, true);
 function drawPeek(toBottom) {
   if (ui.composing) { ui.peekPending = ui.peekPending || { toBottom: false }; ui.peekPending.toBottom ||= Boolean(toBottom); return; }
   const m = ui.modal;
+  if (m.held) { clearTimeout(m.held); m.held = null; }   // this draw is the one it was holding
   const box = $("#modal");
   // The reply box is rebuilt with the rest; keep the cursor in it.
   const active = document.activeElement;
@@ -2031,7 +2069,7 @@ function drawPeek(toBottom) {
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
-    ${peekStatus(m, s, run)}${peekTodos(m)}
+    <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
@@ -2145,7 +2183,8 @@ function toolGroup(g, m, run) {
   const kinds = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, c]) => (c > 1 ? `${esc(k)} ×${c}` : esc(k))).join(" · ");
   const failed = g.tools.filter((t) => t.status === "error").length;
   const hidden = n - shown.length;
-  const label = open ? T(`${n} steps`, `${n} 步`) : T(`${hidden} earlier step${hidden === 1 ? "" : "s"}`, `前面还有 ${hidden} 步`);
+  // Every call in the run still going: all are shown, so "0 earlier steps" would say nothing.
+  const label = open || !hidden ? T(`${n} steps`, `${n} 步`) : T(`${hidden} earlier step${hidden === 1 ? "" : "s"}`, `前面还有 ${hidden} 步`);
   return `<div class="pgroup" data-action="pgroup" data-key="${esc(key)}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${label} · ${kinds}${failed ? ` · <span class="bad">${T(`${failed} failed`, `${failed} 个失败`)}</span>` : ""}</div>`
     + shown.map((t) => toolRow(t, m, run)).join("");
 }
