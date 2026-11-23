@@ -19,23 +19,22 @@
   <a id="guide" class="icon top-icon" href="guide.html" title="Guide: how to use HQ"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1"/></svg></a>
 </header>
 <div id="error" hidden></div>
-<main id="today" hidden>
-  <section class="col" id="today-focus"></section>
-  <section class="col side" id="today-sessions"></section>
+<main id="today" class="kanban" hidden>
+  <div id="newtask-form" hidden></div>
+  <section id="today-focus"></section>
 </main>
-<main id="all" hidden>
-  <section class="col" id="col-tasks">
-    <div class="vhead"><h1>All tasks</h1><span class="spacer"></span><span class="seg" id="groupby"></span><label class="toggle af" id="activefirst" title="Projects with a live session come first, most recent activity first"><input type="checkbox" id="activefirst-cb"> active first</label><button class="btn small ghost foldall" id="foldall" data-action="fold-all"></button><label class="toggle"><input type="checkbox" id="show-closed"> show closed</label></div>
-    <div id="newtask-form" hidden></div>
-    <div id="tasks"></div>
-  </section>
-  <section class="col side" id="col-sessions">
-    <div class="vhead"><h2 class="side-h">Sessions</h2><span class="spacer"></span><span class="seg" id="sgroupby"></span></div>
-    <div id="sessions"></div>
-  </section>
+<main id="all" class="kanban" hidden>
+  <div class="vhead"><h1>All tasks</h1><span class="meta" id="all-count"></span><span class="spacer"></span><span class="seg" id="groupby"></span><label class="toggle af" id="activefirst" title="Projects with a live session come first, most recent activity first"><input type="checkbox" id="activefirst-cb"> active first</label><button class="btn small ghost foldall" id="foldall" data-action="fold-all"></button><label class="toggle" id="showdone"><input type="checkbox" id="show-closed"> recently done</label></div>
+  <section id="tasks"></section>
 </main>
-<main id="needs" class="single" hidden>
-  <section class="col inbox"><div id="asks"></div><div id="notes"></div><div id="mytodos"></div></section>
+<main id="needs" class="kanban" hidden>
+  <div class="vhead"><h1>Needs you</h1></div>
+  <div class="needs-sum" id="needs-sum"></div>
+  <div class="ncols">
+    <section class="lane l-you"><div class="lane-h" id="asks-h"></div><div class="lane-body" id="asks"></div></section>
+    <section class="lane l-ready"><div class="lane-h" id="mytodos-h"></div><div class="lane-body" id="mytodos"></div></section>
+    <section class="lane l-run"><div class="lane-h" id="notes-h"></div><div class="lane-body" id="notes"></div></section>
+  </div>
 </main>
 <main id="jobs" hidden>
   <section class="col jobs-col">
@@ -45,6 +44,7 @@
   </section>
 </main>
 <footer id="statusbar"><div id="counts"></div><div class="spacer"></div><div id="quota"></div></footer>
+<aside id="drawer" hidden></aside>
 <div id="settings" hidden></div>
 <div id="modal" hidden></div>
 <div id="confirm" hidden></div>

@@ -82,6 +82,9 @@ const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
   drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
+  // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
+  // boards show a column of recently finished tasks.
+  drawer: null, showDone: pref("hq-show-done", "0") === "1",
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
   // Finished projects (done / abandoned) sit folded at the bottom; these are the ones you unfolded.
@@ -130,7 +133,8 @@ if (LANG === "zh") {
   $("#all .vhead h1").textContent = "所有任务";
   $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前";
   $("#activefirst-cb").nextSibling.nodeValue = " 活跃的在前";
-  $("#show-closed").nextSibling.nodeValue = " 显示已关闭";
+  $("#show-closed").nextSibling.nodeValue = " 最近完成";
+  $("#needs .vhead h1").textContent = "等你处理";
 }
 function ago(iso) {
   if (!iso) return "";
@@ -637,35 +641,30 @@ function render() {
   if (ui.mode === "jobs" && typeof renderJobsView === "function") renderJobsView();   // see jobs.js
   if (ui.mode === "today") {
     $("#today-focus").innerHTML = renderToday();
-    $("#today-sessions").innerHTML = renderTodaySessions();
     $("#newtask-form").innerHTML = ""; delete $("#newtask-form").dataset.drawn;
   }
-  $("#notes").innerHTML = renderNotes();
+  renderNeeds();
   renderCaptureAtts();
-  $("#asks").innerHTML = renderAsks();
-  $("#mytodos").innerHTML = renderMyTodos();
   $("#newtask-form").hidden = !ui.newTask || ui.mode === "today";
   if (ui.newTask && ui.mode !== "today" && !$("#newtask-form").dataset.drawn) {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
-  if (!["project", "repo", "status"].includes(ui.groupBy)) ui.groupBy = "project";
-  const GROUP_LABEL = { project: T("Project", "项目"), repo: T("Repo", "仓库"), status: T("Status", "状态") };
-  $("#groupby").innerHTML = ["project", "repo", "status"].map((g) =>
+  if (!["project", "repo"].includes(ui.groupBy)) ui.groupBy = "project";
+  const GROUP_LABEL = { project: T("Project", "项目"), repo: T("Repo", "仓库") };
+  $("#groupby").innerHTML = ["project", "repo"].map((g) =>
     `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}"${g === "repo" ? ` title="${T("Group by the git repo of each task's workdir (a worktree counts as its repo)", "按任务工作目录所在的 git 仓库分组（worktree 算它的主仓库）")}"` : ""}>${GROUP_LABEL[g]}</button>`).join("");
   $("#activefirst").hidden = ui.groupBy !== "project";
-  $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
-    `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? T("List", "列表") : T("Project", "项目")}</button>`).join("");
-  // One button: by project it folds / unfolds every group; by status it closes open task cards.
-  const anyOpen = ui.groupBy !== "status" ? anyGroupOpen() : ui.expanded.size > 0;
+  // One button folds or unfolds every row.
+  const anyOpen = anyGroupOpen();
   $("#foldall").textContent = anyOpen ? T("Collapse all", "全部收起") : T("Expand all", "全部展开");
-  $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project group", "收起或展开所有项目组")
-    : ui.groupBy === "repo" ? T("Fold or unfold every repo group", "收起或展开所有仓库组") : T("Close every open task", "收起所有展开的任务");
-  $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
+  $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project row", "收起或展开所有项目行") : T("Fold or unfold every repo row", "收起或展开所有仓库行");
   $("#activefirst input").checked = ui.activeFirst;
+  $("#show-closed").checked = ui.showDone;
+  $("#all-count").textContent = T(`${listed().filter(isOpen).length} open`, `${listed().filter(isOpen).length} 个进行中`);
   renderSettings();
-  $("#tasks").innerHTML = renderTasks();
-  $("#sessions").innerHTML = renderSessions();
+  if (ui.mode === "all") $("#tasks").innerHTML = renderTasks();
+  renderDrawer();
 
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
     const v = scrolls[p.dataset.sid];
@@ -722,7 +721,7 @@ function renderCounts() {
   // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
   // you (click → Needs you), and the quota on the right.
   $("#counts").innerHTML =
-    `<span class="sgroup" title="${T("Live Claude Code sessions", "正在运行的 Claude Code session")}"><b>${ui.sessions.length}</b> ${T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session")}` +
+    `<span class="sgroup jump" data-action="open-sessions" title="${T("Live Claude Code sessions — click for the list", "正在运行的 Claude Code session——点击看列表")}"><b>${ui.sessions.length}</b> ${T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session")}` +
       `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
     (asks || mine || later || loose ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
       [asks ? `<b>${asks}</b> ${T(`ask${asks === 1 ? "" : "s"}`, "个问题")}` : "", mine ? `<b>${mine}</b> ${T(`todo${mine === 1 ? "" : "s"}`, "条待办")}` : "",
@@ -759,7 +758,7 @@ function renderAsks() {
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   const later = tasks().filter((t) => laterAsks(t).length && taskMatches(t, ...laterAsks(t).map((a) => a.text)));
   const laterHtml = later.map((t) => `<div class="later-of">${t.id === secId() ? secChip() : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>`}${laterLine(t)}</div>`).join("");
-  const head = `<div class="vhead"><h1>Needs you</h1></div>`;
+  const head = "";
   if (!items.length && total) return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")}</div>` + filterNote(0, total) + laterHtml;
   if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>${T("Claude has nothing waiting on an answer from you.", "Claude 没有在等你回答的问题。")}</div>` + laterHtml;
   const byTask = new Map();
@@ -956,7 +955,7 @@ function renderMyTodos() {
     if (!ms) return "";
     const days = (Date.now() - ms) / 86400000;
     const label = ago(iso).replace(" ago", "").replace(/前$/, "");
-    return `<span class="age ${days >= STALE_DAYS ? "stale" : ""}" title="${T("Waiting since", "开始等待于")} ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
+    return `<span class="age ${days >= 7 ? "stale old" : days >= STALE_DAYS ? "stale" : ""}" title="${T("Waiting since", "开始等待于")} ${esc(new Date(ms).toLocaleString())}">${label}</span>`;
   };
   // Recently ticked items stay in view (struck through, with Undo) for an hour. After that,
   // reopen from the task itself — every change is also in the card's log.
@@ -987,6 +986,31 @@ function renderMyTodos() {
         <div class="meta src">${r.to === "drop" ? T("won't do", "不做") : T("done", "已完成")} ${ago(new Date(r.at).toISOString())} · ${T("undo available for an hour", "1 小时内可以撤销")} · <span class="tid link" data-action="goto" data-task="${esc(r.task)}">${esc(r.task)}</span></div></div>
       <button class="btn small" data-action="undo-todo" data-task="${esc(r.task)}" data-i="${r.i}">${T("Undo", "撤销")}</button>
     </div>`).join("") + `</div>`;
+}
+
+// Needs you: three columns — what Claude asks, what you are to do, what you jotted down — under a
+// line of totals.
+function renderNeeds() {
+  const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
+  const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
+  const open = tasks().filter(isOpen);
+  const todos = open.flatMap((t) => myTodos(t).map((x) => x.created).concat(t.waiting_on_me ? [t.waiting_since] : []));
+  const oldest = todos.map((iso) => Date.parse(iso || "") || 0).filter(Boolean).sort((a, b) => a - b)[0];
+  const oldDays = oldest ? Math.floor((Date.now() - oldest) / 86400000) : 0;
+  const unsorted = unsortedNotes().length;
+  const recent = notes().filter((x) => x.state !== "unsorted" && x.state !== "dropped" && Date.now() - (Date.parse(x.at) || 0) < 2 * 86400000).length;
+  const stat = (ln, n, label, sub) => `<div class="stat l-${ln}"><span class="n">${n}</span><span class="l">${label}</span><span class="s">${sub}</span></div>`;
+  $("#needs-sum").innerHTML =
+    stat("you", asks, T("to answer", "个问题要回答"), later ? T(`${later} for later`, `${later} 条稍后再答`) : "") +
+    stat("ready", todos.length, T("to do", "件事要你去做"), oldDays >= 1 ? T(`oldest ${oldDays}d`, `最久的 ${oldDays} 天`) : "") +
+    stat("run", unsorted, T("notes to sort", "条记下的没分拣"), recent ? T(`${recent} sorted lately`, `最近分好 ${recent} 条`) : "");
+  const h = (ln, name, n, hint) => `<span class="ld"></span><span class="name">${name}</span><span class="cnt">${n}</span><span class="hint">${hint}</span>`;
+  $("#asks-h").innerHTML = h("you", T("Answer", "回答"), asks, T("Claude is asking", "Claude 在问"));
+  $("#mytodos-h").innerHTML = h("ready", T("Do", "去做"), todos.length, T("your todos, newest first", "你的待办，新的在前"));
+  $("#notes-h").innerHTML = h("run", T("Jotted", "记下的"), unsorted, T("unsorted, and the last two days", "未分拣的，和最近两天的"));
+  $("#asks").innerHTML = renderAsks();
+  $("#mytodos").innerHTML = renderMyTodos();
+  $("#notes").innerHTML = renderNotes();
 }
 
 // ---- quick notes (`hq inbox`): a line, link or screenshot jotted in the header box or with the
@@ -1220,189 +1244,260 @@ function filterNote(shown, total) {
   return `<div class="fnote">${T(`Filter “${q}”: ${shown} of ${total}`, `筛选"${q}"：显示 ${shown} / ${total}`)}<button class="btn small ghost" data-action="clear-filter">${T("Clear", "清除")}</button></div>`;
 }
 
+// ------------------------------------------------------------------ lanes
+// Focus and All are boards of four columns, worked out from what the card and its sessions say —
+// never stored: an open ask, your todo or a session stopped on you puts a task in Needs you; else
+// a working session puts it in Running; else Blocked is its status; the rest is Ready to push on.
+// Dragging a card into another column sets the status that belongs there (Running is the
+// sessions' to decide). Recently done is a fifth, optional column.
+const LANES = ["you", "run", "ready", "blocked"];
+const LANE_NAME = { you: T("Needs you", "等你"), run: T("Running", "在跑"), ready: T("Ready", "待推进"), blocked: T("Blocked", "卡住"), done: T("Recently done", "最近完成") };
+const LANE_HINT = {
+  you: T("A question or a todo of yours, or a session waiting on you", "有问题等你答、有你的待办，或 session 停下来等你"),
+  run: T("A session is working on it", "有 session 正在干活"),
+  ready: T("Nothing running — start or resume a session", "没在跑——开一个或接上 session"),
+  blocked: T("Waiting on someone or something else", "在等别人或别的事"),
+  done: T("Finished in the last 3 days", "3 天内完成的"),
+};
+const STATUS_OF = { you: "waiting-on-me", ready: "active", blocked: "blocked", done: "done" };
+const DONE_DAYS = 3;
+const myTodos = (t) => t.todos.filter((x) => x.state === "open" && x.owner === "me");
+function lane(t) {
+  if (!isOpen(t)) return "done";
+  const live = liveFor(t.id);
+  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me" ||
+    live.some((s) => liveState(s) === "waiting")) return "you";
+  if (live.some((s) => liveState(s) === "busy" || bgRunning(s))) return "run";
+  if (t.status === "blocked") return "blocked";
+  return "ready";
+}
+const recentDone = (t) => t.status === "done" && (t.age_days ?? 99) <= DONE_DAYS;
+const laneCols = () => LANES.concat(ui.showDone ? ["done"] : []);
+const KIND_ICON = { goal: "◆", duty: "↻" };
+const kindIcon = (pr) => (pr && pr.kind ? `<i class="ki ${esc(pr.kind)}">${KIND_ICON[pr.kind] || ""}</i>` : "");
+
+// A task's card on the boards. Clicking it opens the side drawer with everything; the card itself
+// is what you need to decide where to look: what it waits on you for, its next step, and one line
+// for its sessions. opt.compact (All): one line of title and of next step.
+function kcard(t, opt = {}) {
+  const ln = lane(t);
+  const pr = t.project ? projectByName(t.project) : null;
+  const star = focusIds().includes(t.id);
+  const asks = openAsks(t), mine = myTodos(t);
+  const rows = [
+    ...asks.map((a) => `<div class="row"><span class="q">?</span><span class="t">${esc(a.text)}</span></div>`),
+    ...(t.waiting_on_me ? [`<div class="row"><span class="q">!</span><span class="t">${esc(t.waiting_on_me)}</span></div>`] : []),
+    ...mine.map((x) => `<div class="row"><span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span><span class="t">${esc(x.text)}</span></div>`),
+  ];
+  const max = opt.compact ? 1 : 2;
+  const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
+  const next = t.next && ln !== "done" ? `<div class="kc-next"><b>${ln === "blocked" ? T("Waiting on", "在等") : T("Next", "下一步")}</b>${esc(t.next)}</div>` : "";
+  const flags = list(ui.flags[t.id]);
+  return `<div class="kc l-${ln} ${opt.compact ? "compact" : ""} ${ln === "done" ? "done" : ""} ${ui.drawer === t.id ? "sel" : ""}" id="kc-${esc(t.id)}"
+      data-action="open-task" data-task="${esc(t.id)}" ${isOpen(t) ? `draggable="true" data-drag-card="${esc(t.id)}"` : ""}
+      title="${T("Click for details · drag to another column to change its status", "点击看详情 · 拖到别的列改状态")}">
+    <div class="kc-top"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span>${t.project && !opt.noProject ? `<span class="proj">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}
+      ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
+      ${flags.length ? `<span class="kflag" title="${esc(flags.map((x) => T(x.text, x.text_zh || x.text)).join("\n"))}">⚠</span>` : ""}
+      ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}</div>
+    <div class="kc-title">${esc(t.title)}</div>
+    ${you}${next}
+    ${ln === "done" ? "" : kcardSessions(t, opt)}
+  </div>`;
+}
+
+// The card's last line: its live sessions (dots, the latest words of the one that matters, Peek),
+// or, with none, Resume and New.
+function kcardSessions(t, opt) {
+  const live = liveFor(t.id);
+  if (!live.length) {
+    if (opt.compact) return "";
+    const r = earlierSessions(t)[0];
+    return `<div class="kc-sess"><span class="line idle">${T("No session", "没有 session")}</span>
+      ${r ? `<button class="go" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}" ${ui.resuming.has(r.sessionId) ? "disabled" : ""}>Resume</button>` : ""}
+      <button class="go" data-action="launch" data-task="${esc(t.id)}" title="${T(`Start a session on this task (${PLACES[launchPlace()]})`, `为这个任务新开 session（${PLACES[launchPlace()]}）`)}">${T("New", "新开")}</button></div>`;
+  }
+  const order = { waiting: 0, busy: 1 };
+  const rank = (s) => order[liveState(s)] ?? (bgRunning(s) ? 2 : 3);
+  const sorted = live.slice().sort((a, b) => rank(a) - rank(b) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const s = sorted[0];
+  const st = liveState(s);
+  const last = plainText(s.lastText);
+  const line = st === "busy" && last ? last : st === "waiting" ? statusWord(s) : `${statusWord(s)} · ${ago(s.updatedAt)}`;
+  return `<div class="kc-sess${s.sessionId === ui.hlSession ? " hl" : ""}"><span class="stack">${sorted.slice(0, 3).map(dot).join("")}</span>
+    ${live.length > 1 ? `<span class="cnt">${live.length}</span>` : ""}
+    <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${newTag(s.sessionId)}${esc(line)}</span>
+    <button class="go peekb" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek its conversation", "Peek 它的对话")}">${ICON.peek}</button></div>`;
+}
+
+function laneHead(ln, n) {
+  return `<div class="lane-h l-${ln}" title="${esc(LANE_HINT[ln])}"><span class="ld"></span><span class="name">${LANE_NAME[ln]}</span><span class="cnt">${n}</span></div>`;
+}
+function laneCol(ln, items, opt = {}) {
+  return `<section class="lane l-${ln}" data-lane="${ln}">${laneHead(ln, items.length)}
+    <div class="lane-hint">${esc(LANE_HINT[ln])}</div>
+    <div class="lane-body">${items.length ? items.map((t) => kcard(t, opt)).join("") : `<div class="lane-empty">${ln === "you" ? T("Nothing waiting on you", "没有在等你的") : "—"}</div>`}</div></section>`;
+}
+const showDoneToggle = () => `<label class="toggle" title="${T("Show a column of tasks finished in the last 3 days (in All, with a filter: every closed task that matches)", "多一列：3 天内完成的任务（All 里筛选时：所有匹配的已结束任务）")}"><input type="checkbox" data-action="show-done" ${ui.showDone ? "checked" : ""}> ${T("recently done", "最近完成")}</label>`;
+
+// ------------------------------------------------------------------ All
+// Swimlanes: a row per project (by kind: projects ◆, duties ↻, then tasks in none) or per repo,
+// each row the same four columns, their heads stuck to the top.
 function renderTasks() {
-  const pool = listed().filter((t) => ui.showClosed || isOpen(t));
-  const visible = pool.filter((t) => taskMatches(t));
   if (!listed().length) return renderOnboarding();
-  if (!visible.length) return pool.length && filterText() ? filterNote(0, pool.length) : `<div class="empty">${T("No tasks.", "没有任务。")}</div>`;
-  let html = filterNote(visible.length, pool.length);
-  if (ui.groupBy === "project") {
-    const names = projectNames();
-    const extra = [...new Set(visible.map((t) => t.project || "").filter((n) => n && !names.includes(n)))];
-    let order = [...names, ...extra];
-    const activity = Object.fromEntries(order.map((n) => [n, projectActivity(n)]));
-    // Active first: projects with a live session float up, newest activity first; the rest keep
-    // the dragged order (Array.sort is stable).
-    if (ui.activeFirst) order = order.slice().sort((a, b) => (activity[b] || 0) - (activity[a] || 0));
-    // Finished projects go last, folded, the way finished tasks do.
-    const finished = order.filter((n) => projectClosed(projectByName(n)));
-    order = order.filter((n) => !finished.includes(n));
-    for (const name of [...order, "", ...finished]) {
-      const group = visible.filter((t) => (t.project || "") === name)
-        .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
+  // Closed tasks: the done column holds the last 3 days' — and, while you filter, every closed
+  // one that matches (older and abandoned too), so a finished task can still be found.
+  const pool = listed().filter((t) => isOpen(t) || (ui.showDone && (recentDone(t) || Boolean(filterText()))));
+  const visible = pool.filter((t) => taskMatches(t));
+  if (!visible.length) return pool.length && filterText() ? filterNote(0, pool.length) : `<div class="empty">${T("No open tasks.", "没有进行中的任务。")}</div>`;
+  const cols = laneCols();
+  const grid = `style="grid-template-columns:${cols.map((l) => (l === "done" ? "minmax(0,.7fr)" : "minmax(0,1fr)")).join(" ")}"`;
+  const lanes = Object.fromEntries(visible.map((t) => [t.id, lane(t)]));
+  let html = filterNote(visible.length, pool.length) +
+    `<div class="swim-cols" ${grid}>${cols.map((l) => laneHead(l, visible.filter((t) => lanes[t.id] === l).length)).join("")}</div>`;
+  const row = ({ key, head, group, shut, closed, empty }) => `<div class="swim-row ${shut ? "fold" : ""}">${head}
+    ${shut ? "" : empty ? empty : `<div class="swim-grid" ${grid}>${cols.map((l) => `<div class="cell l-${l}" data-lane="${l}">${group.filter((t) => lanes[t.id] === l).sort(compareTasks).map((t) => kcard(t, { compact: true, noProject: ui.groupBy === "project" })).join("")}</div>`).join("")}</div>`}</div>`;
+  const pills = (group) => {
+    const you = group.filter((t) => lanes[t.id] === "you").length, run = group.filter((t) => lanes[t.id] === "run").length;
+    return `${you ? `<span class="lpill you" title="${T("Tasks waiting on you", "在等你的任务")}">${T(`${you} on you`, `${you} 等你`)}</span>` : ""}${run ? `<span class="lpill run" title="${T("Tasks with a session working", "有 session 在干活的任务")}">${T(`${run} running`, `${run} 在跑`)}</span>` : ""}`;
+  };
+  const caret = `<span class="caret"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>`;
+
+  if (ui.groupBy === "repo") {
+    const repos = [...new Set(visible.map((t) => t.repo || ""))];
+    const openIn = (r) => visible.filter((t) => (t.repo || "") === r && isOpen(t)).length;
+    repos.sort((a, b) => (!a) - (!b) || openIn(b) - openIn(a) || a.localeCompare(b));
+    for (const r of repos) {
+      const group = visible.filter((t) => (t.repo || "") === r);
+      const key = "repo:" + r;
+      const shut = ui.collapsed.has(key);
+      const projs = new Set(group.map((t) => t.project || "")).size;
+      html += row({ key, shut, group, head: `<div class="swim-head" data-action="collapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}`, `点击${shut ? "展开" : "收起"}`)}">
+        ${caret}<span class="pt">${esc(r || T("No workdir", "没有工作目录"))}</span><span class="meta">${group.length}</span>
+        ${projs > 1 ? `<span class="meta">${T(`${projs} projects`, `${projs} 个项目`)}</span>` : ""}${pills(group)}</div>` });
+    }
+    return html;
+  }
+
+  const names = projectNames();
+  const extra = [...new Set(visible.map((t) => t.project || "").filter((n) => n && !names.includes(n)))];
+  let order = [...names, ...extra];
+  const activity = Object.fromEntries(order.map((n) => [n, projectActivity(n)]));
+  // Active first: projects with a live session float up, newest activity first; the rest keep
+  // the dragged order (Array.sort is stable). Finished projects go last in their section, folded.
+  if (ui.activeFirst) order = order.slice().sort((a, b) => (activity[b] || 0) - (activity[a] || 0));
+  const finished = order.filter((n) => projectClosed(projectByName(n)));
+  order = order.filter((n) => !finished.includes(n)).concat(finished);
+  const sections = [
+    ["goal", T("Projects", "项目"), T("have an end — a goal, a deadline, tasks under them", "有终点——目标、截止、下面挂任务"), order.filter((n) => (projectByName(n) || {}).kind !== "duty")],
+    ["duty", T("Duties", "职责"), T("ongoing — work comes in from time to time", "长期负责——时不时来活"), order.filter((n) => (projectByName(n) || {}).kind === "duty")],
+    ["none", T("Not in a project", "未归属"), T("one-off tasks", "零散任务"), [""]],
+  ];
+  for (const [kind, title, sub, keys] of sections) {
+    let body = "";
+    for (const name of keys) {
+      const group = visible.filter((t) => (t.project || "") === name);
       // Every listed project shows, even with nothing open — unless a search is narrowing things.
       if (!group.length && (!name || !names.includes(name) || filterText())) continue;
       const key = name || "(none)";
       const pr = projectByName(name);
       const done = finished.includes(name);
       const shut = done ? !ui.openClosedProj.has(key) : ui.collapsed.has(key);
-      const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
-      const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
       const movable = Boolean(name) && names.includes(name) && !done;
-      const onMe = pr && pr.stats ? pr.stats.on_me || 0 : 0;
       const label = pr && pr.title && pr.title !== name ? pr.title : name;
-      html += `<div class="group-title proj ${done ? "pdone" : ""}" data-action="collapse" data-key="${esc(key)}" data-closed="${done ? 1 : ""}" title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
+      const closed = listed().filter((t) => (t.project || "") === name && !isOpen(t)).length;
+      const empty = group.length ? "" : `<div class="empty proj-empty">${T("No open tasks", "没有进行中的任务")}${closed ? T(` (${closed} closed)`, `（${closed} 个已关闭）`) : ""}${T(".", "。")}
+          <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ ${T("New task", "新建任务")}</button></div>`;
+      body += row({ key, shut, group, empty, head: `<div class="swim-head ${done ? "pdone" : ""}" data-action="collapse" data-key="${esc(key)}" data-closed="${done ? 1 : ""}"
+          title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
           ${movable ? `draggable="true" data-drag-project="${esc(name)}"` : ""}>
-        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${name
-          ? `<span class="pname" data-action="project-panel" data-p="${esc(name)}" title="${T("Open the project — goal, brief, grants", "打开项目——目标、简报、授权")}${label !== name ? ` (${esc(name)})` : ""}">${esc(label)}</span>`
-          : esc(T("No project", "无项目"))} <span class="meta">${group.length}</span>
-        ${projectSummary(pr)}
+        ${caret}${name ? `${kindIcon(pr)}<span class="pt">${esc(label)}</span>` : `<span class="pt">${T("No project", "无项目")}</span>`}
+        <span class="meta">${group.length}</span>${projectSummary(pr)}${pills(group)}
         ${activity[name] ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● ${ago(new Date(activity[name]).toISOString())}</span>` : ""}
-        ${onMe ? `<span class="badge onme" title="${T("Waiting on you: open asks and your todos in this project", "等你的：这个项目里未回应的问题和你的待办")}">${T(`${onMe} on you`, `${onMe} 等你`)}</span>`
-          : asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}
         ${name && !names.includes(name) ? `<span class="meta">${T("not in list", "不在列表里")}</span>` : ""}
-        ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
-      if (!shut) {
-        const closed = listed().filter((t) => (t.project || "") === name && !isOpen(t)).length;
-        html += group.length ? group.map((t) => renderTask(t, "project")).join("")
-          : `<div class="empty proj-empty">${T("No open tasks", "没有进行中的任务")}${closed && !ui.showClosed ? T(` (${closed} closed)`, `（${closed} 个已关闭）`) : ""}${T(".", "。")}
-              <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ ${T("New task", "新建任务")}</button></div>`;
-      }
+        <span class="spacer"></span>
+        ${name ? `<button class="open" data-action="project-panel" data-p="${esc(name)}" title="${T("Open the project — goal, brief, grants", "打开项目——目标、简报、授权")}">${T("Open ›", "打开 ›")}</button>` : ""}</div>` });
     }
-    return html;
-  }
-  if (ui.groupBy === "repo") {
-    const repos = [...new Set(visible.map((t) => t.repo || ""))];
-    const openIn = (r) => visible.filter((t) => (t.repo || "") === r && isOpen(t)).length;
-    repos.sort((a, b) => (!a) - (!b) || openIn(b) - openIn(a) || a.localeCompare(b));
-    for (const r of repos) {
-      const group = visible.filter((t) => (t.repo || "") === r)
-        .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
-      const key = "repo:" + r;
-      const shut = ui.collapsed.has(key);
-      const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
-      const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
-      const projs = new Set(group.map((t) => t.project || "")).size;
-      html += `<div class="group-title proj repo" data-action="collapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}`, `点击${shut ? "展开" : "收起"}`)}">
-        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(r || T("No workdir", "没有工作目录"))} <span class="meta">${group.length}</span>
-        ${projs > 1 ? `<span class="meta" title="${T("Projects with tasks in this repo", "在这个仓库里有任务的项目数")}">${T(`${projs} projects`, `${projs} 个项目`)}</span>` : ""}
-        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}</div>`;
-      if (!shut) html += group.map((t) => renderTask(t, "repo")).join("");
-    }
-    return html;
-  }
-  for (const st of ORDER) {
-    const group = visible.filter((t) => t.status === st).sort(compareTasks);
-    if (!group.length) continue;
-    html += `<div class="group-title">${LABEL[st]} <span class="meta">${group.length}</span></div>`;
-    html += group.map((t) => renderTask(t, "status")).join("");
+    if (body) html += (kind === "none" ? `<div class="swim-sec">${title}<span class="sub">${sub}</span></div>`
+      : `<div class="swim-sec k-${kind}"><i class="ki ${kind}">${KIND_ICON[kind]}</i>${title}<span class="sub">${sub}</span></div>`) + body;
   }
   return html;
 }
 
 const STATUS_SHORT = { "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"), done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃") };
-function renderTask(t, mode) {
-  const asks = openAsks(t).length;
-  const open = ui.expanded.has(t.id);
-  const mine = t.waiting_on_me || (t.todos.find((x) => x.state === "open" && x.owner === "me") || {}).text;
-  // Row 1: id · title (one line) · badges. Row 2: the subtitle across the full width, two lines max.
-  const subText = mine && isOpen(t) ? mine : (t.next && isOpen(t) ? t.next : "");
-  // Status is the rail on the row's left edge (and the id's colour); the group heading already
-  // names the project or the status, so the row repeats neither.
-  const sub = subText ? `<div class="tsub ${mine && isOpen(t) ? "waiting" : ""}" title="${esc((mine && isOpen(t) ? T("Waiting on you: ", "等你处理：") : T("Next: ", "下一步：")) + subText)}">${esc(subText)}</div>` : "";
-  return `<div class="task ${open ? "open" : ""}" id="task-${esc(t.id)}" data-st="${esc(t.status)}">
-    <div class="task-head" data-action="expand" data-task="${esc(t.id)}" title="${esc(STATUS_SHORT[t.status] || t.status)}${T(` — click to ${open ? "fold" : "open"}`, `——点击${open ? "收起" : "展开"}`)}">
-      <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
-      <div class="ttitle" title="${esc(t.title)}">${esc(t.title)}</div>
-      <div class="tright">
-        ${isOpen(t) ? `<button class="star ${focusIds().includes(t.id) ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}"
-            title="${focusIds().includes(t.id) ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
-        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}
-        ${liveTag(liveFor(t.id))}
-        ${mode !== "status" && t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
-        ${mode !== "project" && t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
-        <span class="age-d" title="${T("Last updated", "最后更新")} ${esc(t.updated || "")}">${t.age_days ?? "?"}${T("d", "天")}</span>
-      </div>
-      ${open ? "" : sub}
-    </div>
-    ${open ? renderTaskBody(t) : ""}
-  </div>`;
+
+// ------------------------------------------------------------------ the drawer
+// A task's details slide in from the right over the board (ui.drawer: its id), with buttons to
+// set its status; "@sessions" shows every live session instead (the status bar's count opens it).
+const DRAWER_STATUS = [["active", T("Active", "进行中")], ["waiting-on-me", T("Waiting on me", "等我")], ["blocked", T("Blocked", "卡住")], ["done", T("Done", "完成")]];
+function renderDrawer() {
+  const el = $("#drawer");
+  const body0 = el.querySelector(".dr-body");
+  const keep = body0 && el.dataset.for === ui.drawer ? body0.scrollTop : 0;
+  const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
+  if (ui.drawer && ui.drawer !== "@sessions" && !t) ui.drawer = null;
+  if (!ui.drawer) { el.hidden = true; el.innerHTML = ""; el.dataset.for = ""; return; }
+  el.hidden = false;
+  el.dataset.for = ui.drawer;
+  const close = `<button class="icon x" data-action="drawer-close" title="${T("Close (Esc)", "关闭（Esc）")}">✕</button>`;
+  if (!t) {
+    el.className = "drawer";
+    el.innerHTML = `<div class="dr-head"><div class="r1"><b class="dr-k">${T("Live sessions", "正在运行的 session")}</b><span class="meta">${ui.sessions.length}</span><span class="spacer"></span>
+        <span class="seg">${["list", "project"].map((g) => `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? T("List", "列表") : T("Project", "项目")}</button>`).join("")}</span>${close}</div></div>
+      <div class="dr-body">${renderSessions()}</div>`;
+  } else {
+    const ln = lane(t);
+    const pr = t.project ? projectByName(t.project) : null;
+    const star = focusIds().includes(t.id);
+    el.className = `drawer l-${ln}`;
+    el.innerHTML = `<div class="dr-head"><div class="r1"><span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
+        ${t.project ? `<span class="chip link" data-action="project-panel" data-p="${esc(t.project)}">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}
+        ${t.category ? `<span class="meta">${esc(t.category)}</span>` : ""}<span class="spacer"></span>
+        ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}${close}</div>
+      <h2>${esc(t.title)}</h2>
+      <div class="dr-status">${DRAWER_STATUS.map(([s, w]) => `<button class="${t.status === s ? "on" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}">${w}</button>`).join("")}
+        ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
+        <span class="meta lane-now">${T("Column:", "在：")} <b>${LANE_NAME[ln]}</b></span></div>
+      ${focusFlags(t)}</div>
+      <div class="dr-body">${renderTaskBody(t)}</div>`;
+  }
+  const body = el.querySelector(".dr-body");
+  if (body && keep) body.scrollTop = keep;
+}
+function openDrawer(id) {
+  ui.drawer = id;
+  ui.launchMenu = null;
+  render();
+  const node = document.getElementById("kc-" + id);
+  if (node) flashCard(node);
 }
 
-// ------------------------------------------------------------------ Today
-// A working view: only the tasks picked for today, each with what it needs from you and its
-// sessions; everything else stays in All.
+// ------------------------------------------------------------------ Focus
+// The tasks you keep in view, as the same four columns; everything else stays in All.
 const focusState = () => (ui.board && ui.board.focus) || { ids: [], carry: [] };
 const focusIds = () => focusState().ids || [];
 
-// The latest activity of a task's live sessions (ISO), or "" when none is live.
-const lastActive = (t) => liveFor(t.id).map((s) => s.updatedAt || "").sort().pop() || "";
 function renderToday() {
-  const f = focusState();
-  // Active first: tasks with a live session lead, most recently active first; the rest keep your
-  // order. Off: your order throughout, and the cards can be dragged into it.
-  const mine = focusIds().filter((id) => id !== secId()).map(taskById).filter(Boolean);
-  const picked = ui.activeFirst
-    ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
-    : mine;
+  const picked = focusIds().filter((id) => id !== secId()).map(taskById).filter(Boolean);
   const shown = picked.filter((t) => taskMatches(t));
   const pickable = listed().filter((t) => isOpen(t) && !focusIds().includes(t.id));
-  const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
-  return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${T(`${picked.length} task${picked.length === 1 ? "" : "s"}`, `${picked.length} 个任务`)}</span>
-      <label class="toggle af" title="${T("Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All.", "有 session 在跑的任务排最前，最近有动静的在前。不勾：按你自己的顺序——按住 ⠿ 拖动卡片调整。和 All 里是同一个设置。")}"><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> ${T("active first", "活跃的在前")}</label>
-      <span style="flex:1"></span>
+  const head = `<div class="vhead"><h1>Focus</h1><span class="meta">${T(`${picked.length} task${picked.length === 1 ? "" : "s"}`, `${picked.length} 个任务`)}</span>
+      <span class="spacer"></span>${showDoneToggle()}
       <input class="note pick" list="today-pick" data-key="todaypick" placeholder="${T("Add a task to Focus…", "把任务加进 Focus…")}" value="${esc(draft("todaypick"))}">
       <datalist id="today-pick">${pickable.map((t) => `<option value="${esc(t.id + " · " + t.title)}">`).join("")}</datalist>
       <button class="btn small" data-action="today-add">${T("Add", "添加")}</button></div>
-    ${draftNew}
-    ${filterNote(shown.length, picked.length)}
-    ${shown.length ? shown.map(focusCard).join("") : picked.length ? "" : `<div class="card empty-today">
+    ${ui.newTask ? `<div class="card nt-wrap">${renderNewTask()}</div>` : ""}`;
+  if (!picked.length) return head + `<div class="card empty-today">
       <b>${T("Nothing in Focus yet.", "Focus 里还没有任务。")}</b>
-      <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`}`;
-}
-
-function focusCard(t) {
-  const asks = openAsks(t);
-  const open = t.todos.filter((x) => x.state === "open");
-  const mine = open.filter((x) => x.owner === "me");
-  const others = open.length - mine.length;
-  const live = liveFor(t.id);
-  const detail = ui.expanded.has(t.id);
-  const box = (x) => `<div class="todo">
-      <span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span>
-      <span class="who me">${T("You", "你")}</span><span class="t">${esc(x.text)}</span>
-      <button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button></div>`;
-  // No live session: offer to resume the latest one, beside New session.
-  const resume = live.length ? "" : (() => { const r = earlierSessions(t)[0]; return r
-    ? `<button class="btn small" data-action="resume" data-task="${esc(t.id)}" data-session="${esc(r.sessionId)}" data-dir="${esc(r.cwd || "")}" data-name="${esc(r.title || "")}" title="${esc(resumeTip(r) + " — " + (r.title || r.sessionId.slice(0, 8)) + ", " + ago(r.lastAt))}" ${ui.resuming.has(r.sessionId) ? "disabled" : ""}>Resume</button>` : ""; })();
-  // Clicking the card opens or closes its details, like a row in All; the details themselves
-  // swallow clicks (data-action="none") so selecting or typing there never folds the card.
-  // Closed, a card is its next step, a line per live session (click for Peek), what it asks you
-  // and your own todos; Claude's todos and the log are one click away.
-  return `<div class="fcard ${detail ? "open" : ""}" id="ftask-${esc(t.id)}" data-st="${esc(t.status)}" data-today-card="${esc(t.id)}" data-action="expand" data-task="${esc(t.id)}" title="${detail ? T("Click to fold", "点击收起") : T("Click for details", "点击展开详情")}">
-    <div class="fhead">
-      ${ui.activeFirst ? "" : `<span class="tgrip" draggable="true" data-drag-task="${esc(t.id)}" title="${T("Drag to reorder your Focus", "拖动调整 Focus 的顺序")}">⠿</span>`}
-      <span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
-      <div class="ftitle" title="${esc(t.title)}">${esc(t.title)}</div>
-      ${liveTag(live)}
-      ${t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
-      ${t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
-      <button class="icon x" title="${T("Take it off Focus (the task stays)", "从 Focus 拿掉（任务本身不变）")}" data-confirm="${T("Unfocus?", "拿掉？")}" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
-    </div>
-    ${focusFlags(t)}
-    ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : `
-    <div class="fbody">
-      <div class="now">
-        <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet", "还没有下一步")}</span>`}</div></div>
-        <div class="tools" data-action="none" title="">${resume}${launchSplit(t)}</div>
-      </div>
-      ${focusSessions(t, live)}
-      ${stillRunning(t)}
-      ${asks.length || laterAsks(t).length ? `<div class="fsec" data-action="none" title="">${asks.length ? renderAskGroup(t, asks) : ""}${laterLine(t)}</div>` : ""}
-      ${mine.length ? `<div class="fsec todos" data-action="none" title="">${mine.map(box).join("")}</div>` : ""}
-      ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : T("Nothing waiting on you here", "这里没有在等你的事")}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? T(`${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all`, `还有 ${others} 条是 Claude 或别人的待办——展开看全部`) : ""}</div>` : ""}
-    </div>`}
-  </div>`;
+      <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`;
+  const by = Object.fromEntries(LANES.concat("done").map((l) => [l, []]));
+  for (const t of shown) by[lane(t)].push(t);
+  // Done: what was finished lately, Focus or not (a finished task leaves Focus by itself).
+  by.done = listed().filter((t) => recentDone(t) && taskMatches(t) && !shown.includes(t)).concat(by.done)
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  const cols = laneCols();
+  return head + filterNote(shown.length, picked.length) +
+    `<div class="board c${cols.length}">${cols.map((l) => laneCol(l, by[l])).join("")}</div>`;
 }
 
 // What `hq status` found off about the task — the card behind its session, idle while the card says
@@ -1414,36 +1509,6 @@ function focusFlags(t) {
     const text = T(x.text, x.text_zh || x.text);
     return `<div class="fflag" title="${esc(text)}">⚠ <span>${esc(text)}</span></div>`;
   }).join("")}</div>`;
-}
-
-// A folded Focus card's live sessions, one line each: what it is doing and its last words. The
-// line opens Peek — the output you would otherwise open the card and scroll to the rail for.
-function focusSessions(t, live) {
-  if (!live.length) return "";
-  const order = { waiting: 0, busy: 1 };
-  const rank = (s) => order[s.state] ?? (bgRunning(s) ? 2 : 3);
-  return `<div class="fsess">${live.slice().sort((a, b) => rank(a) - rank(b) || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).map((s) => {
-    const title = String(s.title || s.project || s.sessionId.slice(0, 8));
-    const name = title.replace(new RegExp("^" + t.id + "\\s+"), "") || title;
-    const last = plainText(s.lastText);
-    return `<div class="fs${s.sessionId === ui.hlSession ? " hl" : ""}" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
-      ${dot(s)}<span class="fs-n">${newTag(s.sessionId)}${esc(name)}</span>
-      <span class="fs-st">${esc(statusWord(s))}</span>
-      <span class="fs-l">${last ? esc(last) : ""}</span>
-      <span class="fs-t">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
-      <span class="icon fs-eye">${ICON.peek}</span>
-    </div>`;
-  }).join("")}</div>`;
-}
-
-function renderTodaySessions() {
-  // Follows the filter, like the cards beside it.
-  const ids = focusIds().filter((id) => { const t = taskById(id); return t && taskMatches(t); });
-  const onToday = ui.sessions.filter((s) => s.task && ids.includes(s.task));
-  const loose = ui.sessions.filter((s) => !s.task);
-  return `<div class="vhead"><h2 class="side-h">${T("Sessions on these tasks", "这些任务的 session")}</h2></div>
-    ${onToday.length ? renderSessions(onToday, "state") : `<div class="empty">${T("None yet — start one from a task, or bind one below.", "还没有——从任务上新开一个，或者绑定下面的一个。")}</div>`}
-    ${loose.length ? `<div class="vhead" style="margin-top:22px"><h2 class="side-h">${T("Not on a task", "未绑定任务")}</h2></div>${renderSessions(loose, true)}` : ""}`;
 }
 
 // ---- related resources: URLs as-is, shorthand (QA-123, repo#45) through hq.json "links" rules
@@ -2844,6 +2909,23 @@ function drawSecretary(toBottom) {
       <div class="watch-h" data-action="sec-watch"><span class="eye">◉</span><span>${T(`Keeping an eye on ${watch.length} thing${watch.length === 1 ? "" : "s"}`, `替你盯着 ${watch.length} 件事`)}${m.watchOpen ? "" : ` · ${esc(watch[0])}`}</span><span class="car">${m.watchOpen ? "▴" : "▾"}</span></div>
       ${m.watchOpen ? `<ul>${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>` : "";
 
+  // The side column (wide windows only): what it watches, proposals still open, its reports,
+  // and the files it remembers — the same things the menus above hold, in view.
+  const card = secId() && taskById(secId());
+  const openAsks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
+  const sideRes = RESOLUTIONS.filter(([r]) => r === "do" || r === "drop");
+  const sideSec = (title, n, inner) => `<section class="ss"><div class="ss-h">${title}${n ? `<span class="meta">${n}</span>` : ""}</div>${inner}</section>`;
+  const sideHtml = `<aside class="sec-side">
+    ${sideSec(T("Keeping an eye on", "替你盯着"), watch.length, watch.length ? `<ul class="ss-watch">${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : `<div class="ss-empty">${T("Nothing right now.", "现在没有。")}</div>`)}
+    ${sideSec(T("Waiting on your answer", "待回应建议"), openAsks.length, openAsks.length ? openAsks.map((a) => `<div class="ss-prop"><div class="t">${esc(askKey(a.text))}</div>
+        <div class="acts">${sideRes.map(([r, label, tip]) => `<button class="pb ${r === "do" ? "yes" : ""}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${ui.resolving.has(a.id) ? "disabled" : ""}>${label}</button>`).join("")}</div></div>`).join("")
+      : `<div class="ss-empty">${T("No proposal waiting.", "没有等你回应的建议。")}</div>`)}
+    ${sideSec(T("Reports", "报告"), reports.length, `${reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")}
+      ${evening.replace('class="pi"', 'class="ss-row"')}
+      <button class="ss-row ss-act" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button>`)}
+    ${mem.length ? sideSec(T("What it remembers", "它记得的"), 0, mem.map((f) => `<button class="ss-row" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")) : ""}
+  </aside>`;
+
   const key = "msg:" + SEC;
   const keepDraft = box.querySelector(".c-foot textarea") ? null : draft(key);
   const QUICK = [[T("What is waiting on me?", "有什么在等我？")], [T("What looks stuck?", "哪些看着卡住了？")], [T("What happened today?", "今天做了什么？")],
@@ -2863,12 +2945,13 @@ function drawSecretary(toBottom) {
       ${ibtn("more", T("More", "更多"), `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`)}
       <button class="ibtn" data-action="close-modal" aria-label="${T("Close", "关闭")}" title="${T("Close (Esc)", "关闭 (Esc)")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
+    <div class="sec-wrap"><div class="sec-main">
     ${watchHtml}
     <div class="peek-body c-body">${body}</div>
     <div class="c-foot">${quick}
       <div class="inrow"><textarea class="grow" rows="1" data-key="${key}" data-session="${SEC}" placeholder="${T("Message your secretary — paste or drop images too", "跟秘书说点什么——也可以粘贴或拖入图片")}">${esc(keepDraft ?? draft(key))}</textarea>${sendBtn}</div>
       ${attachStrip(SEC)}
-    </div>
+    </div></div>${sideHtml}</div>
   </div>`;
   box.hidden = false;
   fitAllGrow(box);
@@ -3321,54 +3404,35 @@ function markdown(text, scope = "") {
   return out.join("");
 }
 
-// Bring a task into view in the middle column, whatever hides it: closed status, a search
-// filter that does not match, or a folded project group.
 // Whether any group (by project or repo) is unfolded, finished projects opened by hand included.
 function anyGroupOpen() {
   return groupKeys().some((k) => !ui.collapsed.has(k)) || (ui.groupBy === "project" && [...ui.openClosedProj].some((n) => projectClosed(projectByName(n))));
 }
 
+// Bring a task into view: its details open in the drawer, over whichever page is showing, and its
+// card — if the page has one — scrolls into view and flashes. A search that hides it is cleared,
+// and in All its folded row unfolds.
 function revealTask(id) {
   const t = taskById(id);
   if (!t) return toast(T(`${id} not found`, `找不到 ${id}`), true);
   // The secretary's card isn't in the lists: its window is where it lives.
   if (id === secId()) return openSecretary();
-  // In Today, a task on today's list is its card there: bring that card's top edge to the top
-  // of the column, without opening its details. Anything else is shown in All.
-  if (ui.mode !== "all") {
-    if (ui.mode === "today" && focusIds().includes(id)) {
-      if (!taskMatches(t)) { ui.filter = $("#search").value = ""; render(); }
-      return scrollToCard("ftask-" + id);
-    }
-    ui.mode = "all";
-    savePref("hq-mode", "all");
-  }
-  if (!isOpen(t)) ui.showClosed = $("#show-closed").checked = true;
   if (!taskMatches(t)) ui.filter = $("#search").value = "";
-  // Unfold the group it is in: a finished project's group is folded unless opened by hand.
-  if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
-    ui.openClosedProj.add(t.project);
-    savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
-  } else if (ui.groupBy !== "status") {
-    ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
-    savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
+  if (ui.mode === "all") {
+    if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
+      ui.openClosedProj.add(t.project);
+      savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
+    } else {
+      ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
+      savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
+    }
   }
-  ui.expanded.add(id);
-  render();
-  scrollToCard("task-" + id);
+  openDrawer(id);
 }
 
-// Puts a card's top edge at the top of its scrolling column (with a little air) and flashes it.
-function scrollToCard(elementId) {
-  const node = document.getElementById(elementId);
-  if (!node) return;
-  const col = node.closest(".col");
-  if (col) {
-    const top = node.getBoundingClientRect().top - col.getBoundingClientRect().top + col.scrollTop - 8;
-    col.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  } else {
-    node.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+// Scrolls a card into view inside its column and flashes it.
+function flashCard(node) {
+  node.scrollIntoView({ behavior: "smooth", block: "nearest" });
   node.classList.add("flash");
   setTimeout(() => node.classList.remove("flash"), 1400);
 }
@@ -3542,7 +3606,7 @@ async function saveField(el) {
   await act("set", { task: el.dataset.task, fields: [`${el.dataset.field}=${v}`] }, T("Saved", "已保存"));
 }
 
-const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts, .tgrip";
+const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts";
 
 // Record every answer picked on a task's asks, then type them into their session as one message.
 async function resolveAll(taskId) {
@@ -3775,12 +3839,20 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "expand":
-      // Only a click on the card itself folds it — not one in a box, on a label or ask, or one
-      // that ends a text selection.
+    case "open-task":
+      // Only a click on the card itself opens it — not one in a box or on a label, or one that
+      // ends a text selection. A second click on the open one closes the drawer.
       if (ev.target !== el && ev.target.closest(NO_EXPAND)) return;
       if (String(window.getSelection() || "").trim()) return;
-      ui.expanded.has(d.task) ? ui.expanded.delete(d.task) : ui.expanded.add(d.task);
-      return render();
+      if (ui.drawer === d.task) { ui.drawer = null; return render(); }
+      return openDrawer(d.task);
+    case "drawer-close": ui.drawer = null; return render();
+    case "open-sessions": ui.drawer = ui.drawer === "@sessions" ? null : "@sessions"; return render();
+    case "drawer-status": {
+      const t = taskById(d.task);
+      if (!t || t.status === d.s) return;
+      return setStatus(d.task, d.s);
+    }
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
     case "note-move": return noteMove(d.id, JSON.parse(d.dest));
@@ -3978,7 +4050,7 @@ document.addEventListener("click", async (ev) => {
     case "continue": {
       try {
         const out = JSON.parse(await api("continue", { task: d.task }));
-        ui.expanded.add(out.to);
+        ui.drawer = out.to;
         toast(T(`Continued in ${out.to}`, `已续到 ${out.to}`) + (out.asks && out.asks.length ? T(` — ${out.asks.length} open ask(s) moved with it`, `——${out.asks.length} 条未回应的问题一起搬过去了`) : ""));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
@@ -4022,18 +4094,13 @@ document.addEventListener("click", async (ev) => {
       savePref("hq-scollapsed", JSON.stringify([...ui.scollapsed]));
       return render();
     case "fold-all": {
-      if (ui.groupBy !== "status") {
-        const anyOpen = anyGroupOpen();
-        ui.collapsed = new Set(anyOpen ? groupKeys() : []);
-        if (anyOpen) {
-          ui.expanded.clear();
-          ui.openClosedProj.clear();
-          savePref("hq-open-closed-proj", "[]");
-        }
-        savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
-      } else {
-        ui.expanded.clear();
+      const anyOpen = anyGroupOpen();
+      ui.collapsed = new Set(anyOpen ? groupKeys() : []);
+      if (anyOpen) {
+        ui.openClosedProj.clear();
+        savePref("hq-open-closed-proj", "[]");
       }
+      savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       return render();
     }
     case "group-by": ui.groupBy = d.g; savePref("hq-groupby", d.g); return render();
@@ -4212,7 +4279,7 @@ document.addEventListener("click", async (ev) => {
         if (sid) await api("bind", { task: id, session: sid });
         ui.newTask = false; delete $("#newtask-form").dataset.drawn;
         clearNewTaskDrafts();
-        ui.expanded.add(id);
+        ui.drawer = id;
         toast(T(`Created ${id}`, `已创建 ${id}`));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
@@ -4245,7 +4312,7 @@ document.addEventListener("change", (ev) => {
   if (d.action === "set-status") return setStatus(d.task, el.value);
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
-  if (el.id === "show-closed") { ui.showClosed = el.checked; render(); }
+  if (el.id === "show-closed" || d.action === "show-done") { ui.showDone = el.checked; savePref("hq-show-done", el.checked ? "1" : "0"); render(); }
   if (el.id === "activefirst-cb" || d.action === "active-first") { ui.activeFirst = el.checked; savePref("hq-activefirst", el.checked ? "1" : "0"); render(); }
 });
 
@@ -4498,6 +4565,7 @@ document.addEventListener("keydown", async (ev) => {
   if (ev.key === "Escape" && ui.modal && ui.modal.pop) { ev.preventDefault(); ui.modal.pop = null; return drawPeek(false); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
+  if (ev.key === "Escape" && ui.drawer && !["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) { ev.preventDefault(); ui.drawer = null; return render(); }
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
@@ -4553,7 +4621,7 @@ document.addEventListener("dragstart", (ev) => {
   if (el.closest("#tasks")) setTimeout(() => { if (ui.dragging) $("#tasks").classList.add("reordering"); }, 0);
 });
 document.addEventListener("dragover", (ev) => {
-  if (!ui.dragging) return;
+  if (!ui.dragging || ui.dragCard) return;
   const zone = dropZone(ev);
   if (!zone) return;
   ev.preventDefault();
@@ -4566,7 +4634,7 @@ document.addEventListener("dragover", (ev) => {
 });
 document.addEventListener("drop", (ev) => {
   const moving = ui.dragging, at = ui.dropAt;
-  if (!moving || !dropZone(ev)) return;
+  if (!moving || ui.dragCard || !dropZone(ev)) return;
   ev.preventDefault();
   finishDrag();
   if (!at) return;
@@ -4579,8 +4647,10 @@ document.addEventListener("drop", (ev) => {
 });
 function finishDrag() {
   ui.dragging = null;
+  ui.dragCard = null;
   ui.dropAt = null;
   clearDropMarks();
+  document.querySelectorAll("[data-lane].drop").forEach((n) => n.classList.remove("drop"));
   $("#tasks").classList.remove("reordering");
   document.querySelectorAll(".dragging").forEach((n) => n.classList.remove("dragging"));
 }
@@ -4593,55 +4663,78 @@ document.addEventListener("dragend", () => {
   render();
 });
 
-// ---- reorder Today's task cards by their ⠿ grip (only with Active first off). The order is
-// today's list in focus.json, saved with `hq focus order`.
+// ---- drag a card to another column: that column's status (see STATUS_OF). Running is the
+// sessions' to decide, so nothing is dropped there. In Focus, dropping a card in its own column
+// puts it in your order (focus.json, saved with `hq focus order`).
 document.addEventListener("dragstart", (ev) => {
-  const grip = ev.target.closest && ev.target.closest("[data-drag-task]");
-  if (!grip) return;
-  ui.dragging = "task:" + grip.dataset.dragTask;      // holds rebuilds until the drop
+  const card = ev.target.closest && ev.target.closest("[data-drag-card]");
+  if (!card) return;
+  ui.dragging = "card:" + card.dataset.dragCard;      // holds rebuilds until the drop
+  ui.dragCard = card.dataset.dragCard;
   ui.dropAt = null;
   ev.dataTransfer.effectAllowed = "move";
   // Not text/plain: dropped on a message box, that would type the task id into it.
-  ev.dataTransfer.setData("application/x-hq-task", grip.dataset.dragTask);
-  const card = grip.closest(".fcard");
-  if (card) card.classList.add("dragging");
+  ev.dataTransfer.setData("application/x-hq-task", ui.dragCard);
+  setTimeout(() => card.classList.add("dragging"), 0);
 });
 document.addEventListener("dragover", (ev) => {
-  if (!String(ui.dragging || "").startsWith("task:")) return;
-  const zone = ev.target.closest && ev.target.closest("#today-focus");
-  if (!zone) { clearDropMarks(); ui.dropAt = null; return; }
+  if (!ui.dragCard) return;
+  const zone = ev.target.closest && ev.target.closest("[data-lane]");
+  document.querySelectorAll("[data-lane].drop").forEach((n) => { if (n !== zone) n.classList.remove("drop"); });
+  clearDropMarks();
+  if (!zone) { ui.dropAt = null; return; }
   ev.preventDefault();
   ev.dataTransfer.dropEffect = "move";
-  let best = null, dist = Infinity;
-  for (const el of zone.querySelectorAll("[data-today-card]")) {
-    const r = el.getBoundingClientRect(), mid = r.top + r.height / 2, d = Math.abs(ev.clientY - mid);
-    if (d < dist) { dist = d; best = { el, before: ev.clientY < mid }; }
+  zone.classList.add("drop");
+  const t = taskById(ui.dragCard);
+  ui.dropAt = { lane: zone.dataset.lane };
+  if (t && zone.dataset.lane === lane(t) && zone.closest("#today-focus")) {
+    let best = null, dist = Infinity;
+    for (const el of zone.querySelectorAll("[data-drag-card]")) {
+      const r = el.getBoundingClientRect(), mid = r.top + r.height / 2, d = Math.abs(ev.clientY - mid);
+      if (d < dist) { dist = d; best = { el, before: ev.clientY < mid }; }
+    }
+    if (best && best.el.dataset.dragCard !== ui.dragCard) {
+      best.el.classList.add(best.before ? "drop-before" : "drop-after");
+      ui.dropAt = { lane: zone.dataset.lane, id: best.el.dataset.dragCard, before: best.before };
+    }
   }
-  clearDropMarks();
-  if (!best || "task:" + best.el.dataset.todayCard === ui.dragging) { ui.dropAt = null; return; }
-  best.el.classList.add(best.before ? "drop-before" : "drop-after");
-  ui.dropAt = { id: best.el.dataset.todayCard, before: best.before };
 });
 document.addEventListener("drop", async (ev) => {
-  const moving = String(ui.dragging || "");
-  if (!moving.startsWith("task:") || !(ev.target.closest && ev.target.closest("#today-focus"))) return;
+  const id = ui.dragCard, at = ui.dropAt;
+  if (!id) return;
   ev.preventDefault();
-  const at = ui.dropAt, id = moving.slice(5);
   finishDrag();
-  if (!at) return render();
-  const order = focusIds().filter((x) => x !== id);
-  const i = order.indexOf(at.id);
-  if (i < 0) return render();
-  order.splice(at.before ? i : i + 1, 0, id);
-  const before = focusIds();
-  ui.board.focus.ids = order;                    // shows at once; the save follows
-  render();
-  try { await api("focus", { action: "order", tasks: order }); }
-  catch (e) {
-    toast(String(e.message || e), true);
-    ui.board.focus.ids = before;                 // not saved: back to the order hq has
-    ui.lastSig = null;
-    refresh();
+  const t = taskById(id);
+  if (!at || !t) return render();
+  const from = lane(t);
+  if (at.lane === from) {
+    if (!at.id) return render();
+    const order = focusIds().filter((x) => x !== id);
+    const i = order.indexOf(at.id);
+    if (i < 0) return render();
+    order.splice(at.before ? i : i + 1, 0, id);
+    const before = focusIds();
+    ui.board.focus.ids = order;                    // shows at once; the save follows
+    render();
+    try { await api("focus", { action: "order", tasks: order }); }
+    catch (e) {
+      toast(String(e.message || e), true);
+      ui.board.focus.ids = before;                 // not saved: back to the order hq has
+      ui.lastSig = null;
+      refresh();
+    }
+    return;
+  }
+  if (at.lane === "run") { render(); return toast(T("Running is up to its sessions — start or resume one from the card", "「在跑」由 session 决定——从卡片上新开或接上一个 session"), true); }
+  const status = STATUS_OF[at.lane];
+  if (t.status !== status) await setStatus(id, status); else render();
+  // Asks, your todos or a working session keep a card where it is, whatever its status says.
+  const now = taskById(id) && lane(taskById(id));
+  if (now && now !== at.lane && isOpen(taskById(id))) {
+    toast(now === "you" ? T(`${id}: status saved, but it stays in Needs you — it has an open ask or a todo of yours`, `${id}：状态已改，但它还有没答的问题或你的待办，所以留在「等你」`)
+      : now === "run" ? T(`${id}: status saved, but a session is working on it, so it stays in Running`, `${id}：状态已改，但有 session 在干活，所以留在「在跑」`)
+      : T(`${id}: status saved`, `${id}：状态已改`));
   }
 });
 
