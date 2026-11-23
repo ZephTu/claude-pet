@@ -1887,6 +1887,7 @@ def ts_seconds(ts):
 # progress. Rows carry a summary only; `hq peek <sid> --tool <id>` gives one call's full input
 # and output when a row is opened, so the list the board polls every few seconds stays small.
 PEEK_TOOLS_MAX = 300   # tool rows in one Peek window; older ones drop off (messages never do)
+PEEK_BYTES_MAX = 64_000_000   # how far back Peek reads for its n messages
 TODO_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"}  # shown as the todo list
 NOTE_ID = re.compile(r"<tool-use-id>([^<]+)</tool-use-id>")
 NOTE_TASK = re.compile(r"<task-id>([^<]+)</task-id>")   # a background command's or agent's own id
@@ -2084,8 +2085,10 @@ def peek_timeline(entries):
 
 def peek_window(path, n):
     """The last n messages with the tool calls among them (at most PEEK_TOOLS_MAX, newest kept),
-    and the transcript entries they were read from."""
-    for nbytes in (600_000, 6_000_000):
+    and the transcript entries they were read from. Reads further back until it has n messages:
+    screenshots sit in the transcript as base64, so a session that looked at a few dozen of them
+    has only a handful of messages in its last 6 MB. A whole 10 MB transcript parses in ~15 ms."""
+    for nbytes in (600_000, 6_000_000, PEEK_BYTES_MAX):
         entries = transcript_tail(path, nbytes)
         items = peek_timeline(entries)
         at = [i for i, it in enumerate(items) if it["kind"] == "msg"]
