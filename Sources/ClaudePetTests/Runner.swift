@@ -1550,9 +1550,30 @@ struct Runner {
         // The click that had no effect: a row whose terminal is gone used to
         // explain itself and leave the badge exactly where it was.
         t.check("a finished row with a live terminal is opened, then cleared",
-                PanelModel.finishedClick(handle: "h-a") == .openThenRead)
+                PanelModel.finishedClick(.terminal) == .openThenRead)
+        t.check("a finished row that opens its task on the board is opened, then cleared",
+                PanelModel.finishedClick(.board(task: "T-1")) == .openThenRead)
         t.check("a finished row with nowhere to jump is cleared by the click itself",
-                PanelModel.finishedClick(handle: "") == .read)
+                PanelModel.finishedClick(.nowhere) == .read)
+
+        // Settings → "Clicking a Session Opens": the terminal, or the session's task on the board.
+        t.check("nothing stored means clicks go to the terminal",
+                ClickTarget(stored: nil) == .terminal && ClickTarget(stored: "junk") == .terminal)
+        t.check("the board choice is read back", ClickTarget(stored: "board") == .board)
+        t.check("terminal mode jumps even when the session has a task",
+                ClickTarget.terminal.route(task: "T-7 Fix it", canJump: true) == .terminal)
+        t.check("terminal mode with no terminal goes nowhere",
+                ClickTarget.terminal.route(task: "T-7 Fix it", canJump: false) == .nowhere)
+        t.check("board mode opens the session's task, terminal or not",
+                ClickTarget.board.route(task: "T-7 Fix it", canJump: true) == .board(task: "T-7")
+                    && ClickTarget.board.route(task: "T-7 Fix it", canJump: false) == .board(task: "T-7"))
+        t.check("board mode falls back to the terminal for a session bound to no task",
+                ClickTarget.board.route(task: nil, canJump: true) == .terminal
+                    && ClickTarget.board.route(task: "", canJump: true) == .terminal)
+        t.check("board mode with neither a task nor a terminal goes nowhere",
+                ClickTarget.board.route(task: nil, canJump: false) == .nowhere)
+        t.check("a task label that does not start with an id is no task",
+                ClickTarget.taskID("Fix it") == nil && ClickTarget.taskID("T-12") == "T-12")
 
         t.check("nothing to report means no badge at all",
                 PanelModel.badge(needsYou: 0, unreadFinishes: 0) == "")

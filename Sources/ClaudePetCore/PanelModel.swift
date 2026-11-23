@@ -121,10 +121,11 @@ public enum PanelModel {
         case read
     }
 
-    /// - Parameter handle: the row's terminal handle, empty when there is none
-    ///   to address — a closed session, or a terminal we cannot drive.
-    public static func finishedClick(handle: String) -> FinishedClick {
-        handle.isEmpty ? .read : .openThenRead
+    /// - Parameter route: where a click on the row's session goes — see
+    ///   ClickTarget. `.nowhere` when its terminal is gone (or cannot be
+    ///   driven) and the board is not where clicks go, or it has no task.
+    public static func finishedClick(_ route: ClickTarget.Route) -> FinishedClick {
+        route == .nowhere ? .read : .openThenRead
     }
 
     /// Where a "take me to the next thing" shortcut should land.
