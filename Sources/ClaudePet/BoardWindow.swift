@@ -61,6 +61,9 @@ final class BoardWindow: NSWindow {
     /// Brings the board forward and gives it the keyboard. The pet is an
     /// accessory app, so it has to activate itself for the window to be key.
     func present(reveal task: String = "") {
+        showInDock(true)
+        // Minimised, it would stay in the Dock: every way of opening the board restores it.
+        if isMiniaturized { deminiaturize(nil) }
         // Activation is only a request on macOS 14+, and an accessory app
         // asking from a menu or a click on a non-activating panel is often
         // refused — the window then opened *behind* the frontmost app, which
@@ -78,6 +81,85 @@ final class BoardWindow: NSWindow {
             let safe = task.range(of: #"^T-\d+$"#, options: .regularExpression) != nil ? task : ""
             webView.evaluateJavaScript("window.hqReveal && window.hqReveal('\(safe)');")
         }
+    }
+
+    // MARK: - Dock and Cmd-Tab while the board is open
+
+    /// The pet lives outside the Dock and Cmd-Tab (an accessory app). While
+    /// the board is open it joins both, with the pet as its icon, so the board
+    /// can be switched back to like any window; closing the board takes it out
+    /// again. A board that is merely behind other windows keeps its place.
+    private func showInDock(_ on: Bool) {
+        let policy: NSApplication.ActivationPolicy = on ? .regular : .accessory
+        if NSApp.activationPolicy() != policy {
+            if on { NSApp.mainMenu = Self.boardMenu() }
+            NSApp.setActivationPolicy(policy)
+        }
+        guard on, let icon = Self.dockIcon() else { return }
+        // The icon every time: the skin may have changed while the board was open (it is cached).
+        // After the policy switch, and once more on the next turn: the bundle has no icon file,
+        // and the Dock tile it builds for a newly regular app came up blank (the generic app
+        // icon) until a click redrew it, when the icon had been set before the switch.
+        NSApp.applicationIconImage = icon
+        DispatchQueue.main.async {
+            guard NSApp.activationPolicy() == .regular else { return }
+            NSApp.applicationIconImage = icon
+            NSApp.dockTile.display()
+        }
+    }
+
+    override func close() {
+        super.close()
+        showInDock(false)
+    }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        showInDock(false)
+    }
+
+    /// A regular app shows a menu bar; this is the least it needs: close the
+    /// board (Cmd-W) and quit. Quit carries no Cmd-Q on purpose: Cmd-Q is
+    /// pressed by reflex to close a window, and here it would take the pet
+    /// away with the board. Quitting from the menu or the Dock is deliberate.
+    private static func boardMenu() -> NSMenu {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let app = NSMenu()
+        app.addItem(withTitle: L("Close Task Board", "关闭任务看板"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        app.addItem(.separator())
+        app.addItem(withTitle: L("Quit Claude Pet", "退出 Claude Pet"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        appItem.submenu = app
+        main.addItem(appItem)
+        return main
+    }
+
+    /// The pet as the app icon: the current skin's idle picture on a rounded
+    /// tile in the board's colour, drawn once per skin.
+    private static var iconCache: (skin: String, image: NSImage)?
+    private static func dockIcon() -> NSImage? {
+        let skin = UserDefaults.standard.string(forKey: "petSkin") ?? PetSkins.defaultID
+        if let cached = iconCache, cached.skin == skin { return cached.image }
+        guard let root = Bundle.module.url(forResource: "pet", withExtension: nil) else { return nil }
+        let picture = [skin, PetSkins.defaultID].lazy
+            .compactMap { NSImage(contentsOf: root.appendingPathComponent("skins/\($0)/assets/idle.png")) }
+            .first
+        guard let picture else { return nil }
+        let side: CGFloat = 512
+        let icon = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            // Apple's icon grid: the tile is ~80% of the canvas, corners ~22% of the tile.
+            let tile = rect.insetBy(dx: side * 0.1, dy: side * 0.1)
+            let path = NSBezierPath(roundedRect: tile, xRadius: tile.width * 0.225, yRadius: tile.width * 0.225)
+            NSColor(calibratedRed: 0.137, green: 0.125, blue: 0.114, alpha: 1).setFill()
+            path.fill()
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            picture.draw(in: tile.insetBy(dx: tile.width * 0.06, dy: tile.width * 0.06))
+            NSGraphicsContext.restoreGraphicsState()
+            return true
+        }
+        iconCache = (skin, icon)
+        return icon
     }
 
     /// The pet has no main menu (it is an accessory app), so the standard
