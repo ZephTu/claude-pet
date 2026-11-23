@@ -341,6 +341,13 @@ rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" 
 stop sess-1 "$(printf 'reopened\n```hq-update\nstatus: blocked\n```')" >/dev/null
 stop sess-1 "$(printf 'gave up\n```hq-update\nstatus: abandoned\n```')" >/dev/null
 fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="abandoned", d' && ok "reopened and abandoned: a new finished mark" || fail "abandoned mark: $(fin)"
+hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"one more thing"}' >/dev/null
+[ "$(fin)" = null ] && ok "a prompt after finishing takes the mark away (still being talked to)" || fail "mark kept after a prompt: $(fin)"
+stop sess-1 "$(printf 'back\n```hq-update\nstatus: active\n```')" >/dev/null
+stop sess-1 "$(printf 'ok\n```hq-update\nstatus: done\nnonsense line\n```')" >/dev/null
+[ "$(fin)" = null ] && grep -q "^status: active" "$C1" && ok "a status change in a block with a bad line neither applies nor marks" || fail "mixed block: $(fin)"
+python3 -c 'import json; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"fixed\n```hq-update\nstatus: done\n```"}))' | "$HQ" hook >/dev/null
+fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="done", d' && ok "the corrected block sent while another Stop hook held the turn still marks" || fail "stop_hook_active mark: $(fin)"
 stop sess-1 "$(printf 'back\n```hq-update\nstatus: blocked\n```')" >/dev/null
 python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
 import json, sys

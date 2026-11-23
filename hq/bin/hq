@@ -2043,7 +2043,7 @@ def match_todo(todos, kind, want):
                   f"{'candidates' if hits else 'open todos'}: {listing}")
 
 
-def apply_update(card, block, via="session"):
+def apply_update(card, block, via="session", change=None):
     """Apply an hq-update block — the card changes a session writes in its reply instead of running
     `hq log/set/ref/addtodo/todo` one tool call at a time. Every such call is another model round trip
     that re-reads the whole conversation; the block costs a few output tokens.
@@ -2055,12 +2055,18 @@ def apply_update(card, block, via="session"):
     there is skipped), so a block that does arrive twice changes nothing. A `ref:` line whose URL
     is already on the card replaces that entry's title in place — on purpose, so a title can move
     on (PR #9 open → merged) — and repeating it changes nothing.
-    A block made only of template placeholders is the protocol's example echoed back: ignored."""
+    A block made only of template placeholders is the protocol's example echoed back: ignored.
+    `change`, a dict, gets the card's status before and after ("from", "to"), both read under the
+    same lock as the write, so a status set elsewhere at the same moment is never taken for this one."""
     entries = update_lines(block)
     if entries and all(v and is_placeholder(v) for _, v in entries):
         return []
     with card_lock(card):
-        return _apply_update(card, entries, via)
+        before = parse_card(card).get("status")
+        problems = _apply_update(card, entries, via)
+        if change is not None:
+            change.update({"from": before, "to": parse_card(card).get("status")})
+        return problems
 
 
 def _apply_update(card, entries, via):
@@ -3670,6 +3676,7 @@ def _hook_main():
             entry.update(turn_start=turn_start, announced=True, grants=grants, grants_task=meta["id"],
                          brief=brief_hash(brief))
             entry.pop("update_problems", None)
+            entry.pop("finished", None)   # talked to again after finishing its task: not to be stopped
             entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
         update_session(sid, note_turn)
         t = open_asks_text(meta, sid=sid, state=state)
@@ -3684,13 +3691,14 @@ def _hook_main():
             if b["kind"] == "hq-update":
                 # Only at the end of the reply: one quoted or shown mid-reply is an example.
                 if b["trailing"]:
-                    before = parse_card(card).get("status")
-                    bad = apply_update(card, b["body"])
+                    change = {}
+                    bad = apply_update(card, b["body"], change=change)
                     problems += bad
-                    after = parse_card(card).get("status")
                     # This session finished its task: say so on its entry, for the board to treat
                     # like a task finished there (its "Finishing a task" setting: ask, stop, keep).
-                    if not bad and before in OPEN_STATUSES and after in ("done", "abandoned"):
+                    # The next prompt to it takes the mark away: you are still talking to it.
+                    after = change.get("to")
+                    if not bad and change.get("from") in OPEN_STATUSES and after in ("done", "abandoned"):
                         update_session(sid, lambda e: e.update(finished={"task": meta["id"], "status": after, "at": now_iso()}))
                 continue
             kind = b["kind"]

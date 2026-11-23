@@ -1712,7 +1712,9 @@ function drawFinishAsk() {
       <button class="btn primary" data-action="finish-stop">${n === 1 ? T("Stop it", "停掉") : T("Stop all", "全部停掉")}</button></div>
   </div>`;
   box.hidden = false;
-  box.querySelector("[data-action=finish-stop]").focus();
+  // Opened by a refresh, not by your click: Return or Space meant for the box you were typing in
+  // must not stop anything, so the safe button takes the focus.
+  box.querySelector(a.auto ? "[data-action=finish-keep]" : "[data-action=finish-stop]").focus();
 }
 function answerFinishAsk(stop) {
   const a = ui.finishAsk;
@@ -1726,24 +1728,41 @@ function answerFinishAsk(stop) {
 }
 
 // A session that finished its own task (status done / abandoned in its hq-update) is treated as if
-// the task were finished here: the same setting stops its sessions, asks, or leaves them. Once the
-// finishing session's turn is over (it is no longer busy), so its reply has landed; and only within
-// 10 minutes — one from while the board was closed may have been talked to since, and the amber
-// "still running" bar covers it. Each is handled once ("hq-finish-seen": the newest one handled).
+// the task were finished here: the same setting stops its sessions, asks, or leaves them. Not while
+// the finishing session is busy (its reply hasn't landed, or background work it started is still
+// running); a prompt sent to it after finishing takes the mark away (hq drops it), so a session you
+// are still talking to is never stopped; and only within 10 minutes — older ones, from while the
+// board was closed, are left to the amber "still running" bar. Each mark is handled once
+// ("hq-finish-seen": session|time → when it was handled); one that has to wait — the finisher
+// busy, or another finish question already open — stays for a later refresh. Stopping without
+// asking leaves the task's other sessions alone while they are working or waiting on you.
 const FINISH_FRESH_MS = 10 * 60 * 1000;
 function sessionFinishes() {
-  const seen = Number(pref("hq-finish-seen", "0")) || 0, now = Date.now();
-  const at = (s) => Date.parse(s.finished.at) || 0;
-  const fresh = ui.sessions.filter((s) => s.finished && s.finished.task === s.task && s.state !== "busy"
-    && at(s) > seen && now - at(s) < FINISH_FRESH_MS);
-  if (!fresh.length) return;
-  savePref("hq-finish-seen", String(Math.max(...fresh.map(at))));
-  for (const id of new Set(fresh.map((s) => s.task))) {
-    const t = taskById(id), live = liveFor(id);
-    if (!t || isOpen(t) || !live.length) continue;
-    if (finishStop() === "stop") stopAll(live, T(`${id} was finished by its session; `, `${id} 已由它的 session 结束；`));
-    else if (finishStop() === "ask" && !ui.finishAsk) { ui.finishAsk = { task: id, status: t.status }; drawFinishAsk(); }
+  const now = Date.now(), at = (s) => Date.parse(s.finished.at) || 0, key = (s) => `${s.sessionId}|${s.finished.at}`;
+  let seen = {};
+  try { seen = JSON.parse(pref("hq-finish-seen", "{}")) || {}; } catch (e) { seen = {}; }
+  if (typeof seen !== "object" || Array.isArray(seen)) seen = {};
+  for (const k of Object.keys(seen)) if (!(now - seen[k] < 2 * FINISH_FRESH_MS)) delete seen[k];
+  const marks = ui.sessions.filter((s) => s.finished && s.finished.task === s.task && !seen[key(s)] && now - at(s) < FINISH_FRESH_MS);
+  const byTask = new Map();
+  for (const s of marks) {
+    if (liveState(s) === "busy") continue;
+    byTask.set(s.task, [...(byTask.get(s.task) || []), s]);
   }
+  for (const [id, finishers] of byTask) {
+    const t = taskById(id), live = liveFor(id), mode = finishStop();
+    if (t && !isOpen(t) && live.length && mode === "ask") {
+      if (ui.finishAsk) continue;   // one question at a time; this one waits for the next refresh
+      ui.finishAsk = { task: id, status: t.status, auto: true };
+      drawFinishAsk();
+    } else if (t && !isOpen(t) && live.length && mode === "stop") {
+      const mine = new Set(finishers.map((s) => s.sessionId));
+      const targets = live.filter((s) => mine.has(s.sessionId) || !["busy", "waiting"].includes(liveState(s)));
+      if (targets.length) stopAll(targets, T(`${id} was finished by its session; `, `${id} 已由它的 session 结束；`));
+    }
+    for (const s of finishers) seen[key(s)] = now;
+  }
+  savePref("hq-finish-seen", JSON.stringify(seen));
 }
 
 // plain: one flat list; "state": grouped by what they are doing, whatever All's Sessions toggle says.

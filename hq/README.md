@@ -41,7 +41,7 @@ captured automatically and sessions don't get the task rules.
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
 `hq sessions --json` gives each one's `finished` — `{task, status, at}` once that session's own
 hq-update moved its task from open to done or abandoned (the board then applies its
-"Finishing a task" setting to the task's sessions), else null.
+"Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
 `{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`),
 `turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply
