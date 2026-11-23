@@ -2315,7 +2315,7 @@ function drawPeek(toBottom) {
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
-    ${m.secretary ? secretaryWatch(m) : ""}
+    ${m.secretary ? secretaryReports(m) + secretaryWatch(m) : ""}
     <div class="peek-body">${list}</div>
     ${m.secretary ? secretaryAsks() : ""}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.secretary ? noSend : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
@@ -2403,6 +2403,28 @@ function secretaryWatch(m) {
   return `<div class="sec-watch"><span class="sec-watch-h">${T("Keeping an eye on", "它在替你盯的事")}</span>
     ${lines.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
 }
+// Its reports (`hq report`, written to secretary/reports/): the newest, each opening in your editor
+// (what you change there it learns from), the evening schedule's switch, and "write one now".
+function secretaryReports(m) {
+  const st = m.sec || {}, sch = st.schedule || {}, reports = st.reports || [];
+  const kindWord = (k) => (k === "weekly" ? T("weekly", "周报") : T("daily", "日报"));
+  const links = reports.map((r) => `<button class="lnk" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — the secretary learns from your edits", "打开编辑——秘书会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}</button>`).join(" · ");
+  const hm = `${String(sch.hour ?? 18).padStart(2, "0")}:${String(sch.minute ?? 30).padStart(2, "0")}`;
+  const when = sch.kind === "weekdays" ? T(`weekdays ${hm}, the weekly one on Fridays`, `工作日 ${hm}，周五写周报`)
+    : sch.kind === "daily" ? T(`daily ${hm}, the weekly one on Fridays`, `每天 ${hm}，周五写周报`) : T("on its schedule in Scheduled", "按“定时任务”里设的时间");
+  const busy = st.running || ui.sending.has(SEC);
+  return `<div class="sec-reports">
+    <span class="sec-watch-h">${T("Reports", "报告")}</span>${links || `<span class="meta">${T("none yet", "还没有")}</span>`}
+    <span style="flex:1"></span>
+    ${sch.reports === false
+      // Its scheduled runs ask what the user wrote in Scheduled; turning reports on replaces that.
+      ? `<span class="meta" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs: your own prompt, no reports", "定时运行：用你自己的 prompt，不写报告") : T("Evening report off", "定时报告：关")}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="1">${sch.enabled ? T("Write reports instead", "改成写报告") : T("Turn on", "开启")}</button>`
+      : `<span class="meta" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}">${sch.enabled ? T(`Evening report on: ${when}`, `定时报告：开（${when}）`) : T(`Evening report off (${when})`, `定时报告：关（${when}）`)}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}">${sch.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>`}
+    <button class="btn small" data-action="secretary-report-now" ${busy ? "disabled" : ""} title="${T("Ask for the report that is due now", "让它现在写今天该写的报告")}">${T("Write one now", "现在写一份")}</button>
+  </div>`;
+}
 // Its memory files, each opening in your editor.
 function secretaryMemory(m) {
   const st = m.sec || {};
@@ -2424,19 +2446,19 @@ function secretaryIntro() {
   return T(`Ask it where things stand: “How are T-072 and T-071 doing, and what is blocking them?”, “What is waiting on me?”, “What looks stuck?”. It looks things up on the board each time and marks what waits on you with ⚑.`,
            `问它各个任务的情况：“T-072 和 T-071 怎么样了、卡点是什么？”“有什么在等我？”“哪些看着卡住了？”。它每次都现查看板，等你处理的事会用 ⚑ 标出来。`);
 }
-async function sendSecretary() {
+// preset: a message of the window's own ("Write one now"); the draft in the box stays as it is.
+async function sendSecretary(preset) {
   if (ui.sending.has(SEC)) return;
   const key = "msg:" + SEC;
-  const text = (ui.drafts[key] || "").trim();
-  const images = ui.atts[SEC] || [];
+  const text = preset || (ui.drafts[key] || "").trim();
+  const images = preset ? [] : ui.atts[SEC] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
   ui.sending.add(SEC);
   if (ui.modal && ui.modal.secretary) drawPeek(true);
   try {
     await api("secretary-send", { text: message });
-    delete ui.drafts[key];
-    delete ui.atts[SEC];
+    if (!preset) { delete ui.drafts[key]; delete ui.atts[SEC]; }
     if (ui.modal && ui.modal.secretary && ui.modal.sec) ui.modal.sec.running = true;
   } catch (e) {
     toast(String(e.message || e), true);
@@ -3366,6 +3388,13 @@ document.addEventListener("click", async (ev) => {
     case "close-modal": return closePeek();
     case "open-secretary": return openSecretary();
     case "secretary-setup": return setupSecretary();
+    case "secretary-reports":
+      try { ui.secretary = await apiObj("secretary-reports", { on: d.on === "1" }); }
+      catch (e) { return toast(String(e.message || e), true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
+      return toast(d.on === "1" ? T("Evening report on", "定时报告已开启") : T("Evening report off", "定时报告已关闭"));
+    case "secretary-report-now":
+      return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":
       try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
       return refreshPeek();

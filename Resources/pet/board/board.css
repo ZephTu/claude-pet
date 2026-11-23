@@ -444,6 +444,8 @@ select.place { max-width: 100px; }
 .sec-watch { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text); line-height: 1.5; }
 .sec-watch-h { color: var(--dim); margin-right: 6px; }
 .sec-watch-h + div { display: inline; }
+.sec-reports { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.sec-reports .sec-watch-h { margin-right: 0; }
 .sec-asks { flex: none; max-height: 42%; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 4px; border-top: 1px solid var(--line); }
 .sec-asks-h { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
 .sec-asks .card.ask { margin-bottom: 6px; }
