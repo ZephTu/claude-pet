@@ -816,7 +816,8 @@ import datetime as dt, json, re, sys
 now = dt.datetime.now(dt.timezone.utc)
 z = lambda m: (now - dt.timedelta(minutes=int(m))).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 rows = json.loads(re.sub(r'"@(\d+)"', lambda m: json.dumps(z(m.group(1))), sys.argv[2]))
-open(sys.argv[1], "a").write("".join(json.dumps(r) + "\n" for r in rows))
+# Compact, as Claude Code writes it: some readers find keys by their bytes.
+open(sys.argv[1], "a").write("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rows))
 PY
 }
 backdate() { python3 -c 'import os,sys,time; t=time.time()-float(sys.argv[2])*60; os.utime(sys.argv[1],(t,t))' "$1" "$2"; }
@@ -853,10 +854,21 @@ assert s["messages"][-1]=={"role":"assistant","ts":s["messages"][-1]["ts"],"text
 # An API error as the last reply (no tokens, model "<synthetic>") leaves the budget as it was.
 transcript "$P/$SS1.jsonl" '[{"type":"assistant","message":{"id":"a3","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"API Error: overloaded"}]},"timestamp":"@118"}]'
 "$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert c=={"tokens":100000,"budget":200000,"percent":50}, c' && ok "status: an API-error reply does not change the context budget" || fail "status context after API error"
-# /compact writes a boundary with the new size; that is the context until the next reply.
-transcript "$P/$SS1.jsonl" '[{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":100000,"postTokens":12000},"timestamp":"@118"}]'
-"$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert c=={"tokens":12000,"budget":200000,"percent":6}, c' && ok "status: after /compact the context is the boundary's size" || fail "status context after compact"
-"$HQ" peek "$SS1" -n 5 --json --meta | python3 -c 'import json,sys; t=json.load(sys.stdin)["turn"]; assert t["context"]==12000, t' && ok "peek: after /compact the turn line shows the compacted size" || fail "peek context after compact"
+# /compact writes a boundary with the conversation's new size; until the next reply the context is
+# that plus what a request sends besides (system prompt, tools): the first reply, at most 60k.
+B='{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":100000,"postTokens":POST},"timestamp":"@118"}'
+ctx_is() { "$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert (c or {}).get("tokens")==(int(sys.argv[1]) or None), c' "$1"; }
+transcript "$P/$SS1.jsonl" "[${B/POST/12000}]"
+ctx_is 72000 && ok "status: after /compact the boundary's size plus the first reply's (at most 60k)" || fail "status context after compact"
+"$HQ" peek "$SS1" -n 5 --json --meta | python3 -c 'import json,sys; t=json.load(sys.stdin)["turn"]; assert t["context"]==72000, t' && ok "peek: after /compact the turn line shows the compacted size" || fail "peek context after compact"
+transcript "$P/$SS1.jsonl" '[{"type":"assistant","message":{"id":"a4","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":49990,"output_tokens":5},"content":[{"type":"text","text":"Back."}]},"timestamp":"@117"}]'
+ctx_is 50000 && ok "status: the next reply after a compaction wins over it" || fail "status reply after compact"
+transcript "$P/$SS1.jsonl" "[${B/POST/20000}]"
+ctx_is 58000 && ok "status: a later compaction adds what the reply after the last one sent besides" || fail "status learned overhead"
+transcript "$P/$SS1.jsonl" "[${B/POST/9000}]"
+ctx_is 47000 && ok "status: two compactions in a row, the last one's size" || fail "status two compactions"
+transcript "$P/$SS1.jsonl" '[{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"auto","preTokens":100000},"timestamp":"@116"}]'
+ctx_is 0 && ok "status: a boundary that does not say its size leaves no reading" || fail "status boundary without size"
 # The card written after that work: not behind any more.
 "$HQ" touch "$S1" >/dev/null
 "$HQ" status "$S1" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["idle-waiting"], k' && ok "status: a card written after its session's work is not behind" || fail "status card-behind cleared"

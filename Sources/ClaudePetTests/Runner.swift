@@ -643,14 +643,30 @@ struct Runner {
             let size = post.map { #","postTokens":\#($0)"# } ?? ""
             return #"{"parentUuid":null,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":188000\#(size)}}"# + "\n"
         }
-        let justCompacted = TranscriptStats.advance(ctx, through: Data((talk + boundary(12_000)).utf8))
-        t.check("after /compact the context is the boundary's size, before any reply",
-                justCompacted.contextTokens == 12_000 && justCompacted.model == "claude-opus-5-5")
+        // A session whose first reply sent 30k (system prompt, tools, one prompt), then grew.
+        let grown30 = human("p1") + reply("claude-opus-5-5", input: 2, created: 0, read: 29_998)
+            + reply("claude-opus-5-5", input: 2, created: 1_000, read: 186_998)
+        let preCompact = TranscriptStats.advance(.init(), through: Data(grown30.utf8))
+        let justCompacted = TranscriptStats.advance(preCompact, through: Data((grown30 + boundary(12_000)).utf8))
+        t.check("after /compact: the boundary's size plus what the first reply sent besides",
+                justCompacted.contextTokens == 42_000 && justCompacted.model == "claude-opus-5-5")
         let thenReplied = TranscriptStats.advance(justCompacted, through: Data(
-            (talk + boundary(12_000) + reply("claude-opus-5-5", input: 5, created: 14_000, read: 0)).utf8))
-        t.check("the next reply after a compaction wins over the boundary", thenReplied.contextTokens == 14_005)
-        t.check("a boundary read in the same pass as an earlier reply still wins",
-                TranscriptStats.advance(.init(), through: Data((talk + boundary(12_000)).utf8)).contextTokens == 12_000)
+            (grown30 + boundary(12_000) + reply("claude-opus-5-5", input: 5, created: 50_000, read: 0)).utf8))
+        t.check("the next reply after a compaction wins over the boundary", thenReplied.contextTokens == 50_005)
+        let again = TranscriptStats.advance(thenReplied, through: Data(
+            (grown30 + boundary(12_000) + reply("claude-opus-5-5", input: 5, created: 50_000, read: 0)
+             + boundary(20_000)).utf8))
+        t.check("a later compaction adds what the request after the last one sent besides",
+                again.contextTokens == 58_005)
+        t.check("read in one pass, it comes to the same",
+                TranscriptStats.advance(.init(), through: Data(
+                    (grown30 + boundary(12_000) + reply("claude-opus-5-5", input: 5, created: 50_000, read: 0)
+                     + boundary(20_000)).utf8)).contextTokens == 58_005)
+        t.check("two compactions in a row: the last one's size",
+                TranscriptStats.advance(preCompact, through: Data(
+                    (grown30 + boundary(12_000) + boundary(9_000)).utf8)).contextTokens == 39_000)
+        t.check("a first reply that was mostly a grown30 prompt adds at most 60k",
+                TranscriptStats.advance(.init(), through: Data((talk + boundary(12_000)).utf8)).contextTokens == 72_000)
         t.check("a boundary without its size leaves no reading, not the old one",
                 TranscriptStats.advance(ctx, through: Data((talk + boundary(nil)).utf8)).contextPercent == nil)
         let quoted = #"{"type":"user","message":{"content":"\"subtype\":\"compact_boundary\",\"postTokens\":5"}}"# + "\n"

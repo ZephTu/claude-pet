@@ -2537,7 +2537,7 @@ def recent_messages(path, n=8):
     return [{"role": it["role"], "text": it["text"], "ts": it["ts"]} for it in items if it["kind"] == "msg"]
 
 
-def turn_stats(entries):
+def turn_stats(entries, path=None):
     """The turn in progress, or else the last one: when it started, Claude's output tokens in it,
     how long it took (finished turns: Claude Code logs a turn_duration when one ends), and the
     context size at its last reply."""
@@ -2584,7 +2584,7 @@ def turn_stats(entries):
             ctx, last = n, i
     if start is None:
         return None
-    post = compacted_since(entries, last)
+    post = compacted_since(entries, last, path)
     if post is not None:
         ctx = post or None
     return {"start": start, "done": ms is not None, "ms": ms, "tokens": out, "context": ctx}
@@ -2999,7 +2999,7 @@ def cmd_peek(args):
             print(json.dumps({"session": os.path.basename(path)[:-6] if path else args.session,
                               "found": bool(path), "live": live, "title": session_title(entries),
                               "cwd": cwd, "messages": msgs, "items": items,
-                              "turn": turn_stats(entries), "todos": latest_todos(entries)},
+                              "turn": turn_stats(entries, path), "todos": latest_todos(entries)},
                              ensure_ascii=False, indent=1))
         else:
             print(json.dumps(msgs, ensure_ascii=False, indent=1))
@@ -3164,16 +3164,69 @@ def waiting_on_a_run(texts):
     return None
 
 
-def compacted_since(entries, i):
-    """The context a compaction after entries[i] left (its boundary's postTokens; 0 when it does
-    not say), or None when there was none. /compact writes no reply, so until the next one this
-    is the session's size."""
-    cut = next((o for o in entries[i + 1:]
+def compacted_since(entries, i, path=None):
+    """The context the last compaction after entries[i] left, or None when there was none
+    (0 when its boundary does not say). /compact writes no reply, so until the next one this is
+    the session's size. The boundary's postTokens is the conversation alone: the next request
+    also sends the system prompt, the tools and the files Claude Code attaches again, 25-55k
+    more. So add what that came to (compaction_overhead) — the pet counts it the same way."""
+    cut = next((o for o in reversed(entries[i + 1:])
                 if o.get("type") == "system" and o.get("subtype") == "compact_boundary"), None)
     if cut is None:
         return None
     post = (cut.get("compactMetadata") or {}).get("postTokens")
-    return post if isinstance(post, int) else 0
+    if not isinstance(post, int) or post <= 0:
+        return 0
+    return post + (compaction_overhead(path) if path else 0)
+
+
+def compaction_overhead(path):
+    """What a request sends on top of the conversation: the latest compaction that has a reply
+    after it, that reply's size less the boundary's postTokens; before any, the session's first
+    reply (a system prompt, the tools and one prompt; at most 60k). 0 when the transcript has neither.
+    Reads by bytes from the boundaries, so a long transcript costs a few finds."""
+    import mmap
+    bkey, ukey = b'"subtype":"compact_boundary"', b'"usage":{"input_tokens":'
+    def line_at(m, at):
+        a = m.rfind(b"\n", 0, at) + 1
+        b = m.find(b"\n", at)
+        b = len(m) if b < 0 else b
+        try:
+            return json.loads(m[a:b]), b
+        except ValueError:
+            return None, b
+    def reply_after(m, at, stop):
+        while True:
+            hit = m.find(ukey, at, stop)
+            if hit < 0:
+                return None
+            o, at = line_at(m, hit)
+            if isinstance(o, dict) and o.get("type") == "assistant" and not o.get("isSidechain") \
+                    and reply_tokens(o) > 0:
+                return reply_tokens(o)
+    try:
+        with open(path, "rb") as f:
+            if os.fstat(f.fileno()).st_size == 0:
+                return 0
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                end = len(m)
+                while True:
+                    hit = m.rfind(bkey, 0, end)
+                    if hit < 0:
+                        break
+                    o, stop = line_at(m, hit)
+                    end = hit
+                    post = ((o or {}).get("compactMetadata") or {}).get("postTokens") \
+                        if isinstance(o, dict) and o.get("subtype") == "compact_boundary" else None
+                    if not isinstance(post, int) or post <= 0:
+                        continue
+                    n = reply_after(m, stop, len(m))
+                    if n is not None:
+                        return max(0, n - post)
+                # A first reply is mostly system prompt and tools; past 60k its prompt was a long paste.
+                return min(reply_after(m, 0, len(m)) or 0, 60_000)
+    except OSError:
+        return 0
 
 
 def reply_tokens(o):
@@ -3206,7 +3259,7 @@ def session_status(sid, path, now, n_msgs):
     at, reply = next(((i, o) for i, o in reversed(list(enumerate(entries)))
                       if o.get("type") == "assistant" and not o.get("isSidechain") and reply_tokens(o) > 0),
                      (-1, None))
-    post = compacted_since(entries, at)
+    post = compacted_since(entries, at, path)
     tokens = post if post is not None else reply_tokens(reply) if reply else 0
     ctx = None
     if tokens > 0:
