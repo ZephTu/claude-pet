@@ -206,23 +206,30 @@
 </ul>
 
 <h1 id="zh-secretary">秘书</h1>
-<p>顶栏的 <b>秘书</b> 打开一个常驻的对话窗口，对面是一个了解这个看板的 Claude。可以问它"T-072 和 T-071 怎么样了、卡点是什么""有什么在等我""哪些看着卡住了"。它每次都先现查任务卡和 session（<code>hq status</code>、<code>hq asks</code>、<code>hq board</code>……）再回答，等你处理的事用 <b>⚑</b> 标出来。它只管"信息 → 看板 → 你的注意力"这条线，<b>自己不干活</b>：要做的事，它会告诉你属于哪个任务，你在那个任务上点 ▶ 新开 session。</p>
+<p>顶栏的 <b>秘书</b> 打开一个常驻的对话窗口，对面是一个了解这个看板的 Claude。可以问它"T-072 和 T-071 怎么样了、卡点是什么""有什么在等我""哪些看着卡住了"。它每次都先现查任务卡和 session（<code>hq status</code>、<code>hq asks</code>、<code>hq board</code>……）再回答，像同事那样用几句话说清楚：先说结论，再说要紧的细节，等你的事直说（"从周一起就在等你"），不念步骤、少用编号列表。它只管"信息 → 看板 → 你的注意力"这条线，<b>自己不干活</b>：要做的事，它会告诉你属于哪个任务，你在那个任务上点 ▶ 新开 session。</p>
 <ul>
 <li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里的任务"秘书"（时间表是工作日 18:30 写报告，先关着，见下面的<b>报告</b>）。</li>
-<li><b>对话窗口</b>就是 Peek。发一条消息就是把这个任务跑一次，消息就是这次的 prompt；回复和工具调用照常显示。它回复期间，发送按钮是灰的，状态行写"回复中"，旁边有 <b>停止</b>。上一条失败了，或者因为额度被跳过，状态行会写明原因。这里没有斜杠命令。</li>
+<li><b>顶栏按钮</b>上是你当前形象（⚙ 里选的猫或修士）的脸。它在回复时脸外有一圈呼吸的光环；一个多小时没说话，换成睡着的样子；右上角的数字是它还在等你回答的建议有几条。</li>
+<li><b>对话窗口</b>像和一个人聊天，不是普通 session 的 Peek：
+  <ul>
+  <li>每一轮只显示你说的话和它最后的回复，中间的工具调用和过程输出都不显示。它干活时，对话里显示它的脸和跳动的三个点，下面一行写它正在做什么（"在看看板…""在翻任务卡…""在写回复…"）。</li>
+  <li>标题栏是它的脸、名字和状态：在、正在做什么、在休息（多久前回过话），上一条失败或因为额度被跳过时写明原因。</li>
+  <li>定时运行、点了"现在写一份"、在看板上回答了它的建议，这些不是你打的字，显示成居中的一行小字（"定时：写今天该写的报告""你回应了它的建议"）。两轮之间隔了半小时以上，中间标出时间。</li>
+  <li>输入框上方是常用问题（"有什么在等我？""哪些看着卡住了？""今天做了什么？""帮我起草消息"），点一下直接发出，"帮我起草消息"只填进输入框。它回复期间，发送按钮变成 <b>停止</b>。悬停在它的回复上可以 <b>复制</b>；⋯ 菜单里有 <b>复制整段对话</b>。这里没有斜杠命令。</li>
+  </ul></li>
 <li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；它的时间表就是定时报告的时间，也在那里改。定时运行如果碰上它正在回复，会等这一轮结束（最多 10 分钟）再开始，不会跳过。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
 <li><b>它能做什么</b>：它在后台跑，没人在旁边批准，所以只预先允许三样：读文件（Read / Grep / Glob）、运行 <code>~/.claude/hq/bin/hq</code>、改 <code>secretary/</code> 下的文件。其他操作都会被拒绝，除非你在 Claude Code 设置里另外允许了。外部系统它只读；消息和邮件只起草，写在回复里。</li>
-<li><b>它的建议，在它的窗口里或 Needs you 里回答</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为问题出现在秘书窗口底部的"它在问你"里（就在输入框上方），同时也出现在 <b>Needs you</b>，标着绿色的 <b>秘书</b>，点它打开秘书窗口。两边是同一批问题，在哪边回答都行。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议。点了 Yes，它大约 10 秒后自己醒来照做（比撤销按钮在的时间长，点了 <b>撤销</b> 它就不做），每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。点 <b>转待办</b> 表示这件事你自己做：它变成你的 @me 待办，秘书不会去做。</li>
-<li><b>报告</b>：秘书窗口里"报告"一行列出最近几份日报、周报，点一下用编辑器打开。<b>现在写一份</b> 让它马上写今天该写的那份；<b>开启</b> 打开定时报告：工作日晚上 18:30 写日报，周五写周报（时间在 <b>定时任务</b> 页改）。如果你在 <b>定时任务</b> 页给"秘书"写过自己的 prompt，这一行会写"用你自己的 prompt，不写报告"，点 <b>改成写报告</b> 会把它换成写报告的 prompt。
+<li><b>它的建议，在它的窗口里或 Needs you 里回答</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为建议卡片出现在对话里，紧跟在提出它的那条回复下面（不在哪条回复里的，列在对话最后"这些还在等你回应"下面），同时也出现在 <b>Needs you</b>，标着绿色的 <b>秘书</b>，点它打开秘书窗口。两边是同一批问题，在哪边回答都行。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议；回答过的卡片留在对话里，写着你的回答。点了 Yes，它大约 10 秒后自己醒来照做（比撤销按钮在的时间长，点了 <b>撤销</b> 它就不做），每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。点 <b>转待办</b> 表示这件事你自己做：它变成你的 @me 待办，秘书不会去做。</li>
+<li><b>报告</b>：标题栏的 📄 按钮列出最近几份日报、周报，点一下用编辑器打开；<b>让它现在写一份</b> 让它马上写今天该写的那份。⋯ 菜单里的 <b>傍晚写报告</b> 开关打开定时报告：工作日晚上 18:30 写日报，周五写周报（时间在 <b>定时任务</b> 页改）。如果你在 <b>定时任务</b> 页给"秘书"写过自己的 prompt，这一项会写"定时运行用的是你自己的 prompt——改成写报告"，点它会把它换成写报告的 prompt。
   <ul>
   <li>它先跑 <code>hq report</code> 拿到按项目整理的事实：这段时间任务卡 Log 里记的、勾掉的待办、回答了的问题、合并的 PR（要装了 <code>gh</code>）、没动的任务，以及等你好几天了的事（"你欠别人的"：两天以上的 @me 待办和没回答的问题）。日报从上一份报告用到的事实截止处算起（最多往前 7 天，没有就从今天 0 点），周报从周一算起；前一份报告里已经说过关掉的任务不会再说一遍。Jira 的变化目前不在里面。</li>
-  <li>写法照 <code>secretary/reports.md</code>：日报每个有进展的项目写进展 / 卡点 / 下一步，周报先写不超过三行的总结。报告写在 <code>secretary/reports/&lt;日期&gt;-daily.md</code> 或 <code>-weekly.md</code>，回复里也会贴一份。同一天再写一次（比如先点了"现在写一份"，晚上又定时写）会改写同一个文件，它会先读你在里面改过的地方，保留下来。</li>
+  <li>写法照 <code>secretary/reports.md</code>：日报每个有进展的项目写进展 / 卡点 / 下一步，周报先写不超过三行的总结。报告写在 <code>secretary/reports/&lt;日期&gt;-daily.md</code> 或 <code>-weekly.md</code>。回复里不贴全文，只用几句话说要点（什么动了、什么卡住了、什么在等你），在对话里显示成一张报告卡片，<b>打开全文</b> 用编辑器打开那份文件。同一天再写一次（比如先点了"现在写一份"，晚上又定时写）会改写同一个文件，它会先读你在里面改过的地方，保留下来。</li>
   <li><b>它会学你的修改</b>：报告写完它会存一份底稿，你直接改报告文件就行。下次写报告时它看到你改了什么（删掉的一节、改过的说法、换过的顺序），会提议在 <code>reports.md</code> 最后一节"从你的修改里学到的"加一条规则，给出 diff，你同意才写。每处修改只提一次。</li>
   <li>你改过 <code>.claude/agents/secretary.md</code> 的话，升级时不会替换它，里面就没有写报告这一节；定时运行的 prompt 和 <code>hq report</code> 的输出里写着该怎么做，照样能写，但要它学你的修改，最好把新模板里的 Reports 一节抄过去。</li>
-  <li><b>周报带校准问题</b>：周报的回复最后有一两个问题，拿它的记忆对一对这一周的情况（某个项目还那么重要吗、某件事还是谁负责）。问题出现在"它在问你"和 Needs you；你回答后，它把对记忆的修改作为 diff 再问你一次。</li>
+  <li><b>周报带校准问题</b>：周报的回复最后有一两个问题，拿它的记忆对一对这一周的情况（某个项目还那么重要吗、某件事还是谁负责）。问题出现在对话里和 Needs you；你回答后，它把对记忆的修改作为 diff 再问你一次。</li>
   </ul></li>
-<li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件；写报告时还会读 <code>reports.md</code>（报告的写法和学到的规则）。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
-<li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
+<li><b>记忆</b>：⋯ 菜单里"它记着的"下面列出这几个文件（关于你、同事、报告怎么写、常做的流程），点一下用编辑器打开。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件；写报告时还会读 <code>reports.md</code>（报告的写法和学到的规则）。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
+<li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口标题下的"替你盯着 N 件事"，点一下展开。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
 </ul>
 
 <h1 id="zh-quick">记一笔</h1>
@@ -607,7 +614,7 @@ After the status word comes how much context the session carries (e.g. <code>210
 </ul>
 
 <h1 id="en-secretary">Secretary</h1>
-<p><b>Secretary</b> in the top bar opens a standing conversation with a Claude that knows this board. Ask it "How are T-072 and T-071 doing, and what is blocking them?", "What is waiting on me?" or "What looks stuck?". It looks up the cards and sessions every time before it answers (<code>hq status</code>, <code>hq asks</code>, <code>hq board</code>…), and it marks what waits on you with <b>⚑</b>. Its job is the path information → board → your attention, and <b>it doesn't do the work itself</b>: it tells you which task a piece of work belongs to, and you start it there with ▶ New session.</p>
+<p><b>Secretary</b> in the top bar opens a standing conversation with a Claude that knows this board. Ask it "How are T-072 and T-071 doing, and what is blocking them?", "What is waiting on me?" or "What looks stuck?". It looks up the cards and sessions every time before it answers (<code>hq status</code>, <code>hq asks</code>, <code>hq board</code>…), and answers the way a colleague would, in a few sentences: the answer first, then the detail that matters, what waits on you said plainly ("waiting on you since Monday"), no narrated steps and few numbered lists. Its job is the path information → board → your attention, and <b>it doesn't do the work itself</b>: it tells you which task a piece of work belongs to, and you start it there with ▶ New session.</p>
 <ul>
 <li><b>The first time</b>, <b>Secretary</b> lists what it would create, and nothing is created until you click <b>Set up</b>. Files that are already there are always kept. It creates:
   <ul>
@@ -616,7 +623,14 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li>its own task card, "Secretary";</li>
   <li>a job called "Secretary" on the <b>Scheduled</b> page, scheduled for reports on weekdays at 18:30 but off until you turn it on (see <b>Reports</b> below).</li>
   </ul></li>
-<li><b>The window</b> is Peek. Each message you send is one run of that job, with your message as its prompt; replies and tool calls show as usual. While it replies, Send is greyed out, and the status line says it is replying, with a <b>Stop</b> button. If the last message failed, or was skipped because of quota, the status line says why. There are no slash commands.</li>
+<li><b>The top-bar button</b> shows the face of your current pet (the cat or the cultivator, chosen in ⚙). While it replies, a ring breathes around the face; after an hour without a word it shows its sleeping face; the number at the top right counts its proposals still waiting for your answer.</li>
+<li><b>The window</b> reads like a chat with a person, not like a session's Peek:
+  <ul>
+  <li>Each turn shows only what you said and its last reply; tool calls and in-between output are hidden. While it works, the conversation shows its face with three hopping dots, and a line saying what it is doing ("Looking over the board…", "Reading a task card…", "Writing…").</li>
+  <li>The header shows its face, its name and its status: here, what it is doing, or resting (with when it last replied); if the last message failed or was skipped because of quota, it says why.</li>
+  <li>Scheduled runs, Write one now, and your answers to its proposals on the board aren't things you typed: they show as a small centered line ("Scheduled: the report that is due", "You answered its proposals"). When more than half an hour passed between turns, the time is shown between them.</li>
+  <li>Above the message box are common questions ("What is waiting on me?", "What looks stuck?", "What happened today?", "Draft a message"); a click sends one, except the draft one, which only fills the box. While it replies, Send turns into <b>Stop</b>. Hover a reply to <b>Copy</b> it; the ⋯ menu has <b>Copy the conversation</b>. There are no slash commands.</li>
+  </ul></li>
 <li><b>One session</b>: every message continues the same conversation (<code>--resume</code>).
   <ul>
   <li>Past the job's context threshold (50% by default), the conversation is compacted first.</li>
@@ -632,28 +646,28 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li>editing files under <code>secretary/</code>.</li>
   </ul>
   Anything else is refused, unless your Claude Code settings allow it anyway. It only reads outside systems; messages and emails are only drafted, in its reply.</li>
-<li><b>Answer its proposals in its window, or in Needs you.</b> Creating a task, adding a note or a todo to a task (such as <code>@me send the reply to Atul</code>), closing a task, or changing its memory: each shows up as a question under "It asks you" at the bottom of the secretary's window, just above the message box. The same questions are in <b>Needs you</b> too, labeled with a green <b>Secretary</b> that opens its window; answer them in either place. Answer with <b>Yes</b>, <b>No</b> or <b>Later</b>; a note you add changes or replaces the proposal.
+<li><b>Answer its proposals in its window, or in Needs you.</b> Creating a task, adding a note or a todo to a task (such as <code>@me send the reply to Atul</code>), closing a task, or changing its memory: each shows up as a proposal card in the conversation, right under the reply that made it (ones that belong to no reply are listed at the end, under "Still waiting on you"). The same questions are in <b>Needs you</b> too, labeled with a green <b>Secretary</b> that opens its window; answer them in either place. Answer with <b>Yes</b>, <b>No</b> or <b>Later</b>; a note you add changes or replaces the proposal. An answered card stays in the conversation with your answer on it.
   <ul>
   <li>After a <b>Yes</b>, it wakes up about 10 seconds later and carries it out, then reports one line per proposal in its window. The wait outlasts the <b>Undo</b> button, and after an Undo it does nothing. If it is replying at the time, it waits until that reply ends.</li>
   <li><b>To todo</b> means you'll do it yourself: it becomes your @me todo, and the secretary leaves it alone.</li>
   <li>After a <b>No</b>, it leaves it, and doesn't propose it again unless something changed.</li>
   </ul></li>
-<li><b>Reports</b>: the "Reports" row in the secretary's window lists its latest daily and weekly reports; a click opens one in your editor. <b>Write one now</b> asks for the report that is due now. <b>Turn on</b> turns on the evening reports: a daily report on weekdays at 18:30, and the weekly one on Fridays (change the time on the Scheduled page). If you gave "Secretary" a prompt of your own on the Scheduled page, the row says "your own prompt, no reports", and <b>Write reports instead</b> replaces that prompt with the report one.
+<li><b>Reports</b>: the 📄 button in the header lists its latest daily and weekly reports; a click opens one in your editor. <b>Write one now</b> there asks for the report that is due now. The <b>Evening report</b> switch in the ⋯ menu turns on the evening reports: a daily report on weekdays at 18:30, and the weekly one on Fridays (change the time on the Scheduled page). If you gave "Secretary" a prompt of your own on the Scheduled page, that item says "Scheduled runs use your own prompt — write reports instead", and a click replaces that prompt with the report one.
   <ul>
   <li>It starts from <code>hq report</code>, which gathers the facts by project: what the cards' Logs say for the period, todos ticked, asks answered, PRs merged (with <code>gh</code> installed), tasks that didn't move, and what has waited on you for days ("what you owe others": @me todos and unanswered asks older than two days). A daily report starts where the facts of the last report ended (at most 7 days back, else at midnight); a weekly one covers the week since Monday. A task the last report already said was closed isn't reported closed again. Jira changes aren't included yet.</li>
-  <li>It writes as <code>secretary/reports.md</code> says: in a daily report, progress, blockers and next steps for each project that moved; a weekly one starts with a summary of at most three lines. The report goes to <code>secretary/reports/&lt;date&gt;-daily.md</code> or <code>-weekly.md</code>, and into its reply. Writing it again the same day (Write one now, then the evening run) rewrites the same file: it reads what you changed in it first and keeps it.</li>
+  <li>It writes as <code>secretary/reports.md</code> says: in a daily report, progress, blockers and next steps for each project that moved; a weekly one starts with a summary of at most three lines. The report goes to <code>secretary/reports/&lt;date&gt;-daily.md</code> or <code>-weekly.md</code>. Its reply doesn't paste it: it gives the gist in a few sentences (what moved, what is stuck, what waits on you), shown as a report card in the conversation whose <b>Open the full report</b> opens the file in your editor. Writing it again the same day (Write one now, then the evening run) rewrites the same file: it reads what you changed in it first and keeps it.</li>
   <li><b>It learns from your edits</b>: it keeps a copy of each report as written, so just edit the report file. Next time it sees what you changed (a section you deleted, a wording you fixed, an order you prefer) and proposes a rule for the last section of <code>reports.md</code>, "Rules (learned from your edits)", as a diff; it writes only after you say yes. Each edit is brought up once.</li>
   <li>If you edited <code>.claude/agents/secretary.md</code>, an upgrade leaves it alone, so it has no section on reports. The scheduled prompt and the output of <code>hq report</code> say what to do, so reports still get written, but for it to learn from your edits, copy the Reports section from the new template into it.</li>
-  <li><b>Weekly reports end with calibration questions</b>: one or two questions that check its memory against the week (is that project still a priority, who owns this now). They show under "It asks you" and in Needs you; after you answer, it proposes the change to its memory as a diff.</li>
+  <li><b>Weekly reports end with calibration questions</b>: one or two questions that check its memory against the week (is that project still a priority, who owns this now). They show in the conversation and in Needs you; after you answer, it proposes the change to its memory as a diff.</li>
   </ul></li>
-<li><b>Memory</b>: it reads all three files at the start of every conversation. <b>memory: profile · people · playbooks</b>, under the window's title, opens each file in your editor.
+<li><b>Memory</b>: it reads all three files at the start of every conversation. In the ⋯ menu, "What it remembers" lists the files (about you, colleagues, how reports are written, recurring processes); a click opens one in your editor.
   <ul>
   <li><code>profile.md</code>: who you are, your language, what matters in each project.</li>
   <li><code>people.md</code>: your colleagues, who they are and what they own.</li>
   <li><code>playbooks.md</code>: recurring processes, such as release tests and RCAs.</li>
   </ul>
   When it writes a report it also reads <code>reports.md</code>: how you want reports written, and the rules learned from your edits. You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
-<li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
+<li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows under its header as "Keeping an eye on N things" (click to expand). The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
 </ul>
 
 <h1 id="en-quick">Quick notes</h1>

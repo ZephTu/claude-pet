@@ -147,6 +147,16 @@ final class SecretaryController {
             && (parent == folder.path || parent == folder.appending(path: "reports").path)
     }
 
+    /// For the board's top bar, polled with the pet's state: whether the secretary is answering,
+    /// and when its last run ended (a long quiet shows it asleep).
+    var glance: [String: Any] {
+        var o: [String: Any] = ["busy": running]
+        if let r = store.runs(Self.jobID).first(where: { $0.status != .skipped }) {
+            o["lastAt"] = Jobs.iso(r.ended ?? r.started)
+        }
+        return o
+    }
+
     // MARK: - Internals
 
     /// A run is going, or was just launched and hasn't recorded its start yet.

@@ -458,6 +458,11 @@ overwrites what the user wrote:
   as `"secretary": {"task": "T-…"}` in `hq.json`, and `hq board --json` reports it as
   `"secretary"`.
 
+The agent definition tells it to talk like a colleague in a chat: the answer first, in a few plain
+sentences, lists only for truly separate items, no narrated steps, and for a report only the gist
+(the window links the file). The board's window shows only each turn's last reply, so that is all
+the user reads.
+
 `init` also replaces an agent definition that is still exactly an older shipped version (matched
 by its sha256), so existing setups pick up new instructions; one the user edited is kept.
 
