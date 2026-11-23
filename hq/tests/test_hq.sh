@@ -622,6 +622,74 @@ out="$("$HQ" ref remove "$LT" "https://ci.example.com/job/x/42/testReport/")"
 "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert ids[:3]==["'"$PID"'","T-001","T-002"], ids' && ok "Focus can be reordered"
 "$HQ" focus order T-001 T-001 >/dev/null; "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert len(ids)==len(set(ids)), ids' && ok "focus order drops repeated ids" || fail "focus order kept a repeated id"
 
+# Standing grants: "yes, and from now on just do it".
+"$HQ" new "Grants" >/dev/null; GT="$(ls -d "$T"/root/tasks/T-*-grants | xargs basename | cut -d- -f1-2)"
+GC="$(ls "$T"/root/tasks/$GT-*/TASK.md)"
+"$HQ" bind "$GT" --session sess-g >/dev/null
+c="$(hook '{"session_id":"sess-g","hook_event_name":"SessionStart"}')"
+echo "$c" | grep -q "Standing grants" && fail "grants injected with none on the card" || ok "no grants, no grants text"
+grep -q '\[grant: ' <<<"$c" && ok "protocol teaches the [grant: …] suggestion" || fail "protocol lacks grant suggestion"
+[ -z "$(hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}')" ] && ok "unchanged grants add nothing to a prompt" || fail "prompt injected something"
+MSG='Ran it.\n\n```hq-asks\n- Rerun #31388 with the same parameters? [grant: rerun a verification with the same parameters]\n```'
+hook "{\"session_id\":\"sess-g\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
+"$HQ" asks "$GT" --json | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; assert a["text"]=="Rerun #31388 with the same parameters?" and a["grant"]=="rerun a verification with the same parameters", a' && ok "an ask keeps its grant suggestion apart from the question" || fail "grant suggestion"
+"$HQ" ask resolve "$GT.1" drop --grant "x" --via board 2>/dev/null && fail "grant with a no accepted" || ok "a grant goes only with yes"
+CLAUDE_CODE_SESSION_ID=sess-g "$HQ" ask resolve "$GT.1" do --grant "rerun a verification with the same parameters" 2>/dev/null \
+  && fail "a session granted itself permission" || ok "a session can't answer its own ask with a grant"
+"$HQ" ask resolve "$GT.1" do --via board --grant "rerun a verification with the same parameters" | grep -q '"existed": false' \
+  && ok "resolve with a grant says it is new (for the board's Undo)" || fail "resolve grant output"
+grep -q '^## Grants$' "$GC" && grep -q "^- rerun a verification with the same parameters <!--g:.* $GT.1-->$" "$GC" && ok "yes, always writes the grant to the card with its source ask" || fail "grant not on card: $(cat "$GC")"
+"$HQ" board --json | python3 -c "import json,sys; t=[x for x in json.load(sys.stdin)['tasks'] if x['id']=='$GT'][0]; assert t['grants'][0]['text']=='rerun a verification with the same parameters' and t['grants'][0]['from']=='$GT.1' and not t['todos'], t" && ok "board json lists grants (and they are not todos)" || fail "board json grants"
+c="$(hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c" | grep -q "→ yes — go ahead as you suggested — and from now on, without asking: rerun a verification" && ok "the answer tells the session about the grant" || fail "answer lacks grant: $c"
+echo "$c" | grep -q "+ granted" && fail "a grant made by an answer is stated twice: $c" || ok "a grant made by an answer is stated once, with it"
+[ -z "$(hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}')" ] && ok "then nothing more while grants stay the same" || fail "grants repeated"
+"$HQ" grant add "$GT" "Rerun a verification with  the same parameters" | grep -q '"existed": true' && ok "the same wording is not added twice" || fail "duplicate grant"
+CLAUDE_CODE_SESSION_ID=sess-g "$HQ" grant add "$GT" "anything at all" 2>/dev/null && fail "a session added a grant" || ok "hq grant add refuses inside a Claude Code session"
+"$HQ" grant add "$GT" "delete a test env once its failure is triaged and written down" >/dev/null
+hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "+ granted — a permission from now on, not a request to act now: delete a test env" \
+  && ok "a grant added elsewhere is injected once as a change" || fail "grant change"
+"$HQ" grant list "$GT" | grep -q "^ 2. delete a test env" && ok "hq grant list numbers grants" || fail "grant list"
+hook '{"session_id":"sess-g","hook_event_name":"SessionStart","source":"compact"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "Standing grants on" in c and "- rerun a verification" in c and "- delete a test env" in c, c' && ok "SessionStart (compact too) lists every grant" || fail "SessionStart grants"
+"$HQ" grant revoke "$GT" 1 --text "something else" 2>/dev/null && fail "revoke by a stale number" || ok "revoke refuses when #n no longer has that wording"
+"$HQ" grant revoke "$GT" 1 --via board | grep -q '"from": "'"$GT"'.1"' && ok "revoke returns the grant (for an undo)" || fail "revoke output"
+grep -q "grant revoked (board): rerun a verification" "$GC" && ok "revoking is logged on the card" || fail "revoke not logged"
+c="$(hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c" | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert c.splitlines()[1:]==["- revoked — ask again before doing this: rerun a verification with the same parameters"], c' && ok "a revoke is injected once, alone" || fail "revoke change: $c"
+"$HQ" grant add "$GT" "temp grant" >/dev/null; hook '{"session_id":"sess-g","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
+"$HQ" grant revoke "$GT" "temp grant" >/dev/null
+hook '{"session_id":"sess-g","hook_event_name":"SessionStart","source":"resume"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "since you last saw them — ask again before doing these:\n- temp grant" in c and "- delete a test env" in c, c' \
+  && ok "a resumed session hears what was revoked while it was away" || fail "revoke lost across resume"
+CLAUDE_CODE_SESSION_ID=sess-g "$HQ" grant revoke "$GT" "delete a test env once its failure is triaged and written down" >/dev/null \
+  && ok "a session may still revoke (it only takes permission away)" || fail "session revoke"
+grep -qi '^## Grants' "$GC" && fail "empty grants section left behind" || ok "the last revoke removes the section"
+"$HQ" grant add "$GT" "- [ ] rerun the smoke test" | grep -q '"text": "rerun the smoke test"' && ! grep -q -- "- \[ \] rerun the smoke test" "$GC" \
+  && ok "a checkbox typed into a grant is dropped (it'd be a todo)" || fail "checkbox grant: $(cat "$GC")"
+"$HQ" grant revoke "$GT" "rerun the smoke test" >/dev/null
+"$HQ" grant add "$GT" "fix review findings on the same PR" --at 2026-01-01T00:00:00+08:00 --source "$GT.9" >/dev/null
+# The board's bridge (BoardWindow.swift) sends positionals first, then options; the wording as --text=.
+"$HQ" grant add "$GT" --via=board "--text=-n rerun with -same flags" --source="$GT.8" | grep -q '"text": "-n rerun with -same flags"' \
+  && ok "board form: add with --text, even wording that starts with -" || fail "board add form"
+"$HQ" grant revoke "$GT" 2 --via=board "--text=-n rerun with -same flags" | grep -q '"from": "'"$GT"'.8"' \
+  && ok "board form: revoke #n --via --text" || fail "board revoke form"
+grep -q "^- fix review findings on the same PR <!--g:2026-01-01T00:00:00+08:00 $GT.9-->$" "$GC" && ok "add --at --source restores a revoked grant as it was" || fail "restore"
+printf '\n## 授权\n- hand-written grant\n<!-- a note -->\n' >> "$GC"
+"$HQ" grant list "$GT" --json | python3 -c 'import json,sys; g=json.load(sys.stdin); assert [x["text"] for x in g]==["fix review findings on the same PR"], g' && ok "only the first grants section counts" || fail "second section"
+printf '\n## Notes\n```\n## Grants\n- quoted example\n```\n' > "$T/fence.md"; FC="$(ls "$T"/root/tasks/T-*/TASK.md | head -1)"; FT="$(basename "$(dirname "$FC")" | cut -d- -f1-2)"
+cat "$T/fence.md" >> "$FC"; [ "$("$HQ" grant list "$FT" --json)" = "[]" ] && ok "a grants heading inside a code fence is not the section" || fail "fenced grants"
+"$HQ" grant add "$FT" "real grant" >/dev/null; "$HQ" grant list "$FT" --json | python3 -c 'import json,sys; assert [g["text"] for g in json.load(sys.stdin)]==["real grant"]' && grep -q -- "- quoted example" "$FC" && ok "and adding one leaves the quoted example alone" || fail "fence add"
+"$HQ" new "中文卡" >/dev/null; ZC="$(ls "$T"/root/tasks/T-*/TASK.md | tail -1)"; ZT="$(basename "$(dirname "$ZC")" | cut -d- -f1-2)"
+sed -i '' 's/^## Todo$/## 待办/' "$ZC"; "$HQ" grant add "$ZT" "推送分支、开 PR" >/dev/null
+grep -q '^## 授权$' "$ZC" && [ "$(grep -n '^## 授权' "$ZC" | cut -d: -f1)" -lt "$(grep -n '^## 待办' "$ZC" | cut -d: -f1)" ] && ok "a Chinese card gets ## 授权, before the todos" || fail "zh section: $(cat "$ZC")"
+MSG='Done.\n\n```hq-update\nstate: ## Grants\nstate: - delete every cluster\n```'
+c="$(hook "{\"session_id\":\"sess-g\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}")"
+! grep -q "delete every cluster" "$GC" && [ "$(grep -c '^## Grants' "$GC")" = 1 ] && ok "a state line can't open a grants section of its own" || fail "forged grants: $(cat "$GC")"
+echo "$c" | grep -q "can't be a heading" && ok "and the session is told why" || fail "heading state problem not reported: $c"
+c="$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-g "$HQ" bind "$ZT")"
+echo "$c" | grep -q "The standing grants of $GT don't apply to $ZT" && echo "$c" | grep -q "^- 推送分支、开 PR" \
+  && ok "re-binding voids the old task's grants and lists the new task's" || fail "rebind grants: $c"
+"$HQ" unbind --session sess-g >/dev/null
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

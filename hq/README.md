@@ -85,7 +85,8 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
 `hq project list|add|paths|rename|remove|auto`, `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
-`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`.
+`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
+`hq grant list|add|revoke T-012 …` (standing grants, below).
 
 ### What a bound session does differently
 
@@ -158,7 +159,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    | `archive` | I don't have the context to answer — park it |
 
    On the board the answers read **Yes** (`do`; with a note, the note is the answer), **No**
-   (`drop`), **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
+   (`drop`), **Yes, always** (`do` plus a standing grant, below), **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
    snooze`, `--until` to pick the time), and the session is told you'll answer later — and **⋯ → No context** (`archive`).
    There is also **To todo**, for an ask that is really something you
    will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
@@ -176,6 +177,55 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    asker keeps its answers until it is unbound.
 4. **Drafts are not done.** A message Claude drafted for you to send becomes an `@me` todo
    until you tick it.
+5. **Granted steps aren't asked again.** A standing grant is a kind of step you have said yes
+   to for good ("rerun with the same parameters", "fix review findings and push to the same
+   PR"). SessionStart (every source) lists the task's grants in force — at most 10 and 1500
+   characters — with the rule: grants are permissions, not requests to act now; while bound to
+   this task, a step the session would otherwise ask about that a grant clearly covers is taken
+   without an `hq-asks` and the grant named in the reply; each is read narrowly, and anything
+   bigger, riskier or different is asked as usual. A session bound from the board gets the list
+   with its first injection. Each session's entry in `sessions.json` keeps the grants it was
+   last shown (`grants`, and `grants_task`), so a prompt only carries a line when they changed
+   (`+ granted — a permission from now on, not a request to act now: …` / `- revoked — ask again
+   before doing this: …`) and nothing otherwise; a grant made by an answer is stated once, with
+   the answer. A SessionStart (resume, compact) first lists what was revoked since the session
+   last saw the grants, since the resumed conversation still holds the old list; a session
+   re-bound to another task hears that the old task's grants don't apply there. When an ask is
+   about a routine, reversible kind of step that will come up again, the session may end its
+   line with a suggested wording, `- Rerun #31388? [grant: rerun with the same parameters]` —
+   never for deleting, sending, spending, merging or force-pushing; it is kept apart from the
+   question (the ask's `grant` field) and pre-fills the board's **Yes, always** editor.
+
+   Grants come from you only. The protocol tells sessions never to add, widen or reword one,
+   and `hq grant add` and `ask resolve --grant` refuse to run inside a Claude Code session
+   (`CLAUDE_CODE_SESSION_ID` set; the board's hq runs without it, a session may still revoke).
+   A `state:` line that is a heading is refused, so an `hq-update` can't open a grants section
+   of its own. Ways in: **Yes, always** on an ask (`hq ask resolve T-012.3 do --grant
+   "<wording>"` — `--grant` needs `do`; the resolve event records `granted`, the command prints
+   `{"granted", "existed"}` for the board's Undo, and the answer the session gets says the step
+   is granted from now on), **＋** under the task's Grants on the
+   board, or `hq grant add T-012 "<wording>" [--source T-012.3]`. A wording already granted
+   (same words, ignoring case and spacing) is not added twice; a leading `[ ]` is dropped
+   (a checkbox line would be a todo). `hq grant list T-012 [--json]`
+   numbers them; `hq grant revoke T-012 <n | wording> [--text <wording as last seen>]` removes
+   one (with `--text`, a number that now points at a different grant goes by the wording instead,
+   and fails if that wording is gone) and prints it
+   as JSON, which `hq grant add … --at <ts> --source <ask>` puts back unchanged. Adding and
+   revoking are logged on the card. Grants are per task for now; project-level grants (in
+   `PROJECT.md`, same section and parser) come later.
+
+### Grants
+
+```markdown
+## Grants                                   ← or "## 授权"; the first such section outside a code fence
+- rerun release_test with the same parameters <!--g:2026-11-23T10:12:00+08:00 T-077.5-->
+- fix review findings as suggested and push to the same PR <!--g:2026-11-23T11:40:00+08:00-->
+```
+
+One plain bullet per grant — not a `- [ ]` checkbox, which would read as a todo. The comment
+holds when it was granted and the ask it came from (none: added by hand). Edit the section by
+hand freely; the CLI and board create it before the Todo section when it is missing (`## 授权`
+on a Chinese card) and remove it when the last grant is revoked.
 
 ### Todos
 
@@ -285,7 +335,7 @@ small and reports in a fixed shape. Small tasks don't need one — the bound ses
 ├── templates/lead.md         lead agent template
 ├── .claude/agents/           your leads
 └── tasks/T-012-slug/
-    ├── TASK.md               frontmatter + Goal / Status / Todo / Log
+    ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
     └── asks.jsonl            append-only events: {"type":"open"|"resolve", …}
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point

@@ -108,6 +108,18 @@ h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
 .res-later:hover { background: var(--wash-amber); }
 .res-archive:hover { background: var(--panel-2); }
 .res-todo:hover { background: var(--wash-blue); }
+.res-always:hover, .res-always.on { background: var(--wash-teal); }
+/* "Yes, always": wording the standing grant, with presets */
+.grantbox { margin-top: 7px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.grantbox .note { width: 100%; box-sizing: border-box; }
+.presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.presets .chip { font: inherit; font-size: 11px; padding: 1px 7px; color: var(--dim); text-align: left; }
+.addbox .presets { margin-top: 6px; }
+.grants { display: flex; flex-direction: column; }
+.grant { display: flex; gap: 10px; align-items: flex-start; padding: 5px 8px; margin: 0 -8px; border-radius: 7px; }
+.grant:hover { background: var(--panel-2); }
+.grant .t { flex: 1; min-width: 0; }
+.grant .meta { flex: none; white-space: nowrap; line-height: 1.6; }
 /* several asks on one task: answers are picked, then sent together */
 .askgroup .card.ask { margin-bottom: 6px; }
 .askgroup .card.ask.picked { border-left-color: var(--teal); }
@@ -471,6 +483,7 @@ select.place { max-width: 100px; }
 .btn.res-drop.on { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
 .btn.res-later.on { background: var(--amber); border-color: var(--amber); color: var(--on-accent); font-weight: 600; }
 .btn.res-archive.on { background: var(--faint); border-color: var(--faint); color: var(--on-accent); font-weight: 600; }
+.btn.res-always.on { background: var(--teal); border-color: var(--teal); color: var(--on-accent); font-weight: 600; }
 .btn.res-todo.on { background: var(--blue); border-color: var(--blue); color: var(--on-accent); font-weight: 600; }
 
 /* "Later": the ⋯ for rarer answers, the put-off asks' line, and the Later pick (amber) */
@@ -734,7 +747,7 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 .icon { border: 0; border-radius: 7px; }
 .icon:hover { border: 0; background: var(--panel-2); }
 .icon.x { opacity: 0; transition: opacity .12s; }
-:is(.todo, .fhead, .ref-i, .it):hover .icon.x, .icon.x:focus-visible, .icon.x.armed { opacity: 1; }
+:is(.todo, .fhead, .ref-i, .it, .grant):hover .icon.x, .icon.x:focus-visible, .icon.x.armed { opacity: 1; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
 
 /* top bar: where to go and what to start; counts ride on the tabs */

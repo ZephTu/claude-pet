@@ -19,11 +19,29 @@ const LABEL = {
 // ask open and out of sight until tomorrow. "No context" is rare and sits behind ⋯.
 const RESOLUTIONS = [
   ["do", T("Yes", "可以"), T("Yes — go ahead, or as you suggested. With a note, the note is your answer (\"A+C\", \"run it once\")", "可以——去做，或按你的建议来。写了说明，说明就是你的回答（如“A+C”“跑一次”）")],
+  ["always", T("Yes, always", "以后都可以"), T("Yes — and from now on, sessions on this task do this kind of thing without asking. You word the standing grant before it's sent; revoke it any time under the task's Grants", "可以——而且以后这个任务的 session 遇到这类事情直接做，不再问。发出前你来定授权的措辞；随时可以在任务的「授权」里撤销")],
   ["drop", T("No", "不要"), T("No — don't do it. A note can say why, or what instead", "不要——别做。说明里可以写原因，或者换成什么")],
   ["todo", T("To todo", "转待办"), T("Something I'll do myself — make it an @me todo on this task and close the ask", "这是我自己要去做的事——在这个任务里加一条 @me 待办，并关掉这个问题")],
   ["snooze", T("Later", "稍后"), T("Not now — keep the question, but hide it until tomorrow: it leaves Needs you and the cat's badge, and the session is told you'll answer later", "先不答——问题留着，但藏到明天：它会离开 Needs you 和小猫的角标，session 会被告知你稍后再答")],
 ];
 const MORE_RESOLUTIONS = [["archive", T("No context", "不了解背景"), T("I can't answer this — park it", "我答不了——先归档")]];
+// Standing grants the user says yes to most (from the asks answered Yes on this board, 2026-11).
+const GRANT_PRESETS = [
+  T("Fix the review findings as suggested and push them to the same PR", "review 出的问题按建议全修，推到同一个 PR"),
+  T("Rerun a verification with the same parameters as last time", "用和上次相同的参数重跑验证"),
+  T("Once the plan is agreed, start: worktree and branch off origin/main, open a PR when done", "方案确认后直接开工：从 origin/main 开 worktree 和分支，做完开 PR"),
+  T("Push the branch, open a PR, push commits to the open PR", "推送分支、开 PR、把提交推到已有的 PR"),
+  T("Delete a test env once its failure is triaged and written down", "失败原因已查清并记下的测试环境直接删"),
+  T("After a PR merges, install from main on this machine (scripts/install.sh)", "PR 合并后从 main 本机安装（scripts/install.sh）"),
+  T("Draft a Jira, reply or message — without sending it", "起草 Jira、回复或消息（不发送）"),
+  T("Record verification results in the tracker or artifact", "把验证结果记到 tracker 或 artifact 里"),
+];
+const grantKey = (s) => String(s || "").split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+// The wording a "Yes, always" will grant: what you typed, else the session's suggestion, else the question.
+const grantWording = (a) => ui.drafts["grant:" + a.id] ?? (a.grant || a.text);
+function grantPresets(action, attrs) {
+  return `<div class="presets">${GRANT_PRESETS.map((p) => `<button class="chip link" data-action="${action}" ${attrs} data-text="${esc(p)}">${esc(p)}</button>`).join("")}</div>`;
+}
 // Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
 const projectNames = () => projects().map((p) => p.name);
@@ -62,7 +80,7 @@ function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } cat
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
   board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
-  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
@@ -174,7 +192,7 @@ function pruneDrafts() {
   if (!ui.board) return;
   const open = new Set(tasks().flatMap((t) => pendingAsks(t).map((a) => a.id)));
   const gone = (id) => !open.has(id);
-  for (const k of Object.keys(ui.drafts)) { const m = /^(?:note|push):(.+)$/.exec(k); if (m && gone(m[1])) delete ui.drafts[k]; }
+  for (const k of Object.keys(ui.drafts)) { const m = /^(?:note|push|grant):(.+)$/.exec(k); if (m && gone(m[1])) delete ui.drafts[k]; }
   for (const k of Object.keys(ui.atts)) { const m = /^ask:(.+)$/.exec(k); if (m && gone(m[1])) delete ui.atts[k]; }
   for (const id of Object.keys(ui.picks)) if (gone(id)) delete ui.picks[id];
 }
@@ -700,15 +718,31 @@ function askCard(t, a, opt = {}) {
         <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
         ${RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []).map(([r, label, tip]) => opt.group
           ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)}${T(" — pick, then Send below", "——先选，再点下面的发送")}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
-          : `<button class="btn small res-${r}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
+          : `<button class="btn small res-${r} ${r === "always" && ui.granting.has(a.id) ? "on" : ""}" title="${esc(tip)}" data-action="${r === "always" ? "grant-open" : "resolve"}" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
         ${ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
       </div>
       ${attachStrip(attKey)}
+      ${(opt.group ? pick === "always" : ui.granting.has(a.id)) ? grantBox(t, a, opt) : ""}
       ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="${T("Type your answer into that session so it carries on now, instead of waiting for your next message there", "把回答直接发给那个 session，让它马上接着干，不用等你在那边发下一条消息")}">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>`
         : pushBlocked(a) && !opt.sharedTarget ? `<div class="onprompt">${T(`${esc(pushBlocked(a).title || pushBlocked(a).project)} is waiting on a prompt in its terminal — the answer reaches it at its next turn`, `${esc(pushBlocked(a).title || pushBlocked(a).project)} 在终端里等你确认或回答——回应会在它下一轮送达`)}</div>` : ""}
     </div>`;
+}
+
+// "Yes, always": word the standing grant before it goes on the card. The session may have
+// suggested one with the ask ([grant: …]); presets are the kinds you said yes to most.
+function grantBox(t, a, opt) {
+  const have = (t.grants || []).some((g) => grantKey(g.text) === grantKey(grantWording(a)));
+  return `<div class="grantbox">
+    <div class="meta">${T("From now on, without asking — sessions on", "以后不用问，直接做——")} ${esc(t.id)}${T(":", " 的 session：")}</div>
+    <textarea class="note grow" rows="1" data-key="grant:${esc(a.id)}" placeholder="${T("the kind of step, e.g. rerun a verification with the same parameters", "这一类事情，如：用和上次相同的参数重跑验证")}">${esc(grantWording(a))}</textarea>
+    ${have ? `<div class="meta">${T("Already granted on this task — this just answers Yes.", "这个任务已经有这条授权——这次只是回答可以。")}</div>` : ""}
+    ${grantPresets("grant-preset", `data-id="${esc(a.id)}"`)}
+    ${opt.group ? "" : `<div class="row" style="justify-content:flex-end">
+      <button class="btn small ghost" data-action="grant-cancel" data-id="${esc(a.id)}">${T("Cancel", "取消")}</button>
+      <button class="btn small primary" data-action="resolve" data-id="${esc(a.id)}" data-res="always">${T("Yes, and grant it", "可以，并授权")}</button></div>`}
+  </div>`;
 }
 
 // The live session that raised an ask, if the board can type into its terminal.
@@ -732,7 +766,8 @@ const RES_TEXT = { do: "Yes", drop: "No", later: "Ask later — needs someone el
   todo: "Made it an @me todo — the user will do it themselves; don't ask again",
   snooze: "Later — the user will answer this later; carry on with what doesn't depend on it" };
 // An answer as the session reads it: Yes with a note is the user's own answer, not "Yes — …".
-function resText(res, note) {
+function resText(res, note, granted) {
+  if (res === "always") return resText("do", note) + (granted ? ` — and from now on, without asking: ${granted} (a standing grant)` : "");
   if (res === "do") return note ? `Answer: ${note}` : "Yes — go ahead as you suggested";
   if (res === "drop") return "No" + (note ? ` — ${note}` : "");
   return (RES_TEXT[res] || res) + (note && res !== "snooze" ? ` — ${note}` : "");
@@ -741,6 +776,15 @@ function resText(res, note) {
 // "do" with a note saying so. Returns what an Undo needs.
 async function answerAsk(a, res, note) {
   if (res === "snooze") { await api("snooze", { id: a.id }); return { snoozed: true }; }
+  if (res === "always") {
+    const task = a.id.replace(/\.\d+$/, "");
+    const wording = String(grantWording(a)).replace(/\s+/g, " ").trim();
+    if (!wording) throw new Error(T("Word the grant first", "先写好授权的措辞"));
+    // hq says whether the grant was already on the card: then an Undo leaves it there.
+    const r = await apiObj("resolve", { id: a.id, resolution: "do", note, grant: wording });
+    delete ui.drafts["grant:" + a.id]; ui.granting.delete(a.id);
+    return { task, granted: r.granted || wording, existed: Boolean(r.existed) };
+  }
   if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
   const task = a.id.replace(/\.\d+$/, "");
   const text = `@me ${a.text}${note ? ` — ${note}` : ""}`.replace(/\s+/g, " ").trim();
@@ -754,8 +798,13 @@ async function answerAsk(a, res, note) {
   return { task, text };
 }
 // Undo of "To todo": the todo it added goes too (marked dropped, so the card keeps the trace).
+// Undo of "Yes, always": the grant it added is revoked again.
 async function dropMadeTodo(made) {
   if (!made) return;
+  if (made.granted) {
+    if (!made.existed) await api("grant", { action: "revoke", task: made.task, text: made.granted });
+    return;
+  }
   await refresh();
   const t = taskById(made.task);
   const x = t && t.todos.find((y) => y.state === "open" && (y.owner ? `@${y.owner} ${y.text}` : y.text) === made.text);
@@ -768,12 +817,12 @@ function gist(text) {
   const t = String(text || "").replace(/\s+/g, " ").trim();
   return t.length > 30 ? t.slice(0, 30) + "…" : t;
 }
-function pushMessage(a, res, note) {
-  return `[HQ board] ${a.id} "${gist(a.text)}": ${resText(res, note)}`;
+function pushMessage(a, res, note, made) {
+  return `[HQ board] ${a.id} "${gist(a.text)}": ${resText(res, note, made && made.granted)}`;
 }
 function pushMessageAll(answers) {
   return "[HQ board] Answers:\n" +
-    answers.map(({ a, res, note }) => `- ${a.id} "${gist(a.text)}": ${resText(res, note)}`).join("\n");
+    answers.map(({ a, res, note, made }) => `- ${a.id} "${gist(a.text)}": ${resText(res, note, made && made.granted)}`).join("\n");
 }
 // An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
 // Writing a note on one of several asks means you're answering it: Do is picked for you. Only
@@ -1385,6 +1434,17 @@ function renderTaskBody(t) {
             <input class="note" data-key="${k("addtodo")}" data-task="${esc(t.id)}" data-enter="addtodo" placeholder="${T("e.g. @me send the reply to …   (@me = you, @claude, or a name)", "如 @me 把回复发给 …   （@me = 你，@claude，或人名）")}" value="${esc(draft(k("addtodo")))}">
             <button class="btn small primary" data-action="add-todo" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>` : ""}
         ${t.todos.length ? `<div class="todos">${todoRows()}</div>` : `<div class="empty">${T("No todos.", "没有待办。")}</div>`}
+
+        ${secHead(T("Grants", "授权"), t, "grant", T("Add a standing grant — a kind of step sessions on this task take without asking", "加一条常设授权——这个任务的 session 不用问就可以做的一类事"), (t.grants || []).length || null)}
+        ${adding("grant") ? `<div class="addbox"><div class="row nowrap">
+            <input class="note" data-key="${k("addgrant")}" data-task="${esc(t.id)}" data-enter="addgrant" placeholder="${T("e.g. rerun a verification with the same parameters", "如：用和上次相同的参数重跑验证")}" value="${esc(draft(k("addgrant")))}">
+            <button class="btn small primary" data-action="add-grant" data-task="${esc(t.id)}">${T("Add", "添加")}</button></div>
+            ${grantPresets("grant-preset-task", `data-for="${esc(t.id)}"`)}</div>` : ""}
+        ${(t.grants || []).length ? `<div class="grants">${t.grants.map((g) => `<div class="grant">
+            <span class="t">${esc(g.text)}</span>
+            <span class="meta" title="${esc(g.at || "")}">${g.from ? esc(g.from) + " · " : ""}${g.at ? ago(g.at) : ""}</span>
+            <button class="icon x" title="${T("Revoke — sessions ask again before this kind of step", "撤销——之后 session 遇到这类事情会重新问")}" data-confirm="${T("Revoke?", "撤销？")}" data-action="grant-revoke" data-task="${esc(t.id)}" data-i="${g.i}" data-text="${esc(g.text)}">✕</button></div>`).join("")}</div>`
+          : `<div class="empty">${T("None — sessions ask before each such step. Answer an ask with \"Yes, always\" to add one.", "没有——session 每次都会先问。回答 ask 时点「以后都可以」就会加一条。")}</div>`}
 
         ${secHead(T("Log", "日志"), t, "log", T("Add a note — the task's memory; bound sessions read it", "加一条备注——任务的记忆；绑定的 session 会读它"), logs.length || null)}
         ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="${T("A decision, a finding, a note for whoever picks this up next", "一个决定、一个发现、给下一个接手者的备注")}">${esc(draft(k("log")))}</textarea>
@@ -2566,14 +2626,14 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["push:" + d.id];
       try {
         const made = await answerAsk(a, d.res, note);
-        let msg = T(`${d.id} → ${d.res === "todo" ? "@me todo" : d.res}`, `${d.id} → ${(RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === d.res) || [])[1] || d.res}`);
+        let msg = T(`${d.id} → ${d.res === "todo" ? "@me todo" : d.res === "always" ? "yes, and granted" : d.res}`, `${d.id} → ${(RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === d.res) || [])[1] || d.res}`);
         if (push) {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
           // the same answer again. Unmark if the message never got there.
           try {
             // (Later is not an answer: nothing to keep the hook from repeating.)
             if (d.res !== "snooze") await api("delivered", { id: d.id, session: target.sessionId });
-            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note), queue: target.state === "busy", ...sendExtra(target) });
+            await api("send", { session: target.sessionId, text: pushMessage(a, d.res, note, made), queue: target.state === "busy", ...sendExtra(target) });
             msg += ` · ${target.state === "busy" ? T("queued for", "已排队给") : T("sent to", "已发给")} ${target.title || target.project}`;
           } catch (e) {
             try { await api("delivered", { id: d.id, session: target.sessionId, undo: true }); } catch (e2) { /* best effort */ }
@@ -2609,6 +2669,31 @@ document.addEventListener("click", async (ev) => {
     case "do-todo": return doTodo(d.task, d.text);
     case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.add(d.id); return render();
+    case "grant-open": ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
+      { const el = document.querySelector(`[data-key="${CSS.escape("grant:" + d.id)}"]`); if (el) { el.focus(); el.select(); } }
+      return;
+    case "grant-cancel": ui.granting.delete(d.id); delete ui.drafts["grant:" + d.id]; return render();
+    case "grant-preset": ui.drafts["grant:" + d.id] = d.text; saveDrafts(); return render();
+    case "grant-preset-task": ui.drafts["addgrant:" + d.for] = d.text; saveDrafts(); return render();
+    case "add-grant": {
+      const key = "addgrant:" + d.task;
+      const text = (ui.drafts[key] || "").trim();
+      if (!text) return;
+      delete ui.drafts[key];
+      ui.adding.delete(`${d.task}:grant`);
+      return act("grant", { action: "add", task: d.task, text }, T("Grant added — sessions on this task are told at their next turn", "授权已添加——这个任务的 session 下一轮就会知道"));
+    }
+    case "grant-revoke": {
+      try {
+        const g = JSON.parse(await api("grant", { action: "revoke", task: d.task, index: d.i, text: d.text }) || "{}");
+        toast(T("Grant revoked — sessions ask again from their next turn", "授权已撤销——session 从下一轮起会重新问"), false, async () => {
+          try { await api("grant", { action: "add", task: d.task, text: g.text || d.text, at: g.at || "", source: g.from || "" }); toast(T("Grant restored", "授权已恢复")); }
+          catch (e) { toast(String(e.message || e), true); }
+          await refresh();
+        });
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
     case "show-later": ui.showLater.has(d.task) ? ui.showLater.delete(d.task) : ui.showLater.add(d.task); return render();
     case "forget-session": {
       const t = taskById(d.task);
@@ -2754,7 +2839,7 @@ document.addEventListener("click", async (ev) => {
       const key = `${d.task}:${d.what}`;
       ui.adding.has(key) ? ui.adding.delete(key) : ui.adding.add(key);
       render();
-      const focus = { todo: "addtodo", log: "log" }[d.what];
+      const focus = { todo: "addtodo", log: "log", grant: "addgrant" }[d.what];
       const el = focus && document.querySelector(`[data-key="${CSS.escape(focus + ":" + d.task)}"]`);
       if (el) el.focus();
       return;
@@ -3096,6 +3181,7 @@ document.addEventListener("keydown", async (ev) => {
       return act("category", { action: "rename", names: [el.dataset.cat, text] }, T(`Renamed ${el.dataset.cat} → ${text}`, `已改名 ${el.dataset.cat} → ${text}`));
     }
     if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, T("Todo added", "待办已添加"));
+    if (el.dataset.enter === "addgrant") { ui.adding.delete(`${el.dataset.task}:grant`); return act("grant", { action: "add", task: el.dataset.task, text }, T("Grant added", "授权已添加")); }
     if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, T("Added", "已添加"));
   }
 });
