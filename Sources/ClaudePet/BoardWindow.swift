@@ -425,8 +425,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (["path": url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path], nil)
         case "open":
             let path = str("path")
-            // A task card, or a project's PROJECT.md (the project panel's "Open PROJECT.md").
-            guard path.hasSuffix("/TASK.md") || path.hasSuffix("/PROJECT.md"), FileManager.default.fileExists(atPath: path) else {
+            // A task card, a project's PROJECT.md (the project panel's "Open PROJECT.md"), or one of
+            // the secretary's memory files (its window's links).
+            guard path.hasSuffix("/TASK.md") || path.hasSuffix("/PROJECT.md") || secretary.isMemoryFile(path),
+                  FileManager.default.fileExists(atPath: path) else {
                 return (nil, L("not a task card or project file", "不是任务卡或项目文件"))
             }
             NSWorkspace.shared.open(URL(fileURLWithPath: path))

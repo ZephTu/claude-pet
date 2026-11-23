@@ -1677,7 +1677,11 @@ def secretary_info():
     tid = secretary_task_id()
     # The sessions bound to its card: the board checks its session is among them before a run.
     sessions = sorted(s for s, e in load_state().items() if tid and isinstance(e, dict) and e.get("task") == tid)
-    return {"root": root, "task": tid, "card": find_card(tid) if tid else None, "sessions": sessions,
+    card = find_card(tid) if tid else None
+    # What it is keeping an eye on for the user: its card's state lines, which its hq-update writes.
+    state = card_state_lines(parse_card(card)["body"]) if card else []
+    return {"root": root, "task": tid, "card": card, "sessions": sessions,
+            "state": [one_line(l, 200) for l in state[:6]],
             "agent": agent, "agentExists": os.path.isfile(agent), "memory": memory, "files": files,
             "ready": bool(tid) and os.path.isfile(agent) and all(files.values())}
 
@@ -1706,7 +1710,9 @@ def secretary_init(lang):
         # Its asks are what Needs you shows; the card itself stays off Focus.
         tid, card = new_card(SECRETARY_TITLE[lang], slug="secretary", lead="secretary", focus=False)
         text = open(card, encoding="utf-8").read()
-        text = re.sub(r"(?m)^<what done looks like>$", lambda _: SECRETARY_GOAL[lang], text, count=1)
+        # The goal's placeholder, whatever its wording (the root may have its own TASK.md template).
+        text = re.sub(r"(?m)^(##[ \t]*(?:Goal|目标)[^\n]*\n)<[^\n]*>$", lambda m: m.group(1) + SECRETARY_GOAL[lang],
+                      text, count=1)
         atomic_write(card, text)
         cfg = load_json(root_config_path(), {})
         if not isinstance(cfg, dict):

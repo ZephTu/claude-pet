@@ -438,6 +438,14 @@ select.place { max-width: 100px; }
 .md a { color: var(--blue); text-decoration: none; border-bottom: 1px dotted currentColor; cursor: pointer; }
 .md a:hover { color: var(--text); }
 .pfoot { margin: 0; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+/* The secretary's window: what it keeps an eye on (above), its asks to answer (below). */
+.sec-watch { padding: 6px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text); line-height: 1.5; }
+.sec-watch-h { color: var(--dim); margin-right: 6px; }
+.sec-watch-h + div { display: inline; }
+.sec-asks { flex: none; max-height: 42%; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 4px; border-top: 1px solid var(--line); }
+.sec-asks-h { font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+.sec-asks .card.ask { margin-bottom: 6px; }
+.chip.sec { color: var(--teal); }
 #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel-2);
   border: 1px solid var(--line); padding: 7px 14px; border-radius: 9px; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
 #toast.bad { border-color: var(--red); }

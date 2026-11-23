@@ -173,6 +173,11 @@ async function undoTodo(task, i) {
   await act("todo", { task, index: i, state: r ? r.from : "open", text: r ? r.text : "" }, T("Undone", "已撤销"));
 }
 const tasks = () => (ui.board ? ui.board.tasks : []);
+// The secretary's own card (hq.json's `secretary`) is its notebook, not a piece of your work: the
+// task lists and their counts leave it out. Its asks (its proposals) still show in Needs you, and
+// in its window.
+const secId = () => (ui.board && ui.board.secretary) || "";
+const listed = () => tasks().filter((t) => t.id !== secId());
 const taskById = (id) => tasks().find((t) => t.id === id);
 const isOpen = (t) => ["waiting-on-me", "blocked", "active"].includes(t.status);
 // ---- drafts survive the pet quitting: what you typed, the images you added and the answers you
@@ -595,7 +600,7 @@ function render() {
   const need = needCount();
   // Each tab carries its count; only Needs you's is lit, because only it asks something of you.
   // (Scheduled has none: its jobs are only read while that page is showing.)
-  const tabN = { today: focusIds().length, all: tasks().filter(isOpen).length, needs: need };
+  const tabN = { today: focusIds().length, all: listed().filter(isOpen).length, needs: need };
   $("#mode").innerHTML = [["today", "Focus"], ["all", "All"], ["needs", "Needs you"], ["jobs", typeof jt === "function" ? jt("tab") : "Scheduled"]].map(([m, label]) =>
     `<button class="tab ${ui.mode === m ? "on" : ""}" data-action="mode" data-m="${m}"${ui.mode === m ? ` aria-current="page"` : ""}${m === "needs" ? ` title="${T("Unanswered asks and your todos", "未回应的问题和你的待办")}"` : ""}>${label}${tabN[m] ? `<span class="n ${m === "needs" ? "hot" : ""}">${tabN[m]}</span>` : ""}</button>`).join("");
   $("#today").hidden = ui.mode !== "today";
@@ -721,7 +726,7 @@ function renderAsks() {
   for (const t of tasks()) for (const a of openAsks(t)) { total++; if (taskMatches(t, a.text)) items.push([t, a]); }
   items.sort((x, y) => String(x[1].ts).localeCompare(String(y[1].ts)));
   const later = tasks().filter((t) => laterAsks(t).length && taskMatches(t, ...laterAsks(t).map((a) => a.text)));
-  const laterHtml = later.map((t) => `<div class="later-of"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>${laterLine(t)}</div>`).join("");
+  const laterHtml = later.map((t) => `<div class="later-of">${t.id === secId() ? secChip() : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span>`}${laterLine(t)}</div>`).join("");
   const head = `<div class="vhead"><h1>Needs you</h1></div>`;
   if (!items.length && total) return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")}</div>` + filterNote(0, total) + laterHtml;
   if (!items.length) return head + `<div class="calm"><svg viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg>${T("Claude has nothing waiting on an answer from you.", "Claude 没有在等你回答的问题。")}</div>` + laterHtml;
@@ -754,22 +759,32 @@ function groupTarget(asks) {
   return ts[0] && ts.every((x) => x && x.sessionId === ts[0].sessionId) ? ts[0] : null;
 }
 
+// The secretary's asks are labeled as its own and open its window, not its (hidden) card.
+const secChip = () => `<span class="chip link sec" data-action="open-secretary" title="${T("Open the secretary", "打开秘书")}">${T("Secretary", "秘书")}</span>`;
+// No "Yes, always" for the secretary: a standing grant is never for it. opt.peek: in its window,
+// which doesn't redraw for ⋯ or pasted images either: those stay in Needs you.
 function askCard(t, a, opt = {}) {
   const pick = ui.picks[a.id];
   const attKey = "ask:" + a.id;
+  const sec = t.id === secId();
+  const meta = opt.peek ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
+    : sec ? `${secChip()}<span class="chip link" data-action="open-secretary">${esc(a.id)}</span>${ago(a.ts)}`
+    : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
+  const res = opt.peek || sec ? RESOLUTIONS.filter(([r]) => r !== "always")
+    : RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []);
   return `
     <div class="card ask ${pick ? "picked" : ""}">
-      <div class="meta"><span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}</div>
+      <div class="meta">${meta}</div>
       <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       <div class="row askrow">
-        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
-        ${RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []).map(([r, label, tip]) => opt.group
+        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" ${opt.peek ? "" : `data-att="${esc(attKey)}"`} placeholder="${opt.peek ? T("note", "说明") : T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
+        ${res.map(([r, label, tip]) => opt.group
           ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)}${T(" — pick, then Send below", "——先选，再点下面的发送")}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
           : `<button class="btn small res-${r} ${r === "always" && ui.granting.has(a.id) ? "on" : ""}" title="${esc(tip)}" data-action="${r === "always" ? "grant-open" : "resolve"}" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
-        ${ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
+        ${opt.peek || ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
       </div>
-      ${attachStrip(attKey)}
-      ${(opt.group ? pick === "always" : ui.granting.has(a.id)) ? grantBox(t, a, opt) : ""}
+      ${opt.peek ? "" : attachStrip(attKey)}
+      ${!opt.peek && (opt.group ? pick === "always" : ui.granting.has(a.id)) ? grantBox(t, a, opt) : ""}
       ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="${T("Type your answer into that session so it carries on now, instead of waiting for your next message there", "把回答直接发给那个 session，让它马上接着干，不用等你在那边发下一条消息")}">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>`
@@ -959,12 +974,12 @@ function renderWaitingUnused() {
 // Every group the Tasks column can show by project — listed projects (even empty ones), any
 // project named only on a card, and "No project".
 function projectGroupKeys() {
-  return [...new Set([...projectNames(), ...tasks().map((t) => t.project || "(none)")])]
+  return [...new Set([...projectNames(), ...listed().map((t) => t.project || "(none)")])]
     .filter((k) => !projectClosed(projectByName(k)));
 }
 // The fold keys of the groups the Tasks column shows now (repo groups are "repo:<name>").
 function groupKeys() {
-  if (ui.groupBy === "repo") return [...new Set(tasks().map((t) => "repo:" + (t.repo || "")))];
+  if (ui.groupBy === "repo") return [...new Set(listed().map((t) => "repo:" + (t.repo || "")))];
   return projectGroupKeys();
 }
 const projectByName = (name) => projects().find((p) => p.name === name) || null;
@@ -1041,9 +1056,9 @@ function filterNote(shown, total) {
 }
 
 function renderTasks() {
-  const pool = tasks().filter((t) => ui.showClosed || isOpen(t));
+  const pool = listed().filter((t) => ui.showClosed || isOpen(t));
   const visible = pool.filter((t) => taskMatches(t));
-  if (!tasks().length) return renderOnboarding();
+  if (!listed().length) return renderOnboarding();
   if (!visible.length) return pool.length && filterText() ? filterNote(0, pool.length) : `<div class="empty">${T("No tasks.", "没有任务。")}</div>`;
   let html = filterNote(visible.length, pool.length);
   if (ui.groupBy === "project") {
@@ -1083,7 +1098,7 @@ function renderTasks() {
         ${name && !names.includes(name) ? `<span class="meta">${T("not in list", "不在列表里")}</span>` : ""}
         ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
       if (!shut) {
-        const closed = tasks().filter((t) => (t.project || "") === name && !isOpen(t)).length;
+        const closed = listed().filter((t) => (t.project || "") === name && !isOpen(t)).length;
         html += group.length ? group.map((t) => renderTask(t, "project")).join("")
           : `<div class="empty proj-empty">${T("No open tasks", "没有进行中的任务")}${closed && !ui.showClosed ? T(` (${closed} closed)`, `（${closed} 个已关闭）`) : ""}${T(".", "。")}
               <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ ${T("New task", "新建任务")}</button></div>`;
@@ -1161,12 +1176,12 @@ function renderToday() {
   const f = focusState();
   // Active first: tasks with a live session lead, most recently active first; the rest keep your
   // order. Off: your order throughout, and the cards can be dragged into it.
-  const mine = focusIds().map(taskById).filter(Boolean);
+  const mine = focusIds().filter((id) => id !== secId()).map(taskById).filter(Boolean);
   const picked = ui.activeFirst
     ? mine.slice().sort((a, b) => lastActive(b).localeCompare(lastActive(a)) || mine.indexOf(a) - mine.indexOf(b))
     : mine;
   const shown = picked.filter((t) => taskMatches(t));
-  const pickable = tasks().filter((t) => isOpen(t) && !focusIds().includes(t.id));
+  const pickable = listed().filter((t) => isOpen(t) && !focusIds().includes(t.id));
   const draftNew = ui.newTask ? `<div class="card">${renderNewTask()}</div>` : "";
   return `<div class="today-h vhead"><h1>Focus</h1><span class="meta">${T(`${picked.length} task${picked.length === 1 ? "" : "s"}`, `${picked.length} 个任务`)}</span>
       <label class="toggle af" title="${T("Tasks with a live session come first, most recently active first. Off: your own order — drag a card by ⠿ to change it. The same setting as in All.", "有 session 在跑的任务排最前，最近有动静的在前。不勾：按你自己的顺序——按住 ⠿ 拖动卡片调整。和 All 里是同一个设置。")}"><input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}> ${T("active first", "活跃的在前")}</label>
@@ -1773,7 +1788,7 @@ function renderSessions(items = ui.sessions, plain = false) {
   return (items === ui.sessions ? strayBar() : "") + renderSessionList(items, plain);
 }
 function renderSessionList(items, plain) {
-  const openTasks = tasks().filter(isOpen);
+  const openTasks = listed().filter(isOpen);
   const card = (s) => {
     const t = s.task && taskById(s.task);
     const sid = s.sessionId;
@@ -1952,7 +1967,7 @@ function renderSessionSettings() {
 function renderProjects() {
   const ps = projects();
   const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
-  const unassigned = tasks().filter((t) => !t.project).length;
+  const unassigned = listed().filter((t) => !t.project).length;
   const rows = ps.map((pr) => {
     const n = tasks().filter((t) => t.project === pr.name).length;
     if (ui.projRemove[pr.name]) {
@@ -2025,7 +2040,7 @@ function renderOnboarding() {
   </div>`;
 }
 
-function categoryCount(name) { return tasks().filter((t) => (t.category || "") === name).length; }
+function categoryCount(name) { return listed().filter((t) => (t.category || "") === name).length; }
 
 function renderCategories() {
   const cats = categories();
@@ -2113,7 +2128,10 @@ async function refreshPeek(first) {
     try { m.sec = ui.secretary = await apiObj("secretary"); } catch (e) { return toast(String(e.message || e), true); }
     if (ui.modal !== m) return;
     if (m.sec.sessionId && m.sec.sessionId !== m.sid) m.sid = m.sec.sessionId;
-    const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.contextPct]);
+    // Its card's state and its open asks too: answering one here (or in Needs you) redraws it.
+    const card = taskById(secId());
+    const secSig = JSON.stringify([m.sid, m.sec.running, m.sec.waking, m.sec.last, m.sec.contextPct, m.sec.state,
+      card ? pendingAsks(card).map((a) => [a.id, isLater(a)]) : null]);
     secChanged = secSig !== m.secSig;
     m.secSig = secSig;
   }
@@ -2130,7 +2148,7 @@ async function refreshPeek(first) {
   }
   if (m.starting && Date.now() - m.startedAt > 120000) { m.starting = false; changed = true; }
   if (msgs && !Array.isArray(msgs)) {          // --meta form: also says who the session is
-    if (!m.live) { m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
+    if (!m.live) { if (!m.secretary) m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
                    m.project = m.project || (msgs.cwd || "").split("/").pop(); }
     m.found = msgs.found;
     act = { items: msgs.items || null, turn: msgs.turn || null, todos: msgs.todos || null };
@@ -2227,7 +2245,8 @@ function drawPeek(toBottom) {
   const box = $("#modal");
   // The reply box is rebuilt with the rest; keep the cursor in it.
   const active = document.activeElement;
-  const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
+  // (By its key: the secretary's window also has its asks' note boxes.)
+  const typing = active && box.contains(active) && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd, active.dataset.key] : null;
   const body = box.querySelector(".peek-body");
   const atBottom = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 12;
   const prevTop = body ? body.scrollTop : 0;    // the rebuilt list starts at the top otherwise
@@ -2258,10 +2277,10 @@ function drawPeek(toBottom) {
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
       </div>`).join("");
-  const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + key);
+  const keepDraft = box.querySelector(".pfoot textarea") ? null : draft("msg:" + key);
   const chip = m.secretary ? (m.sec && m.sec.running ? ` <span class="chip">${T("replying…", "回复中…")}</span>` : "")
     : m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
-  const sub = m.secretary ? T("its proposals wait in Needs you · click outside or Esc to close", "它的建议在 Needs you 里等你 · 点外面或按 Esc 关闭")
+  const sub = m.secretary ? `${secretaryMemory(m)} · ${T("click outside or Esc to close", "点外面或按 Esc 关闭")}`
     : `${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
@@ -2273,7 +2292,9 @@ function drawPeek(toBottom) {
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
+    ${m.secretary ? secretaryWatch(m) : ""}
     <div class="peek-body">${list}</div>
+    ${m.secretary ? secretaryAsks() : ""}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.secretary ? noSend : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
         placeholder="${prompt ? ON_PROMPT() : canSend ? (m.secretary ? T("Ask your secretary — e.g. how are T-072 and T-071 doing, and what is blocking them?", "问秘书——比如：T-072 和 T-071 怎么样了、卡点是什么？") : T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片")) : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
@@ -2282,7 +2303,10 @@ function drawPeek(toBottom) {
   </div>`;
   box.hidden = false;
   fitAllGrow(box);
-  if (typing) { const ta = box.querySelector("textarea"); if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); } }
+  if (typing) {
+    const ta = [...box.querySelectorAll("textarea")].find((x) => x.dataset.key === typing[2]);
+    if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); }
+  }
   slashPlace();
   const nb = box.querySelector(".peek-body");
   if (toBottom || atBottom) { nb.scrollTop = nb.scrollHeight; return; }
@@ -2346,6 +2370,31 @@ function secretaryLead(m) {
     return { cls: "wait", lead: `${last.status === "skipped" ? T("Last message skipped:", "上一条被跳过：") : T("Last reply didn't finish:", "上一次没回完：")} <span class="plabel">${esc(last.summary || last.status)}</span>` };
   }
   return { cls: "idle", lead: T("Ready", "待命") };
+}
+// Above the conversation: what it is keeping an eye on for you (its card's state, which its
+// hq-update writes).
+function secretaryWatch(m) {
+  const lines = (m.sec && m.sec.state) || [];
+  if (!lines.length) return "";
+  return `<div class="sec-watch"><span class="sec-watch-h">${T("Keeping an eye on", "它在替你盯的事")}</span>
+    ${lines.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
+}
+// Its memory files, each opening in your editor.
+function secretaryMemory(m) {
+  const st = m.sec || {};
+  const files = Object.keys(st.files || {}).filter((f) => st.files[f]);
+  if (!st.memory || !files.length) return T("Secretary", "秘书");
+  return `${T("memory:", "记忆：")} ${files.map((f) => `<button class="lnk" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(f.replace(/\.md$/, ""))}</button>`).join(" · ")}`;
+}
+// Its proposals, answered right here: the same asks as in Needs you, one answer each.
+function secretaryAsks() {
+  const t = taskById(secId());
+  if (!t) return "";
+  const asks = openAsks(t), later = laterAsks(t);
+  if (!asks.length && !later.length) return "";
+  return `<div class="sec-asks">
+    <div class="sec-asks-h">${T("It asks you", "它在问你")} <span class="meta">${asks.length}</span>${later.length ? `<span class="meta"> · ${T(`${later.length} for later, in Needs you`, `${later.length} 条稍后再答，在 Needs you 里`)}</span>` : ""}</div>
+    ${asks.map((a) => askCard(t, a, { peek: true })).join("")}</div>`;
 }
 function secretaryIntro() {
   return T(`Ask it where things stand: “How are T-072 and T-071 doing, and what is blocking them?”, “What is waiting on me?”, “What looks stuck?”. It looks things up on the board each time and marks what waits on you with ⚑.`,

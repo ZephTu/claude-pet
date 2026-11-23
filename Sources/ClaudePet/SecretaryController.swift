@@ -108,6 +108,14 @@ final class SecretaryController {
         answeredYes.remove(askID)
     }
 
+    /// One of its memory files (`<root>/secretary/*.md`): the board opens these for editing.
+    func isMemoryFile(_ path: String) -> Bool {
+        guard let memory = info["memory"] as? String, !memory.isEmpty else { return false }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        return url.pathExtension == "md"
+            && url.deletingLastPathComponent().path == URL(fileURLWithPath: memory).standardizedFileURL.path
+    }
+
     // MARK: - Internals
 
     /// A run is going, or was just launched and hasn't recorded its start yet.
