@@ -258,17 +258,21 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(["ask", "resolve", str("id"), str("resolution"),
                              "--via", "board", "--note=\(str("note"))"] + grant)
         case "grant":
-            // list / add / revoke a task's standing grants; revoke goes by #n, checked against the text shown.
+            // list / add / revoke the standing grants of a task, or of a project (`project`, kept in its
+            // PROJECT.md); revoke goes by #n, checked against the text shown.
             let index = (body["index"] as? Int).map(String.init) ?? str("index")
+            // Positionals first and the wording as --text=: argparse can't take `rest*` positionals
+            // after options, and wording starting with "-" must not read as one.
+            let project = str("project")
+            let who = project.isEmpty ? [str("task")] : []
+            let whose = project.isEmpty ? [] : ["--project=\(project)"]
             switch str("action") {
             case "add":
                 let extra = (str("at").isEmpty ? [] : ["--at=\(str("at"))"]) + (str("source").isEmpty ? [] : ["--source=\(str("source"))"])
-                // Positionals first and the wording as --text=: argparse can't take `rest*` positionals
-                // after options, and wording starting with "-" must not read as one.
-                return await hq(["grant", "add", str("task"), "--via=board", "--text=\(str("text"))"] + extra)
+                return await hq(["grant", "add"] + who + whose + ["--via=board", "--text=\(str("text"))"] + extra)
             case "revoke":
-                return await hq(["grant", "revoke", str("task")] + (index.isEmpty ? [] : [index]) + ["--via=board", "--text=\(str("text"))"])
-            default: return await hq(["grant", "list", str("task"), "--json"])
+                return await hq(["grant", "revoke"] + who + (index.isEmpty ? [] : [index]) + whose + ["--via=board", "--text=\(str("text"))"])
+            default: return await hq(["grant", "list"] + who + whose + ["--json"])
             }
         case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
         case "snooze":
@@ -404,8 +408,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (["path": url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path], nil)
         case "open":
             let path = str("path")
-            guard path.hasSuffix("/TASK.md"), FileManager.default.fileExists(atPath: path) else {
-                return (nil, L("not a task card", "不是任务卡"))
+            // A task card, or a project's PROJECT.md (the project panel's "Open PROJECT.md").
+            guard path.hasSuffix("/TASK.md") || path.hasSuffix("/PROJECT.md"), FileManager.default.fileExists(atPath: path) else {
+                return (nil, L("not a task card or project file", "不是任务卡或项目文件"))
             }
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
             return (["ok": true], nil)

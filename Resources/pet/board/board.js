@@ -84,6 +84,8 @@ const ui = {
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
+  // Finished projects (done / abandoned) sit folded at the bottom; these are the ones you unfolded.
+  openClosedProj: new Set(JSON.parse(pref("hq-open-closed-proj", "[]"))),
   // Tasks whose open @claude todos are unfolded (folded by default).
   claudeOpen: new Set(JSON.parse(pref("hq-claude-todos-open", "[]"))),
   // `hq status --focus` flags by task id ({kind, text, text_zh}), and when they were last read.
@@ -326,6 +328,7 @@ async function refresh(force) {
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
+  else if (ui.modal && ui.modal.type === "project") drawProjectPanel(true);
   loadFlags();
 }
 window.hqRefresh = refresh;
@@ -608,15 +611,18 @@ function render() {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
-  $("#groupby").innerHTML = ["project", "status"].map((g) =>
-    `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}">${g === "project" ? T("Project", "项目") : T("Status", "状态")}</button>`).join("");
+  if (!["project", "repo", "status"].includes(ui.groupBy)) ui.groupBy = "project";
+  const GROUP_LABEL = { project: T("Project", "项目"), repo: T("Repo", "仓库"), status: T("Status", "状态") };
+  $("#groupby").innerHTML = ["project", "repo", "status"].map((g) =>
+    `<button class="${ui.groupBy === g ? "on" : ""}" data-action="group-by" data-g="${g}"${g === "repo" ? ` title="${T("Group by the git repo of each task's workdir (a worktree counts as its repo)", "按任务工作目录所在的 git 仓库分组（worktree 算它的主仓库）")}"` : ""}>${GROUP_LABEL[g]}</button>`).join("");
   $("#activefirst").hidden = ui.groupBy !== "project";
   $("#sgroupby").innerHTML = ["list", "project"].map((g) =>
     `<button class="${ui.sgroupBy === g ? "on" : ""}" data-action="sgroup-by" data-g="${g}">${g === "list" ? T("List", "列表") : T("Project", "项目")}</button>`).join("");
   // One button: by project it folds / unfolds every group; by status it closes open task cards.
-  const anyOpen = ui.groupBy === "project" ? projectGroupKeys().some((k) => !ui.collapsed.has(k)) : ui.expanded.size > 0;
+  const anyOpen = ui.groupBy !== "status" ? anyGroupOpen() : ui.expanded.size > 0;
   $("#foldall").textContent = anyOpen ? T("Collapse all", "全部收起") : T("Expand all", "全部展开");
-  $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project group", "收起或展开所有项目组") : T("Close every open task", "收起所有展开的任务");
+  $("#foldall").title = ui.groupBy === "project" ? T("Fold or unfold every project group", "收起或展开所有项目组")
+    : ui.groupBy === "repo" ? T("Fold or unfold every repo group", "收起或展开所有仓库组") : T("Close every open task", "收起所有展开的任务");
   $("#foldall").hidden = ui.groupBy === "status" && !anyOpen;
   $("#activefirst input").checked = ui.activeFirst;
   renderSettings();
@@ -942,7 +948,50 @@ function renderWaitingUnused() {
 // Every group the Tasks column can show by project — listed projects (even empty ones), any
 // project named only on a card, and "No project".
 function projectGroupKeys() {
-  return [...new Set([...projectNames(), ...tasks().map((t) => t.project || "(none)")])];
+  return [...new Set([...projectNames(), ...tasks().map((t) => t.project || "(none)")])]
+    .filter((k) => !projectClosed(projectByName(k)));
+}
+// The fold keys of the groups the Tasks column shows now (repo groups are "repo:<name>").
+function groupKeys() {
+  if (ui.groupBy === "repo") return [...new Set(tasks().map((t) => "repo:" + (t.repo || "")))];
+  return projectGroupKeys();
+}
+const projectByName = (name) => projects().find((p) => p.name === name) || null;
+const projectClosed = (pr) => Boolean(pr && pr.defined && ["done", "abandoned"].includes(pr.status));
+// Days from today to a YYYY-MM-DD date (negative: past), or null.
+function daysUntil(day) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ""));
+  if (!m) return null;
+  const now = new Date();
+  return Math.round((new Date(+m[1], m[2] - 1, +m[3]) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+}
+function dueText(day) {
+  const n = daysUntil(day);
+  if (n === null) return "";
+  const short = String(day).slice(5);
+  const left = n > 0 ? T(`${n}d left`, `还剩 ${n} 天`) : n === 0 ? T("today", "今天") : T(`${-n}d late`, `过期 ${-n} 天`);
+  return `<span class="pdue ${n < 0 ? "late" : n <= 7 ? "soon" : ""}" title="${T("Due", "截止")} ${esc(day)}">${T("due", "截止")} ${esc(short)} · ${left}</span>`;
+}
+const PKIND_LABEL = { goal: T("goal", "目标"), duty: T("duty", "职责") };
+const PSTATUS_LABEL = { active: T("active", "进行中"), paused: T("paused", "暂停"), done: T("done", "已完成"), abandoned: T("abandoned", "已放弃") };
+// What a project heading says after its name: a goal's progress and deadline, a duty's load.
+function projectSummary(pr) {
+  if (!pr || !pr.defined) return "";
+  const st = pr.stats || {};
+  const bits = [];
+  if (pr.kind) bits.push(`<span class="ptag ${esc(pr.kind)}">${PKIND_LABEL[pr.kind]}</span>`);
+  if (pr.status && pr.status !== "active") bits.push(`<span class="ptag st">${PSTATUS_LABEL[pr.status] || esc(pr.status)}</span>`);
+  if (pr.kind === "goal") {
+    const total = (st.open || 0) + (st.done || 0);
+    if (pr.due && !projectClosed(pr)) bits.push(dueText(pr.due));
+    if (total) {
+      const pct = Math.round(100 * (st.done || 0) / total);
+      bits.push(`<span class="pprog" title="${T(`${st.done} of ${total} tasks done`, `${total} 个任务完成了 ${st.done} 个`)}"><span class="bar"><span style="width:${pct}%"></span></span>${st.done}/${total}</span>`);
+    }
+  } else if (pr.kind === "duty") {
+    bits.push(`<span class="pload">${T(`${st.open || 0} open`, `${st.open || 0} 进行中`)}${st.done_7d ? T(` · ${st.done_7d} done this week`, ` · 本周完成 ${st.done_7d}`) : ""}</span>`);
+  }
+  return bits.join("");
 }
 
 function projectActivity(name) {
@@ -981,21 +1030,32 @@ function renderTasks() {
     // Active first: projects with a live session float up, newest activity first; the rest keep
     // the dragged order (Array.sort is stable).
     if (ui.activeFirst) order = order.slice().sort((a, b) => (activity[b] || 0) - (activity[a] || 0));
-    for (const name of [...order, ""]) {
+    // Finished projects go last, folded, the way finished tasks do.
+    const finished = order.filter((n) => projectClosed(projectByName(n)));
+    order = order.filter((n) => !finished.includes(n));
+    for (const name of [...order, "", ...finished]) {
       const group = visible.filter((t) => (t.project || "") === name)
         .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
       // Every listed project shows, even with nothing open — unless a search is narrowing things.
       if (!group.length && (!name || !names.includes(name) || f)) continue;
       const key = name || "(none)";
-      const shut = ui.collapsed.has(key);
+      const pr = projectByName(name);
+      const done = finished.includes(name);
+      const shut = done ? !ui.openClosedProj.has(key) : ui.collapsed.has(key);
       const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
       const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
-      const movable = Boolean(name) && names.includes(name);
-      html += `<div class="group-title proj" data-action="collapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
+      const movable = Boolean(name) && names.includes(name) && !done;
+      const onMe = pr && pr.stats ? pr.stats.on_me || 0 : 0;
+      const label = pr && pr.title && pr.title !== name ? pr.title : name;
+      html += `<div class="group-title proj ${done ? "pdone" : ""}" data-action="collapse" data-key="${esc(key)}" data-closed="${done ? 1 : ""}" title="${T(`Click to ${shut ? "expand" : "collapse"}${movable ? " · drag to reorder" : ""}`, `点击${shut ? "展开" : "收起"}${movable ? " · 拖动调整顺序" : ""}`)}"
           ${movable ? `draggable="true" data-drag-project="${esc(name)}"` : ""}>
-        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(name || T("No project", "无项目"))} <span class="meta">${group.length}</span>
+        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${name
+          ? `<span class="pname" data-action="project-panel" data-p="${esc(name)}" title="${T("Open the project — goal, brief, grants", "打开项目——目标、简报、授权")}${label !== name ? ` (${esc(name)})` : ""}">${esc(label)}</span>`
+          : esc(T("No project", "无项目"))} <span class="meta">${group.length}</span>
+        ${projectSummary(pr)}
         ${activity[name] ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● ${ago(new Date(activity[name]).toISOString())}</span>` : ""}
-        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}
+        ${onMe ? `<span class="badge onme" title="${T("Waiting on you: open asks and your todos in this project", "等你的：这个项目里未回应的问题和你的待办")}">${T(`${onMe} on you`, `${onMe} 等你`)}</span>`
+          : asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}
         ${name && !names.includes(name) ? `<span class="meta">${T("not in list", "不在列表里")}</span>` : ""}
         ${movable ? `<span class="grip" aria-hidden="true">⠿</span>` : ""}</div>`;
       if (!shut) {
@@ -1004,6 +1064,26 @@ function renderTasks() {
           : `<div class="empty proj-empty">${T("No open tasks", "没有进行中的任务")}${closed && !ui.showClosed ? T(` (${closed} closed)`, `（${closed} 个已关闭）`) : ""}${T(".", "。")}
               <button class="btn small ghost" data-action="new-in-project" data-p="${esc(name)}">+ ${T("New task", "新建任务")}</button></div>`;
       }
+    }
+    return html;
+  }
+  if (ui.groupBy === "repo") {
+    const repos = [...new Set(visible.map((t) => t.repo || ""))];
+    const openIn = (r) => visible.filter((t) => (t.repo || "") === r && isOpen(t)).length;
+    repos.sort((a, b) => (!a) - (!b) || openIn(b) - openIn(a) || a.localeCompare(b));
+    for (const r of repos) {
+      const group = visible.filter((t) => (t.repo || "") === r)
+        .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
+      const key = "repo:" + r;
+      const shut = ui.collapsed.has(key);
+      const asks = group.reduce((n, t) => n + openAsks(t).length, 0);
+      const live = group.reduce((n, t) => n + liveFor(t.id).length, 0);
+      const projs = new Set(group.map((t) => t.project || "")).size;
+      html += `<div class="group-title proj repo" data-action="collapse" data-key="${esc(key)}" title="${T(`Click to ${shut ? "expand" : "collapse"}`, `点击${shut ? "展开" : "收起"}`)}">
+        <span class="caret ${shut ? "" : "open"}"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>${esc(r || T("No workdir", "没有工作目录"))} <span class="meta">${group.length}</span>
+        ${projs > 1 ? `<span class="meta" title="${T("Projects with tasks in this repo", "在这个仓库里有任务的项目数")}">${T(`${projs} projects`, `${projs} 个项目`)}</span>` : ""}
+        ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}${live ? `<span class="badge live" title="${T("live sessions", "正在运行的 session")}">${live}</span>` : ""}</div>`;
+      if (!shut) html += group.map((t) => renderTask(t, "repo")).join("");
     }
     return html;
   }
@@ -1035,8 +1115,8 @@ function renderTask(t, mode) {
             title="${focusIds().includes(t.id) ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${focusIds().includes(t.id) ? "★" : "☆"}</button>` : ""}
         ${asks ? `<span class="badge" title="${T("open asks", "未回应的问题")}">${asks}</span>` : ""}
         ${liveTag(liveFor(t.id))}
-        ${mode === "project" ? (t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : "")
-          : t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
+        ${mode !== "status" && t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}
+        ${mode !== "project" && t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
         <span class="age-d" title="${T("Last updated", "最后更新")} ${esc(t.updated || "")}">${t.age_days ?? "?"}${T("d", "天")}</span>
       </div>
       ${open ? "" : sub}
@@ -2277,6 +2357,67 @@ document.addEventListener("mousedown", (ev) => {
   if (ui.settings && ev.target === $("#settings")) closeSettings();
 });
 
+// ------------------------------------------------------------------ project panel
+// What a project is (PROJECT.md: goal, done-when, brief, grants) and how it stands. Read-only:
+// the content is edited in PROJECT.md; only a grant can be revoked here.
+function openProjectPanel(name) {
+  ui.modal = { type: "project", name };
+  drawProjectPanel();
+}
+// onlyIfChanged: the timed refresh redraws it only when the project or its tasks changed, so the
+// panel doesn't jump back to the top while you read.
+function drawProjectPanel(onlyIfChanged) {
+  const m = ui.modal;
+  const box = $("#modal");
+  const pr = projectByName(m.name) || { name: m.name, defined: false, paths: [], stats: null, grants: [] };
+  const mine = tasks().filter((t) => (t.project || "") === m.name);
+  const sig = JSON.stringify([LANG, pr, mine.map((t) => [t.id, t.title, t.status])]);
+  if (onlyIfChanged && sig === m.sig) return;
+  m.sig = sig;
+  const open = mine.filter(isOpen).sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || compareTasks(a, b));
+  const st = pr.stats || { open: open.length, done: 0, abandoned: 0, done_7d: 0, on_me: 0 };
+  const sec = (title, body) => `<section class="ctx-sec"><h4>${title}</h4>${body}</section>`;
+  const text = (v, none) => v ? `<div class="md">${markdown(v)}</div>` : `<div class="empty">${none}</div>`;
+  const refs = (vals) => vals.map((v) => { const r = resolveRef(v); return r.url
+    ? `<a href="#" class="ref chip" data-action="link" data-url="${esc(r.url)}" title="${esc(r.url)}">${esc(v)}</a>` : `<span class="chip">${esc(v)}</span>`; }).join(" ");
+  const facts = [
+    pr.kind ? `<span class="ptag ${esc(pr.kind)}">${PKIND_LABEL[pr.kind]}</span>` : "",
+    pr.defined ? `<span class="ptag st">${PSTATUS_LABEL[pr.status] || esc(pr.status)}</span>` : "",
+    pr.due && !projectClosed(pr) ? dueText(pr.due) : "",
+  ].filter(Boolean).join("");
+  const counts = pr.kind === "duty"
+    ? T(`${st.open} open · ${st.done_7d} done in the last 7 days · ${st.done} done in all`, `${st.open} 进行中 · 最近 7 天完成 ${st.done_7d} · 共完成 ${st.done}`)
+    : T(`${st.done} of ${st.open + st.done} done · ${st.open} open`, `${st.open + st.done} 个完成了 ${st.done} 个 · ${st.open} 进行中`);
+  box.innerHTML = `<div class="panel ppanel" role="dialog" aria-label="${T("Project", "项目")}">
+    <div class="phead">
+      <div><div class="meta">${T("Project", "项目")} · ${esc(pr.name)}</div>
+        <div class="stitle ctx-title">${esc(pr.title || pr.name)}</div>
+        <div class="pfacts">${facts}${st.on_me ? `<span class="badge onme">${T(`${st.on_me} on you`, `${st.on_me} 等你`)}</span>` : ""}</div></div>
+      <span style="flex:1"></span>
+      ${pr.defined && pr.file ? `<button class="btn small" data-action="open" data-path="${esc(pr.file)}" title="${esc(pr.file)}">${T("Open PROJECT.md", "打开 PROJECT.md")}</button>` : ""}
+      <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
+    </div>
+    <div class="peek-body">
+      ${!pr.defined ? `<section class="ctx-sec"><div class="empty">${T(
+        `This project has no PROJECT.md yet, so no kind, goal or brief. Make one from a shell: <code>hq project set ${esc(pr.name)} kind=goal</code> (or <code>kind=duty</code>), then edit the file.`,
+        `这个项目还没有 PROJECT.md，所以没有类型、目标和简报。在终端里建一份：<code>hq project set ${esc(pr.name)} kind=goal</code>（或 <code>kind=duty</code>），再编辑这个文件。`)}</div></section>` : ""}
+      ${pr.defined ? sec(pr.kind === "duty" ? T("Scope", "职责范围") : T("Goal", "目标"), text(pr.goal, T("Not written yet.", "还没写。"))) : ""}
+      ${pr.defined ? sec(pr.kind === "duty" ? T("Running well when", "健康标准") : T("Done when", "完成标准"), text(pr.done_when, T("Not written yet.", "还没写。"))) : ""}
+      ${pr.defined ? sec(T("Brief — given to every session on its tasks", "简报——交给它每个任务的 session"), text(pr.brief, T("Empty: sessions are told nothing about this project.", "空的：session 不会收到这个项目的任何说明。"))) : ""}
+      ${pr.defined ? sec(T("Project grants — hold for every task in it", "项目授权——对它的每个任务都有效"), (pr.grants || []).length
+        ? `<div class="grants">${pr.grants.map((g) => `<div class="grant"><span class="t">${esc(g.text)}</span>
+            <span class="meta" title="${esc(g.at || "")}">${g.from ? esc(g.from) + " · " : ""}${g.at ? ago(g.at) : ""}</span>
+            <button class="icon x" title="${T("Revoke — sessions ask again before this kind of step", "撤销——之后 session 遇到这类事情会重新问")}" data-confirm="${T("Revoke?", "撤销？")}" data-action="pgrant-revoke" data-p="${esc(pr.name)}" data-i="${g.i}" data-text="${esc(g.text)}">✕</button></div>`).join("")}</div>`
+        : `<div class="empty">${T("None. Add them to the Grants section of PROJECT.md, or <code>hq grant add --project NAME \"…\"</code>.", "没有。写在 PROJECT.md 的「授权」一节，或者 <code>hq grant add --project 名字 \"…\"</code>。")}</div>`) : ""}
+      ${(pr.jira || []).length || (pr.fixVersions || []).length ? sec("Jira", `${(pr.jira || []).length ? `<div>${T("Epics: ", "Epic：")}${refs(pr.jira)}</div>` : ""}${(pr.fixVersions || []).length ? `<div class="meta" style="margin-top:4px">${T("Fix versions: ", "Fix version：")}${pr.fixVersions.map(esc).join(", ")}</div>` : ""}`) : ""}
+      ${sec(T("Tasks", "任务"), `<div class="meta">${counts}</div>
+        ${open.map((t) => `<div class="row ctx-s"><span class="chip link" data-action="ctx-goto" data-task="${esc(t.id)}">${esc(t.id)}</span><span>${esc(t.title)}</span>${t.status !== "active" ? `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>` : ""}</div>`).join("")}`)}
+      ${(pr.paths || []).length ? sec(T("Default directories", "默认目录"), `<div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>${pr.paths.map((x) => `<div><code>${esc(x)}</code></div>`).join("")}`) : ""}
+    </div>
+  </div>`;
+  box.hidden = false;
+}
+
 // ------------------------------------------------------------------ context window
 // What an ask / todo / "waiting on you" item is about, and where to go next:
 // the reply that raised it, the task card, and the sessions that worked on it.
@@ -2477,6 +2618,11 @@ function markdown(text, scope = "") {
 
 // Bring a task into view in the middle column, whatever hides it: closed status, a search
 // filter that does not match, or a folded project group.
+// Whether any group (by project or repo) is unfolded, finished projects opened by hand included.
+function anyGroupOpen() {
+  return groupKeys().some((k) => !ui.collapsed.has(k)) || (ui.groupBy === "project" && [...ui.openClosedProj].some((n) => projectClosed(projectByName(n))));
+}
+
 function revealTask(id) {
   const t = taskById(id);
   if (!t) return toast(T(`${id} not found`, `找不到 ${id}`), true);
@@ -2492,8 +2638,12 @@ function revealTask(id) {
   if (f && !`${t.id} ${t.title} ${list(t.refs).join(" ")} ${t.category} ${t.project || ""}`.toLowerCase().includes(f)) {
     ui.filter = $("#search").value = "";
   }
-  if (ui.groupBy === "project") {
-    ui.collapsed.delete(t.project || "(none)");
+  // Unfold the group it is in: a finished project's group is folded unless opened by hand.
+  if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
+    ui.openClosedProj.add(t.project);
+    savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
+  } else if (ui.groupBy !== "status") {
+    ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
     savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
   }
   ui.expanded.add(id);
@@ -2532,10 +2682,15 @@ function fitAllGrow(root = document) { root.querySelectorAll("textarea.grow").fo
 
 // The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
 function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
+// Also disarms: a button in the modal isn't redrawn by render(), so it would stay armed.
 function paintArmed() {
-  if (!ui.armed) return;
   for (const b of document.querySelectorAll("[data-confirm]")) {
-    if (confirmKey(b.dataset) === ui.armed) { b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+    if (ui.armed && confirmKey(b.dataset) === ui.armed) {
+      if (!b.classList.contains("armed")) { b.dataset.unarmed = b.innerHTML; b.classList.add("armed"); b.textContent = b.dataset.confirm; }
+    } else if (b.classList.contains("armed")) {
+      b.classList.remove("armed");
+      if (b.dataset.unarmed !== undefined) b.innerHTML = b.dataset.unarmed;
+    }
   }
 }
 
@@ -3061,11 +3216,14 @@ document.addEventListener("click", async (ev) => {
       savePref("hq-scollapsed", JSON.stringify([...ui.scollapsed]));
       return render();
     case "fold-all": {
-      if (ui.groupBy === "project") {
-        const keys = projectGroupKeys();
-        const anyOpen = keys.some((k) => !ui.collapsed.has(k));
-        ui.collapsed = new Set(anyOpen ? keys : []);
-        if (anyOpen) ui.expanded.clear();
+      if (ui.groupBy !== "status") {
+        const anyOpen = anyGroupOpen();
+        ui.collapsed = new Set(anyOpen ? groupKeys() : []);
+        if (anyOpen) {
+          ui.expanded.clear();
+          ui.openClosedProj.clear();
+          savePref("hq-open-closed-proj", "[]");
+        }
         savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       } else {
         ui.expanded.clear();
@@ -3074,9 +3232,26 @@ document.addEventListener("click", async (ev) => {
     }
     case "group-by": ui.groupBy = d.g; savePref("hq-groupby", d.g); return render();
     case "collapse":
+      if (d.closed) {
+        ui.openClosedProj.has(d.key) ? ui.openClosedProj.delete(d.key) : ui.openClosedProj.add(d.key);
+        savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
+        return render();
+      }
       ui.collapsed.has(d.key) ? ui.collapsed.delete(d.key) : ui.collapsed.add(d.key);
       savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
       return render();
+    case "project-panel": return openProjectPanel(d.p);
+    case "pgrant-revoke": {
+      try {
+        const g = JSON.parse(await api("grant", { action: "revoke", project: d.p, index: d.i, text: d.text }) || "{}");
+        toast(T("Project grant revoked — sessions on its tasks ask again from their next turn", "项目授权已撤销——它的任务的 session 从下一轮起会重新问"), false, async () => {
+          try { await api("grant", { action: "add", project: d.p, text: g.text || d.text, at: g.at || "", source: g.from || "" }); toast(T("Grant restored", "授权已恢复")); }
+          catch (e) { toast(String(e.message || e), true); }
+          await refresh();
+        });
+      } catch (e) { toast(String(e.message || e), true); }
+      return refresh();
+    }
     case "open-settings": ui.settings = ui.settings || "projects"; return render();
     case "settings-tab": ui.settings = d.tab; return render();
     case "close-settings": closeSettings(); return;

@@ -125,10 +125,13 @@
 </ul>
 <h2>Tasks（All 的左列）</h2>
 <ul>
-<li>标题旁的 <b>Project | Status</b> 切换分组方式（会记住）：
-  <ul><li><b>Project</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"没有进行中的任务"和 <b>+ 新建任务</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；"无项目"固定在最后）；勾选 <b>活跃的在前</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、未回应问题数（黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>无项目</b>。</li>
-  <li><b>Status</b>：按 Waiting on you / Blocked / Active 分组，每行带项目标签。</li></ul></li>
-<li><b>Collapse all / Expand all</b>：按项目分组时一键收起或展开所有项目组；按状态分组时一键收起所有点开的任务。</li>
+<li>标题旁的 <b>项目 | 仓库 | 状态</b> 切换分组方式（会记住）：
+  <ul><li><b>项目</b>（默认）：按项目分组，所有项目都会显示（还没有任务的项目显示"没有进行中的任务"和 <b>+ 新建任务</b>，直接在该项目下新建），点整条组标题折叠或展开，<b>拖动组标题调整项目顺序</b>（在任务栏任意位置松手都行，以最近的组标题为准；拖动时各组临时只显示标题；已完成 / 已放弃的项目不能拖，"无项目"排在进行中的项目之后）；勾选 <b>活跃的在前</b>（默认勾上）时，有运行中 session 的项目（绑定到它的任务，或在它的目录里干活）排在最前，按最近活动时间倒序，组名旁显示绿点和时间，其余按你拖出的顺序；组名旁显示任务数、"N 等你"（这个项目里未回应的问题加你的待办，黄）和运行中的 session 数（绿）；组内先按状态（等你 → 阻塞 → 进行中），每行带状态标签。没有项目的任务归在 <b>无项目</b>。
+    <br>有 PROJECT.md 的项目，组标题显示 <b>title</b>（显示名）和类型标签 <b>目标</b> / <b>职责</b>，暂停的再加一个 <b>暂停</b>：<b>目标</b>后面是截止日期和剩几天（7 天内变黄，过期标红写"过期 N 天"）以及进度条"完成数 / 总数"（已放弃的不算）；<b>职责</b>后面是"N 进行中 · 本周完成 M"（最近 7 天完成的，职责的总数只会一直涨，所以不显示）。状态是已完成 / 已放弃的项目排在"无项目"之后、变灰、默认收起，点开会记住。
+    <br><b>点项目名</b>打开项目面板（只读）：显示名、类型、状态、截止日期、目标（职责写"职责范围"）、完成标准（职责写"健康标准"）、简报、项目授权（每条可 ✕ 撤销，提示里能撤销这次撤销）、Jira epic 和 fix version、它进行中的任务（点编号跳到那个任务，所在的组会自动展开）、默认目录；右上角 <b>打开 PROJECT.md</b> 用默认编辑器打开文件。内容要在 PROJECT.md 里改。还没有 PROJECT.md 的项目，面板里提示用 <code>hq project set 名字 kind=goal</code>（或 <code>kind=duty</code>）建一份。</li>
+  <li><b>仓库</b>：按任务第一个工作目录所在的 git 仓库分组（worktree 算回它的主仓库，比如 <code>claude-pet-T079</code> 算 <code>claude-pet</code>；不是 git 仓库就用目录名），进行中任务多的仓库在前，没有工作目录的在最后。组名旁显示任务数、仓库里有几个项目的任务（不止一个时才显示）、未回应问题数和运行中的 session 数；组内先按状态，每行带项目标签。一个仓库可以有好几个项目的任务（比如 claude-pet 里既有 claude-pet 也有 hq-v2）。</li>
+  <li><b>状态</b>：按 等你处理 / 阻塞中 / 进行中 分组，每行带项目标签。</li></ul></li>
+<li><b>全部收起 / 全部展开</b>：按项目或仓库分组时一键收起或展开所有组；按状态分组时一键收起所有点开的任务。</li>
 <li>勾 <b>show closed</b> 显示已完成和已放弃。</li>
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
@@ -470,10 +473,13 @@ next: "fix 分支跑 Jenkins 并提 PR"
 </ul>
 <h2>Tasks (All, left)</h2>
 <ul>
-<li><b>Project | Status</b> next to the title switches the grouping (remembered):
-  <ul><li><b>Project</b> (default): one group per project — every project shows, even one with no open tasks (it offers <b>+ New task</b> right there) — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; "No project" stays last); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, open asks (amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.</li>
+<li><b>Project | Repo | Status</b> next to the title switches the grouping (remembered):
+  <ul><li><b>Project</b> (default): one group per project — every project shows, even one with no open tasks (it offers <b>+ New task</b> right there) — click the group bar to fold it, <b>drag it to reorder projects</b> (let go anywhere in the column — the nearest header decides; groups fold to their headers while you drag; done or abandoned projects can't be dragged, and "No project" comes after the open ones); with <b>active first</b> ticked (the default), projects with a live session — bound to one of their tasks, or working in their directory — come first, most recent activity first, with a green dot and the time; the rest keep your dragged order; it shows task count, "N on you" (open asks plus your todos in the project, amber) and live sessions (green); inside, tasks go by status (waiting → blocked → active) with a status tag. Tasks without a project are under <b>No project</b>.
+    <br>A project with a PROJECT.md shows its <b>title</b> and a <b>goal</b> / <b>duty</b> tag, plus <b>paused</b> when it is: a <b>goal</b> then shows its deadline and the days left (amber within 7 days, red and "N d late" once past) and a progress bar, done / total (abandoned tasks don't count); a <b>duty</b> shows "N open · M done this week" (the last 7 days — a duty's total only grows, so it isn't shown). A done or abandoned project goes after "No project", dimmed and folded; unfolding it is remembered.
+    <br><b>Click a project's name</b> for its panel (read-only): title, kind, status, deadline, goal (a duty: its scope), done-when (a duty: what running well looks like), brief, project grants (✕ revokes one; the toast can undo it), Jira epics and fix versions, its open tasks (click an id to go to it — its group unfolds) and default directories; <b>Open PROJECT.md</b> at the top right opens the file in your editor. The content is edited in PROJECT.md. A project with no PROJECT.md yet says to make one with <code>hq project set NAME kind=goal</code> (or <code>kind=duty</code>).</li>
+  <li><b>Repo</b>: one group per git repo of the task's first workdir (a worktree counts as its main repo — <code>claude-pet-T079</code> is <code>claude-pet</code>; a folder outside git goes by its name), repos with more open tasks first, tasks with no workdir last. It shows the task count, how many projects have tasks there (when more than one), open asks and live sessions; inside, tasks go by status, each row tagged with its project. One repo can hold tasks of several projects (claude-pet holds both claude-pet and hq-v2).</li>
   <li><b>Status</b>: Waiting on you / Blocked / Active groups, each row tagged with its project.</li></ul></li>
-<li><b>Collapse all / Expand all</b>: by project it folds or unfolds every group; by status it closes every open task.</li>
+<li><b>Collapse all / Expand all</b>: by project or repo it folds or unfolds every group; by status it closes every open task.</li>
 <li>Tick <b>show closed</b> for done and abandoned.</li>
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
