@@ -138,6 +138,7 @@
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
 <li><b>状态 = 任务行左边那根竖条的颜色，也是任务编号的颜色</b>（看板上和小猫列表里都一样）：<span style="color:var(--amber)">橙 = 等你处理</span>、<span style="color:var(--red)">珊瑚红 = 阻塞</span>、<span style="color:var(--teal)">绿 = 进行中</span>、<span style="color:var(--blue)">蓝 = 已完成</span>、<span style="color:var(--faint);text-decoration:line-through">灰 = 已放弃</span>；悬停显示状态名。</li>
+<li><b>状态会跟着问题自动变</b>（只在 进行中 和 等你处理 之间）：session 提了新问题、这一轮又没写 status 时，进行中的任务自动变成 等你处理（用 Undo 撤回一个回答、或撤回勾掉的 <code>@me</code> 待办也一样）；等你把最后一个问题回应掉（看板、<code>hq ask resolve</code> 或 session 的 <code>hq-resolved</code>），或把最后一条 <code>@me</code> 待办勾掉 / 不做（别人的待办不算），而且没有别的未回应问题（推到 Later 的也算未回应）和未完成的 <code>@me</code> 待办时，等你处理 自动变回 进行中。session 在同一轮回复里自己写了 status（并且写进去了）的，以它写的为准；阻塞、已完成、已放弃 从不自动改。每次自动改都会在卡片日志里记一行（带 <code>auto</code>）。</li>
 </ul>
 <p>点开一个任务：</p>
 <table>
@@ -504,6 +505,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
 <li><b>Status is the colour of the bar at a task row's left edge, and of its id</b> (on the board and in the cat's list alike): <span style="color:var(--amber)">amber = waiting on you</span>, <span style="color:var(--red)">coral = blocked</span>, <span style="color:var(--teal)">green = active</span>, <span style="color:var(--blue)">blue = done</span>, <span style="color:var(--faint);text-decoration:line-through">grey = abandoned</span>; hover for the name.</li>
+<li><b>Status follows the asks by itself</b> (between active and waiting on you only): when a session asks something new and writes no status in that reply, an active task becomes waiting on you (so does taking back an answer, or the tick of an <code>@me</code> todo, with Undo). When you answer the last ask (on the board, with <code>hq ask resolve</code>, or the session's <code>hq-resolved</code>) or tick off or drop the last <code>@me</code> todo (other people's todos don't count), and no other ask is open (one put off with Later still is) and no <code>@me</code> todo is left, a task waiting on you goes back to active. A status the session writes in the same reply (and that is applied) wins; blocked, done and abandoned are never changed automatically. Each automatic change leaves a line in the card's log (marked <code>auto</code>).</li>
 </ul>
 <p>Open a task:</p>
 <table>
