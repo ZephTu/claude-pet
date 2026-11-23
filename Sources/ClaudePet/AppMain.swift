@@ -92,6 +92,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     private var menu: PetMenu?
     private var completions: CompletionStore?
     private var hotKey: HotKey?
+    private var noteHotKey: HotKey?
+    private let quickNote = QuickNotePanel()
     private let git = GitCache()
     private let transcripts = TranscriptCache()
     /// sessionId → turns and context, from the last render.
@@ -199,6 +201,10 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         let hotKey = HotKey { [weak self] in self?.jumpToNextWaiting() }
         self.hotKey = hotKey
         if UserDefaults.standard.bool(forKey: Self.hotKeyKey) { hotKey.register() }
+        let noteHotKey = HotKey(keyCode: HotKey.noteKeyCode, name: HotKey.noteDisplayName) { [weak self] in self?.showQuickNote() }
+        self.noteHotKey = noteHotKey
+        if UserDefaults.standard.bool(forKey: Self.noteHotKeyKey) { noteHotKey.register() }
+        quickNote.onSubmit = { [weak self] text, images in self?.fileQuickNote(text, images: images) }
         bridge.onSnooze = { [weak self] id, point in self?.askSnooze(sessionID: id, at: point) }
         let completions = CompletionStore(petHome: petHome)
         completions.reload(now: Date(), force: true)
@@ -257,7 +263,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             onQuit: { NSApp.terminate(nil) },
             onShowBoard: { [weak self] in self?.showBoard() },
             onSkin: { [weak panel] id in panel?.setSkin(id) },
-            onLanguage: { [weak self] id in self?.setLanguage(id) }
+            onLanguage: { [weak self] id in self?.setLanguage(id) },
+            onQuickNote: { [weak self] in self?.showQuickNote() },
+            onNoteShortcutToggle: { [weak self] in self?.toggleNoteHotKey() }
         )
         panel.onRightClick = { [weak self, weak panel] point in
             guard let self, let view = panel?.contentView else { return }
@@ -270,6 +278,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                           launchesAtLogin: self.launchesAtLogin,
                           mutedCount: self.hiddenMarks.count,
                           shortcutOn: self.hotKey?.isRegistered ?? false,
+                          noteShortcutOn: self.noteHotKey?.isRegistered ?? false,
                           keepListOpenOn: self.keepListOpen,
                           problem: HealthCollector.quickProblem(petHome: self.petHome),
                           noticeHold: self.noticeHold, noticeCount: self.noticeCount,
@@ -1152,19 +1161,71 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
 
     private static let hotKeyKey = "globalShortcutEnabled"
 
-    private func toggleHotKey() {
+    private static let noteHotKeyKey = "quickNoteShortcutEnabled"
+
+    private func toggleHotKey() { toggle(hotKey, key: Self.hotKeyKey) }
+    private func toggleNoteHotKey() { toggle(noteHotKey, key: Self.noteHotKeyKey) }
+
+    private func toggle(_ hotKey: HotKey?, key: String) {
         guard let hotKey else { return }
         if hotKey.isRegistered {
             hotKey.unregister()
-            UserDefaults.standard.set(false, forKey: Self.hotKeyKey)
+            UserDefaults.standard.set(false, forKey: key)
             return
         }
         // Only remember it as on if it actually took: another app may already
         // own the chord, and a menu tick that lies is worse than no feature.
         let ok = hotKey.register()
-        UserDefaults.standard.set(ok, forKey: Self.hotKeyKey)
+        UserDefaults.standard.set(ok, forKey: key)
         if !ok {
-            bridge?.say(L("\(HotKey.displayName) is taken by another app", "\(HotKey.displayName) 已被别的应用占用"), hold: 5)
+            bridge?.say(L("\(hotKey.name) is taken by another app", "\(hotKey.name) 已被别的应用占用"), hold: 5)
+        }
+    }
+
+    // MARK: - Quick notes
+
+    /// The shortcut again while the box is up closes it.
+    private func showQuickNote() {
+        if quickNote.isVisible { quickNote.close() } else { quickNote.show() }
+    }
+
+    /// Files the note (`hq inbox add`), has it sorted (`hq inbox sort`, a few seconds), and says
+    /// where it went — or that it waits in Needs you, where it can be moved with a click.
+    private func fileQuickNote(_ text: String, images: [String]) {
+        Task { @MainActor [weak self] in
+            let added = await BoardBridge.noteAdd(text: text, images: images, via: "hotkey")
+            guard let id = Self.noteJSON(added.0)?["id"] as? String else {
+                self?.bridge?.say(L("Couldn't note that: \(added.1 ?? "?")", "没记下：\(added.1 ?? "?")"), hold: 6)
+                return
+            }
+            self?.bridge?.say(L("Noted — sorting…", "记下了，正在分拣…"), hold: 4)
+            let sorted = await BoardBridge.noteSort(id)
+            guard let note = Self.noteJSON(sorted.0) else {
+                self?.bridge?.say(L("Noted, but sorting failed — it's in Needs you", "记下了，但分拣出错——在 Needs you 里"), hold: 6)
+                return
+            }
+            if note["state"] as? String == "sorted", let dest = note["dest"] as? [String: Any] {
+                let label = Self.noteDestLabel(dest)
+                self?.bridge?.say(L("Filed: \(label)", "已放到：\(label)"), hold: 6, emphasis: label)
+            } else {
+                self?.bridge?.say(L("Not sure where that goes — it's waiting in Needs you", "没把握放哪——在 Needs you 里等你挑"), hold: 6)
+            }
+        }
+    }
+
+    private static func noteJSON(_ out: Any?) -> [String: Any]? {
+        guard let text = out as? String, let data = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// Where a note went, the way the board says it (board.js destLabel).
+    static func noteDestLabel(_ d: [String: Any]) -> String {
+        let task = d["task"] as? String ?? ""
+        switch d["kind"] as? String ?? "" {
+        case "task": return L("new task “\(d["title"] as? String ?? "")”", "新任务「\(d["title"] as? String ?? "")」")
+        case "todo": return "\(task) " + L("todo", "待办") + " @\(d["owner"] as? String ?? "me")"
+        case "note": return "\(task) " + L("log", "记录")
+        default: return L("your todo", "我的待办")
         }
     }
 

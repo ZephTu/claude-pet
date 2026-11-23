@@ -790,6 +790,18 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 .searchbox svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .searchbox #search { flex: 1; min-width: 0; width: auto; background: transparent; border: 0; padding: 0; color: var(--text); outline: none; }
 .searchbox:focus-within { box-shadow: inset 0 0 0 1px var(--faint); }
+/* Quick note: jot a line, Enter files it (hq inbox) */
+.capture { display: flex; align-items: center; gap: 7px; flex: 0 1 300px; min-width: 120px; padding: 0 10px; height: 30px;
+  border-radius: 8px; background: var(--panel-2); color: var(--faint); cursor: text; }
+.capture svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.capture #capture { flex: 1; min-width: 0; width: auto; background: transparent; border: 0; padding: 0; color: var(--text); outline: none; }
+.capture:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.capture.dropping { box-shadow: inset 0 0 0 1px var(--teal); }
+#capture-atts { display: flex; gap: 4px; flex: none; }
+#capture-atts:empty { display: none; }
+.att.mini { width: 26px; height: 20px; border-radius: 4px; }
+.att.mini .icon { opacity: 0; width: 100%; height: 100%; top: 0; right: 0; border-radius: 0; }
+.att.mini:hover .icon { opacity: 1; }
 .top-icon { width: 30px; height: 30px; color: var(--dim); }
 .top-icon svg { width: 16px; height: 16px; stroke-width: 1.5; }
 a.top-icon { display: grid; place-items: center; text-decoration: none; }
@@ -991,7 +1003,7 @@ main.single { grid-template-columns: 1fr; }
 .card.ask { border: 0; box-shadow: inset 3px 0 0 var(--amber); padding: 12px 14px; }
 .askgroup .card.ask.picked { border: 0; box-shadow: inset 3px 0 0 var(--teal); }
 .ask-text { font: 600 14.5px/1.5 var(--round); }
-#mytodos .group-title { margin-top: 26px; }
+#mytodos .group-title, #notes .group-title { margin-top: 26px; }
 .inbox-list { display: flex; flex-direction: column; }
 .todo.it { align-items: flex-start; padding: 9px 10px; margin: 0 -10px; }
 .todo.it .it-t { flex: 1; min-width: 0; }
@@ -1077,3 +1089,26 @@ main.single { grid-template-columns: 1fr; }
 .ppanel .md p:last-child { margin-bottom: 0; }
 .ppanel .ctx-s { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
 .ppanel code { font-size: 12px; }
+
+/* Needs you: quick notes, at the top */
+#notes .group-title .n.hot { background: var(--accent); color: var(--on-accent); border-radius: 9px; padding: 0 6px; font: 600 11.5px var(--round); }
+#notes .group-title .meta { color: var(--faint); font-weight: 500; margin-left: 4px; }
+#notes .notes { margin-bottom: 8px; }
+.qnote.it { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; margin: 0 -10px; border-radius: 8px; }
+.qnote.it:hover { background: var(--panel-2); }
+.qnote.it .it-t { flex: 1; min-width: 0; }
+.qnote.it .t { font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qnote.it.unsorted { box-shadow: inset 3px 0 0 var(--amber); background: var(--panel); margin: 2px -10px; }
+.qnote.it.dropped .t { color: var(--faint); text-decoration: line-through; }
+.qnote.it .src { margin-top: 2px; overflow-wrap: anywhere; }
+.qnote.it .src .by { color: var(--faint); }
+.qnote.it .src .bad { color: var(--red); }
+.qnote.it .sorting { color: var(--teal); }
+.qnote.it .age { border: 0; background: none; padding: 0; font: 600 12px var(--round); color: var(--faint); margin-top: 2px; flex: none; }
+.qnote.it .dests { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.chip.dest { font-size: 12px; padding: 2px 8px; color: var(--text); }
+.chip.dest.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--dim); }
+.chip.link.ghost { background: transparent; color: var(--dim); }
+.qnote-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.qnote-pick select { max-width: 320px; }
+.qnote-pick .spacer { flex: 1; }

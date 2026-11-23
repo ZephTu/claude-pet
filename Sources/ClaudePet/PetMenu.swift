@@ -10,6 +10,8 @@ import ClaudePetCore
 final class PetMenu: NSObject, NSMenuDelegate {
     private let onPauseToggle: () -> Void
     private let onShortcutToggle: () -> Void
+    private let onNoteShortcutToggle: (() -> Void)?
+    private let onQuickNote: (() -> Void)?
     private let onShowHealth: () -> Void
     private let onKeepListOpenToggle: () -> Void
     private let onLoginToggle: () -> Void
@@ -33,8 +35,12 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onQuit: @escaping () -> Void,
         onShowBoard: (() -> Void)? = nil,
         onSkin: ((String) -> Void)? = nil,
-        onLanguage: ((String) -> Void)? = nil
+        onLanguage: ((String) -> Void)? = nil,
+        onQuickNote: (() -> Void)? = nil,
+        onNoteShortcutToggle: (() -> Void)? = nil
     ) {
+        self.onQuickNote = onQuickNote
+        self.onNoteShortcutToggle = onNoteShortcutToggle
         self.onLanguage = onLanguage
         self.onShowBoard = onShowBoard
         self.onSkin = onSkin
@@ -52,14 +58,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
+        noteShortcutOn: Bool = false, keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
         noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount,
         skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true },
         language: String = "auto"
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
+            shortcutOn: shortcutOn, noteShortcutOn: noteShortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
             noticeHold: noticeHold, noticeCount: noticeCount,
             skin: skin, canShowSkin: canShowSkin, language: language
         )
@@ -71,7 +77,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     /// - Parameter problem: the first thing found wrong with the install, or nil
     ///   when nothing is — which is when the connection report is left out.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
-                  shortcutOn: Bool = false, keepListOpenOn: Bool = false,
+                  shortcutOn: Bool = false, noteShortcutOn: Bool = false, keepListOpenOn: Bool = false,
                   problem: HealthCheck? = nil,
                   noticeHold: TimeInterval = Chatter.noticeHold,
                   noticeCount: Int = Chatter.noticeCount,
@@ -92,6 +98,11 @@ final class PetMenu: NSObject, NSMenuDelegate {
             let board = NSMenuItem(title: L("Task Board…", "任务看板…"), action: #selector(showBoard), keyEquivalent: "")
             board.target = self
             menu.addItem(board)
+            if onQuickNote != nil {
+                let note = NSMenuItem(title: L("Quick Note…", "记一笔…"), action: #selector(quickNote), keyEquivalent: "")
+                note.target = self
+                menu.addItem(note)
+            }
             menu.addItem(.separator())
         }
 
@@ -133,6 +144,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
         shortcut.state = shortcutOn ? .on : .off
         shortcut.target = self
         options.addItem(shortcut)
+        if onNoteShortcutToggle != nil {
+            let noteKey = NSMenuItem(
+                title: L("Quick Note (\(HotKey.noteDisplayName))", "记一笔 (\(HotKey.noteDisplayName))"),
+                action: #selector(toggleNoteShortcut), keyEquivalent: "")
+            noteKey.state = noteShortcutOn ? .on : .off
+            noteKey.target = self
+            options.addItem(noteKey)
+        }
         options.addItem(.separator())
 
         // The "this session finished" bubbles above the pet.
@@ -213,6 +232,8 @@ final class PetMenu: NSObject, NSMenuDelegate {
     @objc private func toggleLogin() { onLoginToggle() }
     @objc private func unmuteAll() { onUnmuteAll() }
     @objc private func toggleShortcut() { onShortcutToggle() }
+    @objc private func toggleNoteShortcut() { onNoteShortcutToggle?() }
+    @objc private func quickNote() { onQuickNote?() }
     @objc private func showHealth() { onShowHealth() }
     @objc private func toggleKeepListOpen() { onKeepListOpenToggle() }
     @objc private func pickHold(_ sender: NSMenuItem) {

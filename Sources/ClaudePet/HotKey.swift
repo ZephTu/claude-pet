@@ -12,24 +12,36 @@ import Carbon.HIToolbox
 /// it runs is taking something that was not offered.
 @MainActor
 final class HotKey {
-    /// ⌃⌥⌘J. Three modifiers on purpose: two-modifier chords are where apps
-    /// and the system already live, and this one has to be safe to enable
-    /// without auditing what else is installed.
-    static let defaultKeyCode = UInt32(kVK_ANSI_J)
+    /// ⌃⌥⌘ plus a letter. Three modifiers on purpose: two-modifier chords are
+    /// where apps and the system already live, and these have to be safe to
+    /// enable without auditing what else is installed.
     static let defaultModifiers = UInt32(controlKey | optionKey | cmdKey)
-    /// nonisolated so the menu can title itself without hopping actors.
+    /// ⌃⌥⌘J jumps to the session waiting longest. nonisolated so the menu can
+    /// title itself without hopping actors.
     nonisolated static let displayName = "⌃⌥⌘J"
+    /// ⌃⌥⌘N opens the quick-note panel.
+    nonisolated static let noteDisplayName = "⌃⌥⌘N"
+    static let noteKeyCode = UInt32(kVK_ANSI_N)
 
+    let keyCode: UInt32
+    let name: String
     private var ref: EventHotKeyRef?
-    private var handler: EventHandlerRef?
     private let action: () -> Void
+    private let slot: UInt32
 
-    /// Carbon hands the callback a raw pointer, so the instance has to be
-    /// reachable from a plain C function. One shortcut, one slot.
-    private static var current: HotKey?
+    /// Carbon hands the callback a raw pointer, so the instances have to be
+    /// reachable from a plain C function: by the id each registers with.
+    private static var live: [UInt32: HotKey] = [:]
+    private static var nextSlot: UInt32 = 1
+    /// One handler for every shortcut, installed with the first one.
+    private static var handler: EventHandlerRef?
 
-    init(action: @escaping () -> Void) {
+    init(keyCode: UInt32 = UInt32(kVK_ANSI_J), name: String = HotKey.displayName, action: @escaping () -> Void) {
+        self.keyCode = keyCode
+        self.name = name
         self.action = action
+        slot = Self.nextSlot
+        Self.nextSlot += 1
     }
 
     var isRegistered: Bool { ref != nil }
@@ -37,8 +49,29 @@ final class HotKey {
     @discardableResult
     func register() -> Bool {
         guard ref == nil else { return true }
-        Self.current = self
+        Self.installHandler()
+        let id = EventHotKeyID(signature: Self.signature, id: slot)
+        let status = RegisterEventHotKey(keyCode, Self.defaultModifiers, id,
+                                         GetEventDispatcherTarget(), 0, &ref)
+        if status != noErr {
+            // Another app already owns the chord. Not an error worth a dialog —
+            // the feature is optional — but it must not look like it worked.
+            NSLog("ClaudePet: could not register \(name) (status \(status))")
+            ref = nil
+            return false
+        }
+        Self.live[slot] = self
+        return true
+    }
 
+    func unregister() {
+        if let ref { UnregisterEventHotKey(ref) }
+        ref = nil
+        Self.live[slot] = nil
+    }
+
+    private static func installHandler() {
+        guard handler == nil else { return }
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetEventDispatcherTarget(), { _, event, _ -> OSStatus in
@@ -47,36 +80,17 @@ final class HotKey {
                               EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &id)
             guard id.signature == HotKey.signature else { return noErr }
+            let slot = id.id
             // The Carbon callback is not isolated; the work it triggers touches
             // AppKit, so it is hopped onto the main actor explicitly.
             DispatchQueue.main.async {
-                MainActor.assumeIsolated { HotKey.current?.action() }
+                MainActor.assumeIsolated { HotKey.live[slot]?.action() }
             }
             return noErr
         }, 1, &spec, nil, &handler)
-
-        let id = EventHotKeyID(signature: Self.signature, id: 1)
-        let status = RegisterEventHotKey(Self.defaultKeyCode, Self.defaultModifiers, id,
-                                         GetEventDispatcherTarget(), 0, &ref)
-        if status != noErr {
-            // Another app already owns the chord. Not an error worth a dialog —
-            // the feature is optional — but it must not look like it worked.
-            NSLog("ClaudePet: could not register \(Self.displayName) (status \(status))")
-            ref = nil
-            return false
-        }
-        return true
     }
 
-    func unregister() {
-        if let ref { UnregisterEventHotKey(ref) }
-        ref = nil
-        if let handler { RemoveEventHandler(handler) }
-        handler = nil
-        if Self.current === self { Self.current = nil }
-    }
-
-    private static let signature: OSType = {
+    private nonisolated static let signature: OSType = {
         // 'CPet' as a four-char code.
         let chars = Array("CPet".utf8)
         return chars.reduce(OSType(0)) { ($0 << 8) | OSType($1) }

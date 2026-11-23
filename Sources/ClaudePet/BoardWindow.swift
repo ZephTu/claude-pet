@@ -337,6 +337,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
         case "saveImage": return saveImage(dataURL: str("data"))
+        case "note-add":
+            return await Self.noteAdd(text: str("text"), images: body["images"] as? [String] ?? [], via: "board")
+        case "note-sort": return await Self.noteSort(str("id"))
+        case "note-move":
+            // Each field as --name=value: a text starting with "-" must not read as an option.
+            let fields = ["task", "owner", "text", "title", "project", "category", "workdir"]
+                .filter { !str($0).isEmpty }.map { "--\($0)=\(str($0))" }
+            return await hq(["inbox", "move", "--json"] + fields + ["--", str("id"), str("kind")])
+        case "note-drop": return await hq(["inbox", "drop", "--json", "--", str("id")])
+        case "note-restore": return await hq(["inbox", "restore", "--json", "--", str("id")])
         case "launch":
             return await launch(task: str("task"), title: str("title"), dir: str("dir"),
                                 place: str("where"), prompt: str("prompt"), skip: body["skip"] as? Bool ?? false,
@@ -443,12 +453,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// An image pasted or dropped into a message box, saved as a file so its path can go into the
     /// message — Claude Code reads an image from a path in the prompt.
     private func saveImage(dataURL: String) -> (Any?, String?) {
-        let types = ["image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"]
         guard dataURL.hasPrefix("data:"), let comma = dataURL.firstIndex(of: ",") else { return (nil, L("not an image", "不是图片")) }
         let header = dataURL[dataURL.index(dataURL.startIndex, offsetBy: 5)..<comma]   // image/png;base64
         let mime = String(header.split(separator: ";").first ?? "")
-        guard header.hasSuffix(";base64"), let ext = types[mime] else { return (nil, L("unsupported image type \(mime)", "不支持的图片类型 \(mime)")) }
+        guard header.hasSuffix(";base64") else { return (nil, L("unsupported image type \(mime)", "不支持的图片类型 \(mime)")) }
         guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) else { return (nil, L("bad image data", "图片数据有误")) }
+        return Self.saveImage(data, mime: mime)
+    }
+    /// Saves image bytes under ~/.claude/hq/attachments (the quick-note panel pastes there too).
+    static func saveImage(_ data: Data, mime: String) -> (Any?, String?) {
+        let types = ["image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"]
+        guard let ext = types[mime] else { return (nil, L("unsupported image type \(mime)", "不支持的图片类型 \(mime)")) }
         guard data.count <= 20 * 1024 * 1024 else { return (nil, L("image is larger than 20 MB", "图片超过 20 MB")) }
         let dir = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/attachments")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -460,12 +475,30 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         return (["path": url.path], nil)
     }
 
+    // MARK: - Quick notes
+
+    /// Files a quick note (`hq inbox add`): it shows on the board at once, as unsorted.
+    static func noteAdd(text: String, images: [String], via: String) async -> (Any?, String?) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !images.isEmpty else { return (nil, L("empty note", "内容是空的")) }
+        return await hq(["inbox", "add", "--json", "--via=\(via)"] + images.map { "--image=\($0)" } + ["--", text])
+    }
+
+    /// Has a cheap model file it (`hq inbox sort`, a few seconds): a new task, a todo or log line on
+    /// a task, or the user's own todo — or it stays unsorted when the model isn't sure.
+    static func noteSort(_ id: String) async -> (Any?, String?) {
+        var args = ["inbox", "sort", "--json"]
+        if let claude = await findClaude() { args.append("--claude=\(claude)") }
+        return await hq(args + ["--", id])
+    }
+
     // MARK: - New sessions
 
     /// The claude CLI. The pet runs outside any shell, so PATH doesn't know about it: look in the
     /// usual install places, then ask a login shell once.
-    private var cachedClaude: String??
-    private func claudePath() async -> String? {
+    private func claudePath() async -> String? { await Self.findClaude() }
+    private static var cachedClaude: String??
+    static func findClaude() async -> String? {
         if let c = cachedClaude { return c }
         let home = NSHomeDirectory()
         let candidates = ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude",
@@ -964,14 +997,16 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         return s
     }
 
-    private var hqPath: String {
+    private var hqPath: String { Self.hqPath }
+    private static var hqPath: String {
         // HQ_BIN: a worktree's hq for `--render-board` while developing; the installed one otherwise.
         if let dev = ProcessInfo.processInfo.environment["HQ_BIN"], !dev.isEmpty { return dev }
         return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/bin/hq").path
     }
 
+    private func hq(_ args: [String]) async -> (Any?, String?) { await Self.hq(args) }
     /// Runs hq and hands its stdout back as text; the page parses JSON itself.
-    private func hq(_ args: [String]) async -> (Any?, String?) {
+    static func hq(_ args: [String]) async -> (Any?, String?) {
         guard FileManager.default.isExecutableFile(atPath: hqPath) else {
             return (nil, L("HQ is not installed — run hq/install.sh --root <dir>", "没有安装 HQ — 运行 hq/install.sh --root <dir>"))
         }
