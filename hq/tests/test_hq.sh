@@ -532,6 +532,24 @@ import json,sys; d=json.load(sys.stdin)
 assert not d["turn"]["done"] and d["turn"]["start"]=="2026-01-02T00:01:00Z" and d["turn"]["tokens"]==4, d["turn"]
 ' && ok "peek --meta: the turn after an interrupt starts at its own prompt" || fail "peek --meta turn after interrupt"
 
+# Slash commands for the board's message boxes: the newest full skill listing plus what was added after it.
+KSID=feedface-7777-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"attachment","attachment":{"type":"skill_listing","content":"- gone: from before the resume","names":["gone"],"isInitial":true}}' \
+  '{"type":"attachment","attachment":{"type":"skill_listing","content":"- review: Review the diff\n  over two lines\n- hud:setup: Configure: the HUD\n- hud: The bare plugin","names":["review","hud:setup","hud"],"isInitial":true}}' \
+  '{"type":"user","message":{"content":"quoting {\"type\":\"skill_listing\",\"names\":[\"fake\"]}"}}' \
+  '{"type":"attachment","attachment":{"type":"skill_listing","content":"- late: Turned up later","names":["late"],"isInitial":false}}' \
+  '{"type":"attachment","attachment":{"type":"skill_listing","content":"- review: Review the diff, now with tests","names":["review"],"isInitial":false}}' \
+  > "$HOME/.claude/projects/-tmp-repo/$KSID.jsonl"
+"$HQ" peek "$KSID" --commands --json | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+assert d["found"] and d["skills"]==[{"name":"review","desc":"Review the diff, now with tests"},{"name":"hud:setup","desc":"Configure: the HUD"},{"name":"hud","desc":"The bare plugin"},{"name":"late","desc":"Turned up later"}], d
+' && ok "peek --commands: the newest full listing plus later additions and changes, plugin names with colons" || fail "peek --commands listing"
+"$HQ" peek "$KSID" --commands | head -1 | grep -qx "/review  Review the diff, now with tests" && ok "peek --commands prints /name  description lines" || fail "peek --commands text"
+: > "$HOME/.claude/projects/-tmp-repo/$KSID.jsonl"
+"$HQ" peek "$KSID" --commands --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d=={"found":True,"skills":[]}, d' && ok "peek --commands: an empty transcript has no skills" || fail "peek --commands empty"
+"$HQ" peek feedface-0000-0000-0000-000000000000 --commands --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d=={"found":False,"skills":[]}, d' && ok "peek --commands: an unknown session is not found" || fail "peek --commands unknown"
+
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 

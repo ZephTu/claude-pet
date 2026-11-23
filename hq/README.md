@@ -46,6 +46,9 @@ since, its `compact_boundary`'s `postTokens` plus what a request sent besides th
 after the previous compaction, else the session's first reply, at most 60k) and `todos` (Claude's latest
 TodoWrite / TaskCreate list: `{text, status, active}`); `hq peek <sid> --tool <tool_use id>`
 prints one call's full input and output (an Edit's diff), `--json` for the fields.
+`hq peek <sid> --commands [--json]` lists the skills the session can run as slash commands —
+the newest `skill_listing` Claude Code wrote into the transcript plus skills added after it;
+`--json` gives `{found, skills: [{name, desc}]}` (the board's message boxes complete `/` from it).
 
 **Jump log:** `hq jumps [--days 7] [--json]` summarises `~/.claude/pet/jumps.jsonl`, which
 Claude Pet appends to on every ↗ Jump — counts by the session's state at the time
@@ -86,7 +89,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|remove|restore T-012 <url>`, `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`,
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
