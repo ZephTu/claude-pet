@@ -780,11 +780,10 @@ async function answerAsk(a, res, note) {
     const task = a.id.replace(/\.\d+$/, "");
     const wording = String(grantWording(a)).replace(/\s+/g, " ").trim();
     if (!wording) throw new Error(T("Word the grant first", "先写好授权的措辞"));
-    const t = taskById(task);
-    const existed = Boolean(t && (t.grants || []).some((g) => grantKey(g.text) === grantKey(wording)));
-    await api("resolve", { id: a.id, resolution: "do", note, grant: wording });
+    // hq says whether the grant was already on the card: then an Undo leaves it there.
+    const r = await apiObj("resolve", { id: a.id, resolution: "do", note, grant: wording });
     delete ui.drafts["grant:" + a.id]; ui.granting.delete(a.id);
-    return { task, granted: wording, existed };
+    return { task, granted: r.granted || wording, existed: Boolean(r.existed) };
   }
   if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
   const task = a.id.replace(/\.\d+$/, "");

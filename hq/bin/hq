@@ -601,12 +601,20 @@ def grant_key(text):
 
 def clean_grant(text):
     t = " ".join(str(text).replace("<!--", "").replace("-->", "").split())
-    t = re.sub(r"^[-*]\s+", "", t)
+    t = re.sub(r"^(?:[-*]\s+)?(?:\[[ xX\-]\]\s*)?", "", t)   # a bullet or a checkbox (that'd be a todo)
     if not t or is_placeholder(t):
         die("a grant needs its wording, e.g. 'rerun a verification with the same parameters'")
     if len(t) > GRANT_MAX_CHARS:
         die(f"a grant is one short rule (at most {GRANT_MAX_CHARS} characters)")
     return t
+
+
+def user_only():
+    """Grants come from the user — the board, or hq in their own terminal — never from a session's
+    own tool calls. (The board's hq runs without Claude Code's session variables.)"""
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        die("a standing grant comes from the user: \"Yes, always\" on the board, or `hq grant add` in "
+            "a terminal of their own — never from inside a Claude Code session")
 
 
 def add_grant(card, text, source=None, at=None, via="cli"):
@@ -636,7 +644,8 @@ def add_grant(card, text, source=None, at=None, via="cli"):
                 lines[head:head] = block
         atomic_write(card, "\n".join(lines))
         append_log(card, f"grant added ({via}): {text}")
-    return next(g for g in card_grants(open(card, encoding="utf-8").read()) if grant_key(g["text"]) == grant_key(text))
+    return next((dict(g, existed=False) for g in card_grants(open(card, encoding="utf-8").read())
+                 if grant_key(g["text"]) == grant_key(text)), {"text": text, "existed": False})
 
 
 def revoke_grant(card, pick, text=None, via="cli"):
@@ -685,30 +694,46 @@ def grants_text(meta):
             break
         shown.append(g)
         used += len(g["text"])
-    lines = [f"Standing grants on {meta['id']} — the user has said yes to these for good. Do what they cover "
-             "without an hq-asks, and say in your reply which grant you acted on. Anything not clearly "
-             "covered: ask as usual."]
+    lines = [f"Standing grants on {meta['id']} — permissions the user gave for good, not requests to do "
+             f"anything now. While bound to {meta['id']}, a step you'd otherwise ask about that one of these "
+             "clearly covers: take it without an hq-asks and name the grant in your reply. Read each one "
+             "narrowly; anything bigger, riskier or different: ask as usual."]
     lines += [f"- {g['text']}" for g in shown]
     if len(shown) < len(gs):
         lines.append(f"- … {len(gs) - len(shown)} more in the card's grants section")
     return "\n".join(lines)
 
 
-def grants_change_text(meta, seen):
-    """What changed in the grants since this session was last told (None: never told — all of them)."""
+def grants_change_text(meta, seen, seen_task=None, full=False, skip=()):
+    """What the session needs to hear about grants. `seen`: what it was last told (None: nothing),
+    on task `seen_task`. full (SessionStart, a bind): the whole list, after what was revoked since it
+    last saw them — a resumed conversation still holds the old list. Otherwise only the changes,
+    leaving out `skip` (grants it hears about with the answer that made them)."""
+    out = []
+    if seen_task and seen_task != meta["id"]:
+        if seen:
+            out.append(f"The standing grants of {seen_task} don't apply to {meta['id']}: ask before doing those things here.")
+        seen = None
     now = [g["text"] for g in grants_for(meta)]
-    if seen is None:
-        return grants_text(meta)
-    have = {grant_key(x) for x in seen}
+    have = {grant_key(x) for x in seen or []}
     cur = {grant_key(x) for x in now}
-    added = [x for x in now if grant_key(x) not in have]
-    gone = [x for x in seen if grant_key(x) not in cur]
+    gone = [x for x in seen or [] if grant_key(x) not in cur]
+    if full or seen is None:
+        if gone:
+            out.append(f"Revoked on {meta['id']} since you last saw them — ask again before doing these:")
+            out += [f"- {x}" for x in gone]
+        t = grants_text(meta)
+        if t:
+            out.append(t)
+        return "\n".join(out)
+    skip = {grant_key(x) for x in skip if x}
+    added = [x for x in now if grant_key(x) not in have and grant_key(x) not in skip]
     if not added and not gone:
-        return ""
-    lines = [f"Standing grants on {meta['id']} changed since your last turn:"]
-    lines += [f"+ new — do this without asking from now on: {x}" for x in added]
-    lines += [f"- revoked — ask again before doing this: {x}" for x in gone]
-    return "\n".join(lines)
+        return "\n".join(out)
+    out.append(f"Standing grants on {meta['id']} changed since your last turn:")
+    out += [f"+ granted — a permission from now on, not a request to act now: {x}" for x in added]
+    out += [f"- revoked — ask again before doing this: {x}" for x in gone]
+    return "\n".join(out)
 
 
 def cmd_grant(args):
@@ -720,6 +745,7 @@ def cmd_grant(args):
         for g in [] if args.json else gs:
             print(f"{g['i']:>2}. {g['text']}" + (f"  (from {g['from']})" if g.get("from") else ""))
     elif args.action == "add":
+        user_only()
         # The board passes the wording as --text, so wording that starts with "-" is never an option.
         g = add_grant(card, args.text or " ".join(args.rest), source=args.source, at=args.at, via=args.via)
         print(json.dumps(g, ensure_ascii=False))
@@ -820,8 +846,13 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None):
     if grant and grant.strip():
         if resolution != "do":
             die("a grant goes with a yes (do)")
-        event["granted"] = add_grant(card, grant, source=aid, via=via)["text"]
+        user_only()
+        g = add_grant(card, grant, source=aid, via=via)
+        event["granted"] = g["text"]
     append_event(os.path.dirname(card), event)
+    if event.get("granted"):
+        # For the board's Undo: a grant that was already there stays when the answer is taken back.
+        print(json.dumps({"id": aid, "granted": g["text"], "existed": bool(g.get("existed"))}, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------- session state
@@ -895,9 +926,11 @@ workdir: <absolute path you started working in>
 ```hq-asks
 - <question or request>
 ```
-   If it is a kind of step that will come up again (rerun with the same parameters, delete an
-   env once triaged, fix review findings on the PR …), end the line with `[grant: <that kind of
-   step, worded as a standing permission>]`: the user can then say yes to it for good.
+   If it is a routine, reversible kind of step that will come up again (rerun with the same
+   parameters, push review fixes to the same PR …), you may end the line with `[grant: <that
+   kind of step, worded as narrowly as the question>]`: the user can then say yes to it for
+   good. Never for deleting, sending, spending, merging or force-pushing. Only the user adds
+   grants: never add, widen or reword one yourself.
 3. When the user answers tracked asks in chat, record each one:
 ```hq-resolved
 - <ask id> <do|drop|later|archive>: <short note>
@@ -1211,9 +1244,16 @@ def cmd_bind(args):
     from_inside = sid == os.environ.get("CLAUDE_CODE_SESSION_ID")
     with state_lock():
         state = load_state()
-        prev = state.get(sid, {}).get("task")
+        old = state.get(sid, {})
+        prev = old.get("task")
         state[sid] = {"task": meta["id"], "bound_at": now_iso(), "announced": from_inside,
-                      "delivered": state.get(sid, {}).get("delivered", [])}
+                      "delivered": old.get("delivered", [])}
+        # What the session was last told about grants: a re-bound session hears that the old
+        # task's grants no longer apply.
+        if from_inside:
+            state[sid].update(grants=[g["text"] for g in grants_for(meta)], grants_task=meta["id"])
+        elif "grants" in old:
+            state[sid].update(grants=old["grants"], grants_task=old.get("grants_task") or prev)
         save_state(state)
     fields = {}
     sessions = meta.get("sessions") if isinstance(meta.get("sessions"), list) else []
@@ -1233,6 +1273,9 @@ def cmd_bind(args):
     if prev and prev != meta["id"]:
         print(f"(re-bound from {prev})")
     print(protocol(meta))
+    g = grants_change_text(meta, old.get("grants"), old.get("grants_task") or prev, full=True) if from_inside else ""
+    if g:
+        print("\n" + g)
     t = open_asks_text(meta)
     if t:
         print("\n" + t)
@@ -1641,6 +1684,9 @@ def _apply_update(card, entries, via):
                 problems.append(f"status must be one of {', '.join(STATUSES)} (got {v!r})")
         elif k == "next":
             fields["next"] = v
+        elif k == "state" and v.lstrip().startswith("#"):
+            # A heading here would start a section of its own (a forged `## Grants`, say).
+            problems.append(f"`state: {v}` — a state line can't be a heading; write it as plain text")
         elif k == "state":
             # A checkbox here would turn into a real todo in the Status section.
             state.append(re.sub(r"^-\s*\[[ xX\-]\]\s*", "", v))
@@ -2621,8 +2667,9 @@ def hook_main():
         # Every source — startup, resume, clear, compact — gets the grants in force and the open
         # @claude todos: after a compaction or /clear the session no longer remembers them.
         grants = [g["text"] for g in grants_for(meta)]
-        update_session(sid, lambda e: e.update(announced=True, grants=grants))
-        parts = [protocol(meta), grants_text(meta), open_asks_text(meta, sid=sid, state=state),
+        g = grants_change_text(meta, s.get("grants"), s.get("grants_task"), full=True)
+        update_session(sid, lambda e: e.update(announced=True, grants=grants, grants_task=meta["id"]))
+        parts = [protocol(meta), g, open_asks_text(meta, sid=sid, state=state),
                  claude_todos_text(meta, payload.get("source") or "")]
         emit(event, "\n\n".join(p for p in parts if p))
 
@@ -2635,12 +2682,6 @@ def hook_main():
             todos = claude_todos_text(meta)
             if todos:
                 lines.append(todos)
-        # Grants: the whole list once (SessionStart, or here for a session bound from the board),
-        # then only what changed — nothing at all on a turn where nothing did.
-        grants = [g["text"] for g in grants_for(meta)]
-        g = grants_change_text(meta, s.get("grants") if s.get("announced", True) else None)
-        if g:
-            lines.append(g)
         if s.get("update_problems"):
             lines.append(update_problems_text(meta, s["update_problems"]))
         # An answer goes to the session that asked, once. Another session on the same task
@@ -2658,9 +2699,17 @@ def hook_main():
             for a in fresh:
                 lines.append(f"- {a['id']} \"{gist(a['text'])}\" → {answer_text(a['state'], a.get('note'), a.get('granted'))}")
         told = {a["id"] for a in fresh}
+        # Grants: the whole list once (SessionStart, or here for a session bound from the board),
+        # then only what changed — nothing at all on a turn where nothing did. A grant made by an
+        # answer above was just stated with it.
+        grants = [g["text"] for g in grants_for(meta)]
+        g = grants_change_text(meta, s.get("grants"), s.get("grants_task"),
+                               full=not s.get("announced", True), skip=[a.get("granted") for a in fresh])
+        if g:
+            lines.append(g)
 
         def note_turn(entry):
-            entry.update(turn_start=turn_start, announced=True, grants=grants)
+            entry.update(turn_start=turn_start, announced=True, grants=grants, grants_task=meta["id"])
             entry.pop("update_problems", None)
             entry["delivered"] = sorted(set(entry.get("delivered", [])) | told)
         update_session(sid, note_turn)

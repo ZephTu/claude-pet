@@ -180,21 +180,33 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 5. **Granted steps aren't asked again.** A standing grant is a kind of step you have said yes
    to for good ("rerun with the same parameters", "fix review findings and push to the same
    PR"). SessionStart (every source) lists the task's grants in force — at most 10 and 1500
-   characters — with the rule: do what a grant covers without an `hq-asks`, say which grant you
-   acted on, and ask as usual about anything not clearly covered. A session bound from the
-   board gets the list with its first injection. Each session's entry in `sessions.json` keeps
-   the grants it was last shown (`grants`), so a prompt only carries a line when they changed
-   (`+ new — do this without asking from now on: …` / `- revoked — ask again before doing this:
-   …`) and nothing otherwise. When an ask is about a kind of step that will come up again, the
-   session ends its line with a suggested wording, `- Rerun #31388? [grant: rerun with the same
-   parameters]`; it is kept apart from the question (the ask's `grant` field) and pre-fills the
-   board's **Yes, always** editor.
+   characters — with the rule: grants are permissions, not requests to act now; while bound to
+   this task, a step the session would otherwise ask about that a grant clearly covers is taken
+   without an `hq-asks` and the grant named in the reply; each is read narrowly, and anything
+   bigger, riskier or different is asked as usual. A session bound from the board gets the list
+   with its first injection. Each session's entry in `sessions.json` keeps the grants it was
+   last shown (`grants`, and `grants_task`), so a prompt only carries a line when they changed
+   (`+ granted — a permission from now on, not a request to act now: …` / `- revoked — ask again
+   before doing this: …`) and nothing otherwise; a grant made by an answer is stated once, with
+   the answer. A SessionStart (resume, compact) first lists what was revoked since the session
+   last saw the grants, since the resumed conversation still holds the old list; a session
+   re-bound to another task hears that the old task's grants don't apply there. When an ask is
+   about a routine, reversible kind of step that will come up again, the session may end its
+   line with a suggested wording, `- Rerun #31388? [grant: rerun with the same parameters]` —
+   never for deleting, sending, spending, merging or force-pushing; it is kept apart from the
+   question (the ask's `grant` field) and pre-fills the board's **Yes, always** editor.
 
-   Grants come from you only: **Yes, always** on an ask (`hq ask resolve T-012.3 do --grant
-   "<wording>"` — `--grant` needs `do`; the resolve event records `granted`, and the answer the
-   session gets says the step is granted from now on), **＋** under the task's Grants on the
+   Grants come from you only. The protocol tells sessions never to add, widen or reword one,
+   and `hq grant add` and `ask resolve --grant` refuse to run inside a Claude Code session
+   (`CLAUDE_CODE_SESSION_ID` set; the board's hq runs without it, a session may still revoke).
+   A `state:` line that is a heading is refused, so an `hq-update` can't open a grants section
+   of its own. Ways in: **Yes, always** on an ask (`hq ask resolve T-012.3 do --grant
+   "<wording>"` — `--grant` needs `do`; the resolve event records `granted`, the command prints
+   `{"granted", "existed"}` for the board's Undo, and the answer the session gets says the step
+   is granted from now on), **＋** under the task's Grants on the
    board, or `hq grant add T-012 "<wording>" [--source T-012.3]`. A wording already granted
-   (same words, ignoring case and spacing) is not added twice. `hq grant list T-012 [--json]`
+   (same words, ignoring case and spacing) is not added twice; a leading `[ ]` is dropped
+   (a checkbox line would be a todo). `hq grant list T-012 [--json]`
    numbers them; `hq grant revoke T-012 <n | wording> [--text <wording as last seen>]` removes
    one (with `--text`, a number that now points at a different grant goes by the wording instead,
    and fails if that wording is gone) and prints it
