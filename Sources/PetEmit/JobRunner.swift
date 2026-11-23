@@ -14,7 +14,7 @@ enum JobRunner {
     static func run(id: String, trigger: String, promptFile: String? = nil) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
         let store = JobStore()
-        guard Jobs.isValidID(id), let job = store.load(id) else {
+        guard Jobs.isValidID(id), let first = store.load(id) else {
             FileHandle.standardError.write(Data("pet-emit: no job \(id)\n".utf8))
             return 2
         }
@@ -23,13 +23,25 @@ enum JobRunner {
         // One run at a time: a run that outlasts its interval makes the next one a skip, which
         // the history shows, rather than two runs fighting over one session.
         let lockFD = open(store.folder(id).appending(path: "lock").path, O_CREAT | O_RDWR, 0o600)
-        guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
+        // Except that a fixed-time run of a job that keeps one session waits a while for the run
+        // going on: that is a chat with the secretary, and its evening report shouldn't be lost to it.
+        let waitFor: TimeInterval = trigger == "schedule" && first.sessionMode == .resume && first.schedule.kind != .every ? 600 : 0
+        let deadline = Date().addingTimeInterval(waitFor)
+        var locked = lockFD >= 0 && flock(lockFD, LOCK_EX | LOCK_NB) == 0
+        while lockFD >= 0, !locked, Date() < deadline {
+            Thread.sleep(forTimeInterval: 5)
+            locked = flock(lockFD, LOCK_EX | LOCK_NB) == 0
+        }
+        guard locked else {
             store.append(id, ["run": JobStore.newRunID(), "event": "skip", "at": iso(Date()), "trigger": trigger,
                               "summary": "skipped: the previous run was still going"])
             if let promptFile { try? FileManager.default.removeItem(atPath: promptFile) }
             return 0
         }
         defer { flock(lockFD, LOCK_UN); close(lockFD) }
+        // Waited for the lock: the job may have changed meanwhile (switched off, its prompt edited).
+        guard waitFor == 0 || store.load(id).map({ $0.enabled }) == true else { return 0 }
+        let job = (waitFor > 0 ? store.load(id) : nil) ?? first
         try? FileManager.default.removeItem(at: store.stopURL(id))
         // launchd ends a job's agent with SIGTERM (switched off, deleted, uninstalled). Left to
         // its default, that would kill this runner and orphan what it started, which runs in

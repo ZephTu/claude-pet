@@ -1234,9 +1234,10 @@ def find_ask(aid):
     die(f"no ask {aid}")
 
 
-def resolve_ask(aid, resolution, note="", via="cli", grant=None):
+def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
     """Answer an ask. With `grant` (only with do): "yes, and from now on just do this kind of
-    thing" — the grant goes on the card first, then the answer, which records its wording."""
+    thing" — the grant goes on the card first, then the answer, which records its wording.
+    `settle`: let the answer take the task out of waiting-on-me (settle_status)."""
     if resolution not in RESOLUTIONS:
         die(f"resolution must be one of {', '.join(RESOLUTIONS)}")
     card, _ = find_ask(aid)
@@ -1251,6 +1252,50 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None):
     if event.get("granted"):
         # For the board's Undo: a grant that was already there stays when the answer is taken back.
         print(json.dumps({"id": aid, "granted": g["text"], "existed": bool(g.get("existed"))}, ensure_ascii=False))
+    if settle:
+        settle_status(card, via)
+
+
+# Automatic status moves. A status is otherwise only what a session's hq-update, `hq set` or the
+# board wrote — and "waiting-on-me" stayed on after the user had answered everything, until the
+# session happened to write `status: active`. Only these two moves are made, between these two
+# statuses: blocked, done and abandoned are never changed by anything but an explicit status.
+def on_user(meta):
+    """What the card has waiting on the user: open asks (a snoozed one is still open), open @me
+    todos, and the legacy `waiting_on_me` field the board still counts."""
+    return (any(a.get("state") == "open" for a in read_asks(meta["dir"]))
+            or any(t["state"] == "open" and t["owner"] == "me" for t in meta["todos"])
+            or bool(str(meta.get("waiting_on_me") or "").strip()))
+
+
+def open_me_todos(card):
+    return sum(1 for t in parse_card(card)["todos"] if t["state"] == "open" and t["owner"] == "me")
+
+
+def settle_status(card, via):
+    """waiting-on-me → active once nothing is left on the user. Called after an answer, or an
+    @me todo ticked off or dropped — not after other todos: a card waiting on something it never
+    wrote down as an ask or a todo keeps waiting until someone says otherwise."""
+    with card_lock(card):
+        meta = parse_card(card)
+        if meta.get("status") != "waiting-on-me" or on_user(meta):
+            return False
+        _set_fields(card, {"status": "active"})
+        append_log(card, f"status waiting-on-me → active (auto, {via}): no open ask or @me todo left", touch=False)
+        return True
+
+
+def await_answer(card, via):
+    """active → waiting-on-me: an ask was opened, or an answer or an @me todo taken back, and
+    nothing said otherwise. Checked under the lock: an ask answered in the meantime leaves the
+    task as it is."""
+    with card_lock(card):
+        meta = parse_card(card)
+        if meta.get("status") != "active" or not on_user(meta):
+            return False
+        _set_fields(card, {"status": "waiting-on-me"})
+        append_log(card, f"status active → waiting-on-me (auto, {via}): something is open on you", touch=False)
+        return True
 
 
 # ---------------------------------------------------------------- session state
@@ -1644,6 +1689,15 @@ def new_card(title, slug=None, category=None, project=None, lead=None, workdirs=
 
 # ---------------------------------------------------------------- secretary
 SECRETARY_FILES = ("profile.md", "people.md", "playbooks.md")
+# Made by init and by `hq report` when missing, but not needed to be set up: a secretary set up
+# before reports existed is still ready.
+SECRETARY_EXTRA_FILES = ("reports.md",)
+# sha256 of agent definitions earlier versions of hq wrote. One still exactly that was never edited
+# by the user, so init (and the board, before a run) replaces it with the current template.
+SECRETARY_AGENT_OLD = {
+    "181d12d48a0806ae0fb0dc516c9c802bb82d0795e45c50e1eb54eac812f42a7f",
+    "8168fa81c75679b9d001019b67b36537324724597067d5ca991e16c86f1a8358",
+}
 SECRETARY_TITLE = {"zh": "秘书", "en": "Secretary"}
 SECRETARY_GOAL = {
     "zh": "秘书自己的卡片：秘书的 hq-update 写在这里（它在替你盯什么），它的建议作为这张卡的 ask 出现在 Needs you。"
@@ -1674,11 +1728,18 @@ def secretary_task_id():
     return None
 
 
+def agent_stale(path):
+    try:
+        return hashlib.sha256(open(path, "rb").read()).hexdigest() in SECRETARY_AGENT_OLD
+    except OSError:
+        return False
+
+
 def secretary_info():
     root = hq_root()
     agent = os.path.join(root, ".claude", "agents", "secretary.md")
     memory = os.path.join(root, "secretary")
-    files = {f: os.path.isfile(os.path.join(memory, f)) for f in SECRETARY_FILES}
+    files = {f: os.path.isfile(os.path.join(memory, f)) for f in SECRETARY_FILES + SECRETARY_EXTRA_FILES}
     tid = secretary_task_id()
     # The sessions bound to its card: the board checks its session is among them before a run.
     sessions = sorted(s for s, e in load_state().items() if tid and isinstance(e, dict) and e.get("task") == tid)
@@ -1687,24 +1748,31 @@ def secretary_info():
     state = card_state_lines(parse_card(card)["body"]) if card else []
     return {"root": root, "task": tid, "card": card, "sessions": sessions,
             "state": [one_line(l, 200) for l in state[:6]],
-            "agent": agent, "agentExists": os.path.isfile(agent), "memory": memory, "files": files,
-            "ready": bool(tid) and os.path.isfile(agent) and all(files.values())}
+            "agent": agent, "agentExists": os.path.isfile(agent), "agentStale": agent_stale(agent),
+            "memory": memory, "files": files,
+            # The newest reports, for the secretary's window (`hq report list` has them all).
+            "reports": [{k: r[k] for k in ("name", "path", "date", "kind")} for r in report_list()[:4]],
+            "ready": bool(tid) and os.path.isfile(agent) and all(files[f] for f in SECRETARY_FILES)}
 
 
 def secretary_init(lang):
     """Scaffold what is missing (the agent definition, the memory files, the secretary's own card)
-    and never overwrite what is there: those files are the user's, and the secretary's memory."""
+    and never overwrite what is there: those files are the user's, and the secretary's memory. The one
+    exception is an agent definition an older hq wrote and nobody changed: it gets the current one."""
     lang = lang if lang in SECRETARY_TITLE else "en"
     tpl = template_dir()
     info = secretary_info()
     made = []
-    if not info["agentExists"]:
+    if not info["agentExists"] or info["agentStale"]:
         os.makedirs(os.path.dirname(info["agent"]), exist_ok=True)
         atomic_write(info["agent"], open(os.path.join(tpl, "agents", "secretary.md"), encoding="utf-8").read())
         made.append(info["agent"])
     os.makedirs(info["memory"], exist_ok=True)
     for f, exists in info["files"].items():
         if exists:
+            continue
+        if f == "reports.md":
+            made.append(ensure_report_format())    # in the language the memory is in
             continue
         src = os.path.join(tpl, "secretary", lang, f)
         if not os.path.isfile(src):
@@ -1739,6 +1807,377 @@ def cmd_secretary(args):
         print(f"memory: {os.path.join(info['memory'], f)}{'' if ok else '  (missing)'}")
     for m in info.get("made", []):
         print(f"created {m}")
+
+
+# ---------------------------------------------------------------- reports
+# The secretary's daily and weekly reports. `hq report` gathers what happened on the board in a
+# window, by project — the facts; the secretary writes the prose, in the format
+# `secretary/reports.md` sets, into `secretary/reports/`. `hq report keep` snapshots what it wrote,
+# so the next `hq report` can show the user's edits to it: what the secretary learns its format from.
+REPORT_KINDS = ("daily", "weekly")
+REPORT_NAME_RE = re.compile(r"^(\d{4}-\d\d-\d\d)-(daily|weekly)\.md$")
+GH_PR_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+OWED_AFTER_DAYS = 2          # an @me todo or an ask open longer than this is "owed"
+EDITS_LOOKBACK = 5           # how many recent reports are checked for the user's edits
+
+
+def reports_dir():
+    return os.path.join(hq_root(), "secretary", "reports")
+
+
+def reports_index_path():
+    return os.path.join(reports_dir(), ".reports.json")
+
+
+def reports_pending_path():
+    return os.path.join(reports_dir(), ".pending.json")
+
+
+def load_reports_index():
+    idx = load_json(reports_index_path(), {})
+    return idx if isinstance(idx, dict) else {}
+
+
+def report_lang():
+    """The memory's language: zh when profile.md's headings are Chinese (the Chinese template's)."""
+    try:
+        text = open(os.path.join(hq_root(), "secretary", "profile.md"), encoding="utf-8").read()
+    except OSError:
+        return "en"
+    return "zh" if re.search(r"^#+.*[\u4e00-\u9fff]", text, re.M) else "en"
+
+
+def ensure_report_format():
+    """`secretary/reports.md`, the report format, made from the template when missing (a secretary
+    set up before reports existed). Never overwritten: it is the user's, and what the secretary learned."""
+    path = os.path.join(hq_root(), "secretary", "reports.md")
+    if not os.path.exists(path):
+        lang = report_lang()
+        src = os.path.join(template_dir(), "secretary", lang, "reports.md")
+        if not os.path.isfile(src):
+            src = os.path.join(template_dir(), "secretary", "en", "reports.md")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        atomic_write(path, open(src, encoding="utf-8").read())
+    return path
+
+
+def report_window(kind, since, now, name=None):
+    """(start, end, prev) as naive local datetimes, prev the index entry the window starts at.
+    Weekly: this week from Monday 00:00. Daily: from where the last kept report's facts ended (at
+    most 7 days back; not `name` itself, a report being written again), else from today 00:00."""
+    if since:
+        s = local_dt(since)
+        if not s:
+            die(f"--since: not a date or time: {since}")
+        return s.replace(tzinfo=None), now, None
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if kind == "weekly":
+        return midnight - dt.timedelta(days=now.weekday()), now, None
+    # `to`: the end of the facts it was written from; reports kept before that was recorded, `kept`.
+    ends = [(naive(e.get("to") or e.get("kept")), e) for n, e in load_reports_index().items()
+            if isinstance(e, dict) and n != name]
+    ends = [(t, e) for t, e in ends if t and t <= now]
+    if ends:
+        last, e = max(ends, key=lambda x: x[0])
+        if now - last <= dt.timedelta(days=7):
+            return last, now, e
+    return midnight, now, None
+
+
+def naive(ts):
+    t = local_dt(ts)
+    return t.replace(tzinfo=None) if t else None
+
+
+def log_entries(body):
+    """Every Log line of a card: (time, text)."""
+    m = LOG_HEADING_RE.search(body + "\n")
+    out = []
+    for line in (m.group(1) if m else "").splitlines():
+        x = LOG_LINE_RE.match(line.strip())
+        if x:
+            t = naive(x.group(1))
+            if t:
+                out.append((t, x.group(2).strip()))
+    return out
+
+
+TICK_RE = re.compile(r"^todo #\d+ → (done|drop|open) \(([^)]*)\): (.*)$")
+
+
+def pr_states(urls, timeout=20):
+    """GitHub PRs' state through `gh` ({url: {...}}), looked up in parallel; {} without gh. A PR
+    gh can't read is left out: the report says what it knows."""
+    import shutil
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+    gh = shutil.which("gh")
+    if not gh or not urls:
+        return {}
+
+    def one(url):
+        try:
+            r = subprocess.run([gh, "pr", "view", url, "--json", "number,title,state,mergedAt,isDraft"],
+                               capture_output=True, text=True, timeout=timeout)
+            return url, json.loads(r.stdout) if r.returncode == 0 else None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return url, None
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return {u: d for u, d in ex.map(one, urls) if isinstance(d, dict)}
+
+
+def task_activity(meta, start, end, reported_closed=()):
+    """What happened on one card in [start, end]. `closed` holds a date only: a card closed on the
+    window's first day counts unless the report the window starts at already said so."""
+    inw = lambda t: t is not None and start <= t <= end
+    notes, done, dropped = [], [], []
+    for t, text in log_entries(meta["body"]):
+        if not inw(t):
+            continue
+        tick = TICK_RE.match(text)
+        if tick:
+            (done if tick.group(1) == "done" else dropped if tick.group(1) == "drop" else []).append(
+                {"at": iso(t), "text": todo_plain(tick.group(3)), "via": tick.group(2)})
+        else:
+            notes.append({"at": iso(t), "text": text})
+    added = [{"at": iso(naive(x["created"])), "owner": x["owner"], "text": x["text"]}
+             for x in meta["todos"] if inw(naive(x["created"]))]
+    asks = read_asks(meta["dir"])
+    answered = [{"id": a["id"], "text": a.get("text", ""), "answer": a["state"], "note": a.get("note") or "",
+                 "at": iso(naive(a.get("resolved_at")))}
+                for a in asks if a["state"] != "open" and inw(naive(a.get("resolved_at")))]
+    asked = [{"id": a["id"], "text": a.get("text", ""), "at": iso(naive(a.get("ts")))}
+             for a in asks if inw(naive(a.get("ts")))]
+    norm = lambda t: " ".join(str(t).split())
+    settled = {norm(x["text"]) for x in done + dropped}
+    added = [x for x in added if norm(x["text"]) not in settled]
+    answered_ids = {a["id"] for a in answered}
+    asked = [a for a in asked if a["id"] not in answered_ids]
+    day, first = str(meta.get("closed") or ""), start.date().isoformat()
+    closed = meta.get("status") in ("done", "abandoned") and (
+        day > first or (day == first and meta.get("id") not in reported_closed))
+    return {"notes": notes, "done": done, "dropped": dropped, "added": added, "answered": answered,
+            "asked": asked, "closed": closed, "asks": asks}
+
+
+def report_edits():
+    """The user's edits to recent reports since the secretary wrote (or last saw) them: unified
+    diffs against the snapshot `hq report keep` took."""
+    import difflib
+    idx, out = load_reports_index(), []
+    for name in sorted(idx, reverse=True)[:EDITS_LOOKBACK]:
+        cur, base = os.path.join(reports_dir(), name), os.path.join(reports_dir(), ".drafts", name)
+        try:
+            a, b = open(base, encoding="utf-8").read(), open(cur, encoding="utf-8").read()
+        except OSError:
+            continue
+        if a != b:
+            diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
+                                                f"{name} (as written)", f"{name} (as edited)", n=1))
+            out.append({"report": name, "path": cur, "diff": diff})
+    return out
+
+
+def gather_report(kind, since=None, gh=True, now=None):
+    now = (now or dt.datetime.now()).replace(microsecond=0)
+    name = f"{now.date().isoformat()}-{kind}.md"
+    start, end, prev = report_window(kind, since, now, name)
+    reported_closed = set(prev.get("closed") or []) if prev else set()
+    sec = secretary_task_id()
+    metas = [parse_card(p) for p in card_paths()]
+    metas = [m for m in metas if m.get("id") != sec]
+    names = [p["name"] for p in load_projects()]
+    tasks, owed = [], []
+    for m in metas:
+        act = task_activity(m, start, end, reported_closed)
+        is_open = m.get("status") in OPEN_STATUSES
+        # Claude's own new todos are its working plan, not news (the text leaves them out too).
+        moved = any(act[k] for k in ("notes", "done", "dropped", "answered", "asked")) or act["closed"] \
+            or any(x["owner"] != "claude" for x in act["added"])
+        refs = m.get("refs") if isinstance(m.get("refs"), list) else []
+        prs = list(dict.fromkeys(u for r in refs for u in GH_PR_RE.findall(str(r))))
+        # A card closed in the last week may still have a PR merging now.
+        recent = str(m.get("closed") or "") >= (start - dt.timedelta(days=7)).date().isoformat()
+        if not (moved or is_open or (prs and recent)):
+            continue
+        tasks.append({"id": m.get("id"), "title": m.get("title", ""), "project": m.get("project") or "",
+                      "status": m.get("status"), "open": is_open, "updated": m.get("updated", ""), "next": m.get("next", ""),
+                      "state": card_state_lines(m["body"])[:4], "moved": moved, "prs": prs,
+                      **{k: v for k, v in act.items() if k != "asks"}})
+        if is_open:
+            for x in m["todos"]:
+                c = naive(x["created"])
+                if x["state"] == "open" and x["owner"] == "me" and c and (now - c).days >= OWED_AFTER_DAYS:
+                    owed.append({"task": m.get("id"), "kind": "todo", "text": x["text"], "since": iso(c),
+                                 "days": (now - c).days})
+            for a in act["asks"]:
+                c = naive(a.get("ts"))
+                if a["state"] == "open" and c and (now - c).days >= OWED_AFTER_DAYS and not snoozed(a):
+                    owed.append({"task": m.get("id"), "kind": "ask", "id": a["id"], "text": a.get("text", ""),
+                                 "since": iso(c), "days": (now - c).days})
+    owed.sort(key=lambda o: -o["days"])
+    # PRs of the cards above: a PR merged on a quiet or recently closed card is still news.
+    states = pr_states(sorted({u for t in tasks for u in t["prs"]})) if gh else {}
+    for t in tasks:
+        t["prs"] = [dict(url=u, **{k: states[u].get(k) for k in ("number", "title", "state", "mergedAt", "isDraft")},
+                         mergedInWindow=bool(states[u].get("mergedAt")) and start <= naive(states[u]["mergedAt"]) <= end)
+                    if u in states else {"url": u, "state": None} for u in t["prs"]]
+        if any(p.get("mergedInWindow") for p in t["prs"]) and not t["moved"]:
+            t["moved"] = True
+    tasks = [t for t in tasks if t.pop("open") or t["moved"]]
+    projects = []
+    for pname in names + sorted({t["project"] for t in tasks} - set(names)):
+        mine = [t for t in tasks if t["project"] == pname]
+        if not mine:
+            continue
+        info = project_info({"name": pname, "paths": []}) if pname else {}
+        projects.append({"name": pname, "title": info.get("title", ""), "kind": info.get("kind", ""),
+                         "due": info.get("due", ""), "goal": info.get("goal", ""),
+                         "moved": [t for t in mine if t["moved"]],
+                         "quiet": [{"id": t["id"], "title": t["title"], "status": t["status"], "updated": t["updated"]}
+                                   for t in mine if not t["moved"]]})
+    os.makedirs(reports_dir(), exist_ok=True)
+    # What `hq report keep` records for this report: where its facts end (the next daily report
+    # starts there, so what happens while it is written isn't lost) and the cards it saw closed.
+    closed_ids = sorted({t["id"] for t in tasks if t.get("closed")} | (reported_closed if start.date() == end.date() else set()))
+    pending = load_json(reports_pending_path(), {})
+    pending = pending if isinstance(pending, dict) else {}
+    pending[name] = {"from": iso(start), "to": iso(end), "closed": closed_ids}
+    atomic_write(reports_pending_path(), json.dumps(pending, ensure_ascii=False, indent=1) + "\n")
+    path = os.path.join(reports_dir(), name)
+    # Today's report may be written again (Write one now, then the evening run): it's then among
+    # the edits checked, and the secretary must keep what the user changed in it.
+    return {"kind": kind, "from": iso(start), "to": iso(end), "lang": report_lang(),
+            "file": path, "exists": os.path.isfile(path), "format": ensure_report_format(),
+            "projects": projects, "owed": owed, "edits": report_edits(), "gh": bool(gh and states)}
+
+
+def clip(s, n=160):
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def capped(items, what, line, n=6):
+    """The newest n items as lines, with a note of how many more there are."""
+    more = [f"  ({len(items) - n} more {what}: hq report --json)"] if len(items) > n else []
+    return more + [line(x) for x in items[-n:]]
+
+
+def report_text(r):
+    hm = lambda s: s[5:16].replace("T", " ") if s else "?"
+    out = [f"# {r['kind']} report data · {r['from'][:16].replace('T', ' ')} → {r['to'][:16].replace('T', ' ')}",
+           f"write it to: {r['file']}",
+           f"then run:    hq report keep {os.path.basename(r['file'])}",
+           f"format:      {r['format']} (read it first; its rules win)", ""]
+    if r.get("exists"):
+        out[2:2] = ["NOTE: this file exists already (written earlier today). Read it and rewrite it from the facts",
+                    "below, keeping what the user changed in it (see the edits at the end)."]
+    if not r["projects"]:
+        out += ["(nothing on the board)", ""]
+    for p in r["projects"]:
+        head = p["name"] or "(no project)"
+        bits = [x for x in (p["kind"], f"due {p['due']}" if p["due"] else "") if x]
+        out.append(f"## {head}{' — ' + p['title'] if p['title'] else ''}{' [' + ' · '.join(bits) + ']' if bits else ''}")
+        if p["goal"]:
+            out.append(f"goal: {clip(p['goal'], 200)}")
+        for t in p["moved"]:
+            out.append(f"### {t['id']} {t['title']} — {t['status']}{' (closed in window)' if t['closed'] else ''}")
+            for s in t["state"]:
+                out.append(f"  state: {clip(s, 200)}")
+            if t["next"]:
+                out.append(f"  next: {clip(t['next'], 200)}")
+            out += capped(t["notes"], "log lines", lambda n: f"  log {hm(n['at'])}: {clip(n['text'], 200)}")
+            out += capped(t["done"], "done", lambda n: f"  done {hm(n['at'])}: {clip(n['text'], 120)}")
+            if t["dropped"]:
+                out.append(f"  dropped {len(t['dropped'])} todo(s)")
+            # New todos the user or a colleague owns; Claude's own are its working plan, not news.
+            mine = [n for n in t["added"] if n["owner"] != "claude"]
+            out += capped(mine, "new todos", lambda n: f"  new todo {hm(n['at'])}: "
+                          f"{'@' + n['owner'] + ' ' if n['owner'] else ''}{clip(n['text'], 120)}")
+            out += capped(t["answered"], "answers", lambda a: f"  answered {hm(a['at'])} {a['id']} \"{clip(a['text'], 80)}\""
+                          f" → {a['answer']}{': ' + clip(a['note'], 100) if a['note'] else ''}")
+            out += capped(t["asked"], "asks", lambda a: f"  asked {hm(a['at'])} {a['id']}: {clip(a['text'], 100)}")
+            for pr in t["prs"]:
+                if pr.get("state") == "MERGED" and pr.get("mergedInWindow"):
+                    out.append(f"  PR merged {hm(iso(naive(pr['mergedAt'])))}: #{pr['number']} {clip(pr['title'], 100)}")
+                elif pr.get("state") == "OPEN":
+                    out.append(f"  PR open{' (draft)' if pr.get('isDraft') else ''}: #{pr['number']} {clip(pr['title'], 100)}")
+        if p["quiet"]:
+            out.append("no movement: " + ", ".join(f"{q['id']} {clip(q['title'], 40)} ({q['status']}, updated {q['updated']})"
+                                                for q in p["quiet"]))
+        out.append("")
+    out.append("## Owed: waiting on the user for %d days or more" % OWED_AFTER_DAYS)
+    out += [f"- {o['task']} {'ask ' + o['id'] if o['kind'] == 'ask' else '@me todo'}: {clip(o['text'], 140)} — {o['days']}d"
+            for o in r["owed"]] or ["(nothing)"]
+    out.append("")
+    if r["edits"]:
+        out.append("## The user's edits to earlier reports (learn the format from these)")
+        for e in r["edits"]:
+            out += ["```diff", e["diff"].rstrip("\n"), "```"]
+        out.append("")
+    if not r["gh"]:
+        out.append("(PR states unknown: gh is not available or not logged in)")
+    return "\n".join(out).rstrip("\n")
+
+
+def report_list():
+    idx, out = load_reports_index(), []
+    for name in sorted(idx, reverse=True):
+        e = idx[name] if isinstance(idx[name], dict) else {}
+        path = os.path.join(reports_dir(), name)
+        if not os.path.isfile(path):
+            continue
+        m = REPORT_NAME_RE.match(name)
+        out.append({"name": name, "path": path, "date": m.group(1) if m else "", "kind": m.group(2) if m else "",
+                    "kept": e.get("kept"), "from": e.get("from"), "to": e.get("to")})
+    return out
+
+
+def report_keep(name):
+    """Snapshot a report the secretary just wrote; earlier reports' edits are now seen (the report
+    that follows them has dealt with them), so their snapshots move up to what the user left."""
+    name = os.path.basename(name)
+    if not REPORT_NAME_RE.match(name):
+        die(f"not a report file name (YYYY-MM-DD-daily.md or -weekly.md): {name}")
+    path = os.path.join(reports_dir(), name)
+    if not os.path.isfile(path):
+        die(f"no report {path}: write it first")
+    drafts = os.path.join(reports_dir(), ".drafts")
+    os.makedirs(drafts, exist_ok=True)
+    idx = load_reports_index()
+    for other in list(idx):
+        p = os.path.join(reports_dir(), other)
+        if other != name and os.path.isfile(p):
+            atomic_write(os.path.join(drafts, other), open(p, encoding="utf-8").read())
+    atomic_write(os.path.join(drafts, name), open(path, encoding="utf-8").read())
+    pending = load_json(reports_pending_path(), {})
+    pending = pending if isinstance(pending, dict) else {}
+    got = pending.pop(name, None)
+    idx[name] = {"kept": now_iso(), **(got if isinstance(got, dict) else {})}
+    atomic_write(reports_index_path(), json.dumps(idx, ensure_ascii=False, indent=1) + "\n")
+    atomic_write(reports_pending_path(), json.dumps(pending, ensure_ascii=False, indent=1) + "\n")
+    return path
+
+
+def cmd_report(args):
+    if args.action == "keep":
+        if not args.name:
+            die("usage: hq report keep YYYY-MM-DD-daily.md")
+        print(report_keep(args.name))
+        return
+    if args.action == "list":
+        rows = report_list()
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+        else:
+            for x in rows:
+                print(f"{x['date']}  {x['kind']:<6}  {x['path']}")
+        return
+    kind = args.action
+    if kind in (None, "auto"):
+        kind = "weekly" if dt.date.today().weekday() == 4 else "daily"   # Friday: the week's report
+    r = gather_report(kind, since=args.since, gh=not args.no_gh)
+    print(json.dumps(r, ensure_ascii=False, indent=1) if args.json else report_text(r))
 
 
 # ---------------------------------------------------------------- inbox: quick notes, sorted by a cheap model
@@ -2459,6 +2898,11 @@ def _cmd_todo(args, card):
     if not pick:
         die(f"{args.task} has no todo #{args.index}")
     mark_todo(card, lines, pick, args.state, args.via)
+    if todo_owner(pick[2].group(3)) == "me":
+        if args.state in ("done", "drop"):
+            settle_status(card, args.via)
+        else:
+            await_answer(card, args.via)    # the board's Undo of a tick
 
 
 def card_todos(lines):
@@ -2759,7 +3203,7 @@ def match_todo(todos, kind, want):
                   f"{'candidates' if hits else 'open todos'}: {listing}")
 
 
-def apply_update(card, block, via="session", change=None):
+def apply_update(card, block, via="session", change=None, settle=True):
     """Apply an hq-update block — the card changes a session writes in its reply instead of running
     `hq log/set/ref/addtodo/todo` one tool call at a time. Every such call is another model round trip
     that re-reads the whole conversation; the block costs a few output tokens.
@@ -2773,15 +3217,23 @@ def apply_update(card, block, via="session", change=None):
     on (PR #9 open → merged) — and repeating it changes nothing.
     A block made only of template placeholders is the protocol's example echoed back: ignored.
     `change`, a dict, gets the card's status before and after ("from", "to"), both read under the
-    same lock as the write, so a status set elsewhere at the same moment is never taken for this one."""
+    same lock as the write, so a status set elsewhere at the same moment is never taken for this one;
+    "status" when the block was applied with a status line, "me_ticked" when it ticked off or
+    dropped an @me todo. `settle`: let such a tick take the task out of waiting-on-me (the Stop
+    hook passes False and decides once for the whole reply)."""
     entries = update_lines(block)
     if entries and all(v and is_placeholder(v) for _, v in entries):
         return []
     with card_lock(card):
-        before = parse_card(card).get("status")
+        before, me_before = parse_card(card).get("status"), open_me_todos(card)
         problems = _apply_update(card, entries, via)
+        said = not problems and any(k == "status" for k, _ in entries)
+        me_ticked = not problems and open_me_todos(card) < me_before
+        if settle and me_ticked and not said:
+            settle_status(card, via)
         if change is not None:
-            change.update({"from": before, "to": parse_card(card).get("status")})
+            change.update({"from": before, "to": parse_card(card).get("status"),
+                           "status": said, "me_ticked": me_ticked})
         return problems
 
 
@@ -2907,6 +3359,7 @@ def cmd_ask(args):
     elif args.action == "reopen":
         card, _ = find_ask(args.target)
         append_event(os.path.dirname(card), {"type": "reopen", "id": args.target, "via": args.via})
+        await_answer(card, args.via)
     elif args.action == "resolve":
         if not args.rest:
             die("usage: hq ask resolve <ask-id> <do|drop|later|archive> [note…]")
@@ -3719,7 +4172,9 @@ PEEK_RECENT = 600   # a Peek this many seconds before the jump counts as "read i
 
 
 def jump_summary(days, now=None):
-    """Jumps of the last `days` days from the pet's jump log, counted by state x source."""
+    """Jumps of the last `days` days from the pet's jump log, counted by state x source. A click
+    that opened the session's task on the board instead (terminal "board", Settings → "Clicking a
+    Session Opens") is no jump to a terminal: counted apart, as boardOpens."""
     since = (now or time.time()) - days * 86400
     events = []
     try:
@@ -3736,6 +4191,8 @@ def jump_summary(days, now=None):
                     events.append(e)
     except FileNotFoundError:
         pass
+    board_opens = sum(1 for e in events if e.get("terminal") == "board")
+    events = [e for e in events if e.get("terminal") != "board"]
     grid, by_state, by_source, peeked = {}, {}, {}, {}
     for e in events:
         st, src = (str(e.get(k)) if e.get(k) not in (None, "") else "?" for k in ("state", "source"))
@@ -3746,7 +4203,7 @@ def jump_summary(days, now=None):
         if isinstance(e.get("peekedAgo"), int) and e["peekedAgo"] <= PEEK_RECENT:
             peeked[st] = peeked.get(st, 0) + 1
     order = lambda known, seen: [k for k in known if k in seen] + sorted(k for k in seen if k not in known)
-    return {"days": days, "total": len(events), "grid": grid, "byState": by_state, "bySource": by_source,
+    return {"days": days, "total": len(events), "boardOpens": board_opens, "grid": grid, "byState": by_state, "bySource": by_source,
             "peekedFirst": peeked, "states": order(JUMP_STATES, by_state),
             "sources": order(JUMP_SOURCES, by_source)}
 
@@ -3756,8 +4213,10 @@ def cmd_jumps(args):
     if args.json:
         print(json.dumps(r, ensure_ascii=False, indent=1))
         return
+    opens = (f"; {r['boardOpens']} clicks opened the task on the board instead, not counted"
+             if r["boardOpens"] else "")
     if not r["total"]:
-        print(f"no jumps in the last {args.days} days (log: {PET_JUMPS})")
+        print(f"no jumps in the last {args.days} days (log: {PET_JUMPS}){opens}")
         return
     cols = r["sources"]
     w = max([len("state")] + [len(x) for x in r["states"]])
@@ -3768,7 +4227,7 @@ def cmd_jumps(args):
         print(f"{st:<{w}}  " + "  ".join(f"{row.get(c, 0) or '.':>{len(c)}}" for c in cols)
               + f"  {r['byState'][st]:>5}  {r['peekedFirst'].get(st, 0):>6}")
     print(f"{'total':<{w}}  " + "  ".join(f"{r['bySource'][c]:>{len(c)}}" for c in cols) + f"  {r['total']:>5}")
-    print(f"\npeeked = its Peek was open on the board in the {PEEK_RECENT // 60} minutes before the jump")
+    print(f"\npeeked = its Peek was open on the board in the {PEEK_RECENT // 60} minutes before the jump{opens}")
 
 
 def find_transcript(prefix):
@@ -4604,13 +5063,21 @@ def _hook_main():
     elif event == "Stop":
         text = last_assistant_text(payload)
         problems = []
-        for b in hq_blocks(text):
+        blocks = hq_blocks(text)
+        # A status the reply wrote itself (and that was applied) wins over the automatic moves,
+        # which are made once, after all its blocks.
+        status_said = me_ticked = False
+        asked_before = {a["id"] for a in read_asks(meta["dir"])}
+        asked, resolved = False, set()   # resolved: the cards whose asks this reply answered
+        for b in blocks:
             if b["kind"] == "hq-update":
                 # Only at the end of the reply: one quoted or shown mid-reply is an example.
                 if b["trailing"]:
                     change = {}
-                    bad = apply_update(card, b["body"], change=change)
+                    bad = apply_update(card, b["body"], change=change, settle=False)
                     problems += bad
+                    status_said |= bool(change.get("status"))
+                    me_ticked |= bool(change.get("me_ticked"))
                     # This session finished its task: say so on its entry, for the board to treat
                     # like a task finished there (its "Finishing a task" setting: ask, stop, keep).
                     # The next prompt to it takes the mark away: you are still talking to it.
@@ -4624,14 +5091,24 @@ def _hook_main():
                 if not line or is_placeholder(line):
                     continue
                 if kind == "hq-asks":
-                    add_ask(card, line, sid, context=text)
+                    asked |= add_ask(card, line, sid, context=text) not in asked_before
                 else:
                     m = re.match(r"(T-\d+\.\d+)\s+(do|drop|later|archive)\b[:\s]*(.*)$", line)
                     if m:
                         try:
-                            resolve_ask(m.group(1), m.group(2), m.group(3), via="session")
+                            resolve_ask(m.group(1), m.group(2), m.group(3), via="session", settle=False)
+                            resolved.add(find_ask(m.group(1))[0])
                         except SystemExit:
                             pass
+        # A new question with no status written: the task now waits on the user. Answers recorded
+        # with no status written: it stops waiting once nothing is left on the user.
+        if not status_said:
+            if asked:
+                await_answer(card, "session")
+            elif me_ticked or card in resolved:
+                settle_status(card, "session")
+        for c in resolved - {card}:
+            settle_status(c, "session")
         if payload.get("stop_hook_active"):
             # One nudge per turn, never a loop. Another Stop hook may have sent the turn back
             # before this one could: tell the session at its next prompt instead of never.
@@ -4669,6 +5146,13 @@ def main():
     p.add_argument("action", nargs="?", choices=["show", "init"], default="show")
     p.add_argument("--lang", default="en"); p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_secretary)
+    p = sub.add_parser("report", help="the secretary's reports: hq report [auto|daily|weekly] [--since T] [--json] "
+                                      "| keep FILE | list [--json]")
+    p.add_argument("action", nargs="?", choices=["auto", "daily", "weekly", "keep", "list"], default="auto")
+    p.add_argument("name", nargs="?", help="keep: the report's file name")
+    p.add_argument("--since", help="start of the window (date or local time) instead of the default")
+    p.add_argument("--no-gh", action="store_true", help="don't look up PR states with gh")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_report)
     p = sub.add_parser("inbox", help="quick notes: hq inbox [list] | add TEXT [--image P] [--sort] | sort N-1 | "
                                        "move N-1 task|todo|note|me|unsorted [--task T-1 …] | drop N-1 | restore N-1")
     p.add_argument("action", nargs="?", choices=["list", "add", "sort", "move", "drop", "restore"], default="list")

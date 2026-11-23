@@ -22,6 +22,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     private let onShowBoard: (() -> Void)?
     private let onSkin: ((String) -> Void)?
     private let onLanguage: ((String) -> Void)?
+    private let onClickTarget: ((ClickTarget) -> Void)?
 
     init(
         onPauseToggle: @escaping () -> Void,
@@ -37,11 +38,13 @@ final class PetMenu: NSObject, NSMenuDelegate {
         onSkin: ((String) -> Void)? = nil,
         onLanguage: ((String) -> Void)? = nil,
         onQuickNote: (() -> Void)? = nil,
-        onNoteShortcutToggle: (() -> Void)? = nil
+        onNoteShortcutToggle: (() -> Void)? = nil,
+        onClickTarget: ((ClickTarget) -> Void)? = nil
     ) {
         self.onQuickNote = onQuickNote
         self.onNoteShortcutToggle = onNoteShortcutToggle
         self.onLanguage = onLanguage
+        self.onClickTarget = onClickTarget
         self.onShowBoard = onShowBoard
         self.onSkin = onSkin
         self.onNoticeHold = onNoticeHold
@@ -58,14 +61,14 @@ final class PetMenu: NSObject, NSMenuDelegate {
     func show(
         at point: NSPoint, in view: NSView,
         paused: Bool, launchesAtLogin: Bool, mutedCount: Int, shortcutOn: Bool = false,
-        noteShortcutOn: Bool = false, keepListOpenOn: Bool = false, problem: HealthCheck? = nil,
+        noteShortcutOn: Bool = false, keepListOpenOn: Bool = false, clickTarget: ClickTarget = .terminal, problem: HealthCheck? = nil,
         noticeHold: TimeInterval = Chatter.noticeHold, noticeCount: Int = Chatter.noticeCount,
         skin: String = PetSkins.defaultID, canShowSkin: (String) -> Bool = { _ in true },
         language: String = "auto"
     ) {
         let menu = makeMenu(
             paused: paused, launchesAtLogin: launchesAtLogin, mutedCount: mutedCount,
-            shortcutOn: shortcutOn, noteShortcutOn: noteShortcutOn, keepListOpenOn: keepListOpenOn, problem: problem,
+            shortcutOn: shortcutOn, noteShortcutOn: noteShortcutOn, keepListOpenOn: keepListOpenOn, clickTarget: clickTarget, problem: problem,
             noticeHold: noticeHold, noticeCount: noticeCount,
             skin: skin, canShowSkin: canShowSkin, language: language
         )
@@ -78,6 +81,7 @@ final class PetMenu: NSObject, NSMenuDelegate {
     ///   when nothing is — which is when the connection report is left out.
     func makeMenu(paused: Bool, launchesAtLogin: Bool, mutedCount: Int = 0,
                   shortcutOn: Bool = false, noteShortcutOn: Bool = false, keepListOpenOn: Bool = false,
+                  clickTarget: ClickTarget = .terminal,
                   problem: HealthCheck? = nil,
                   noticeHold: TimeInterval = Chatter.noticeHold,
                   noticeCount: Int = Chatter.noticeCount,
@@ -151,6 +155,21 @@ final class PetMenu: NSObject, NSMenuDelegate {
             noteKey.state = noteShortcutOn ? .on : .off
             noteKey.target = self
             options.addItem(noteKey)
+        }
+        // Where a notice, a row in the list or that shortcut takes you — see ClickTarget.
+        if onClickTarget != nil {
+            let opens = NSMenuItem(title: L("Clicking a Session Opens", "点击 session 时打开"), action: nil, keyEquivalent: "")
+            let targets = NSMenu()
+            for (target, title) in [(ClickTarget.terminal, L("Its Terminal", "它的终端")),
+                                    (ClickTarget.board, L("Its Task on the Board", "任务看板上它的任务"))] {
+                let item = NSMenuItem(title: title, action: #selector(pickClickTarget(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = target.rawValue
+                item.state = target == clickTarget ? .on : .off
+                targets.addItem(item)
+            }
+            opens.submenu = targets
+            options.addItem(opens)
         }
         options.addItem(.separator())
 
@@ -247,6 +266,9 @@ final class PetMenu: NSObject, NSMenuDelegate {
     }
     @objc private func pickLanguage(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { onLanguage?(id) }
+    }
+    @objc private func pickClickTarget(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String { onClickTarget?(ClickTarget(stored: raw)) }
     }
     @objc private func quit() { onQuit() }
     @objc private func showBoard() { onShowBoard?() }

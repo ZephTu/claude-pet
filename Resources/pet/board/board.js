@@ -79,7 +79,7 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
-  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {},
+  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
   drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   groupBy: pref("hq-groupby", "project"), sgroupBy: pref("hq-sgroupby", "list"),
@@ -322,6 +322,7 @@ async function refresh(force) {
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
     ui.usage = pet.usage || null;
+    ui.clickTarget = pet.clickTarget || "";   // empty: no pet behind this board (--render-board)
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
@@ -374,7 +375,16 @@ async function loadFlags() {
     ui.flagsLoading = false;
   }
 }
-window.hqReveal = (id) => refresh().then(() => { if (id) revealTask(id); });
+// From the pet: a click on a session opens its task here (Settings → "Clicking a session on the
+// pet opens"), with that session picked out and its conversation open.
+window.hqReveal = (id, sid) => refresh().then(() => {
+  clearTimeout(ui.hlTimer);   // a second click soon after the last Peek closed: keep the new pick
+  ui.hlSession = sid && id && id !== secId() && taskById(id) ? sid : null;
+  // Draw the pick first: revealTask only scrolls to a card already in Focus, without a redraw.
+  render();
+  if (id) revealTask(id);
+  if (ui.hlSession) openPeek(sid);
+});
 
 // ------------------------------------------------------------------ render
 // Background sessions (claude --bg) have no terminal; `claude agents --json` names them. Mark the
@@ -1402,7 +1412,7 @@ function focusSessions(t, live) {
     const title = String(s.title || s.project || s.sessionId.slice(0, 8));
     const name = title.replace(new RegExp("^" + t.id + "\\s+"), "") || title;
     const last = plainText(s.lastText);
-    return `<div class="fs" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
+    return `<div class="fs${s.sessionId === ui.hlSession ? " hl" : ""}" data-action="peek" data-session="${esc(s.sessionId)}" title="${esc(name)}${T(" — click to Peek its conversation", "——点击 Peek 它的对话")}">
       ${dot(s)}<span class="fs-n">${newTag(s.sessionId)}${esc(name)}</span>
       <span class="fs-st">${esc(statusWord(s))}</span>
       <span class="fs-l">${last ? esc(last) : ""}</span>
@@ -1708,7 +1718,7 @@ function renderTaskBody(t) {
       <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div></div>
       ${tools}
     </div>`;
-  const sessRow = (s) => `<div class="bsess">
+  const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
@@ -2098,6 +2108,8 @@ function renderSessionSettings() {
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
     ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
+    ${ui.clickTarget ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task here opens in Focus if it is there, in All otherwise, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，Focus 里有就在 Focus，没有就在 All，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
+      `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
     ${row(T("Active first", "活跃的在前"), T("Tasks (and project groups) with a live session come first, most recently active first. Off: your own order", "有 session 在跑的任务（和项目组）排最前，最近有动静的在前。不勾：按你自己的顺序"),
@@ -2254,6 +2266,13 @@ async function openPeek(sid, back, opt = {}) {
   await refreshPeek(true);
 }
 function closePeek() {
+  // A session the pet sent us to stays picked out a moment longer, where its card is.
+  if (ui.hlSession && ui.modal && ui.modal.sid === ui.hlSession) {
+    const sid = ui.hlSession;
+    requestAnimationFrame(() => { const row = document.querySelector(".bsess.hl, .fs.hl"); if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
+    clearTimeout(ui.hlTimer);
+    ui.hlTimer = setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
+  }
   ui.modal = null;
   $("#modal").hidden = true;
   $("#modal").innerHTML = "";
@@ -2434,7 +2453,7 @@ function drawPeek(toBottom) {
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
-    ${m.secretary ? secretaryWatch(m) : ""}
+    ${m.secretary ? secretaryReports(m) + secretaryWatch(m) : ""}
     <div class="peek-body">${list}</div>
     ${m.secretary ? secretaryAsks() : ""}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.secretary ? noSend : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
@@ -2522,6 +2541,28 @@ function secretaryWatch(m) {
   return `<div class="sec-watch"><span class="sec-watch-h">${T("Keeping an eye on", "它在替你盯的事")}</span>
     ${lines.map((l) => `<div>${esc(l)}</div>`).join("")}</div>`;
 }
+// Its reports (`hq report`, written to secretary/reports/): the newest, each opening in your editor
+// (what you change there it learns from), the evening schedule's switch, and "write one now".
+function secretaryReports(m) {
+  const st = m.sec || {}, sch = st.schedule || {}, reports = st.reports || [];
+  const kindWord = (k) => (k === "weekly" ? T("weekly", "周报") : T("daily", "日报"));
+  const links = reports.map((r) => `<button class="lnk" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — the secretary learns from your edits", "打开编辑——秘书会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}</button>`).join(" · ");
+  const hm = `${String(sch.hour ?? 18).padStart(2, "0")}:${String(sch.minute ?? 30).padStart(2, "0")}`;
+  const when = sch.kind === "weekdays" ? T(`weekdays ${hm}, the weekly one on Fridays`, `工作日 ${hm}，周五写周报`)
+    : sch.kind === "daily" ? T(`daily ${hm}, the weekly one on Fridays`, `每天 ${hm}，周五写周报`) : T("on its schedule in Scheduled", "按“定时任务”里设的时间");
+  const busy = st.running || ui.sending.has(SEC);
+  return `<div class="sec-reports">
+    <span class="sec-watch-h">${T("Reports", "报告")}</span>${links || `<span class="meta">${T("none yet", "还没有")}</span>`}
+    <span style="flex:1"></span>
+    ${sch.reports === false
+      // Its scheduled runs ask what the user wrote in Scheduled; turning reports on replaces that.
+      ? `<span class="meta" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs: your own prompt, no reports", "定时运行：用你自己的 prompt，不写报告") : T("Evening report off", "定时报告：关")}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="1">${sch.enabled ? T("Write reports instead", "改成写报告") : T("Turn on", "开启")}</button>`
+      : `<span class="meta" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}">${sch.enabled ? T(`Evening report on: ${when}`, `定时报告：开（${when}）`) : T(`Evening report off (${when})`, `定时报告：关（${when}）`)}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}">${sch.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>`}
+    <button class="btn small" data-action="secretary-report-now" ${busy ? "disabled" : ""} title="${T("Ask for the report that is due now", "让它现在写今天该写的报告")}">${T("Write one now", "现在写一份")}</button>
+  </div>`;
+}
 // Its memory files, each opening in your editor.
 function secretaryMemory(m) {
   const st = m.sec || {};
@@ -2543,19 +2584,19 @@ function secretaryIntro() {
   return T(`Ask it where things stand: “How are T-072 and T-071 doing, and what is blocking them?”, “What is waiting on me?”, “What looks stuck?”. It looks things up on the board each time and marks what waits on you with ⚑.`,
            `问它各个任务的情况：“T-072 和 T-071 怎么样了、卡点是什么？”“有什么在等我？”“哪些看着卡住了？”。它每次都现查看板，等你处理的事会用 ⚑ 标出来。`);
 }
-async function sendSecretary() {
+// preset: a message of the window's own ("Write one now"); the draft in the box stays as it is.
+async function sendSecretary(preset) {
   if (ui.sending.has(SEC)) return;
   const key = "msg:" + SEC;
-  const text = (ui.drafts[key] || "").trim();
-  const images = ui.atts[SEC] || [];
+  const text = preset || (ui.drafts[key] || "").trim();
+  const images = preset ? [] : ui.atts[SEC] || [];
   if (!text && !images.length) return;
   const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
   ui.sending.add(SEC);
   if (ui.modal && ui.modal.secretary) drawPeek(true);
   try {
     await api("secretary-send", { text: message });
-    delete ui.drafts[key];
-    delete ui.atts[SEC];
+    if (!preset) { delete ui.drafts[key]; delete ui.atts[SEC]; }
     if (ui.modal && ui.modal.secretary && ui.modal.sec) ui.modal.sec.running = true;
   } catch (e) {
     toast(String(e.message || e), true);
@@ -3496,6 +3537,13 @@ document.addEventListener("click", async (ev) => {
     case "close-modal": return closePeek();
     case "open-secretary": return openSecretary();
     case "secretary-setup": return setupSecretary();
+    case "secretary-reports":
+      try { ui.secretary = await apiObj("secretary-reports", { on: d.on === "1" }); }
+      catch (e) { return toast(String(e.message || e), true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
+      return toast(d.on === "1" ? T("Evening report on", "定时报告已开启") : T("Evening report off", "定时报告已关闭"));
+    case "secretary-report-now":
+      return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":
       try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
       return refreshPeek();
@@ -3831,6 +3879,8 @@ document.addEventListener("change", (ev) => {
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
   if (d.action === "finish-stop-pref") { savePref("hq-finish-stop", el.value); return render(); }
   if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
+  // Kept by the pet, which its menu shares; shows at once, the next refresh confirms it.
+  if (d.action === "click-target") { ui.clickTarget = el.value; api("click-target", { value: el.value }).catch((e) => toast(String(e.message || e), true)); return render(); }
   // A picked status / project / category shows at once; the refresh after saving confirms it.
   if (["set-status", "set-project", "set-category"].includes(d.action)) {
     ui.pointerDown = false;

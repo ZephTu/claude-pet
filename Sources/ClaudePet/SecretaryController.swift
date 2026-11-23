@@ -8,8 +8,10 @@ import Foundation
 ///   memory (`<root>/secretary/*.md`) and its own task card, whose asks are its proposals;
 /// - a scheduled job, `secretary`, holds the session: Claude runs in the task root as
 ///   `--agent secretary`, the same session every run, compacted past a threshold and skipped
-///   when the subscription's quota is nearly used up (see Jobs.swift). It is off schedule unless
-///   the user turns one on; each message from the board is one run, its text the run's prompt;
+///   when the subscription's quota is nearly used up (see Jobs.swift). Each message from the board
+///   is one run, its text the run's prompt. Its schedule, off until the user turns it on from the
+///   secretary's window, is the evening report: weekdays at 18:30, the weekly one on Fridays
+///   (`hq report` picks which);
 /// - the session is bound to the secretary's card, so the hq hooks give it the card's rules, file
 ///   its `hq-asks` as asks in Needs you, and tell it the answers at its next turn;
 /// - the board shows the conversation in Peek, by the session's id.
@@ -58,6 +60,16 @@ final class SecretaryController {
             o["contextPct"] = Int((Double(ctx) * 100 / Double(window)).rounded())
         }
         o["waking"] = !answeredYes.isEmpty
+        if let job = store.load(Self.jobID) {
+            // A job from before reports shows what ensureJob will make of it.
+            let migrating = Self.needsMigration(job)
+            let sch = migrating ? Self.migratedSchedule(job.schedule) : job.schedule
+            o["schedule"] = ["enabled": job.enabled, "kind": sch.kind.rawValue,
+                             // false: its scheduled runs ask something else (the user's own prompt).
+                             "reports": migrating || Self.writesReports(job),
+                             "hour": sch.hour, "minute": sch.minute,
+                             "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
+        }
         return (o, nil)
     }
 
@@ -82,6 +94,21 @@ final class SecretaryController {
         if running { return (nil, L("The secretary is still answering — wait for it, or stop it.", "秘书还在回复上一条——等它说完，或者先停下。")) }
         if let err = await prepare() { return (nil, err) }
         return start(text, trigger: "chat")
+    }
+
+    /// The evening report on or off: the job's schedule (weekdays 18:30 unless the user changed it
+    /// in Scheduled). Turning it on gives the job the report prompt if it asks something else, and
+    /// a fixed time if it runs every N minutes: the user asked for reports, from the window.
+    func setReports(on: Bool) async -> (Any?, String?) {
+        if let err = await prepare() { return (nil, err) }
+        if on, var job = store.load(Self.jobID), !Self.writesReports(job) {
+            job.prompt = Self.reportPrompt
+            if job.schedule.kind == .every { job.schedule = Self.reportSchedule }
+            if let err = await save(job) { return (nil, err) }
+        }
+        let r = await jobs.setEnabled(Self.jobID, on)
+        if let err = r.1 { return (nil, err) }
+        return await status()
     }
 
     func stop() -> (Any?, String?) {
@@ -113,8 +140,11 @@ final class SecretaryController {
         guard let memory = info["memory"] as? String, !memory.isEmpty else { return false }
         // Symlinks resolved on both sides: the check is about the file that gets opened.
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let folder = URL(fileURLWithPath: memory).resolvingSymlinksInPath()
+        let parent = url.deletingLastPathComponent().path
+        // Its memory, or one of its reports (`secretary/reports/`).
         return url.pathExtension == "md"
-            && url.deletingLastPathComponent().path == URL(fileURLWithPath: memory).resolvingSymlinksInPath().path
+            && (parent == folder.path || parent == folder.appending(path: "reports").path)
     }
 
     // MARK: - Internals
@@ -153,6 +183,14 @@ final class SecretaryController {
         guard info["ready"] as? Bool == true, let task = info["task"] as? String else {
             return L("The secretary isn't set up yet.", "秘书还没有设置好。")
         }
+        // Set up by an older version: an agent definition it wrote and nobody edited is brought up
+        // to date, and a memory file added since (reports.md) is made. Nothing the user wrote changes.
+        let files = info["files"] as? [String: Bool] ?? [:]
+        if info["agentStale"] as? Bool == true || files.values.contains(false), let hq {
+            let r = await hq(["secretary", "init", "--json"])
+            if let err = r.1 { return err }
+            if let err = parseInfo(r.0) { return err }
+        }
         if let err = await ensureJob() { return err }
         // The session's id is chosen before its first run, so the session is bound to the card
         // from its first prompt (the hq hooks then give it the card's rules).
@@ -182,22 +220,48 @@ final class SecretaryController {
         return r
     }
 
+    /// What a scheduled run asks: the report that is due (`hq report` picks daily or weekly). It
+    /// names the steps itself: an agent definition the user edited keeps its old instructions.
+    static var reportPrompt: String { L(reportPrompts[0], reportPrompts[1]) }
+    private static let reportPrompts = [
+        "Scheduled run: write the report that is due (Reports in your instructions): run `~/.claude/hq/bin/hq report`, write the report to the file it names, in the format of secretary/reports.md, run `~/.claude/hq/bin/hq report keep <that file name>`, then stop.",
+        "定时运行：写今天该写的报告（照你说明里的 Reports 一节）：运行 `~/.claude/hq/bin/hq report`，按 secretary/reports.md 的格式把报告写进它给出的文件，再运行 `~/.claude/hq/bin/hq report keep <那个文件名>`，写完就停。"]
+    static func writesReports(_ job: Job) -> Bool { reportPrompts.contains(job.prompt) }
+    /// The schedule a job made before reports existed had, and the time reports run at instead.
+    static let reportSchedule = Schedule(kind: .weekdays, hour: 18, minute: 30, cron: "30 18 * * 1-5")
+    private static let oldPrompts: Set<String> = ["Look over the board: what needs my attention?", "看一眼看板：有什么需要我注意的？"]
+    /// Made before reports: its prompt and schedule were placeholders nobody ran (it was off).
+    private static func needsMigration(_ job: Job) -> Bool { !job.enabled && oldPrompts.contains(job.prompt) }
+    /// The default 09:00 placeholder, or every N minutes (a report an hour is not a report), becomes
+    /// the evening; a fixed time the user chose stays.
+    private static func migratedSchedule(_ s: Schedule) -> Schedule {
+        s == Schedule() || s.kind == .every ? reportSchedule : s
+    }
+
     /// The job as the secretary needs it. The user may change its model, time limit, quota and
-    /// compaction settings, or give it a schedule, in Scheduled; what makes it the secretary
+    /// compaction settings, its schedule or its prompt in Scheduled; what makes it the secretary
     /// (folder, agent, same session, allowed tools) is put back.
     private func ensureJob() async -> String? {
         guard let root = info["root"] as? String, !root.isEmpty else { return L("No HQ root", "找不到 HQ 根目录") }
         let tools = Self.allowedTools(root: root)
         var job = store.load(Self.jobID) ?? Job(
-            id: Self.jobID, name: L("Secretary", "秘书"), kind: .claude,
-            prompt: L("Look over the board: what needs my attention?", "看一眼看板：有什么需要我注意的？"),
-            cwd: root, enabled: false, timeoutMinutes: 15, sessionMode: .resume, compactAbovePct: 50,
-            notify: .failure, agent: "secretary", allowedTools: tools)
+            id: Self.jobID, name: L("Secretary", "秘书"), kind: .claude, prompt: Self.reportPrompt,
+            cwd: root, schedule: Self.reportSchedule, enabled: false, timeoutMinutes: 15, sessionMode: .resume,
+            compactAbovePct: 50, notify: .failure, agent: "secretary", allowedTools: tools)
         let fresh = store.load(Self.jobID) == nil
-        if !fresh, job.directory == root, job.agent == "secretary", job.sessionMode == .resume,
+        let old = Self.needsMigration(job)
+        if !fresh, !old, job.directory == root, job.agent == "secretary", job.sessionMode == .resume,
            job.kind == .claude, job.allowedTools == tools { return nil }
         job.cwd = root; job.agent = "secretary"; job.sessionMode = .resume; job.kind = .claude
         job.allowedTools = tools
+        if old {
+            job.prompt = Self.reportPrompt
+            job.schedule = Self.migratedSchedule(job.schedule)
+        }
+        return await save(job)
+    }
+
+    private func save(_ job: Job) async -> String? {
         guard let data = try? JSONEncoder().encode(job),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "encode" }
         return await jobs.save(raw).1

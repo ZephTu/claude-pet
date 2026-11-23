@@ -1119,12 +1119,12 @@ import json, os, sys
 d = json.load(open(sys.argv[1])); root = sys.argv[2]
 assert d["ready"] and d["agentExists"] and all(d["files"].values()), d
 assert os.path.isfile(os.path.join(root, ".claude/agents/secretary.md"))
-for f in ("profile.md", "people.md", "playbooks.md"):
+for f in ("profile.md", "people.md", "playbooks.md", "reports.md"):
     assert os.path.isfile(os.path.join(root, "secretary", f)), f
 assert json.load(open(os.path.join(root, "hq.json")))["secretary"] == {"task": d["task"]}, d
 card = open(d["card"], encoding="utf-8").read()
 assert "title: \"秘书\"" in card and "lead: secretary" in card and "<what done looks like>" not in card, card
-assert len(d["made"]) == 5, d["made"]
+assert len(d["made"]) == 6, d["made"]
 PY2
 STID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["task"])' "$T/sec.json")"
 [ "$(cat "$T/root/focus.json" 2>/dev/null || true)" = "$FOCUS_BEFORE" ] && ok "secretary's card stays off Focus" || fail "secretary card joined Focus"
@@ -1152,6 +1152,103 @@ python3 -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c.pop("secreta
 import json,sys; d=json.load(sys.stdin); card=open(d["card"], encoding="utf-8").read()
 assert "秘书自己的卡片" in card and "<要达成什么" not in card, card' && ok "secretary init fills the goal of the root's own card template" || fail "secretary goal with root template"
 rm -rf "$T/root/templates"
+
+# hq report: what happened on the board in a window, by project, for the secretary's reports.
+[ -f "$T/root/secretary/reports.md" ] && grep -q "报告格式" "$T/root/secretary/reports.md" && ok "secretary init makes reports.md in the memory's language" || fail "reports.md template"
+"$HQ" project add reportproj --kind goal >/dev/null
+RT="$("$HQ" new "Report me" --project reportproj | head -1)"
+"$HQ" log "$RT" "picked the dataset"
+"$HQ" addtodo "$RT" "@claude write the loader" >/dev/null; "$HQ" addtodo "$RT" "@me review the plan" >/dev/null
+"$HQ" todo "$RT" 1 done >/dev/null
+"$HQ" ref add "$RT" "PR #7 loader https://github.com/acme/repo/pull/7" >/dev/null
+"$HQ" ask add "$RT" "Use SF100?" >/dev/null; "$HQ" ask resolve "$RT.1" do "yes, SF100" --via board
+"$HQ" ask add "$RT" "Rerun tonight?" >/dev/null
+OLD="$(python3 -c 'import datetime as d; print((d.datetime.now().astimezone()-d.timedelta(days=5)).isoformat(timespec="seconds"))')"
+"$HQ" addtodo "$RT" "@me send the numbers to Atul" >/dev/null
+python3 - "$T"/root/tasks/"$RT"-*/TASK.md "$OLD" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"(send the numbers to Atul <!--t:)[^>]*(-->)", lambda m: m.group(1) + sys.argv[2] + m.group(2), s)
+open(p, "w", encoding="utf-8").write(s)
+PY2
+mkdir -p "$T/bin"; MERGED="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+printf '#!/bin/sh\necho "{\\"number\\":7,\\"title\\":\\"loader\\",\\"state\\":\\"MERGED\\",\\"mergedAt\\":\\"%s\\",\\"isDraft\\":false}"\n' "$MERGED" > "$T/bin/gh"; chmod +x "$T/bin/gh"
+PATH="$T/bin:$PATH" "$HQ" report daily --json > "$T/rep.json"
+python3 - "$T/rep.json" "$RT" "$T/root" <<'PY2' && ok "hq report: notes, ticked todos, answers, open asks, merged PRs, what you owe" || fail "hq report json"
+import json, os, sys
+r, tid, root = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+assert r["kind"] == "daily" and r["file"].endswith("-daily.md") and os.path.dirname(r["file"]) == os.path.join(root, "secretary", "reports"), r["file"]
+p = [x for x in r["projects"] if x["name"] == "reportproj"][0]
+t = [x for x in p["moved"] if x["id"] == tid][0]
+assert [n["text"] for n in t["notes"]] == ["picked the dataset"], t["notes"]
+assert [n["text"] for n in t["done"]] == ["write the loader"], t["done"]
+assert [n["text"] for n in t["added"]] == ["review the plan"], t["added"]       # a todo done in the window isn't "new" too
+assert [(a["id"], a["answer"], a["note"]) for a in t["answered"]] == [(tid + ".1", "do", "yes, SF100")], t["answered"]
+assert [a["text"] for a in t["asked"]] == ["Rerun tonight?"], t["asked"]          # answered ones aren't repeated as asked
+assert t["prs"][0]["mergedInWindow"] and t["prs"][0]["number"] == 7, t["prs"]
+assert [(o["task"], o["kind"], o["days"]) for o in r["owed"]] == [(tid, "todo", 5)], r["owed"]
+assert not any(x["id"] == json.load(open(os.path.join(root, "hq.json")))["secretary"]["task"] for pr in r["projects"] for x in pr["moved"] + pr["quiet"])
+assert r["edits"] == [] and r["gh"] is True
+PY2
+PATH="$T/bin:$PATH" "$HQ" report daily | grep -q "PR merged .*#7 loader" && ok "hq report prints the facts as text" || fail "hq report text"
+"$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["gh"] is False' && ok "hq report --no-gh skips PR lookups" || fail "report --no-gh"
+[ "$(cd "$T" && env PATH="$T/bin:$PATH" "$HQ" report weekly --json | python3 -c 'import json,sys,datetime as d; r=json.load(sys.stdin); n=d.datetime.now(); print(r["from"][:10]==(n-d.timedelta(days=n.weekday())).date().isoformat())')" = True ] && ok "weekly report starts on Monday" || fail "weekly window"
+# Keep a report, edit it: the next report shows the edit, once.
+D="$(date +%F)"; RD="$T/root/secretary/reports"
+"$HQ" report keep "$D-daily.md" 2>/dev/null && fail "keep without the file" || ok "keep refuses a report not written yet"
+printf '# Daily\n\n## reportproj\n- progress: loader merged\n' > "$RD/$D-daily.md"
+"$HQ" report keep "$D-daily.md" >/dev/null && [ -f "$RD/.drafts/$D-daily.md" ] && ok "keep snapshots the report as written" || fail "keep snapshot"
+"$HQ" report keep "../hq.json" 2>/dev/null && fail "keep took any file" || ok "keep takes only report file names"
+"$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["edits"]==[], r["edits"]; assert r["from"][:10] == "'"$D"'"' && ok "no edits yet" || fail "edits before editing"
+printf '# Daily\n\n## reportproj\n- loader merged (PR #7)\n' > "$RD/$D-daily.md"
+"$HQ" report weekly --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); e=r["edits"]
+assert len(e)==1 and "-- progress: loader merged" in e[0]["diff"] and "+- loader merged (PR #7)" in e[0]["diff"], e' && ok "hq report shows the user's edits to the last report as a diff" || fail "report edits"
+printf '# Weekly\n' > "$RD/$D-weekly.md"; "$HQ" report keep "$D-weekly.md" >/dev/null
+"$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["edits"]==[], r["edits"]' && ok "keeping the next report marks earlier edits as seen" || fail "edits seen"
+"$HQ" report list --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert sorted(x["kind"] for x in r)==["daily","weekly"], r' && ok "hq report list" || fail "report list"
+"$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["reports"])==2 and d["files"]["reports.md"] and d["ready"], d' && ok "secretary --json lists its reports" || fail "secretary reports"
+# Today's report written again (Write one now, then the evening run): the user's edits to it show.
+printf '# Daily\n\n## reportproj\n- loader merged (PR #7), my words\n' > "$RD/$D-daily.md"
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+assert r["exists"] and [e["report"] for e in r["edits"]]==["'"$D"'-daily.md"], r["edits"]' && ok "rewriting today's report shows the user's edits to it" || fail "same-day rewrite edits"
+"$HQ" report daily --no-gh | grep -q "NOTE: this file exists" && ok "and says to keep them" || fail "same-day rewrite note"
+# The next daily report starts where the last one's facts ended, not when it was kept.
+"$HQ" report weekly --no-gh --json > "$T/wk.json"; sleep 1; "$HQ" report keep "$D-weekly.md" >/dev/null
+python3 - "$T/wk.json" "$RD/.reports.json" <<'PY2' && ok "keep records the window the report was written from" || fail "keep window"
+import json, sys
+g, idx = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+w = idx[g["file"].rsplit("/", 1)[1]]
+assert (w["from"], w["to"]) == (g["from"], g["to"]) and w["kept"] > w["to"], w
+PY2
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); g=json.load(open("'"$T/wk.json"'"))
+assert r["from"] == g["to"], (r["from"], g["to"])' && ok "the next daily report starts at the end of the last one's facts" || fail "daily window start"
+"$HQ" report list --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert all(x["to"] for x in r), r' && ok "report list shows each window" || fail "list window"
+# A card closed today and already reported closed isn't reported closed again later today;
+# a card whose only news is Claude's own todos didn't move.
+RC="$("$HQ" new "Close me" --project reportproj | head -1)"; "$HQ" set "$RC" status=done >/dev/null
+RQ="$("$HQ" new "Quiet me" --project reportproj | head -1)"
+"$HQ" report weekly --no-gh --json > "$T/wk.json"
+python3 - "$T/wk.json" "$RC" <<'PY2' && ok "a card closed in the window is reported closed" || fail "closed in window"
+import json, sys
+r = json.load(open(sys.argv[1])); p = [x for x in r["projects"] if x["name"] == "reportproj"][0]
+assert [t["closed"] for t in p["moved"] if t["id"] == sys.argv[2]] == [True], p["moved"]
+PY2
+"$HQ" report keep "$D-weekly.md" >/dev/null; "$HQ" addtodo "$RQ" "@claude look into it" >/dev/null
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); p=[x for x in r["projects"] if x["name"]=="reportproj"][0]
+moved = [t["id"] for t in p["moved"]]
+assert "'"$RC"'" not in moved and "'"$RQ"'" not in moved, moved
+assert "'"$RQ"'" in [q["id"] for q in p["quiet"]], p["quiet"]' && ok "not reported closed twice; Claude's own new todos aren't movement" || fail "closed twice / claude todos"
+# An agent definition an older hq wrote, unedited, is brought up to date; an edited one is kept.
+(cd "$SRC/.." && git show 66ec2b4:hq/template/agents/secretary.md) > "$T/root/.claude/agents/secretary.md"
+"$HQ" secretary --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["agentStale"]' && ok "an old unedited agent definition is stale" || fail "agentStale"
+"$HQ" secretary init --json >/dev/null; grep -q "^## Reports" "$T/root/.claude/agents/secretary.md" && ok "init brings a stale agent definition up to date" || fail "stale agent upgrade"
+echo "mine" >> "$T/root/.claude/agents/secretary.md"; "$HQ" secretary init --json >/dev/null
+tail -1 "$T/root/.claude/agents/secretary.md" | grep -q mine && ok "init keeps an edited agent definition" || fail "edited agent overwritten"
+rm "$T/root/secretary/reports.md"; "$HQ" report daily --no-gh >/dev/null; grep -q "报告格式" "$T/root/secretary/reports.md" && ok "hq report remakes a missing reports.md" || fail "reports.md remade"
 
 # hq inbox: quick notes, sorted by a (fake) cheap model; a move takes back exactly what it wrote.
 # Run as the pet runs it where that is possible: /usr/bin/python3 is 3.9 on macOS, whose argparse
@@ -1235,12 +1332,89 @@ cat > "$HOME/.claude/pet/jumps.jsonl" <<EOF
 {"at":"$NOW","session":"b","source":"board-peek","state":"replied","peekedAgo":5000}
 {"at":"2020-01-01T00:00:00Z","session":"old","source":"hotkey","state":"question"}
 {"at":"$NOW","session":"odd","source":["x"],"state":7}
+{"at":"$NOW","session":"c","source":"pet-list","state":"replied","terminal":"board"}
 [1, 2]
 not json
 EOF
-"$HQ" jumps --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["total"]==4 and r["grid"]["7"]=={"[\x27x\x27]":1} and r["grid"]["replied"]=={"pet-list":1,"board-peek":1} and r["peekedFirst"]=={"permission":1} and r["states"]==["permission","replied","7"], r' && ok "hq jumps counts the last week by state x source" || fail "hq jumps"
+"$HQ" jumps --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["total"]==4 and r["boardOpens"]==1 and r["grid"]["7"]=={"[\x27x\x27]":1} and r["grid"]["replied"]=={"pet-list":1,"board-peek":1} and r["peekedFirst"]=={"permission":1} and r["states"]==["permission","replied","7"], r' && ok "hq jumps counts the last week by state x source" || fail "hq jumps"
 "$HQ" jumps | grep -q "^permission " && ok "hq jumps prints a table" || fail "hq jumps table"
 rm "$HOME/.claude/pet/jumps.jsonl"; "$HQ" jumps | grep -q "no jumps" && ok "hq jumps without a log says so" || fail "hq jumps empty"
+
+# automatic status: waiting-on-me ↔ active follow the asks and @me todos; nothing else moves by itself
+AS="$("$HQ" new "Auto status" --no-focus | head -1)"; CA="$(ls "$T"/root/tasks/$AS-*/TASK.md)"
+"$HQ" bind "$AS" --session sess-as >/dev/null
+st() { sed -n '/^---$/,/^---$/p' "$CA" | sed -n 's/^status: //p'; }
+stop sess-as "$(printf 'First question.\n```hq-asks\n- Which dataset?\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && grep -q "active → waiting-on-me (auto" "$CA" && ok "auto status: a new ask with no status written puts an active task waiting on you" || fail "ask did not wait: $(st)"
+"$HQ" ask resolve "$AS.1" do --via board --note "the big one" >/dev/null
+[ "$(st)" = active ] && grep -q "waiting-on-me → active (auto, board)" "$CA" && ok "auto status: answering the last ask makes it active again" || fail "answer did not settle: $(st)"
+"$HQ" ask reopen "$AS.1" --via board >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: taking the answer back waits again" || fail "reopen: $(st)"
+"$HQ" ask resolve "$AS.1" do --via board >/dev/null
+stop sess-as "$(printf 'Two things.\n```hq-asks\n- Ship on Friday?\n- Which region?\n```')" >/dev/null
+"$HQ" ask resolve "$AS.2" do --via board >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: one ask still open keeps it waiting" || fail "settled early: $(st)"
+"$HQ" ask snooze "$AS.3" --via board >/dev/null; "$HQ" ask reopen "$AS.2" --via board >/dev/null; "$HQ" ask resolve "$AS.2" do --via board >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: a snoozed ask is still open" || fail "snoozed: $(st)"
+"$HQ" addtodo "$AS" "@me send the form" >/dev/null
+stop sess-as "$(printf 'Noted.\n```hq-resolved\n- %s.3 do: us-east\n```' "$AS")" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: an open @me todo keeps it waiting" || fail "todo ignored: $(st)"
+"$HQ" addtodo "$AS" "@claude rerun" >/dev/null
+stop sess-as "$(printf 'Thanks.\n```hq-update\ndone: send the form\n```')" >/dev/null
+[ "$(st)" = active ] && ok "auto status: ticking off the last @me todo (an @claude one left) makes it active" || fail "todo done: $(st)"
+N="$("$HQ" show "$AS" | grep -c '^- \[' || true)"
+"$HQ" todo "$AS" "$((N-1))" open --via board >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: undoing that tick waits again" || fail "todo undo: $(st)"
+"$HQ" todo "$AS" "$((N-1))" done --via board >/dev/null
+"$HQ" set "$AS" status=waiting-on-me >/dev/null
+stop sess-as "$(printf 'Done that.
+```hq-update
+done: rerun
+```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: ticking an @claude todo leaves it waiting" || fail "@claude tick moved it: $(st)"
+"$HQ" set "$AS" "waiting_on_me=sign the form" >/dev/null; "$HQ" addtodo "$AS" "@me sign" >/dev/null
+stop sess-as "$(printf 'ok
+```hq-update
+done: sign
+```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: the legacy waiting_on_me field keeps it waiting" || fail "legacy field: $(st)"
+"$HQ" set "$AS" "waiting_on_me=" >/dev/null
+"$HQ" set "$AS" status=waiting-on-me >/dev/null; "$HQ" addtodo "$AS" "@me approve" >/dev/null
+N="$("$HQ" show "$AS" | grep -c '^- \[' || true)"
+"$HQ" todo "$AS" "$N" drop --via board >/dev/null
+[ "$(st)" = active ] && ok "auto status: dropping it on the board does too" || fail "board todo: $(st)"
+"$HQ" set "$AS" status=active >/dev/null
+stop sess-as "$(printf 'Asking, still working.\n```hq-update\nstatus: active\n```\n```hq-asks\n- Token?\n```')" >/dev/null
+[ "$(st)" = active ] && ok "auto status: a status the reply wrote wins over its ask" || fail "status overridden: $(st)"
+"$HQ" set "$AS" status=blocked >/dev/null
+"$HQ" ask resolve "$AS.4" do --via board >/dev/null
+[ "$(st)" = blocked ] && ok "auto status: blocked is never changed by an answer" || fail "blocked moved: $(st)"
+"$HQ" set "$AS" status=waiting-on-me >/dev/null
+stop sess-as "$(printf 'Ok.\n```hq-asks\n- Again?\n```\n```hq-update\nstatus: waiting-on-me\n```')" >/dev/null
+stop sess-as "$(printf 'Got it.\n```hq-resolved\n- %s.5 do: yes\n```\n```hq-update\nstatus: waiting-on-me\nnext: wait\n```' "$AS")" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: answers recorded with a status written keep that status" || fail "said status lost: $(st)"
+Q="$("$HQ" ask add "$AS" "Final?")"
+[ "$(st)" = waiting-on-me ] || fail "not waiting before hq-resolved: $(st)"
+stop sess-as "$(printf 'Recorded.\n```hq-resolved\n- %s do: yes\n```' "$Q")" >/dev/null
+[ "$(st)" = active ] && ok "auto status: an hq-resolved block answering the last ask makes it active" || fail "hq-resolved settle: $(st)"
+stop sess-as "$(printf 'One ask, one rejected status.\n```hq-asks\n- Which one?\n```\n```hq-update\nstatus: waiting-on-me\ndone: no such todo\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: a rejected block's status does not stop the ask's move" || fail "rejected status: $(st)"
+"$HQ" set "$AS" status=active >/dev/null
+stop sess-as "$(printf 'Template echoed.\n```hq-asks\n- And this?\n```\n```hq-update\nstatus: active | waiting-on-me | blocked | done | abandoned\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: an echoed template's status does not either" || fail "placeholder status: $(st)"
+for a in $("$HQ" asks "$AS" | grep -o "$AS\.[0-9]*" | sort -u); do "$HQ" ask resolve "$a" do --via board >/dev/null; done
+[ "$(st)" = active ] || fail "asks left open: $(st)"
+"$HQ" addtodo "$AS" "@me last one" >/dev/null; "$HQ" set "$AS" status=waiting-on-me >/dev/null
+F="$(grep -c 'waiting-on-me → active (auto' "$CA")"
+stop sess-as "$(printf 'Next question.\n```hq-update\ndone: last one\n```\n```hq-asks\n- Next?\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && [ "$(grep -c 'waiting-on-me → active (auto' "$CA")" = "$F" ] && ok "auto status: a reply that ticks the last @me todo and asks again stays waiting, no back-and-forth" || fail "flip-flop: $(st)"
+OT="$("$HQ" new "Other task" --no-focus | head -1)"; "$HQ" ask add "$OT" "Other?" >/dev/null; "$HQ" set "$OT" status=waiting-on-me >/dev/null
+stop sess-as "$(printf 'Answered for the other task too.\n```hq-resolved\n- %s.1 do: yes\n```' "$OT")" >/dev/null
+sed -n '/^---$/,/^---$/p' "$T"/root/tasks/$OT-*/TASK.md | grep -q '^status: active' && ok "auto status: an hq-resolved answer for another task settles that task" || fail "other task not settled"
+"$HQ" set "$AS" status=done >/dev/null
+stop sess-as "$(printf 'One more.\n```hq-asks\n- Reopen it?\n```')" >/dev/null
+[ "$(st)" = done ] && ok "auto status: an ask on a done task leaves it done" || fail "done moved: $(st)"
+"$HQ" unbind --session sess-as >/dev/null
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

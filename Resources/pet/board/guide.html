@@ -88,7 +88,8 @@
 <li><b>底部状态栏</b>：session 有几个（在干活的、等你的），问题、待办和没分拣的记录各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
 <li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
-<li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、active first。</li>
+<li><b>⚙ 设置</b>（在哪个页面都能打开，Esc / Done / 点窗口外关闭）：<b>Projects</b> 管理项目，<b>Categories</b> 管理分类，<b>Sessions</b> 里是新 session 开在哪、skip permissions、stay on board、在宠物上点击 session 时打开什么、active first。</li>
+<li><b>在宠物上点击 session 时打开</b>（⚙ 设置 → Sessions，或者右键桌宠 → 设置 → <b>点击 session 时打开</b>，两处是同一个设置）：点完成气泡、点小猫列表里的 session 或已完成的一行、按"跳到等待中的 session"快捷键时去哪里。默认 <b>它的终端</b>；选 <b>看板上它的任务</b> 后，打开看板并定位到这个 session 绑定的任务——Focus 里有这个任务就在 Focus 里定位，没有就切到 All 展开它——同时把这个 session 的那一行高亮、打开它的对话窗口（Peek），可以直接看回复、发消息；关掉对话窗口后高亮再留几秒。没绑定任务的 session 照旧跳终端。选了看板后，绑定了任务、但终端跳不过去的 session 在小猫列表里也能点了。</li>
 <li><b>额度</b>：<b>5h</b> 和 <b>week</b> 两条——订阅的 5 小时额度和每周额度用了多少（70% 起变黄、90% 起变红），<b>resets</b> 后面是多久后重置。和悬停在小猫身上看到的是同一份数据。Claude Code 只把额度交给状态栏命令，所以要有状态栏把它存下来：用 claude-hud 的话，在 <code>~/.claude/plugins/claude-hud/config.json</code> 的 <code>display</code> 里加 <code>"externalUsageWritePath": "&lt;你的主目录&gt;/.claude/pet/hud-usage.json"</code>（必须写绝对路径）；或者用 <code>pet-emit --statusline</code> 包一层你的状态栏命令（见仓库的 docs/pet.zh-CN.md）。没有新鲜的数据就不显示。每个开着的 session 都会写入它自己最后一次调用 API 时的数字，所以显示的是<b>最后出现</b>的那组读数，不是最大的那组：手动重置额度之后会跟着降下来。合盖睡眠、重启小猫后新旧顺序依然记得；只有小猫从没见过的读数（第一次运行，或它关着、睡着期间新写进来的）一开始分不出新旧，会先显示较高的那组，等某个正在工作的 session 的数字再变一次就对了。</li>
 <li><b>Filter tasks…</b>：Focus、All、Needs you 三个页面都按它筛选。任务按编号、标题、关联、分类、项目匹配；Needs you 里的问题和待办还会匹配它们自己的文字（比如搜 <code>PR #78</code> 能找到写着它的待办）。Focus 右边那栏 session 也只留匹配任务的。筛选时列表上方会写"显示 几 / 几"，点 <b>清除</b> 就恢复全部；从别处跳到一个被筛掉的任务时，筛选会自动清掉。</li>
 
@@ -139,6 +140,7 @@
 <li><b>组内排序</b>：有正在运行的 session 的排最前 → 绑定过 session 的 → 其余；同一档里有未回应问题的靠前，再按最后更新时间。</li>
 <li>行尾黄色数字 = 未回应的 ask 数，绿色数字 = 正在为它工作的 session 数。</li>
 <li><b>状态 = 任务行左边那根竖条的颜色，也是任务编号的颜色</b>（看板上和小猫列表里都一样）：<span style="color:var(--amber)">橙 = 等你处理</span>、<span style="color:var(--red)">珊瑚红 = 阻塞</span>、<span style="color:var(--teal)">绿 = 进行中</span>、<span style="color:var(--blue)">蓝 = 已完成</span>、<span style="color:var(--faint);text-decoration:line-through">灰 = 已放弃</span>；悬停显示状态名。</li>
+<li><b>状态会跟着问题自动变</b>（只在 进行中 和 等你处理 之间）：session 提了新问题、这一轮又没写 status 时，进行中的任务自动变成 等你处理（用 Undo 撤回一个回答、或撤回勾掉的 <code>@me</code> 待办也一样）；等你把最后一个问题回应掉（看板、<code>hq ask resolve</code> 或 session 的 <code>hq-resolved</code>），或把最后一条 <code>@me</code> 待办勾掉 / 不做（别人的待办不算），而且没有别的未回应问题（推到 Later 的也算未回应）和未完成的 <code>@me</code> 待办时，等你处理 自动变回 进行中。session 在同一轮回复里自己写了 status（并且写进去了）的，以它写的为准；阻塞、已完成、已放弃 从不自动改。每次自动改都会在卡片日志里记一行（带 <code>auto</code>）。</li>
 </ul>
 <p>点开一个任务：</p>
 <table>
@@ -196,7 +198,7 @@
   </ul>
   <b>保存并立即跑一次</b> 保存后马上跑一次，方便试。</li>
 <li><b>列表</b>：标题旁是一共几个、几个开着（有在跑或最近失败的也会写出来）。每个任务一行，行与行之间只有细线：名称和类型标签（Claude / Shell），下面一行淡色写 prompt 或命令 · 工作目录；时间（人话，如"每个工作日 09:00"），下面是"下次 …"或"已暂停"；最近 12 次运行的小竖条（绿 = 成功，越高跑得越久；红 = 失败 / 超时 / 中断，满格；黄 = 成功但有工具被拒绝；蓝 = 运行中；灰色矮条 = 跳过或停止），下面是上次的时间、结果和耗时（失败时标红）；上次用掉的额度（Claude 任务；接着同一个 session 时还有 session 上下文）；开关、<b>立即运行</b>（运行中变成 <b>停止</b>）、<b>编辑</b>、<b>删除</b>（点两下）。关掉的任务名称和时间变淡。最近一次失败时，整行下面摊开一块淡红底的输出最后几行。窗口窄时"用掉的额度"一栏收起。</li>
-<li><b>运行历史</b>：点任务名称展开，列出最近 30 次：开始时间（手动跑的带"手动"标记）、结果、耗时、用掉的额度（这次运行前后周额度、5 小时额度各涨了多少，例如"周 +1%"；不到 1% 时显示"不到周额度的 1%"；悬停能看到按 API 价格折算的美元）、摘要（回复的第一行，或命令输出的最后一行）。上一次还没跑完时到点的那次会记成"跳过"，不会两次抢同一个 session。</li>
+<li><b>运行历史</b>：点任务名称展开，列出最近 30 次：开始时间（手动跑的带"手动"标记）、结果、耗时、用掉的额度（这次运行前后周额度、5 小时额度各涨了多少，例如"周 +1%"；不到 1% 时显示"不到周额度的 1%"；悬停能看到按 API 价格折算的美元）、摘要（回复的第一行，或命令输出的最后一行）。上一次还没跑完时到点的那次会记成"跳过"，不会两次抢同一个 session。例外是接着同一个 session、在固定时间跑的任务（比如秘书的定时报告）：它会先等上一次跑完，最多等 10 分钟，等不到才记成跳过。</li>
 <li><b>详情</b>：一次运行的输入、Claude 的回复（Markdown 排版）或命令的输出、"过程"（每次工具调用和结果，被拒绝的标红）和日志。<b>对话</b> 打开这次运行的完整 session 记录（和看 session 一样）；<b>接着聊</b> 在终端里 <code>claude --resume</code> 这个 session（勾了 stay on board 就留在看板上聊）。</li>
 <li><b>和小猫</b>：定时跑的 Claude session 不会出现在小猫和看板的 session 列表里，也不会让猫举手等你批准（hook 看到 <code>CLAUDE_PET_JOB</code> 就不管它）。任务失败时小猫上方弹出"Scheduled job failed: …"，点一下打开这一页；没看过的失败计入角标，并列在小猫列表的 <b>Scheduled</b> 分组里（运行中的也在这里）。打开这一页就算看过。</li>
 <li><b>文件</b>：每个任务一个目录 <code>~/.claude/pet/jobs/&lt;id&gt;/</code>：<code>job.json</code>（设置）、<code>runs.jsonl</code>（每次开始、结束各一行，保留最近 100 次）、<code>state.json</code>（接着同一个 session 时的 session id 等）、<code>logs/</code>（每次运行的输出；Claude 任务另有 stream-json 记录）。卸载 Claude Pet 会关掉所有任务的 LaunchAgent，但保留这些文件。</li>
@@ -206,12 +208,20 @@
 <h1 id="zh-secretary">秘书</h1>
 <p>顶栏的 <b>秘书</b> 打开一个常驻的对话窗口，对面是一个了解这个看板的 Claude。可以问它"T-072 和 T-071 怎么样了、卡点是什么""有什么在等我""哪些看着卡住了"。它每次都先现查任务卡和 session（<code>hq status</code>、<code>hq asks</code>、<code>hq board</code>……）再回答，等你处理的事用 <b>⚑</b> 标出来。它只管"信息 → 看板 → 你的注意力"这条线，<b>自己不干活</b>：要做的事，它会告诉你属于哪个任务，你在那个任务上点 ▶ 新开 session。</p>
 <ul>
-<li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里一个不定时的任务"秘书"。</li>
+<li><b>第一次</b>：点 <b>秘书</b> 会先列出要创建哪些东西，点 <b>设置</b> 才真正创建。已有的文件一律保留，不会覆盖。会创建：任务根目录下的 <code>.claude/agents/secretary.md</code>（它的身份和规矩，可以直接改）；记忆文件 <code>secretary/profile.md</code>、<code>people.md</code>、<code>playbooks.md</code>；它自己的任务卡"秘书"；<b>定时任务</b> 页里的任务"秘书"（时间表是工作日 18:30 写报告，先关着，见下面的<b>报告</b>）。</li>
 <li><b>对话窗口</b>就是 Peek。发一条消息就是把这个任务跑一次，消息就是这次的 prompt；回复和工具调用照常显示。它回复期间，发送按钮是灰的，状态行写"回复中"，旁边有 <b>停止</b>。上一条失败了，或者因为额度被跳过，状态行会写明原因。这里没有斜杠命令。</li>
-<li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；也可以给它加个时间表，比如每天早上让它把看板看一遍。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
+<li><b>始终是同一个 session</b>：每条消息都接着上一次的对话（<code>--resume</code>）。上下文超过任务设的阈值（默认 50%）时先 compact；周额度或 5 小时额度用到设定的比例（默认 90%）时跳过，不会把额度用光。这两项和模型、单次最长时间一样，在 <b>定时任务</b> 页编辑"秘书"就能改；它的时间表就是定时报告的时间，也在那里改。定时运行如果碰上它正在回复，会等这一轮结束（最多 10 分钟）再开始，不会跳过。工作目录、agent、"接着同一个 session"和允许的工具是秘书离不开的设置，改了也会在下次发消息时改回来。</li>
 <li><b>它能做什么</b>：它在后台跑，没人在旁边批准，所以只预先允许三样：读文件（Read / Grep / Glob）、运行 <code>~/.claude/hq/bin/hq</code>、改 <code>secretary/</code> 下的文件。其他操作都会被拒绝，除非你在 Claude Code 设置里另外允许了。外部系统它只读；消息和邮件只起草，写在回复里。</li>
 <li><b>它的建议，在它的窗口里或 Needs you 里回答</b>：建任务、给任务记一笔、加待办（比如 <code>@me 把回复发给 Atul</code>）、关任务、改它的记忆，都会作为问题出现在秘书窗口底部的"它在问你"里（就在输入框上方），同时也出现在 <b>Needs you</b>，标着绿色的 <b>秘书</b>，点它打开秘书窗口。两边是同一批问题，在哪边回答都行。你点 <b>Yes</b>、<b>No</b> 或 <b>Later</b>，可以附说明，说明会修改或替换它的建议。点了 Yes，它大约 10 秒后自己醒来照做（比撤销按钮在的时间长，点了 <b>撤销</b> 它就不做），每条做完用一行汇报，打开秘书窗口就能看到；它要是正在回复，就等这一轮结束再做。点了 No 它就不做，没有新情况也不会再提。点 <b>转待办</b> 表示这件事你自己做：它变成你的 @me 待办，秘书不会去做。</li>
-<li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
+<li><b>报告</b>：秘书窗口里"报告"一行列出最近几份日报、周报，点一下用编辑器打开。<b>现在写一份</b> 让它马上写今天该写的那份；<b>开启</b> 打开定时报告：工作日晚上 18:30 写日报，周五写周报（时间在 <b>定时任务</b> 页改）。如果你在 <b>定时任务</b> 页给"秘书"写过自己的 prompt，这一行会写"用你自己的 prompt，不写报告"，点 <b>改成写报告</b> 会把它换成写报告的 prompt。
+  <ul>
+  <li>它先跑 <code>hq report</code> 拿到按项目整理的事实：这段时间任务卡 Log 里记的、勾掉的待办、回答了的问题、合并的 PR（要装了 <code>gh</code>）、没动的任务，以及等你好几天了的事（"你欠别人的"：两天以上的 @me 待办和没回答的问题）。日报从上一份报告用到的事实截止处算起（最多往前 7 天，没有就从今天 0 点），周报从周一算起；前一份报告里已经说过关掉的任务不会再说一遍。Jira 的变化目前不在里面。</li>
+  <li>写法照 <code>secretary/reports.md</code>：日报每个有进展的项目写进展 / 卡点 / 下一步，周报先写不超过三行的总结。报告写在 <code>secretary/reports/&lt;日期&gt;-daily.md</code> 或 <code>-weekly.md</code>，回复里也会贴一份。同一天再写一次（比如先点了"现在写一份"，晚上又定时写）会改写同一个文件，它会先读你在里面改过的地方，保留下来。</li>
+  <li><b>它会学你的修改</b>：报告写完它会存一份底稿，你直接改报告文件就行。下次写报告时它看到你改了什么（删掉的一节、改过的说法、换过的顺序），会提议在 <code>reports.md</code> 最后一节"从你的修改里学到的"加一条规则，给出 diff，你同意才写。每处修改只提一次。</li>
+  <li>你改过 <code>.claude/agents/secretary.md</code> 的话，升级时不会替换它，里面就没有写报告这一节；定时运行的 prompt 和 <code>hq report</code> 的输出里写着该怎么做，照样能写，但要它学你的修改，最好把新模板里的 Reports 一节抄过去。</li>
+  <li><b>周报带校准问题</b>：周报的回复最后有一两个问题，拿它的记忆对一对这一周的情况（某个项目还那么重要吗、某件事还是谁负责）。问题出现在"它在问你"和 Needs you；你回答后，它把对记忆的修改作为 diff 再问你一次。</li>
+  </ul></li>
+<li><b>记忆</b>：秘书窗口标题下的 <b>记忆：profile · people · playbooks</b> 点一下就用编辑器打开对应文件。<code>profile.md</code> 记你是谁、用什么语言、各个项目看重什么；<code>people.md</code> 记同事是谁、负责什么；<code>playbooks.md</code> 记常做的流程，比如发版测试、RCA。每次对话开头它都会读这三个文件；写报告时还会读 <code>reports.md</code>（报告的写法和学到的规则）。你可以随时直接改。它自己要改，会先在回复里给出 diff，再问"按上面的 diff 更新 secretary/people.md？"，你同意后才写。它用 <code>profile.md</code> 里写的语言回复；没写的话，就用你说话的语言。</li>
 <li><b>它自己的任务卡</b>"秘书"是它的笔记本：它的 hq-update 写在这里，记着它在替你盯什么，这几行显示在秘书窗口顶部的"它在替你盯的事"。这张卡不算你的工作：All、Focus 和它们的计数里都没有它；它的问题照样在 Needs you 里。指向这张卡的链接（比如它的问题转成的待办上的编号）会打开秘书窗口。秘书的问题不提供"以后都可以"：授权从来不给秘书。</li>
 </ul>
 
@@ -236,7 +246,7 @@
 <h1 id="zh-pet">和小猫的联动</h1>
 <ul>
 <li><b>列表里显示任务</b>：单击小猫弹出的 session 列表，每一行的第二行用暗灰色显示它绑定的任务（"标题 · 编号"），只有任务需要注意时末尾才加一个带颜色的状态词（needs you / blocked / done）。没装 HQ 或没绑定任务时，第二行和以前一样。</li>
-<li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session。</li>
+<li><b>问题也会提醒</b>：未回应的问题计入小猫的角标（小猫会做出"有事找你"的样子），并列在小猫列表最上面的 <b>Asks</b> 分组里，点一下打开看板并定位到那个任务；出现新问题时，小猫上方弹出"T-012 asks: …"，点击跳到提问的 session（设成 <b>看板上它的任务</b> 时，打开看板上它的任务）。</li>
 <li><b>记一笔</b>：小猫菜单里的 <b>记一笔…</b> 打开记一笔的小框；在 <b>设置</b> 里打开 <b>记一笔 (⌃⌥⌘N)</b> 后，任何时候按 ⌃⌥⌘N 都能打开。记下后小猫会说放到了哪里，见<a href="#zh-quick">记一笔</a>。</li>
 
 </ul>
@@ -300,9 +310,10 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>在跑的 session（需要 Claude Pet）· 看某个 session 最近的对话（已结束的也可以，按 id 前缀查找本机对话记录；<code>--meta --json</code> 还带工具调用、本轮用时 / token 和 Claude 的待办）· 某次工具调用的完整输入和输出</td></tr>
 <tr><td><code>hq secretary [init --lang zh|en] [--json]</code></td><td>看秘书的文件和任务卡在不在。<code>init</code> 只补上缺的（agent 定义、记忆文件、它自己的任务卡，任务卡编号记在 <code>hq.json</code> 的 <code>secretary</code> 里），已有的不动。看板上的 <b>秘书 → 设置</b> 跑的就是它</td></tr>
 <tr><td><code>hq inbox [--all] [--json]</code> · <code>hq inbox add TEXT [--image P] [--sort]</code> · <code>hq inbox sort|drop|restore N-001</code> · <code>hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--text …] [--owner …] [--title …]</code></td><td>记一笔（见<a href="#zh-quick">记一笔</a>）：列出没分拣的和最近两天分拣过的（<code>--all</code> 全部）· 记下一条（<code>--sort</code> 接着分拣）· 让模型分拣 / 删掉 / 恢复 · 放到指定的地方（会撤回上一个去处写进去的东西）</td></tr>
-<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数</td></tr>
+<tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>秘书写报告用的事实：按项目列出这段时间的 Log、勾掉和新加的待办、回答了的问题、合并和还开着的 PR（用 <code>gh</code> 查，<code>--no-gh</code> 不查）、没动的任务，还有等你两天及以上的事，以及你对之前报告（包括今天已写的那份）的修改（diff）。<code>auto</code>（默认）周五是周报、其他日子是日报；日报从上一份报告用到的事实截止处算起，周报从周一算起。<code>keep</code> 存下刚写好的报告的底稿，下次就能看出你改了什么；<code>list</code> 列出写过的报告</td></tr>
+<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>最近几天点 ↗ Jump 跳终端的次数，按当时 session 的状态（等授权 / 等回答 / 刚答完 / 在干活 / 打断 / 空闲…）× 从哪里点的（看板任务卡 / Sessions 列表 / Peek / 小猫的 session 列表或已完成列表 / 通知 / 快捷键）汇总，并标出跳之前 10 分钟内打开过它的 Peek 的次数；点击后打开看板上任务的那些不算跳终端，单独报一个数</td></tr>
 </table>
-<p><b>跳终端记录</b>：每次从看板、小猫或快捷键跳回终端，小猫都会在 <code>~/.claude/pet/jumps.jsonl</code> 追加一行：时间、session、绑定的任务、当时的状态、context 占比、在这个状态里待了多久（打断的从没动静时算起）、从哪里点的、跳之前多久打开过它的 Peek（只算打开那一下，开着时的自动刷新不算；小猫重启后清零）。找不到终端、没跳成的也记。只存在本机，不含对话内容；用来看哪些情况还非得回终端不可。</p>
+<p><b>跳终端记录</b>：每次从看板、小猫或快捷键跳回终端，小猫都会在 <code>~/.claude/pet/jumps.jsonl</code> 追加一行：时间、session、绑定的任务、当时的状态、context 占比、在这个状态里待了多久（打断的从没动静时算起）、从哪里点的、跳之前多久打开过它的 Peek（只算打开那一下，开着时的自动刷新不算；小猫重启后清零）。找不到终端、没跳成的也记；设成打开看板上它的任务时，那一下也记一行，终端一栏写 <code>board</code>。只存在本机，不含对话内容；用来看哪些情况还非得回终端不可。</p>
 <p>在 Claude Code 里还可以用三个 slash 命令：<code>/task T-012</code>（绑定，或 <code>/task 新任务标题</code> 新建并绑定）、<code>/board</code>（显示看板）、<code>/hq-onboard</code>（从已有 session 初始化）。</p>
 
 <h1 id="zh-onboard">从已有 session 开始</h1>
@@ -408,7 +419,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 &lt;任务根目录&gt;/hq.json                       项目、分类、链接规则、秘书的任务卡、分拣用的模型
 &lt;任务根目录&gt;/inbox.json                    记一笔的记录（分拣好的、删掉的保存 30 天）
 &lt;任务根目录&gt;/.claude/agents/secretary.md   秘书的定义
-&lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks）
+&lt;任务根目录&gt;/secretary/                   秘书的记忆（profile / people / playbooks / reports.md）
+&lt;任务根目录&gt;/secretary/reports/           秘书写的日报、周报（.drafts/ 里是它写完时的底稿）
 ~/.claude/pet/jobs/secretary/             秘书的 session（定时任务"秘书"）</pre>
 <p>卸载：<code>hq/uninstall.sh</code>，会移除 hook、slash 命令和命令行工具，任务卡原样保留。桌宠自己的卸载脚本是 <code>scripts/uninstall.sh</code>（发行包里是 <code>uninstall.sh</code>）。</p>
 </div>
@@ -477,7 +489,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>The status bar</b> at the bottom: sessions (working, waiting on you), asks, todos and unsorted notes (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
 <li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>
-<li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, active first.</li>
+<li><b>⚙ Settings</b> (on any page; Esc, Done or a click outside closes it): <b>Projects</b>, <b>Categories</b>, and <b>Sessions</b> — where new sessions open, skip permissions, stay on board, what clicking a session on the pet opens, active first.</li>
+<li><b>Clicking a session on the pet opens</b> (⚙ Settings → Sessions, or right-click the pet → Settings → <b>Clicking a Session Opens</b>; both are the same setting): where a finish bubble, a session or finished row in the cat's list, and the jump-to-waiting shortcut take you. <b>Its terminal</b> by default. With <b>Its task on the board</b>, the board opens at the task the session is bound to — on its Focus card when the task is in Focus, otherwise opened in All — with that session's row picked out and its conversation window (Peek) open, to read and reply right there; the highlight stays a few seconds after you close the conversation. A session bound to no task still goes to its terminal. With the board chosen, a session bound to a task whose terminal can't be reached becomes clickable in the cat's list too.</li>
 <li><b>Limits</b>: <b>5h</b> and <b>week</b> — how much of the subscription's 5-hour and weekly limits is used (amber from 70%, red from 90%), and after <b>resets</b> how long until each resets. It is the same reading the pet shows when you hover it. Claude Code hands these only to the statusline command, so a statusline has to save them: with claude-hud, add <code>"externalUsageWritePath": "&lt;your home&gt;/.claude/pet/hud-usage.json"</code> (an absolute path) under <code>display</code> in <code>~/.claude/plugins/claude-hud/config.json</code>; or wrap your statusline command in <code>pet-emit --statusline</code> (see docs/pet.md in the repo). With no fresh reading, nothing is shown. Every open session writes the figures from its own last API call, so what shows is the reading that appeared <b>last</b>, not the highest — after a quota reset it comes down with it. Which is newer survives sleep and restarts; only readings the pet has never seen (its first run, or ones written while it was off or asleep) it cannot order at once, and it shows the higher one until a working session's figures next move.</li>
 <li><b>Filter tasks…</b> narrows all three tabs — Focus, All and Needs you. Tasks match on id, title, refs, category or project; asks and todos in Needs you also on their own text (searching <code>PR #78</code> finds the todo that mentions it). Focus's sessions column keeps only the matching tasks' sessions. While filtering, a line above each list says how many of how many show, with <b>Clear</b>; jumping to a task the filter hides clears it.</li>
 <li><b>New task</b>: pick a category; type a workdir or pick a suggestion (or leave it — binding a session records its directory); optionally bind a session.</li>
@@ -527,6 +540,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>Order within a group</b>: tasks with a live session first, then tasks that had a session, then the rest; ties go to open asks, then the most recently updated.</li>
 <li>Amber number = open asks, green = live sessions working on it.</li>
 <li><b>Status is the colour of the bar at a task row's left edge, and of its id</b> (on the board and in the cat's list alike): <span style="color:var(--amber)">amber = waiting on you</span>, <span style="color:var(--red)">coral = blocked</span>, <span style="color:var(--teal)">green = active</span>, <span style="color:var(--blue)">blue = done</span>, <span style="color:var(--faint);text-decoration:line-through">grey = abandoned</span>; hover for the name.</li>
+<li><b>Status follows the asks by itself</b> (between active and waiting on you only): when a session asks something new and writes no status in that reply, an active task becomes waiting on you (so does taking back an answer, or the tick of an <code>@me</code> todo, with Undo). When you answer the last ask (on the board, with <code>hq ask resolve</code>, or the session's <code>hq-resolved</code>) or tick off or drop the last <code>@me</code> todo (other people's todos don't count), and no other ask is open (one put off with Later still is) and no <code>@me</code> todo is left, a task waiting on you goes back to active. A status the session writes in the same reply (and that is applied) wins; blocked, done and abandoned are never changed automatically. Each automatic change leaves a line in the card's log (marked <code>auto</code>).</li>
 </ul>
 <p>Open a task:</p>
 <table>
@@ -584,7 +598,7 @@ After the status word comes how much context the session carries (e.g. <code>210
   </ul>
   <b>Save and run now</b> saves and runs it once, to try it.</li>
 <li><b>The list</b>: next to the title, how many jobs there are and how many are on (and any running or failing). A row per job, separated by hairlines: the name with a Claude / Shell tag, and under it, faintly, the prompt or command · folder; the schedule in words (e.g. "Weekdays 09:00") with "Next …" or "Paused" under it; the last 12 runs as small bars (green = succeeded, taller for longer runs; red = failed / timed out / interrupted, full height; amber = succeeded with a tool refused; blue = running; a short grey stub = skipped or stopped), with the last run's time, result and duration under them (red if it failed); the quota the last run used (Claude jobs; plus the session's context when it continues one session); then the switch, <b>Run now</b> (<b>Stop</b> while it runs), <b>Edit</b> and <b>Delete</b> (two clicks). A job that is off has its name and schedule faded. When the last run failed, its last lines of output show across the row on a faint red ground. In a narrow window the quota column folds away.</li>
-<li><b>Runs</b>: click a job's name for its last 30 runs: when it started (manual runs are marked), result, time taken, quota used (how much the weekly and 5-hour quotas rose during the run, e.g. "week +1%", or "&lt;1% of the week"; hover for the API list price in dollars), and a summary (the reply's first line, or the command's last output line). A run due while the previous one is still going is recorded as skipped, rather than two runs fighting over one session.</li>
+<li><b>Runs</b>: click a job's name for its last 30 runs: when it started (manual runs are marked), result, time taken, quota used (how much the weekly and 5-hour quotas rose during the run, e.g. "week +1%", or "&lt;1% of the week"; hover for the API list price in dollars), and a summary (the reply's first line, or the command's last output line). A run due while the previous one is still going is recorded as skipped, rather than two runs fighting over one session. The exception is a job that continues one session and runs at a fixed time (such as the secretary's evening report): it waits up to 10 minutes for the previous run to end, and is skipped only if that run is still going.</li>
 <li><b>Details</b>: one run's input, Claude's reply (rendered) or the command's output, "What it did" (each tool call with its result; refused ones in red) and the log. <b>Conversation</b> opens the run's whole session, as for any session; <b>Continue</b> runs <code>claude --resume</code> on it in a terminal (with stay on board ticked, you carry on here).</li>
 <li><b>With the cat</b>: a scheduled Claude run never shows in the pet's or the board's session lists, and never makes the cat wait for an approval (the hook sees <code>CLAUDE_PET_JOB</code> and leaves it alone). When a job fails, "Scheduled job failed: …" pops up above the cat — a click opens this tab; failures you haven't seen count toward the badge and are listed under <b>Scheduled</b> in the cat's list (running jobs too). Opening this tab counts as seeing them.</li>
 <li><b>Files</b>: one folder per job, <code>~/.claude/pet/jobs/&lt;id&gt;/</code>: <code>job.json</code> (its settings), <code>runs.jsonl</code> (a line when each run starts and ends; the newest 100 runs), <code>state.json</code> (the session id for "same session", …), <code>logs/</code> (each run's output; Claude runs also keep their stream-json). Uninstalling Claude Pet switches every job's agent off and keeps these files.</li>
@@ -599,14 +613,15 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li><code>.claude/agents/secretary.md</code> in the task root: who it is and its rules. You can edit it freely.</li>
   <li>its memory files: <code>secretary/profile.md</code>, <code>people.md</code> and <code>playbooks.md</code>;</li>
   <li>its own task card, "Secretary";</li>
-  <li>a job called "Secretary" on the <b>Scheduled</b> page, with no schedule.</li>
+  <li>a job called "Secretary" on the <b>Scheduled</b> page, scheduled for reports on weekdays at 18:30 but off until you turn it on (see <b>Reports</b> below).</li>
   </ul></li>
 <li><b>The window</b> is Peek. Each message you send is one run of that job, with your message as its prompt; replies and tool calls show as usual. While it replies, Send is greyed out, and the status line says it is replying, with a <b>Stop</b> button. If the last message failed, or was skipped because of quota, the status line says why. There are no slash commands.</li>
 <li><b>One session</b>: every message continues the same conversation (<code>--resume</code>).
   <ul>
   <li>Past the job's context threshold (50% by default), the conversation is compacted first.</li>
   <li>When the weekly or 5-hour quota is used past the job's limit (90% by default), the message is skipped, so the secretary can't use up your quota.</li>
-  <li>To change these, the model or the time limit, edit "Secretary" on the Scheduled page. You can also give it a schedule, for example a look over the board every morning.</li>
+  <li>To change these, the model or the time limit, edit "Secretary" on the Scheduled page. Its schedule is the time of the evening reports; change it there too.</li>
+  <li>If a scheduled run comes while it is replying, the run waits for the reply to end (up to 10 minutes) instead of being skipped.</li>
   <li>Its folder, agent, same-session mode and allowed tools are what make it the secretary. If you change them, they are put back at the next message.</li>
   </ul></li>
 <li><b>What it may do</b>: it runs in the background with nobody there to approve a step, so only three things are allowed up front:
@@ -622,13 +637,21 @@ After the status word comes how much context the session carries (e.g. <code>210
   <li><b>To todo</b> means you'll do it yourself: it becomes your @me todo, and the secretary leaves it alone.</li>
   <li>After a <b>No</b>, it leaves it, and doesn't propose it again unless something changed.</li>
   </ul></li>
+<li><b>Reports</b>: the "Reports" row in the secretary's window lists its latest daily and weekly reports; a click opens one in your editor. <b>Write one now</b> asks for the report that is due now. <b>Turn on</b> turns on the evening reports: a daily report on weekdays at 18:30, and the weekly one on Fridays (change the time on the Scheduled page). If you gave "Secretary" a prompt of your own on the Scheduled page, the row says "your own prompt, no reports", and <b>Write reports instead</b> replaces that prompt with the report one.
+  <ul>
+  <li>It starts from <code>hq report</code>, which gathers the facts by project: what the cards' Logs say for the period, todos ticked, asks answered, PRs merged (with <code>gh</code> installed), tasks that didn't move, and what has waited on you for days ("what you owe others": @me todos and unanswered asks older than two days). A daily report starts where the facts of the last report ended (at most 7 days back, else at midnight); a weekly one covers the week since Monday. A task the last report already said was closed isn't reported closed again. Jira changes aren't included yet.</li>
+  <li>It writes as <code>secretary/reports.md</code> says: in a daily report, progress, blockers and next steps for each project that moved; a weekly one starts with a summary of at most three lines. The report goes to <code>secretary/reports/&lt;date&gt;-daily.md</code> or <code>-weekly.md</code>, and into its reply. Writing it again the same day (Write one now, then the evening run) rewrites the same file: it reads what you changed in it first and keeps it.</li>
+  <li><b>It learns from your edits</b>: it keeps a copy of each report as written, so just edit the report file. Next time it sees what you changed (a section you deleted, a wording you fixed, an order you prefer) and proposes a rule for the last section of <code>reports.md</code>, "Rules (learned from your edits)", as a diff; it writes only after you say yes. Each edit is brought up once.</li>
+  <li>If you edited <code>.claude/agents/secretary.md</code>, an upgrade leaves it alone, so it has no section on reports. The scheduled prompt and the output of <code>hq report</code> say what to do, so reports still get written, but for it to learn from your edits, copy the Reports section from the new template into it.</li>
+  <li><b>Weekly reports end with calibration questions</b>: one or two questions that check its memory against the week (is that project still a priority, who owns this now). They show under "It asks you" and in Needs you; after you answer, it proposes the change to its memory as a diff.</li>
+  </ul></li>
 <li><b>Memory</b>: it reads all three files at the start of every conversation. <b>memory: profile · people · playbooks</b>, under the window's title, opens each file in your editor.
   <ul>
   <li><code>profile.md</code>: who you are, your language, what matters in each project.</li>
   <li><code>people.md</code>: your colleagues, who they are and what they own.</li>
   <li><code>playbooks.md</code>: recurring processes, such as release tests and RCAs.</li>
   </ul>
-  You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
+  When it writes a report it also reads <code>reports.md</code>: how you want reports written, and the rules learned from your edits. You can edit them yourself any time. To change them, it shows a diff in its reply and asks "Update secretary/people.md with the diff above?", and writes only after you say yes. It replies in the language <code>profile.md</code> names, or else in the language you write in.</li>
 <li><b>Its own card</b>, "Secretary", is its notebook: its hq-update blocks land there and record what it is keeping an eye on for you, which the window shows at the top as "Keeping an eye on". The card isn't part of your work: All, Focus and their counts leave it out; its questions still show in Needs you. Links to the card (such as the id on a todo made from one of its questions) open the secretary window. Its questions have no "Yes, always": grants are never given to the secretary.</li>
 </ul>
 
@@ -653,7 +676,7 @@ After the status word comes how much context the session carries (e.g. <code>210
 <h1 id="en-pet">With the cat</h1>
 <ul>
 <li><b>Tasks in the list</b>: in the session list a click on the cat opens, each row's second line shows the task the session is bound to, quietly in grey ("title · id"); a coloured status word is added only when the task needs attention (needs you / blocked / done). Without HQ, or for an unbound session, the line is what it always was.</li>
-<li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked.</li>
+<li><b>Asks get noticed</b>: unanswered asks count toward the cat's badge (the cat looks for you) and are listed under <b>Asks</b> at the top of the cat's list — a click opens the board at that task; a new one pops up above the cat as "T-012 asks: …", and clicking it goes to the session that asked (to its task on the board, when clicks are set to open it there).</li>
 <li><b>Quick notes</b>: <b>Quick Note…</b> in the cat's menu opens the quick-note box; with <b>Quick Note (⌃⌥⌘N)</b> on in <b>Settings</b>, ⌃⌥⌘N opens it from anywhere. The cat says where the note went; see <a href="#en-quick">Quick notes</a>.</li>
 
 </ul>
@@ -713,9 +736,10 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq sessions</code> · <code>hq peek SESSION -n 8</code> · <code>hq peek SESSION --tool ID</code></td><td>live sessions (needs Claude Pet) · a session's recent messages (ended ones too, found by id prefix in the local transcripts; <code>--meta --json</code> adds its tool calls, this turn's time and tokens, and Claude's todos) · one tool call's full input and output</td></tr>
 <tr><td><code>hq secretary [init --lang en|zh] [--json]</code></td><td>whether the secretary's files and card are there. <code>init</code> adds only what is missing (the agent definition, the memory files, and its own card, whose id goes under <code>secretary</code> in <code>hq.json</code>) and leaves the rest alone. The board's <b>Secretary → Set up</b> runs it</td></tr>
 <tr><td><code>hq inbox [--all] [--json]</code> · <code>hq inbox add TEXT [--image P] [--sort]</code> · <code>hq inbox sort|drop|restore N-001</code> · <code>hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--text …] [--owner …] [--title …]</code></td><td>quick notes (see <a href="#en-quick">Quick notes</a>): list the unsorted ones and those sorted in the last two days (<code>--all</code>: everything) · jot one (<code>--sort</code> sorts it right away) · have the model sort one / delete / restore it · file it where you say (what its last place got is taken back out)</td></tr>
-<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before</td></tr>
+<tr><td><code>hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]</code> · <code>hq report keep FILE</code> · <code>hq report list</code></td><td>the facts the secretary writes its reports from: by project, the period's Log entries, todos ticked and added, asks answered, PRs merged or still open (looked up with <code>gh</code>; <code>--no-gh</code> skips that), tasks that didn't move, what has waited on you for two days or more, and your edits to earlier reports, today's included (as diffs). <code>auto</code> (the default) is the weekly report on Fridays and the daily one otherwise; a daily report starts where the last report's facts ended, a weekly one on Monday. <code>keep</code> keeps a copy of a report just written, so your edits show next time; <code>list</code> lists the reports</td></tr>
+<tr><td><code>hq jumps [--days 7] [--json]</code></td><td>how often you used ↗ Jump in the last few days, by what the session was doing (needs approval / awaiting reply / just replied / working / interrupted / idle …) × where you clicked (a task card, the Sessions list, Peek, the pet's session or finished list, a notice, the hotkey), and how many of those had its Peek opened in the 10 minutes before; clicks that opened the task on the board instead are not counted as jumps, only reported as a number of their own</td></tr>
 </table>
-<p><b>Jump log</b>: every jump back to a terminal — from the board, the pet or the hotkey — adds one line to <code>~/.claude/pet/jumps.jsonl</code>: the time, the session, its task, its state, its context use, how long it had been in that state (for an interrupted one, since it went quiet), where you clicked, and how long before you opened its Peek (opening it counts, not the refreshes while it stays open; forgotten when the pet restarts). Clicks whose terminal can't be found are logged too. It stays on this machine and holds no conversation text; it is there to show which situations still need the terminal.</p>
+<p><b>Jump log</b>: every jump back to a terminal — from the board, the pet or the hotkey — adds one line to <code>~/.claude/pet/jumps.jsonl</code>: the time, the session, its task, its state, its context use, how long it had been in that state (for an interrupted one, since it went quiet), where you clicked, and how long before you opened its Peek (opening it counts, not the refreshes while it stays open; forgotten when the pet restarts). Clicks whose terminal can't be found are logged too, and so are clicks that open the session's task on the board instead (terminal <code>board</code>). It stays on this machine and holds no conversation text; it is there to show which situations still need the terminal.</p>
 <p>Inside Claude Code: <code>/task T-012</code> binds (or <code>/task New title</code> creates and binds), <code>/board</code> prints the board, <code>/hq-onboard</code> sets HQ up from your existing sessions.</p>
 
 <h1 id="en-onboard">Start from existing sessions</h1>
@@ -821,7 +845,8 @@ next: "run baseline on clusters A/C"
 &lt;root&gt;/hq.json                         projects, categories, link rules, the secretary's card, the sorting model
 &lt;root&gt;/inbox.json                      quick notes (filed and deleted ones kept 30 days)
 &lt;root&gt;/.claude/agents/secretary.md     the secretary's definition
-&lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks)
+&lt;root&gt;/secretary/                     the secretary's memory (profile / people / playbooks / reports.md)
+&lt;root&gt;/secretary/reports/             its daily and weekly reports (.drafts/ holds each as it wrote it)
 ~/.claude/pet/jobs/secretary/          the secretary's session (the "Secretary" job)</pre>
 <p>Uninstall with <code>hq/uninstall.sh</code>: hooks, slash commands and CLI are removed; your cards stay. The pet uninstalls with <code>scripts/uninstall.sh</code> (<code>uninstall.sh</code> in the release).</p>
 </div>
