@@ -465,7 +465,11 @@ Claude Pet runs it from the board's **Secretary** button. The button opens a sch
   answer at the start of that run.
 
 The job is made with the report prompt and a weekday 18:30 schedule, but off; the window's
-**Turn on** enables it. A scheduled run that finds the session busy (the user is chatting) waits
+**Turn on** enables it. The prompt names the steps (`hq report`, write, `hq report keep`) itself,
+for an agent definition the user edited before reports existed. A job made earlier that is off
+and still has the old placeholder prompt gets the report prompt, and the evening schedule unless
+the user chose a fixed time. One with a prompt of the user's own shows as such in the window;
+**Turn on** there replaces the prompt (and an every-N-minutes schedule). A scheduled run that finds the session busy (the user is chatting) waits
 up to 10 minutes for the lock instead of being skipped.
 
 Unattended, the job is allowed only Read, Grep, Glob, `Bash(~/.claude/hq/bin/hq:*)` and Edit or
@@ -475,17 +479,23 @@ Write under `<root>/secretary/`.
 
 `hq report [auto|daily|weekly] [--since T] [--no-gh] [--json]` prints the facts the secretary writes
 a report from. `auto` (the default) is `weekly` on Fridays and `daily` otherwise. The window starts
-at Monday 00:00 for a weekly report; for a daily one, at the last kept report of the past 7 days,
-else today 00:00; `--since` overrides both. Per project, for every task that moved: Log entries,
+at Monday 00:00 for a weekly report; for a daily one, where the facts of the last kept report of
+the past 7 days ended (its `to`), else today 00:00; `--since` overrides both. A report being
+written again the same day doesn't count as the last one. Per project, for every task that moved: Log entries,
 todos ticked, dropped and added, asks answered and asked, PRs on its refs (merged in the window or
 still open, looked up with `gh pr view` unless `--no-gh`); then the tasks that didn't move, what is
 owed (`@me` todos and unsnoozed open asks at least 2 days old), and the user's edits to recent
-reports as unified diffs. The secretary's own card is left out. It also names the file to write,
+reports as unified diffs, today's own included (`"exists": true` when today's file is there: a
+rewrite must keep the user's changes). A card closed on the window's first day counts as closed
+in the window unless the report the window starts at already listed it (`closed` dates have no
+time). Cards whose only news is new `@claude` todos count as quiet. Cards closed in the last week
+are kept only when one of their PRs merged in the window. The secretary's own card is left out. It also names the file to write,
 `secretary/reports/<date>-<daily|weekly>.md`, and creates `secretary/reports.md` from the template
 when it is missing.
 
+Each gather notes its window and the cards it saw closed in `secretary/reports/.pending.json`.
 `hq report keep FILE` snapshots a written report to `secretary/reports/.drafts/FILE` and records
-it in `secretary/reports/.reports.json`; the next `hq report` diffs each recent report against its
+it in `secretary/reports/.reports.json` (`kept`, plus the last gather's `from`, `to` and `closed`); the next `hq report` diffs each recent report against its
 snapshot. Keeping a report re-snapshots the others, so each edit is shown once. `hq report list
 [--json]` lists the reports.
 
@@ -500,7 +510,7 @@ snapshot. Keeping a report re-snapshots the others, so each edit is shown once. 
 ├── templates/lead.md         lead agent template
 ├── .claude/agents/           your leads, and secretary.md
 ├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md, reports.md
-│   └── reports/              its reports; .drafts/ and .reports.json track the user's edits
+│   └── reports/              its reports; .drafts/, .reports.json and .pending.json track edits and windows
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
     └── asks.jsonl            append-only events: {"type":"open"|"resolve", …}

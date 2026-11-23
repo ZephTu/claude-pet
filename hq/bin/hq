@@ -1780,18 +1780,22 @@ def reports_index_path():
     return os.path.join(reports_dir(), ".reports.json")
 
 
+def reports_pending_path():
+    return os.path.join(reports_dir(), ".pending.json")
+
+
 def load_reports_index():
     idx = load_json(reports_index_path(), {})
     return idx if isinstance(idx, dict) else {}
 
 
 def report_lang():
-    """The memory's language: zh when profile.md is the Chinese template's (or says 中文)."""
+    """The memory's language: zh when profile.md's headings are Chinese (the Chinese template's)."""
     try:
         text = open(os.path.join(hq_root(), "secretary", "profile.md"), encoding="utf-8").read()
     except OSError:
         return "en"
-    return "zh" if re.search(r"^##\s*(语言|角色)|中文", text, re.M) else "en"
+    return "zh" if re.search(r"^#+.*[\u4e00-\u9fff]", text, re.M) else "en"
 
 
 def ensure_report_format():
@@ -1809,23 +1813,26 @@ def ensure_report_format():
 
 
 def report_window(kind, since, now, name=None):
-    """(start, end) as naive local datetimes. Weekly: this week from Monday 00:00. Daily: since the
-    last report kept (at most 7 days back; not `name` itself, a report being written again), else
-    since today 00:00."""
+    """(start, end, prev) as naive local datetimes, prev the index entry the window starts at.
+    Weekly: this week from Monday 00:00. Daily: from where the last kept report's facts ended (at
+    most 7 days back; not `name` itself, a report being written again), else from today 00:00."""
     if since:
         s = local_dt(since)
         if not s:
             die(f"--since: not a date or time: {since}")
-        return s.replace(tzinfo=None), now
+        return s.replace(tzinfo=None), now, None
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if kind == "weekly":
-        return midnight - dt.timedelta(days=now.weekday()), now
-    kept = [local_dt(e.get("kept")) for n, e in load_reports_index().items() if isinstance(e, dict) and n != name]
-    kept = [k.replace(tzinfo=None) for k in kept if k]
-    last = max([k for k in kept if k < now], default=None)
-    if last and now - last <= dt.timedelta(days=7):
-        return last, now
-    return midnight, now
+        return midnight - dt.timedelta(days=now.weekday()), now, None
+    # `to`: the end of the facts it was written from; reports kept before that was recorded, `kept`.
+    ends = [(naive(e.get("to") or e.get("kept")), e) for n, e in load_reports_index().items()
+            if isinstance(e, dict) and n != name]
+    ends = [(t, e) for t, e in ends if t and t <= now]
+    if ends:
+        last, e = max(ends, key=lambda x: x[0])
+        if now - last <= dt.timedelta(days=7):
+            return last, now, e
+    return midnight, now, None
 
 
 def naive(ts):
@@ -1870,8 +1877,9 @@ def pr_states(urls, timeout=20):
         return {u: d for u, d in ex.map(one, urls) if isinstance(d, dict)}
 
 
-def task_activity(meta, start, end):
-    """What happened on one card in [start, end)."""
+def task_activity(meta, start, end, reported_closed=()):
+    """What happened on one card in [start, end]. `closed` holds a date only: a card closed on the
+    window's first day counts unless the report the window starts at already said so."""
     inw = lambda t: t is not None and start <= t <= end
     notes, done, dropped = [], [], []
     for t, text in log_entries(meta["body"]):
@@ -1891,23 +1899,24 @@ def task_activity(meta, start, end):
                 for a in asks if a["state"] != "open" and inw(naive(a.get("resolved_at")))]
     asked = [{"id": a["id"], "text": a.get("text", ""), "at": iso(naive(a.get("ts")))}
              for a in asks if inw(naive(a.get("ts")))]
-    settled = {x["text"] for x in done + dropped}
-    added = [x for x in added if x["text"] not in settled]
+    norm = lambda t: " ".join(str(t).split())
+    settled = {norm(x["text"]) for x in done + dropped}
+    added = [x for x in added if norm(x["text"]) not in settled]
     answered_ids = {a["id"] for a in answered}
     asked = [a for a in asked if a["id"] not in answered_ids]
-    closed = meta.get("status") in ("done", "abandoned") and str(meta.get("closed") or "") >= start.date().isoformat()
+    day, first = str(meta.get("closed") or ""), start.date().isoformat()
+    closed = meta.get("status") in ("done", "abandoned") and (
+        day > first or (day == first and meta.get("id") not in reported_closed))
     return {"notes": notes, "done": done, "dropped": dropped, "added": added, "answered": answered,
             "asked": asked, "closed": closed, "asks": asks}
 
 
-def report_edits(skip=None):
+def report_edits():
     """The user's edits to recent reports since the secretary wrote (or last saw) them: unified
     diffs against the snapshot `hq report keep` took."""
     import difflib
     idx, out = load_reports_index(), []
     for name in sorted(idx, reverse=True)[:EDITS_LOOKBACK]:
-        if name == skip:
-            continue
         cur, base = os.path.join(reports_dir(), name), os.path.join(reports_dir(), ".drafts", name)
         try:
             a, b = open(base, encoding="utf-8").read(), open(cur, encoding="utf-8").read()
@@ -1923,22 +1932,27 @@ def report_edits(skip=None):
 def gather_report(kind, since=None, gh=True, now=None):
     now = (now or dt.datetime.now()).replace(microsecond=0)
     name = f"{now.date().isoformat()}-{kind}.md"
-    start, end = report_window(kind, since, now, name)
+    start, end, prev = report_window(kind, since, now, name)
+    reported_closed = set(prev.get("closed") or []) if prev else set()
     sec = secretary_task_id()
     metas = [parse_card(p) for p in card_paths()]
     metas = [m for m in metas if m.get("id") != sec]
     names = [p["name"] for p in load_projects()]
     tasks, owed = [], []
     for m in metas:
-        act = task_activity(m, start, end)
+        act = task_activity(m, start, end, reported_closed)
         is_open = m.get("status") in OPEN_STATUSES
-        moved = any(act[k] for k in ("notes", "done", "dropped", "added", "answered", "asked")) or act["closed"]
+        # Claude's own new todos are its working plan, not news (the text leaves them out too).
+        moved = any(act[k] for k in ("notes", "done", "dropped", "answered", "asked")) or act["closed"] \
+            or any(x["owner"] != "claude" for x in act["added"])
         refs = m.get("refs") if isinstance(m.get("refs"), list) else []
-        prs = [u for r in refs for u in GH_PR_RE.findall(str(r))]
-        if not (moved or is_open):
+        prs = list(dict.fromkeys(u for r in refs for u in GH_PR_RE.findall(str(r))))
+        # A card closed in the last week may still have a PR merging now.
+        recent = str(m.get("closed") or "") >= (start - dt.timedelta(days=7)).date().isoformat()
+        if not (moved or is_open or (prs and recent)):
             continue
         tasks.append({"id": m.get("id"), "title": m.get("title", ""), "project": m.get("project") or "",
-                      "status": m.get("status"), "updated": m.get("updated", ""), "next": m.get("next", ""),
+                      "status": m.get("status"), "open": is_open, "updated": m.get("updated", ""), "next": m.get("next", ""),
                       "state": card_state_lines(m["body"])[:4], "moved": moved, "prs": prs,
                       **{k: v for k, v in act.items() if k != "asks"}})
         if is_open:
@@ -1953,8 +1967,7 @@ def gather_report(kind, since=None, gh=True, now=None):
                     owed.append({"task": m.get("id"), "kind": "ask", "id": a["id"], "text": a.get("text", ""),
                                  "since": iso(c), "days": (now - c).days})
     owed.sort(key=lambda o: -o["days"])
-    # PRs: only of tasks that moved in the window, or are still open — a PR merged on a quiet card
-    # is still news.
+    # PRs of the cards above: a PR merged on a quiet or recently closed card is still news.
     states = pr_states(sorted({u for t in tasks for u in t["prs"]})) if gh else {}
     for t in tasks:
         t["prs"] = [dict(url=u, **{k: states[u].get(k) for k in ("number", "title", "state", "mergedAt", "isDraft")},
@@ -1962,6 +1975,7 @@ def gather_report(kind, since=None, gh=True, now=None):
                     if u in states else {"url": u, "state": None} for u in t["prs"]]
         if any(p.get("mergedInWindow") for p in t["prs"]) and not t["moved"]:
             t["moved"] = True
+    tasks = [t for t in tasks if t.pop("open") or t["moved"]]
     projects = []
     for pname in names + sorted({t["project"] for t in tasks} - set(names)):
         mine = [t for t in tasks if t["project"] == pname]
@@ -1974,9 +1988,19 @@ def gather_report(kind, since=None, gh=True, now=None):
                          "quiet": [{"id": t["id"], "title": t["title"], "status": t["status"], "updated": t["updated"]}
                                    for t in mine if not t["moved"]]})
     os.makedirs(reports_dir(), exist_ok=True)
+    # What `hq report keep` records for this report: where its facts end (the next daily report
+    # starts there, so what happens while it is written isn't lost) and the cards it saw closed.
+    closed_ids = sorted({t["id"] for t in tasks if t.get("closed")} | (reported_closed if start.date() == end.date() else set()))
+    pending = load_json(reports_pending_path(), {})
+    pending = pending if isinstance(pending, dict) else {}
+    pending[name] = {"from": iso(start), "to": iso(end), "closed": closed_ids}
+    atomic_write(reports_pending_path(), json.dumps(pending, ensure_ascii=False, indent=1) + "\n")
+    path = os.path.join(reports_dir(), name)
+    # Today's report may be written again (Write one now, then the evening run): it's then among
+    # the edits checked, and the secretary must keep what the user changed in it.
     return {"kind": kind, "from": iso(start), "to": iso(end), "lang": report_lang(),
-            "file": os.path.join(reports_dir(), name), "format": ensure_report_format(),
-            "projects": projects, "owed": owed, "edits": report_edits(skip=name), "gh": bool(gh and states)}
+            "file": path, "exists": os.path.isfile(path), "format": ensure_report_format(),
+            "projects": projects, "owed": owed, "edits": report_edits(), "gh": bool(gh and states)}
 
 
 def clip(s, n=160):
@@ -1984,7 +2008,7 @@ def clip(s, n=160):
     return s if len(s) <= n else s[:n] + "…"
 
 
-def capped(items, what, line, tid, n=6):
+def capped(items, what, line, n=6):
     """The newest n items as lines, with a note of how many more there are."""
     more = [f"  ({len(items) - n} more {what}: hq report --json)"] if len(items) > n else []
     return more + [line(x) for x in items[-n:]]
@@ -1995,7 +2019,10 @@ def report_text(r):
     out = [f"# {r['kind']} report data · {r['from'][:16].replace('T', ' ')} → {r['to'][:16].replace('T', ' ')}",
            f"write it to: {r['file']}",
            f"then run:    hq report keep {os.path.basename(r['file'])}",
-           f"format:      {r['format']}", ""]
+           f"format:      {r['format']} (read it first; its rules win)", ""]
+    if r.get("exists"):
+        out[2:2] = ["NOTE: this file exists already (written earlier today). Read it and rewrite it from the facts",
+                    "below, keeping what the user changed in it (see the edits at the end)."]
     if not r["projects"]:
         out += ["(nothing on the board)", ""]
     for p in r["projects"]:
@@ -2010,17 +2037,17 @@ def report_text(r):
                 out.append(f"  state: {clip(s, 200)}")
             if t["next"]:
                 out.append(f"  next: {clip(t['next'], 200)}")
-            out += capped(t["notes"], "log lines", lambda n: f"  log {hm(n['at'])}: {clip(n['text'], 200)}", t["id"])
-            out += capped(t["done"], "done", lambda n: f"  done {hm(n['at'])}: {clip(n['text'], 120)}", t["id"])
+            out += capped(t["notes"], "log lines", lambda n: f"  log {hm(n['at'])}: {clip(n['text'], 200)}")
+            out += capped(t["done"], "done", lambda n: f"  done {hm(n['at'])}: {clip(n['text'], 120)}")
             if t["dropped"]:
                 out.append(f"  dropped {len(t['dropped'])} todo(s)")
             # New todos the user or a colleague owns; Claude's own are its working plan, not news.
             mine = [n for n in t["added"] if n["owner"] != "claude"]
             out += capped(mine, "new todos", lambda n: f"  new todo {hm(n['at'])}: "
-                          f"{'@' + n['owner'] + ' ' if n['owner'] else ''}{clip(n['text'], 120)}", t["id"])
+                          f"{'@' + n['owner'] + ' ' if n['owner'] else ''}{clip(n['text'], 120)}")
             out += capped(t["answered"], "answers", lambda a: f"  answered {hm(a['at'])} {a['id']} \"{clip(a['text'], 80)}\""
-                          f" → {a['answer']}{': ' + clip(a['note'], 100) if a['note'] else ''}", t["id"])
-            out += capped(t["asked"], "asks", lambda a: f"  asked {hm(a['at'])} {a['id']}: {clip(a['text'], 100)}", t["id"])
+                          f" → {a['answer']}{': ' + clip(a['note'], 100) if a['note'] else ''}")
+            out += capped(t["asked"], "asks", lambda a: f"  asked {hm(a['at'])} {a['id']}: {clip(a['text'], 100)}")
             for pr in t["prs"]:
                 if pr.get("state") == "MERGED" and pr.get("mergedInWindow"):
                     out.append(f"  PR merged {hm(iso(naive(pr['mergedAt'])))}: #{pr['number']} {clip(pr['title'], 100)}")
@@ -2030,7 +2057,7 @@ def report_text(r):
             out.append("no movement: " + ", ".join(f"{q['id']} {clip(q['title'], 40)} ({q['status']}, updated {q['updated']})"
                                                 for q in p["quiet"]))
         out.append("")
-    out.append("## Owed: waiting on the user for more than %d days" % OWED_AFTER_DAYS)
+    out.append("## Owed: waiting on the user for %d days or more" % OWED_AFTER_DAYS)
     out += [f"- {o['task']} {'ask ' + o['id'] if o['kind'] == 'ask' else '@me todo'}: {clip(o['text'], 140)} — {o['days']}d"
             for o in r["owed"]] or ["(nothing)"]
     out.append("")
@@ -2074,8 +2101,12 @@ def report_keep(name):
         if other != name and os.path.isfile(p):
             atomic_write(os.path.join(drafts, other), open(p, encoding="utf-8").read())
     atomic_write(os.path.join(drafts, name), open(path, encoding="utf-8").read())
-    idx[name] = {"kept": now_iso()}
+    pending = load_json(reports_pending_path(), {})
+    pending = pending if isinstance(pending, dict) else {}
+    got = pending.pop(name, None)
+    idx[name] = {"kept": now_iso(), **(got if isinstance(got, dict) else {})}
     atomic_write(reports_index_path(), json.dumps(idx, ensure_ascii=False, indent=1) + "\n")
+    atomic_write(reports_pending_path(), json.dumps(pending, ensure_ascii=False, indent=1) + "\n")
     return path
 
 

@@ -61,9 +61,12 @@ final class SecretaryController {
         }
         o["waking"] = !answeredYes.isEmpty
         if let job = store.load(Self.jobID) {
-            // A job from before reports shows the schedule ensureJob will give it.
-            let sch = Self.needsMigration(job) && job.schedule == Schedule() ? Self.reportSchedule : job.schedule
+            // A job from before reports shows what ensureJob will make of it.
+            let migrating = Self.needsMigration(job)
+            let sch = migrating ? Self.migratedSchedule(job.schedule) : job.schedule
             o["schedule"] = ["enabled": job.enabled, "kind": sch.kind.rawValue,
+                             // false: its scheduled runs ask something else (the user's own prompt).
+                             "reports": migrating || Self.writesReports(job),
                              "hour": sch.hour, "minute": sch.minute,
                              "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
         }
@@ -94,9 +97,15 @@ final class SecretaryController {
     }
 
     /// The evening report on or off: the job's schedule (weekdays 18:30 unless the user changed it
-    /// in Scheduled), with the report prompt.
+    /// in Scheduled). Turning it on gives the job the report prompt if it asks something else, and
+    /// a fixed time if it runs every N minutes: the user asked for reports, from the window.
     func setReports(on: Bool) async -> (Any?, String?) {
         if let err = await prepare() { return (nil, err) }
+        if on, var job = store.load(Self.jobID), !Self.writesReports(job) {
+            job.prompt = Self.reportPrompt
+            if job.schedule.kind == .every { job.schedule = Self.reportSchedule }
+            if let err = await save(job) { return (nil, err) }
+        }
         let r = await jobs.setEnabled(Self.jobID, on)
         if let err = r.1 { return (nil, err) }
         return await status()
@@ -211,16 +220,23 @@ final class SecretaryController {
         return r
     }
 
-    /// What a scheduled run asks: the report that is due (`hq report` picks daily or weekly).
-    static var reportPrompt: String {
-        L("Scheduled run: write the report that is due (Reports in your instructions), then stop.",
-          "定时运行：写今天该写的报告（照你说明里的 Reports 一节），写完就停。")
-    }
+    /// What a scheduled run asks: the report that is due (`hq report` picks daily or weekly). It
+    /// names the steps itself: an agent definition the user edited keeps its old instructions.
+    static var reportPrompt: String { L(reportPrompts[0], reportPrompts[1]) }
+    private static let reportPrompts = [
+        "Scheduled run: write the report that is due (Reports in your instructions): run `~/.claude/hq/bin/hq report`, write the report to the file it names, in the format of secretary/reports.md, run `~/.claude/hq/bin/hq report keep <that file name>`, then stop.",
+        "定时运行：写今天该写的报告（照你说明里的 Reports 一节）：运行 `~/.claude/hq/bin/hq report`，按 secretary/reports.md 的格式把报告写进它给出的文件，再运行 `~/.claude/hq/bin/hq report keep <那个文件名>`，写完就停。"]
+    static func writesReports(_ job: Job) -> Bool { reportPrompts.contains(job.prompt) }
     /// The schedule a job made before reports existed had, and the time reports run at instead.
     static let reportSchedule = Schedule(kind: .weekdays, hour: 18, minute: 30, cron: "30 18 * * 1-5")
     private static let oldPrompts: Set<String> = ["Look over the board: what needs my attention?", "看一眼看板：有什么需要我注意的？"]
     /// Made before reports: its prompt and schedule were placeholders nobody ran (it was off).
     private static func needsMigration(_ job: Job) -> Bool { !job.enabled && oldPrompts.contains(job.prompt) }
+    /// The default 09:00 placeholder, or every N minutes (a report an hour is not a report), becomes
+    /// the evening; a fixed time the user chose stays.
+    private static func migratedSchedule(_ s: Schedule) -> Schedule {
+        s == Schedule() || s.kind == .every ? reportSchedule : s
+    }
 
     /// The job as the secretary needs it. The user may change its model, time limit, quota and
     /// compaction settings, its schedule or its prompt in Scheduled; what makes it the secretary
@@ -240,8 +256,12 @@ final class SecretaryController {
         job.allowedTools = tools
         if old {
             job.prompt = Self.reportPrompt
-            if job.schedule == Schedule() { job.schedule = Self.reportSchedule }
+            job.schedule = Self.migratedSchedule(job.schedule)
         }
+        return await save(job)
+    }
+
+    private func save(_ job: Job) async -> String? {
         guard let data = try? JSONEncoder().encode(job),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "encode" }
         return await jobs.save(raw).1

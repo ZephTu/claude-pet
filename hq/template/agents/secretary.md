@@ -70,7 +70,9 @@ due":
    The rules win over the format above them.
 3. Write the report with Write to the file `hq report` named (`secretary/reports/<date>-<kind>.md`),
    in the profile's language. Report, don't list: progress, blockers and next steps per project,
-   from the facts, not from what you remember. Leave out what didn't move. Give task ids.
+   from the facts, not from what you remember. Leave out what didn't move. Give task ids. If
+   `hq report` says the file exists (a second report today), Read it first and keep what the user
+   changed in it.
 4. Run `hq report keep <file name>`: it keeps a copy of what you wrote, so the user's edits to it
    show up next time.
 5. Reply with the report itself (the user reads it in your window), and keep your card's `state:`

@@ -2397,8 +2397,12 @@ function secretaryReports(m) {
   return `<div class="sec-reports">
     <span class="sec-watch-h">${T("Reports", "报告")}</span>${links || `<span class="meta">${T("none yet", "还没有")}</span>`}
     <span style="flex:1"></span>
-    <span class="meta" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}">${sch.enabled ? T(`Evening report on: ${when}`, `定时报告：开（${when}）`) : T(`Evening report off (${when})`, `定时报告：关（${when}）`)}</span>
-    <button class="btn small ghost" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}">${sch.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>
+    ${sch.reports === false
+      // Its scheduled runs ask what the user wrote in Scheduled; turning reports on replaces that.
+      ? `<span class="meta" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs: your own prompt, no reports", "定时运行：用你自己的 prompt，不写报告") : T("Evening report off", "定时报告：关")}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="1">${sch.enabled ? T("Write reports instead", "改成写报告") : T("Turn on", "开启")}</button>`
+      : `<span class="meta" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}">${sch.enabled ? T(`Evening report on: ${when}`, `定时报告：开（${when}）`) : T(`Evening report off (${when})`, `定时报告：关（${when}）`)}</span>
+    <button class="btn small ghost" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}">${sch.enabled ? T("Turn off", "关闭") : T("Turn on", "开启")}</button>`}
     <button class="btn small" data-action="secretary-report-now" ${busy ? "disabled" : ""} title="${T("Ask for the report that is due now", "让它现在写今天该写的报告")}">${T("Write one now", "现在写一份")}</button>
   </div>`;
 }
@@ -3368,10 +3372,10 @@ document.addEventListener("click", async (ev) => {
     case "secretary-reports":
       try { ui.secretary = await apiObj("secretary-reports", { on: d.on === "1" }); }
       catch (e) { return toast(String(e.message || e), true); }
-      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
       return toast(d.on === "1" ? T("Evening report on", "定时报告已开启") : T("Evening report off", "定时报告已关闭"));
     case "secretary-report-now":
-      return sendSecretary(T("Write the report that is due now.", "现在写今天该写的报告。"));
+      return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":
       try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
       return refreshPeek();

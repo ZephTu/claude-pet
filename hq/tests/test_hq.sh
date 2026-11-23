@@ -1208,6 +1208,40 @@ printf '# Weekly\n' > "$RD/$D-weekly.md"; "$HQ" report keep "$D-weekly.md" >/dev
 "$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["edits"]==[], r["edits"]' && ok "keeping the next report marks earlier edits as seen" || fail "edits seen"
 "$HQ" report list --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert sorted(x["kind"] for x in r)==["daily","weekly"], r' && ok "hq report list" || fail "report list"
 "$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["reports"])==2 and d["files"]["reports.md"] and d["ready"], d' && ok "secretary --json lists its reports" || fail "secretary reports"
+# Today's report written again (Write one now, then the evening run): the user's edits to it show.
+printf '# Daily\n\n## reportproj\n- loader merged (PR #7), my words\n' > "$RD/$D-daily.md"
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+assert r["exists"] and [e["report"] for e in r["edits"]]==["'"$D"'-daily.md"], r["edits"]' && ok "rewriting today's report shows the user's edits to it" || fail "same-day rewrite edits"
+"$HQ" report daily --no-gh | grep -q "NOTE: this file exists" && ok "and says to keep them" || fail "same-day rewrite note"
+# The next daily report starts where the last one's facts ended, not when it was kept.
+"$HQ" report weekly --no-gh --json > "$T/wk.json"; sleep 1; "$HQ" report keep "$D-weekly.md" >/dev/null
+python3 - "$T/wk.json" "$RD/.reports.json" <<'PY2' && ok "keep records the window the report was written from" || fail "keep window"
+import json, sys
+g, idx = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+w = idx[g["file"].rsplit("/", 1)[1]]
+assert (w["from"], w["to"]) == (g["from"], g["to"]) and w["kept"] > w["to"], w
+PY2
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); g=json.load(open("'"$T/wk.json"'"))
+assert r["from"] == g["to"], (r["from"], g["to"])' && ok "the next daily report starts at the end of the last one's facts" || fail "daily window start"
+"$HQ" report list --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert all(x["to"] for x in r), r' && ok "report list shows each window" || fail "list window"
+# A card closed today and already reported closed isn't reported closed again later today;
+# a card whose only news is Claude's own todos didn't move.
+RC="$("$HQ" new "Close me" --project reportproj | head -1)"; "$HQ" set "$RC" status=done >/dev/null
+RQ="$("$HQ" new "Quiet me" --project reportproj | head -1)"
+"$HQ" report weekly --no-gh --json > "$T/wk.json"
+python3 - "$T/wk.json" "$RC" <<'PY2' && ok "a card closed in the window is reported closed" || fail "closed in window"
+import json, sys
+r = json.load(open(sys.argv[1])); p = [x for x in r["projects"] if x["name"] == "reportproj"][0]
+assert [t["closed"] for t in p["moved"] if t["id"] == sys.argv[2]] == [True], p["moved"]
+PY2
+"$HQ" report keep "$D-weekly.md" >/dev/null; "$HQ" addtodo "$RQ" "@claude look into it" >/dev/null
+"$HQ" report daily --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); p=[x for x in r["projects"] if x["name"]=="reportproj"][0]
+moved = [t["id"] for t in p["moved"]]
+assert "'"$RC"'" not in moved and "'"$RQ"'" not in moved, moved
+assert "'"$RQ"'" in [q["id"] for q in p["quiet"]], p["quiet"]' && ok "not reported closed twice; Claude's own new todos aren't movement" || fail "closed twice / claude todos"
 # An agent definition an older hq wrote, unedited, is brought up to date; an edited one is kept.
 (cd "$SRC/.." && git show 66ec2b4:hq/template/agents/secretary.md) > "$T/root/.claude/agents/secretary.md"
 "$HQ" secretary --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["agentStale"]' && ok "an old unedited agent definition is stale" || fail "agentStale"
