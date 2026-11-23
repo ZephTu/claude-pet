@@ -79,8 +79,8 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
 const ui = {
-  board: null, sessions: [], expanded: new Set(), peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), showClosed: false, filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
+  drafts: {}, hqOpen: new Set(), filter: "", newTask: false, busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: pref("hq-mode", "today"),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -639,14 +639,14 @@ function render() {
   $("#needs").hidden = ui.mode !== "needs";
   $("#jobs").hidden = ui.mode !== "jobs";
   if (ui.mode === "jobs" && typeof renderJobsView === "function") renderJobsView();   // see jobs.js
-  if (ui.mode === "today") {
-    $("#today-focus").innerHTML = renderToday();
-    $("#newtask-form").innerHTML = ""; delete $("#newtask-form").dataset.drawn;
-  }
+  // Only the page on show holds cards: a hidden page's leftovers would double ids like kc-<id>,
+  // and a lookup would find the invisible copy.
+  $("#today-focus").innerHTML = ui.mode === "today" ? renderToday() : "";
+  if (ui.mode !== "all") { $("#newtask-form").innerHTML = ""; delete $("#newtask-form").dataset.drawn; }
   renderNeeds();
   renderCaptureAtts();
-  $("#newtask-form").hidden = !ui.newTask || ui.mode === "today";
-  if (ui.newTask && ui.mode !== "today" && !$("#newtask-form").dataset.drawn) {
+  $("#newtask-form").hidden = !ui.newTask || ui.mode !== "all";
+  if (ui.newTask && ui.mode === "all" && !$("#newtask-form").dataset.drawn) {
     $("#newtask-form").innerHTML = renderNewTask();
     $("#newtask-form").dataset.drawn = "1";
   }
@@ -663,7 +663,7 @@ function render() {
   $("#show-closed").checked = ui.showDone;
   $("#all-count").textContent = T(`${listed().filter(isOpen).length} open`, `${listed().filter(isOpen).length} 个进行中`);
   renderSettings();
-  if (ui.mode === "all") $("#tasks").innerHTML = renderTasks();
+  $("#tasks").innerHTML = ui.mode === "all" ? renderTasks() : "";
   renderDrawer();
 
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
@@ -1271,7 +1271,10 @@ function lane(t) {
   if (t.status === "blocked") return "blocked";
   return "ready";
 }
-const recentDone = (t) => t.status === "done" && (t.age_days ?? 99) <= DONE_DAYS;
+// By the day it was closed (hq stamps `closed`), not its last update: a note on a task finished
+// weeks ago doesn't bring it back. Cards closed before hq stamped it fall back to `updated`.
+const daysSince = (day) => { const d = Date.parse(String(day || "") + "T00:00:00"); return Number.isNaN(d) ? null : Math.floor((Date.now() - d) / 86400000); };
+const recentDone = (t) => t.status === "done" && (daysSince(t.closed) ?? t.age_days ?? 99) <= DONE_DAYS;
 const laneCols = () => LANES.concat(ui.showDone ? ["done"] : []);
 const KIND_ICON = { goal: "◆", duty: "↻" };
 const kindIcon = (pr) => (pr && pr.kind ? `<i class="ki ${esc(pr.kind)}">${KIND_ICON[pr.kind] || ""}</i>` : "");
@@ -1457,7 +1460,7 @@ function renderDrawer() {
       <h2>${esc(t.title)}</h2>
       <div class="dr-status">${DRAWER_STATUS.map(([s, w]) => `<button class="${t.status === s ? "on" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}">${w}</button>`).join("")}
         ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
-        <span class="meta lane-now">${T("Column:", "在：")} <b>${LANE_NAME[ln]}</b></span></div>
+        ${ln !== "done" || recentDone(t) ? `<span class="meta lane-now">${T("Column:", "在：")} <b>${LANE_NAME[ln]}</b></span>` : ""}</div>
       ${focusFlags(t)}</div>
       <div class="dr-body">${renderTaskBody(t)}</div>`;
   }
@@ -1973,11 +1976,12 @@ const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
 async function setStatus(id, status) {
   const live = isOpen({ status }) ? [] : liveFor(id);
   try { await api("set", { task: id, fields: [`status=${status}`] }); }
-  catch (e) { toast(String(e.message || e), true); return refresh(); }
-  if (live.length && finishStop() === "stop") return stopAll(live, T("Status saved; ", "状态已保存；"));
+  catch (e) { toast(String(e.message || e), true); await refresh(); return false; }
+  if (live.length && finishStop() === "stop") { await stopAll(live, T("Status saved; ", "状态已保存；")); return true; }
   toast(T("Status saved", "状态已保存"));
   await refresh();
   if (live.length && finishStop() === "ask") { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
+  return true;
 }
 // The question, in its own small window over the board. Its list is the task's sessions at the
 // moment of answering, not of asking.
@@ -2225,11 +2229,11 @@ function renderSessionSettings() {
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
     ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
-    ${ui.clickTarget ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task here opens in Focus if it is there, in All otherwise, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，Focus 里有就在 Focus，没有就在 All，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
+    ${ui.clickTarget ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task's drawer opens here, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，打开这个任务的详情侧栏，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
       `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
-    ${row(T("Active first", "活跃的在前"), T("Tasks (and project groups) with a live session come first, most recently active first. Off: your own order", "有 session 在跑的任务（和项目组）排最前，最近有动静的在前。不勾：按你自己的顺序"),
+    ${row(T("Active first", "活跃的在前"), T("In All, project rows with a live session come first, most recently active first. Off: your own order", "All 里有 session 在跑的项目行排最前，最近有动静的在前。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
   </div>`;
 }
@@ -2912,12 +2916,12 @@ function drawSecretary(toBottom) {
   // The side column (wide windows only): what it watches, proposals still open, its reports,
   // and the files it remembers — the same things the menus above hold, in view.
   const card = secId() && taskById(secId());
-  const openAsks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
+  const secAsks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
   const sideRes = RESOLUTIONS.filter(([r]) => r === "do" || r === "drop");
   const sideSec = (title, n, inner) => `<section class="ss"><div class="ss-h">${title}${n ? `<span class="meta">${n}</span>` : ""}</div>${inner}</section>`;
   const sideHtml = `<aside class="sec-side">
     ${sideSec(T("Keeping an eye on", "替你盯着"), watch.length, watch.length ? `<ul class="ss-watch">${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : `<div class="ss-empty">${T("Nothing right now.", "现在没有。")}</div>`)}
-    ${sideSec(T("Waiting on your answer", "待回应建议"), openAsks.length, openAsks.length ? openAsks.map((a) => `<div class="ss-prop"><div class="t">${esc(askKey(a.text))}</div>
+    ${sideSec(T("Waiting on your answer", "待回应建议"), secAsks.length, secAsks.length ? secAsks.map((a) => `<div class="ss-prop"><div class="t">${esc(askKey(a.text))}</div>
         <div class="acts">${sideRes.map(([r, label, tip]) => `<button class="pb ${r === "do" ? "yes" : ""}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${ui.resolving.has(a.id) ? "disabled" : ""}>${label}</button>`).join("")}</div></div>`).join("")
       : `<div class="ss-empty">${T("No proposal waiting.", "没有等你回应的建议。")}</div>`)}
     ${sideSec(T("Reports", "报告"), reports.length, `${reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")}
@@ -3418,14 +3422,13 @@ function revealTask(id) {
   // The secretary's card isn't in the lists: its window is where it lives.
   if (id === secId()) return openSecretary();
   if (!taskMatches(t)) ui.filter = $("#search").value = "";
-  if (ui.mode === "all") {
-    if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
-      ui.openClosedProj.add(t.project);
-      savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
-    } else {
-      ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
-      savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
-    }
+  // Its row in All unfolds whatever page you are on, so it is there when you go to All.
+  if (ui.groupBy === "project" && projectClosed(projectByName(t.project))) {
+    ui.openClosedProj.add(t.project);
+    savePref("hq-open-closed-proj", JSON.stringify([...ui.openClosedProj]));
+  } else {
+    ui.collapsed.delete(ui.groupBy === "repo" ? "repo:" + (t.repo || "") : t.project || "(none)");
+    savePref("hq-collapsed", JSON.stringify([...ui.collapsed]));
   }
   openDrawer(id);
 }
@@ -3838,7 +3841,6 @@ document.addEventListener("click", async (ev) => {
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
-    case "expand":
     case "open-task":
       // Only a click on the card itself opens it — not one in a box or on a label, or one that
       // ends a text selection. A second click on the open one closes the drawer.
@@ -4648,6 +4650,8 @@ document.addEventListener("drop", (ev) => {
 function finishDrag() {
   ui.dragging = null;
   ui.dragCard = null;
+  ui.dragFrom = null;
+  ui.dragRow = null;
   ui.dropAt = null;
   clearDropMarks();
   document.querySelectorAll("[data-lane].drop").forEach((n) => n.classList.remove("drop"));
@@ -4671,6 +4675,11 @@ document.addEventListener("dragstart", (ev) => {
   if (!card) return;
   ui.dragging = "card:" + card.dataset.dragCard;      // holds rebuilds until the drop
   ui.dragCard = card.dataset.dragCard;
+  // Where the card was drawn when the drag began: a refresh mid-drag can move the task to another
+  // lane in the data while the screen (held until the drop) still shows the old one.
+  const from = card.closest("[data-lane]");
+  ui.dragFrom = from ? from.dataset.lane : null;
+  ui.dragRow = card.closest(".swim-row");
   ui.dropAt = null;
   ev.dataTransfer.effectAllowed = "move";
   // Not text/plain: dropped on a message box, that would type the task id into it.
@@ -4679,7 +4688,9 @@ document.addEventListener("dragstart", (ev) => {
 });
 document.addEventListener("dragover", (ev) => {
   if (!ui.dragCard) return;
-  const zone = ev.target.closest && ev.target.closest("[data-lane]");
+  let zone = ev.target.closest && ev.target.closest("[data-lane]");
+  // In All a card stays in its project's row: a drop changes status, never the project.
+  if (zone && ui.dragRow && zone.closest(".swim-row") !== ui.dragRow) zone = null;
   document.querySelectorAll("[data-lane].drop").forEach((n) => { if (n !== zone) n.classList.remove("drop"); });
   clearDropMarks();
   if (!zone) { ui.dropAt = null; return; }
@@ -4688,7 +4699,7 @@ document.addEventListener("dragover", (ev) => {
   zone.classList.add("drop");
   const t = taskById(ui.dragCard);
   ui.dropAt = { lane: zone.dataset.lane };
-  if (t && zone.dataset.lane === lane(t) && zone.closest("#today-focus")) {
+  if (t && zone.dataset.lane === ui.dragFrom && zone.closest("#today-focus")) {
     let best = null, dist = Infinity;
     for (const el of zone.querySelectorAll("[data-drag-card]")) {
       const r = el.getBoundingClientRect(), mid = r.top + r.height / 2, d = Math.abs(ev.clientY - mid);
@@ -4701,13 +4712,12 @@ document.addEventListener("dragover", (ev) => {
   }
 });
 document.addEventListener("drop", async (ev) => {
-  const id = ui.dragCard, at = ui.dropAt;
+  const id = ui.dragCard, at = ui.dropAt, from = ui.dragFrom;
   if (!id) return;
   ev.preventDefault();
   finishDrag();
   const t = taskById(id);
   if (!at || !t) return render();
-  const from = lane(t);
   if (at.lane === from) {
     if (!at.id) return render();
     const order = focusIds().filter((x) => x !== id);
@@ -4728,13 +4738,17 @@ document.addEventListener("drop", async (ev) => {
   }
   if (at.lane === "run") { render(); return toast(T("Running is up to its sessions — start or resume one from the card", "「在跑」由 session 决定——从卡片上新开或接上一个 session"), true); }
   const status = STATUS_OF[at.lane];
-  if (t.status !== status) await setStatus(id, status); else render();
+  const changed = t.status !== status;
+  if (changed) { if (!(await setStatus(id, status))) return; }   // failed: its error toast stays
+  else render();
   // Asks, your todos or a working session keep a card where it is, whatever its status says.
   const now = taskById(id) && lane(taskById(id));
   if (now && now !== at.lane && isOpen(taskById(id))) {
-    toast(now === "you" ? T(`${id}: status saved, but it stays in Needs you — it has an open ask or a todo of yours`, `${id}：状态已改，但它还有没答的问题或你的待办，所以留在「等你」`)
-      : now === "run" ? T(`${id}: status saved, but a session is working on it, so it stays in Running`, `${id}：状态已改，但有 session 在干活，所以留在「在跑」`)
-      : T(`${id}: status saved`, `${id}：状态已改`));
+    const lead = changed ? T(`${id}: status saved, but`, `${id}：状态已改，但`)
+      : T(`${id} is already ${STATUS_SHORT[status] || status}, but`, `${id} 本来就是「${STATUS_SHORT[status] || status}」，但`);
+    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours`, `${lead}它还有没答的问题或你的待办，所以留在「等你」`)
+      : now === "run" ? T(`${lead} a session is working on it, so it stays in Running`, `${lead}有 session 在干活，所以留在「在跑」`)
+      : T(`${lead} it stays in ${LANE_NAME[now]}`, `${lead}它留在「${LANE_NAME[now]}」`));
   }
 });
 
