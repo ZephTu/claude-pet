@@ -41,7 +41,9 @@ captured automatically and sessions don't get the task rules.
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
 `{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`),
-`turn` (`start`, `done`, `ms`, output `tokens`, `context`) and `todos` (Claude's latest
+`turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply
+since, its `compact_boundary`'s `postTokens` plus what a request sent besides the conversation
+after the previous compaction, else the session's first reply, at most 60k) and `todos` (Claude's latest
 TodoWrite / TaskCreate list: `{text, status, active}`); `hq peek <sid> --tool <tool_use id>`
 prints one call's full input and output (an Edit's diff), `--json` for the fields.
 

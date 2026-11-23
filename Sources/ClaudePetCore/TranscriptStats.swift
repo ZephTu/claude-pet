@@ -16,8 +16,14 @@ import Foundation
 /// it is not counted again.
 ///
 /// Context: every reply records the tokens its request sent, which is how full
-/// the window was at that moment, and a compaction shows up as the next reply
-/// sending far fewer. The statusline is told the same number as a percentage,
+/// the window was at that moment. A compaction writes a boundary line saying
+/// how big the conversation is now (`postTokens`), and that stands until the
+/// next reply: after `/compact` there may be none for a long while. It is the
+/// conversation alone, though — the next request also sends the system prompt,
+/// the tools and the files Claude Code attaches again, 25-55k more — so what
+/// that came to the last time is added: the reply after the previous
+/// compaction less its `postTokens`, or before any, the session's first reply.
+/// The statusline is told the same number as a percentage,
 /// but it only runs while Claude Code is drawing and only when wired up; the
 /// transcript is always there.
 ///
@@ -33,6 +39,12 @@ public enum TranscriptStats {
         public var contextTokens = 0
         /// The model that request asked for, "[1m]" and all.
         public var model = ""
+        /// The session's first reply, and what a request sent besides the conversation
+        /// the last time a compaction was followed by one (0 until then).
+        public var firstContext = 0
+        public var overhead = 0
+        /// A compaction with no reply after it yet: the size it gave (nil when it did not say).
+        public var compacted: Int?? = nil
 
         public init() {}
 
@@ -52,6 +64,11 @@ public enum TranscriptStats {
                             Array(#""cache_read_input_tokens":"#.utf8)]
     static let requestedModelKey = Array(#""requestedModel":""#.utf8)
     static let modelKey = Array(#""model":""#.utf8)
+    static let boundaryKey = Array(#""subtype":"compact_boundary""#.utf8)
+    static let postTokensKey = Array(#""postTokens":"#.utf8)
+    /// A first reply is mostly system prompt and tools (25-55k); past this its prompt was a
+    /// long paste, which a compaction does not carry over.
+    public static let firstReplyCap = 60_000
 
     /// `progress` moved on through `data`, the whole transcript as it is now.
     /// A line still being written is left for next time.
@@ -74,19 +91,50 @@ public enum TranscriptStats {
                 at = line.upperBound + 1
             }
 
-            // Only the newest reply matters, so look for it from the end.
-            var last: Range<Int>?
+            // Compactions in this stretch, in order, with the size each gave.
+            var boundaries: [(at: Int, post: Int?)] = []
+            at = p.offset
+            while let hit = find(boundaryKey, in: base, from: at, to: end) {
+                let line = bounds(of: hit, in: base, from: at, to: end)
+                at = line.upperBound + 1
+                boundaries.append((line.lowerBound, number(after: postTokensKey, in: base, line)))
+            }
+
+            // Replies in order: the newest is the reading; the first after a compaction
+            // shows what a request sends on top of the conversation.
+            var last: Range<Int>?, b = 0
             at = p.offset
             while let hit = find(usageKey, in: base, from: at, to: end) {
                 let line = bounds(of: hit, in: base, from: at, to: end)
                 at = line.upperBound + 1
                 // An API error is written as a reply with no tokens behind it.
-                if tokens(in: base, from: hit, to: line.upperBound) > 0 { last = line }
+                let n = tokens(in: base, from: hit, to: line.upperBound)
+                guard n > 0 else { continue }
+                while b < boundaries.count, boundaries[b].at < line.lowerBound {
+                    p.compacted = .some(boundaries[b].post)
+                    b += 1
+                }
+                if case let .some(post?) = p.compacted, post > 0 { p.overhead = max(0, n - post) }
+                p.compacted = nil
+                if p.firstContext == 0 { p.firstContext = n }
+                last = line
             }
             if let last, let hit = find(usageKey, in: base, from: last.lowerBound, to: last.upperBound) {
                 p.contextTokens = tokens(in: base, from: hit, to: last.upperBound)
                 let requested = string(after: requestedModelKey, in: base, last)
                 p.model = requested.isEmpty ? string(after: modelKey, in: base, last) : requested
+            }
+
+            // A compaction after that reply: the conversation is the summary now. A
+            // boundary that does not say how big (older Claude Code) leaves no reading
+            // rather than the size it had before.
+            if b < boundaries.count {
+                p.compacted = .some(boundaries[boundaries.count - 1].post)
+                if case let .some(post?) = p.compacted, post > 0 {
+                    p.contextTokens = post + (p.overhead > 0 ? p.overhead : min(p.firstContext, firstReplyCap))
+                } else {
+                    p.contextTokens = 0
+                }
             }
             p.offset = end
         }
@@ -112,6 +160,18 @@ public enum TranscriptStats {
             CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "-"
         })
         return home + "/.claude/projects/" + folder + "/" + sessionId + ".jsonl"
+    }
+
+    /// The digits after `key` in `line`, or nil when the key is not there.
+    private static func number(after key: [UInt8], in base: UnsafePointer<UInt8>,
+                               _ line: Range<Int>) -> Int? {
+        guard let k = find(key, in: base, from: line.lowerBound, to: line.upperBound) else { return nil }
+        var i = k + key.count, n = 0
+        while i < line.upperBound, base[i] >= 0x30, base[i] <= 0x39 {
+            n = n * 10 + Int(base[i] - 0x30)
+            i += 1
+        }
+        return n
     }
 
     /// input + cache creation + cache read, read from the usage at `from`.
