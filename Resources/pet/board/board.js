@@ -1777,7 +1777,9 @@ async function refreshPeek(first) {
     act = { items: msgs.items || null, turn: msgs.turn || null, todos: msgs.todos || null };
     msgs = msgs.messages || [];
   }
-  const sig = JSON.stringify([msgs, act]);
+  // The session's state counts too: stopping on a permission prompt changes no transcript line,
+  // but the status line and the waiting row must say so.
+  const sig = JSON.stringify([msgs, act, s ? [liveState(s), s.waitingOn || ""] : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
@@ -1906,6 +1908,9 @@ function toolRow(t, m, run) {
     if (run.state) time = `<span data-since="${esc(t.ts)}">${fmtDur(secsSince(t.ts))}</span>`;
   } else if (t.status === "pending") {
     ico = "–"; cls = "cut"; tip = T("Stopped before it returned", "没等到结果就停了");
+  } else if (t.status === "stopped") {
+    ico = "■"; cls = "cut"; tip = T("Stopped", "已停止");
+    if (t.endTs && secsBetween(t.ts, t.endTs) >= 1) time = fmtDur(secsBetween(t.ts, t.endTs));
   } else {
     ico = t.status === "error" ? "✗" : "✓"; cls = t.status === "error" ? "err" : "ok";
     tip = t.status === "error" ? T("Failed, or you declined it", "失败了，或者被你拒绝了") : T("Done", "完成");
@@ -1926,12 +1931,13 @@ function toolDetail(t, m) {
     const full = m.fullTools.has(`${t.id}|${which}`);
     const shown = full ? text : text.slice(0, LIMIT);
     const cut = (total || text.length) - shown.length;
+    const capped = (total || 0) > text.length;   // hq sends at most 100k / 200k characters
     const diff = which === "out" && ["Edit", "MultiEdit", "Write"].includes(d.name) && !d.error;
     const body = diff ? shown.split("\n").map((ln) => `<span class="${ln.startsWith("+") ? "dadd" : ln.startsWith("-") ? "drem" : ln.startsWith("@@") ? "dhunk" : ""}">${esc(ln)}</span>`).join("\n") : esc(shown);
     return `<div class="pdlabel">${label}
         <button class="btn small ghost" data-action="copy-tool" data-id="${esc(t.id)}" data-which="${which}">${T("Copy", "复制")}</button>
         ${cut > 0 && !full ? `<button class="btn small ghost" data-action="tool-full" data-id="${esc(t.id)}" data-which="${which}">${T("Show all", "全部显示")}</button>` : ""}</div>
-      <pre class="pdpre">${body}${cut > 0 ? `<span class="pdcut">\n… ${T(`${cut.toLocaleString()} more characters`, `还有 ${cut.toLocaleString()} 个字符`)}${full ? "" : T(" — Show all or Copy for the rest", "——全部显示或复制可看完整内容")}</span>` : ""}</pre>`;
+      <pre class="pdpre">${body}${cut > 0 ? `<span class="pdcut">\n… ${T(`${cut.toLocaleString()} more characters`, `还有 ${cut.toLocaleString()} 个字符`)}${full && capped ? T(" — too long to show here; the full text is in the session's transcript", "——太长，这里不显示；完整内容在 session 的对话记录里") : full ? "" : capped ? T(" — Show all or Copy for more", "——全部显示或复制可看更多") : T(" — Show all or Copy for the rest", "——全部显示或复制可看完整内容")}</span>` : ""}</pre>`;
   };
   return `<div class="pdetail">${part(T("Input", "输入"), d.input, d.inputChars, "in")}${part(T("Output", "输出"), d.output, d.outputChars, "out")
     || (d.done ? "" : `<div class="pdlabel">${T("No output yet", "还没有输出")}</div>`)}</div>`;
@@ -1991,9 +1997,11 @@ function peekTodos(m) {
     ${m.todoOpen ? `<div class="ptodo-list">${td.map((t) => `<div class="ptodo-item ${esc(t.status)}"><span>${mark[t.status] || "☐"}</span> ${esc(t.text)}</div>`).join("")}</div>` : ""}
   </div>`;
 }
+const toolStatus = (m, id) => ((m.items || []).find((x) => x.id === id) || {}).status;
 async function loadToolDetail(m, id) {
+  const st = toolStatus(m, id);   // before the fetch: a call that ends meanwhile is fetched again
   try { m.details[id] = await apiJSON("peek-tool", { session: m.sid, id }); } catch (e) { m.details[id] = { err: String(e.message || e) }; }
-  m.details[id]._st = ((m.items || []).find((x) => x.id === id) || {}).status;
+  m.details[id]._st = st;
   if (ui.modal === m) drawPeek(false);
 }
 // Running times tick between refreshes without rebuilding the window.
@@ -2624,7 +2632,8 @@ document.addEventListener("click", async (ev) => {
       if (m.openTools.has(d.id)) { m.openTools.delete(d.id); return drawPeek(false); }
       m.openTools.add(d.id);
       drawPeek(false);
-      if (!m.details[d.id] || m.details[d.id].err) loadToolDetail(m, d.id);
+      const had = m.details[d.id];   // fetched while it ran, or failed: fetch it again
+      if (!had || had.err || had._st !== toolStatus(m, d.id)) loadToolDetail(m, d.id);
       return;
     }
     case "pgroup": {

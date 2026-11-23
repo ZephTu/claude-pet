@@ -1568,7 +1568,8 @@ def transcript_tail(path, nbytes=600_000):
         f.seek(0, 2)
         size = f.tell()
         f.seek(max(0, size - nbytes))
-        lines = f.read().decode("utf-8", "ignore").splitlines()
+        # Not splitlines(): that also breaks at U+0085, U+2028… inside a JSON string.
+        lines = f.read().decode("utf-8", "ignore").split("\n")
     out = []
     for line in lines:
         try:
@@ -1634,8 +1635,34 @@ def ts_seconds(ts):
 PEEK_TOOLS_MAX = 300   # tool rows in one Peek window; older ones drop off (messages never do)
 TODO_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"}  # shown as the todo list
 NOTE_ID = re.compile(r"<tool-use-id>([^<]+)</tool-use-id>")
+NOTE_TASK = re.compile(r"<task-id>([^<]+)</task-id>")   # a background command's or agent's own id
 NOTE_STATUS = re.compile(r"<status>([^<]+)</status>")
 NOTE_RESULT = re.compile(r"<result>(.*?)(?:</result>|\Z)", re.S)
+STOP_TOOLS = {"TaskStop", "KillShell", "KillBash"}   # stop a background command or agent
+INTERRUPTED = "[Request interrupted by user"
+
+
+def background_id(tur):
+    """The id a background call goes by once launched: a command's backgroundTaskId, an agent's
+    agentId. Task notifications and TaskStop name it, not always the tool_use id."""
+    if isinstance(tur, dict) and (tur.get("backgroundTaskId") or tur.get("isAsync")):
+        return tur.get("backgroundTaskId") or tur.get("agentId")
+    return None
+
+
+def note_status(st):
+    """A task notification's <status> as a row status: finished, stopped on purpose, or failed."""
+    st = (st or "").strip()
+    return "ok" if st == "completed" else "stopped" if st in ("killed", "stopped", "cancelled") else "error"
+
+
+def interrupted(o):
+    """The marker Claude Code writes when you press Esc on a turn (no turn_duration follows)."""
+    if o.get("type") != "user" or o.get("isSidechain"):
+        return False
+    c = (o.get("message") or {}).get("content")
+    t = c if isinstance(c, str) else result_text(c) if isinstance(c, list) else ""
+    return t.lstrip().startswith(INTERRUPTED)
 
 
 def one_line(s, n=100):
@@ -1699,8 +1726,9 @@ def tool_label(name, inp):
     if name in ("Agent", "Task"):
         return one_line(inp.get("description") or inp.get("prompt"))
     if name == "AskUserQuestion":
-        qs = inp.get("questions") or [{}]
-        return one_line((qs[0] or {}).get("question") if isinstance(qs[0], dict) else "")
+        qs = inp.get("questions")
+        q0 = qs[0] if isinstance(qs, list) and qs else {}
+        return one_line(q0.get("question") if isinstance(q0, dict) else "")
     for k in ("description", "query", "url", "skill", "pattern", "command", "file_path", "title", "name", "summary"):
         if isinstance(inp.get(k), str) and inp[k].strip():
             return one_line(inp[k])
@@ -1725,8 +1753,10 @@ def peek_timeline(entries):
     """A transcript as Peek shows it, oldest first: the messages (see message_text) and, between
     them, Claude's tool calls, each one {"kind": "tool", id, name, title, label, ts, status, …}.
     status: ok | error | pending (no result yet: running, or cut short) | background (launched in
-    the background; becomes ok or error when its task notification arrives)."""
+    the background; becomes ok, error or stopped when its task notification arrives, or stopped
+    once TaskStop ends it) | stopped."""
     items, tools, last_user = [], {}, None
+    by_bg, stops = {}, {}   # background id → its row; a TaskStop call's id → the id it stops
     for o in entries:
         if o.get("isSidechain"):
             continue
@@ -1738,6 +1768,9 @@ def peek_timeline(entries):
             kinds = [x.get("type") for x in c if isinstance(x, dict)]
             text_first = "text" in kinds and kinds.index("text") < (kinds.index("tool_use") if "tool_use" in kinds else len(kinds))
             for x in c:
+                if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("name") in STOP_TOOLS:
+                    inp = x.get("input") if isinstance(x.get("input"), dict) else {}
+                    stops[x.get("id")] = inp.get("task_id") or inp.get("shell_id") or inp.get("bash_id")
                 if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("id") \
                         and x.get("name") not in TODO_TOOLS:
                     name = x.get("name") or "?"
@@ -1749,14 +1782,20 @@ def peek_timeline(entries):
             results = [x for x in c if isinstance(x, dict) and x.get("type") == "tool_result"]
             tur = o.get("toolUseResult") if len(results) == 1 else None
             for x in results:
+                # A TaskStop that worked ends the background call it names.
+                target = by_bg.get(stops.get(x.get("tool_use_id")))
+                if target and not x.get("is_error") and target["status"] == "background":
+                    target.update(status="stopped", endTs=ts, bg="stopped")
                 it = tools.get(x.get("tool_use_id"))
                 if not it:
                     continue
                 it["endTs"] = ts
                 if x.get("is_error"):
                     it["status"] = "error"
-                elif isinstance(tur, dict) and (tur.get("backgroundTaskId") or tur.get("isAsync")):
+                elif background_id(tur) or (isinstance(tur, dict) and tur.get("isAsync")):
                     it["status"] = "background"
+                    if background_id(tur):
+                        by_bg[background_id(tur)] = it
                 else:
                     it["status"] = "ok"
                 stat = tool_stat(it["name"], tur)
@@ -1764,13 +1803,14 @@ def peek_timeline(entries):
                     it["stat"] = stat
         note = notification_text(o)
         if note:
+            # It names the call by its tool_use id, or only by the task's own id (an agent's
+            # agentId); a resumed agent's later notifications name the SendMessage call instead.
+            # One notification can list several tasks (those an ended session left running).
             m = NOTE_ID.search(note)
-            it = tools.get(m.group(1).strip()) if m else None
-            if it:
-                st = (NOTE_STATUS.search(note) or [None, ""])[1].strip()
-                it["status"] = "ok" if st == "completed" else "error"
-                it["endTs"] = ts
-                it["bg"] = st or "done"
+            st = (NOTE_STATUS.search(note) or [None, ""])[1].strip()
+            for it in [tools.get(m.group(1).strip()) if m else None] + [by_bg.get(k.strip()) for k in NOTE_TASK.findall(note)]:
+                if it and it["status"] == "background":
+                    it.update(status=note_status(st), endTs=ts, bg=st or "done")
             continue
         t = message_text(o)
         if not t:
@@ -1826,7 +1866,21 @@ def turn_stats(entries):
         lo = ends[-1] + 1
     else:  # no turn markers (older Claude Code): from the last thing the user said
         lo = next((i for i in range(len(entries) - 1, -1, -1)
-                   if message_role(entries[i]) == "user" and message_text(entries[i])), 0)
+                   if message_role(entries[i]) == "user" and message_text(entries[i])
+                   and not interrupted(entries[i]) and not notification_text(entries[i])), 0)
+    # Esc on a turn writes no turn_duration, only a marker: the turn ends there, and the next
+    # one starts after it (else it would count the interrupted turn and the idle time since).
+    cut = [i for i in range(lo, hi) if interrupted(entries[i])]
+    if cut and ms is None:
+        if any(spoke(o) and not interrupted(o) for o in entries[cut[-1] + 1:hi]):
+            lo = cut[-1] + 1
+        else:
+            prev = cut[-2] + 1 if len(cut) > 1 else lo
+            seg = entries[prev:cut[-1]]
+            a = next((entry_ts(o) for o in seg if spoke(o) and entry_ts(o)), None)
+            b = entry_ts(entries[cut[-1]])
+            if a and b and ts_seconds(a) is not None and ts_seconds(b) is not None:
+                lo, hi, ms = prev, cut[-1], int((ts_seconds(b) - ts_seconds(a)) * 1000)
     seg = entries[lo:hi]
     start = next((entry_ts(o) for o in seg if spoke(o) and entry_ts(o)), None)
     seen, out, ctx = set(), 0, None
@@ -1890,9 +1944,12 @@ def tool_detail(path, tool_id, cap_in=100_000, cap_out=200_000):
     output is its diff; a background job's, its result once it has finished)."""
     use = res = tur = note = None
     use_ts = end_ts = None
+    bg = stop_ids = None   # once launched in the background: its own id, and TaskStop calls on it
+    stopped = None
     with open(path, encoding="utf-8", errors="ignore") as f:
         for line in f:
-            if tool_id not in line:
+            if tool_id not in line and not (bg and bg in line) \
+                    and not (stop_ids and any(i in line for i in stop_ids)):
                 continue
             try:
                 o = json.loads(line)
@@ -1908,8 +1965,18 @@ def tool_detail(path, tool_id, cap_in=100_000, cap_out=200_000):
                 elif isinstance(x, dict) and x.get("type") == "tool_result" and x.get("tool_use_id") == tool_id and not res:
                     res, end_ts = x, entry_ts(o)
                     tur = o.get("toolUseResult")
+                    bg = background_id(tur) if not x.get("is_error") else None
+                    stop_ids = set() if bg else None
+                elif bg and isinstance(x, dict) and x.get("type") == "tool_use" and x.get("name") in STOP_TOOLS \
+                        and bg in json.dumps(x.get("input") or {}):
+                    stop_ids.add(x.get("id"))
+                elif stop_ids and isinstance(x, dict) and x.get("type") == "tool_result" \
+                        and x.get("tool_use_id") in stop_ids and not x.get("is_error") and not note and not stopped:
+                    stopped = entry_ts(o)
             t = notification_text(o)
-            if t and NOTE_ID.search(t) and NOTE_ID.search(t).group(1).strip() == tool_id:
+            m = NOTE_ID.search(t) if t else None
+            if t and not note and ((m and m.group(1).strip() == tool_id)
+                                   or (bg and bg in [k.strip() for k in NOTE_TASK.findall(t)])):
                 note, end_ts = t, entry_ts(o)
     if not use:
         return None
@@ -1939,6 +2006,9 @@ def tool_detail(path, tool_id, cap_in=100_000, cap_out=200_000):
         r = NOTE_RESULT.search(note)
         st = (NOTE_STATUS.search(note) or [None, ""])[1].strip()
         text_out = (text_out + "\n\n" if text_out else "") + f"— {st or 'finished'} —\n" + (r.group(1).strip() if r else "")
+    elif stopped:
+        text_out = (text_out + "\n\n" if text_out else "") + "— stopped (TaskStop) —"
+        end_ts = stopped
     return {"id": tool_id, "name": name, "title": tool_title(name), "ts": use_ts, "endTs": end_ts,
             "error": bool((res or {}).get("is_error")), "done": res is not None,
             "input": text_in[:cap_in], "inputChars": len(text_in),

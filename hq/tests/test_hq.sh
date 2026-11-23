@@ -387,6 +387,40 @@ assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progr
 assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
 ' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
 
+# Background calls that end without a tool-use id: TaskStop on a command, an agent's notification
+# naming only its agentId, one that was killed; an interrupted turn; odd input and a U+0085 result.
+CSID=feedface-5555-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"go"},"timestamp":"2026-01-02T00:00:00Z"}' \
+  '{"type":"assistant","message":{"id":"p1","usage":{"output_tokens":5},"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"sleep 999","run_in_background":true}},{"type":"tool_use","id":"g1","name":"Agent","input":{"description":"dig","prompt":"dig in"}},{"type":"tool_use","id":"g2","name":"Agent","input":{"description":"killme","prompt":"x"}},{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":{"oops":1}}},{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/x/odd.txt"}}]},"timestamp":"2026-01-02T00:00:01Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b1","content":"started"}]},"toolUseResult":{"backgroundTaskId":"bgx1"},"timestamp":"2026-01-02T00:00:02Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"g1","content":"launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"agentA"},"timestamp":"2026-01-02T00:00:02Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"g2","content":"launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"agentB"},"timestamp":"2026-01-02T00:00:02Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"q1","content":"?"}]},"timestamp":"2026-01-02T00:00:02Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"r1","content":"odd\u0085line"}]},"timestamp":"2026-01-02T00:00:02Z"}' \
+  '{"type":"assistant","message":{"id":"p2","usage":{"output_tokens":5},"content":[{"type":"tool_use","id":"s1","name":"TaskStop","input":{"task_id":"bgx1"}}]},"timestamp":"2026-01-02T00:00:03Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"s1","content":"stopped"}]},"timestamp":"2026-01-02T00:00:04Z"}' \
+  '{"type":"user","message":{"content":"<task-notification>\n<task-id>agentA</task-id>\n<status>completed</status>\n<result>Found it.</result>\n</task-notification>"},"timestamp":"2026-01-02T00:00:05Z"}' \
+  '{"type":"user","message":{"content":"<task-notification>\n<task-id>agentB</task-id>\n<status>killed</status>\n</task-notification>"},"timestamp":"2026-01-02T00:00:06Z"}' \
+  '{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]},"timestamp":"2026-01-02T00:00:10Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$CSID.jsonl"
+"$HQ" peek "$CSID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+st={i["id"]:i["status"] for i in d["items"] if i["kind"]=="tool"}
+assert st=={"b1":"stopped","g1":"ok","g2":"stopped","q1":"ok","r1":"ok","s1":"ok"}, st
+assert d["turn"]["done"] and d["turn"]["ms"]==10000 and d["turn"]["tokens"]==10, d["turn"]
+' && ok "peek --meta: TaskStop, agentId-only and killed notifications end background rows; an interrupt ends the turn" || fail "peek --meta background endings / interrupt"
+"$HQ" peek "$CSID" --tool g1 --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["output"].endswith("— completed —\nFound it."), d' && ok "peek --tool finds an agent's result by its agentId" || fail "peek --tool agentId notification"
+"$HQ" peek "$CSID" --tool b1 --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "stopped" in d["output"], d' && ok "peek --tool says a TaskStop ended the command" || fail "peek --tool TaskStop"
+printf '%s\n' \
+  '{"type":"user","message":{"content":"again"},"timestamp":"2026-01-02T00:01:00Z"}' \
+  '{"type":"assistant","message":{"id":"p3","usage":{"output_tokens":4},"content":[{"type":"text","text":"Sure."}]},"timestamp":"2026-01-02T00:01:02Z"}' \
+  >> "$HOME/.claude/projects/-tmp-repo/$CSID.jsonl"
+"$HQ" peek "$CSID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+assert not d["turn"]["done"] and d["turn"]["start"]=="2026-01-02T00:01:00Z" and d["turn"]["tokens"]==4, d["turn"]
+' && ok "peek --meta: the turn after an interrupt starts at its own prompt" || fail "peek --meta turn after interrupt"
+
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 
