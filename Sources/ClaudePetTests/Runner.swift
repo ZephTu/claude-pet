@@ -639,6 +639,23 @@ struct Runner {
         let compacted = TranscriptStats.advance(ctx, through: Data(
             (talk + reply("claude-opus-5-5", input: 5, created: 30_000, read: 0)).utf8))
         t.check("a compaction shows as the next reply sending less", compacted.contextPercent == 3)
+        func boundary(_ post: Int?) -> String {
+            let size = post.map { #","postTokens":\#($0)"# } ?? ""
+            return #"{"parentUuid":null,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":188000\#(size)}}"# + "\n"
+        }
+        let justCompacted = TranscriptStats.advance(ctx, through: Data((talk + boundary(12_000)).utf8))
+        t.check("after /compact the context is the boundary's size, before any reply",
+                justCompacted.contextTokens == 12_000 && justCompacted.model == "claude-opus-5-5")
+        let thenReplied = TranscriptStats.advance(justCompacted, through: Data(
+            (talk + boundary(12_000) + reply("claude-opus-5-5", input: 5, created: 14_000, read: 0)).utf8))
+        t.check("the next reply after a compaction wins over the boundary", thenReplied.contextTokens == 14_005)
+        t.check("a boundary read in the same pass as an earlier reply still wins",
+                TranscriptStats.advance(.init(), through: Data((talk + boundary(12_000)).utf8)).contextTokens == 12_000)
+        t.check("a boundary without its size leaves no reading, not the old one",
+                TranscriptStats.advance(ctx, through: Data((talk + boundary(nil)).utf8)).contextPercent == nil)
+        let quoted = #"{"type":"user","message":{"content":"\"subtype\":\"compact_boundary\",\"postTokens\":5"}}"# + "\n"
+        t.check("a message quoting a boundary is not one",
+                TranscriptStats.advance(ctx, through: Data((talk + quoted).utf8)).contextTokens == 188_000)
         t.check("no reply yet is no reading, not 0%",
                 TranscriptStats.advance(.init(), through: Data(human("p").utf8)).contextPercent == nil)
         t.check("the transcript path Claude Code uses when the hook did not say",

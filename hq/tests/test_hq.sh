@@ -853,6 +853,10 @@ assert s["messages"][-1]=={"role":"assistant","ts":s["messages"][-1]["ts"],"text
 # An API error as the last reply (no tokens, model "<synthetic>") leaves the budget as it was.
 transcript "$P/$SS1.jsonl" '[{"type":"assistant","message":{"id":"a3","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"API Error: overloaded"}]},"timestamp":"@118"}]'
 "$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert c=={"tokens":100000,"budget":200000,"percent":50}, c' && ok "status: an API-error reply does not change the context budget" || fail "status context after API error"
+# /compact writes a boundary with the new size; that is the context until the next reply.
+transcript "$P/$SS1.jsonl" '[{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":100000,"postTokens":12000},"timestamp":"@118"}]'
+"$HQ" status "$S1" --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["tasks"][0]["sessions"][0]["context"]; assert c=={"tokens":12000,"budget":200000,"percent":6}, c' && ok "status: after /compact the context is the boundary's size" || fail "status context after compact"
+"$HQ" peek "$SS1" -n 5 --json --meta | python3 -c 'import json,sys; t=json.load(sys.stdin)["turn"]; assert t["context"]==12000, t' && ok "peek: after /compact the turn line shows the compacted size" || fail "peek context after compact"
 # The card written after that work: not behind any more.
 "$HQ" touch "$S1" >/dev/null
 "$HQ" status "$S1" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["idle-waiting"], k' && ok "status: a card written after its session's work is not behind" || fail "status card-behind cleared"

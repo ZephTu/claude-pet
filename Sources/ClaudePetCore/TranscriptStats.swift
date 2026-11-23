@@ -16,8 +16,9 @@ import Foundation
 /// it is not counted again.
 ///
 /// Context: every reply records the tokens its request sent, which is how full
-/// the window was at that moment, and a compaction shows up as the next reply
-/// sending far fewer. The statusline is told the same number as a percentage,
+/// the window was at that moment. A compaction writes a boundary line saying
+/// how big the conversation is now (`postTokens`), and that stands until the
+/// next reply: after `/compact` there may be none for a long while. The statusline is told the same number as a percentage,
 /// but it only runs while Claude Code is drawing and only when wired up; the
 /// transcript is always there.
 ///
@@ -52,6 +53,8 @@ public enum TranscriptStats {
                             Array(#""cache_read_input_tokens":"#.utf8)]
     static let requestedModelKey = Array(#""requestedModel":""#.utf8)
     static let modelKey = Array(#""model":""#.utf8)
+    static let boundaryKey = Array(#""subtype":"compact_boundary""#.utf8)
+    static let postTokensKey = Array(#""postTokens":"#.utf8)
 
     /// `progress` moved on through `data`, the whole transcript as it is now.
     /// A line still being written is left for next time.
@@ -88,6 +91,20 @@ public enum TranscriptStats {
                 let requested = string(after: requestedModelKey, in: base, last)
                 p.model = requested.isEmpty ? string(after: modelKey, in: base, last) : requested
             }
+
+            // A compaction after that reply: the conversation is the summary now. A
+            // boundary that does not say how big (older Claude Code) leaves no reading
+            // rather than the size it had before.
+            var boundary: Range<Int>?
+            at = p.offset
+            while let hit = find(boundaryKey, in: base, from: at, to: end) {
+                let line = bounds(of: hit, in: base, from: at, to: end)
+                at = line.upperBound + 1
+                boundary = line
+            }
+            if let boundary, boundary.lowerBound > (last?.lowerBound ?? -1) {
+                p.contextTokens = number(after: postTokensKey, in: base, boundary) ?? 0
+            }
             p.offset = end
         }
         return p
@@ -112,6 +129,18 @@ public enum TranscriptStats {
             CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "-"
         })
         return home + "/.claude/projects/" + folder + "/" + sessionId + ".jsonl"
+    }
+
+    /// The digits after `key` in `line`, or nil when the key is not there.
+    private static func number(after key: [UInt8], in base: UnsafePointer<UInt8>,
+                               _ line: Range<Int>) -> Int? {
+        guard let k = find(key, in: base, from: line.lowerBound, to: line.upperBound) else { return nil }
+        var i = k + key.count, n = 0
+        while i < line.upperBound, base[i] >= 0x30, base[i] <= 0x39 {
+            n = n * 10 + Int(base[i] - 0x30)
+            i += 1
+        }
+        return n
     }
 
     /// input + cache creation + cache read, read from the usage at `from`.
