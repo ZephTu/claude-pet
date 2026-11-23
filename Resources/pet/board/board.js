@@ -86,6 +86,8 @@ const ui = {
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", collapsed: new Set(JSON.parse(pref("hq-collapsed", "[]"))),
   // Tasks whose open @claude todos are unfolded (folded by default).
   claudeOpen: new Set(JSON.parse(pref("hq-claude-todos-open", "[]"))),
+  // `hq status --focus` flags by task id ({kind, text, text_zh}), and when they were last read.
+  flags: {}, flagsAt: 0, flagsKey: "", flagsIds: "", flagsLoading: false,
 };
 
 // ------------------------------------------------------------------ bridge
@@ -324,8 +326,40 @@ async function refresh(force) {
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
+  loadFlags();
 }
 window.hqRefresh = refresh;
+
+// The Focus cards' ⚠ lines: `hq status --focus` reads each task's sessions, so it runs once a
+// minute (and when the Focus list changes), not on every few-second refresh; it never holds one up.
+const FLAGS_EVERY_MS = 60000;
+function showFlags(flags) {
+  const key = JSON.stringify(flags);
+  if (key === ui.flagsKey) return;
+  ui.flags = flags; ui.flagsKey = key;
+  // A timed redraw, so it waits for the mouse button and the Approve box as refresh() does.
+  if (ui.pointerDown || ui.overApprove) ui.pendingRender = true;
+  else render();
+}
+async function loadFlags() {
+  const ids = list(focusState().ids).join(",");
+  if (ui.flagsLoading || (Date.now() - ui.flagsAt < FLAGS_EVERY_MS && ids === ui.flagsIds)) return;
+  ui.flagsLoading = true;
+  try {
+    const r = JSON.parse(await api("status"));
+    const flags = {};
+    for (const t of list(r.tasks)) if (list(t.flags).length) flags[t.id] = t.flags;
+    ui.flagsAt = Date.now(); ui.flagsIds = ids;
+    showFlags(flags);
+  } catch (e) {
+    // An old hq without `status`, or hq failing: no ⚠ rather than stale ones; try again in a minute.
+    console.warn("hq status:", e);
+    ui.flagsAt = Date.now();
+    showFlags({});
+  } finally {
+    ui.flagsLoading = false;
+  }
+}
 window.hqReveal = (id) => refresh().then(() => { if (id) revealTask(id); });
 
 // ------------------------------------------------------------------ render
@@ -1069,6 +1103,7 @@ function focusCard(t) {
       ${t.project ? `<span class="tproj">${esc(t.project)}</span>` : ""}
       <button class="icon x" title="${T("Take it off Focus (the task stays)", "从 Focus 拿掉（任务本身不变）")}" data-confirm="${T("Unfocus?", "拿掉？")}" data-action="today-remove" data-task="${esc(t.id)}">✕</button>
     </div>
+    ${focusFlags(t)}
     ${detail ? `<div data-action="none" title="">${renderTaskBody(t)}</div>` : `
     <div class="fbody">
       <div class="now">
@@ -1082,6 +1117,17 @@ function focusCard(t) {
       ${others || !(mine.length || asks.length || t.waiting_on_me) ? `<div class="fmore">${mine.length || asks.length || t.waiting_on_me ? "" : T("Nothing waiting on you here", "这里没有在等你的事")}${!(mine.length || asks.length || t.waiting_on_me) && others ? " · " : ""}${others ? T(`${others} more todo${others === 1 ? "" : "s"} for Claude or others — open for all`, `还有 ${others} 条是 Claude 或别人的待办——展开看全部`) : ""}</div>` : ""}
     </div>`}
   </div>`;
+}
+
+// What `hq status` found off about the task — the card behind its session, idle while the card says
+// it waits on a run, untouched for a week, done with a session still running, over budget.
+function focusFlags(t) {
+  const f = list(ui.flags[t.id]);
+  if (!f.length) return "";
+  return `<div class="fflags">${f.map((x) => {
+    const text = T(x.text, x.text_zh || x.text);
+    return `<div class="fflag" title="${esc(text)}">⚠ <span>${esc(text)}</span></div>`;
+  }).join("")}</div>`;
 }
 
 // A folded Focus card's live sessions, one line each: what it is doing and its last words. The
