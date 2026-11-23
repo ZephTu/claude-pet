@@ -176,6 +176,15 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    re-injected every turn and shown on the board until you respond — an ask you skipped is
    never treated as "no".
 
+   **Status follows the asks, between `active` and `waiting-on-me` only.** A reply that opens a
+   new ask without a `status:` line puts an `active` task at `waiting-on-me` (so does taking an
+   answer back with Undo). Once nothing is left on you — no open ask (a snoozed one is still
+   open) and no open `@me` todo — answering the last ask (board, `hq ask resolve`, an
+   `hq-resolved` block) or ticking off / dropping the last `@me` todo (board, `hq todo`, `done:` /
+   `drop:`) puts a `waiting-on-me` task back to `active`. A status written in the same reply
+   wins; `blocked`, `done` and `abandoned` are never changed automatically. Each move is logged
+   on the card with `(auto, <via>)`.
+
    **Claude's open todos come along at session start.** SessionStart — for every source:
    `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
    context, each exactly as written on the card, with the instruction to check them against how
