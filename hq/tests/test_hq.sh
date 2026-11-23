@@ -1183,7 +1183,7 @@ stop sess-as "$(printf 'First question.\n```hq-asks\n- Which dataset?\n```')" >/
 stop sess-as "$(printf 'Two things.\n```hq-asks\n- Ship on Friday?\n- Which region?\n```')" >/dev/null
 "$HQ" ask resolve "$AS.2" do --via board >/dev/null
 [ "$(st)" = waiting-on-me ] && ok "auto status: one ask still open keeps it waiting" || fail "settled early: $(st)"
-"$HQ" ask snooze "$AS.3" --via board >/dev/null; "$HQ" ask resolve "$AS.2" do --via board >/dev/null
+"$HQ" ask snooze "$AS.3" --via board >/dev/null; "$HQ" ask reopen "$AS.2" --via board >/dev/null; "$HQ" ask resolve "$AS.2" do --via board >/dev/null
 [ "$(st)" = waiting-on-me ] && ok "auto status: a snoozed ask is still open" || fail "snoozed: $(st)"
 "$HQ" addtodo "$AS" "@me send the form" >/dev/null
 stop sess-as "$(printf 'Noted.\n```hq-resolved\n- %s.3 do: us-east\n```' "$AS")" >/dev/null
@@ -1191,18 +1191,55 @@ stop sess-as "$(printf 'Noted.\n```hq-resolved\n- %s.3 do: us-east\n```' "$AS")"
 "$HQ" addtodo "$AS" "@claude rerun" >/dev/null
 stop sess-as "$(printf 'Thanks.\n```hq-update\ndone: send the form\n```')" >/dev/null
 [ "$(st)" = active ] && ok "auto status: ticking off the last @me todo (an @claude one left) makes it active" || fail "todo done: $(st)"
+N="$("$HQ" show "$AS" | grep -c '^- \[' || true)"
+"$HQ" todo "$AS" "$((N-1))" open --via board >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: undoing that tick waits again" || fail "todo undo: $(st)"
+"$HQ" todo "$AS" "$((N-1))" done --via board >/dev/null
+"$HQ" set "$AS" status=waiting-on-me >/dev/null
+stop sess-as "$(printf 'Done that.
+```hq-update
+done: rerun
+```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: ticking an @claude todo leaves it waiting" || fail "@claude tick moved it: $(st)"
+"$HQ" set "$AS" "waiting_on_me=sign the form" >/dev/null; "$HQ" addtodo "$AS" "@me sign" >/dev/null
+stop sess-as "$(printf 'ok
+```hq-update
+done: sign
+```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: the legacy waiting_on_me field keeps it waiting" || fail "legacy field: $(st)"
+"$HQ" set "$AS" "waiting_on_me=" >/dev/null
 "$HQ" set "$AS" status=waiting-on-me >/dev/null; "$HQ" addtodo "$AS" "@me approve" >/dev/null
 N="$("$HQ" show "$AS" | grep -c '^- \[' || true)"
 "$HQ" todo "$AS" "$N" drop --via board >/dev/null
 [ "$(st)" = active ] && ok "auto status: dropping it on the board does too" || fail "board todo: $(st)"
-stop sess-as "$(printf 'Asking, but blocked.\n```hq-update\nstatus: blocked\n```\n```hq-asks\n- Token?\n```')" >/dev/null
-[ "$(st)" = blocked ] && ok "auto status: a status the reply wrote wins over its ask" || fail "status overridden: $(st)"
+"$HQ" set "$AS" status=active >/dev/null
+stop sess-as "$(printf 'Asking, still working.\n```hq-update\nstatus: active\n```\n```hq-asks\n- Token?\n```')" >/dev/null
+[ "$(st)" = active ] && ok "auto status: a status the reply wrote wins over its ask" || fail "status overridden: $(st)"
+"$HQ" set "$AS" status=blocked >/dev/null
 "$HQ" ask resolve "$AS.4" do --via board >/dev/null
 [ "$(st)" = blocked ] && ok "auto status: blocked is never changed by an answer" || fail "blocked moved: $(st)"
 "$HQ" set "$AS" status=waiting-on-me >/dev/null
 stop sess-as "$(printf 'Ok.\n```hq-asks\n- Again?\n```\n```hq-update\nstatus: waiting-on-me\n```')" >/dev/null
 stop sess-as "$(printf 'Got it.\n```hq-resolved\n- %s.5 do: yes\n```\n```hq-update\nstatus: waiting-on-me\nnext: wait\n```' "$AS")" >/dev/null
 [ "$(st)" = waiting-on-me ] && ok "auto status: answers recorded with a status written keep that status" || fail "said status lost: $(st)"
+Q="$("$HQ" ask add "$AS" "Final?")"
+[ "$(st)" = waiting-on-me ] || fail "not waiting before hq-resolved: $(st)"
+stop sess-as "$(printf 'Recorded.\n```hq-resolved\n- %s do: yes\n```' "$Q")" >/dev/null
+[ "$(st)" = active ] && ok "auto status: an hq-resolved block answering the last ask makes it active" || fail "hq-resolved settle: $(st)"
+stop sess-as "$(printf 'One ask, one rejected status.\n```hq-asks\n- Which one?\n```\n```hq-update\nstatus: waiting-on-me\ndone: no such todo\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: a rejected block's status does not stop the ask's move" || fail "rejected status: $(st)"
+"$HQ" set "$AS" status=active >/dev/null
+stop sess-as "$(printf 'Template echoed.\n```hq-asks\n- And this?\n```\n```hq-update\nstatus: active | waiting-on-me | blocked | done | abandoned\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && ok "auto status: an echoed template's status does not either" || fail "placeholder status: $(st)"
+for a in $("$HQ" asks "$AS" | grep -o "$AS\.[0-9]*" | sort -u); do "$HQ" ask resolve "$a" do --via board >/dev/null; done
+[ "$(st)" = active ] || fail "asks left open: $(st)"
+"$HQ" addtodo "$AS" "@me last one" >/dev/null; "$HQ" set "$AS" status=waiting-on-me >/dev/null
+F="$(grep -c 'waiting-on-me → active (auto' "$CA")"
+stop sess-as "$(printf 'Next question.\n```hq-update\ndone: last one\n```\n```hq-asks\n- Next?\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && [ "$(grep -c 'waiting-on-me → active (auto' "$CA")" = "$F" ] && ok "auto status: a reply that ticks the last @me todo and asks again stays waiting, no back-and-forth" || fail "flip-flop: $(st)"
+OT="$("$HQ" new "Other task" --no-focus | head -1)"; "$HQ" ask add "$OT" "Other?" >/dev/null; "$HQ" set "$OT" status=waiting-on-me >/dev/null
+stop sess-as "$(printf 'Answered for the other task too.\n```hq-resolved\n- %s.1 do: yes\n```' "$OT")" >/dev/null
+sed -n '/^---$/,/^---$/p' "$T"/root/tasks/$OT-*/TASK.md | grep -q '^status: active' && ok "auto status: an hq-resolved answer for another task settles that task" || fail "other task not settled"
 "$HQ" set "$AS" status=done >/dev/null
 stop sess-as "$(printf 'One more.\n```hq-asks\n- Reopen it?\n```')" >/dev/null
 [ "$(st)" = done ] && ok "auto status: an ask on a done task leaves it done" || fail "done moved: $(st)"

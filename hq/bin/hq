@@ -1256,16 +1256,25 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
 # board wrote — and "waiting-on-me" stayed on after the user had answered everything, until the
 # session happened to write `status: active`. Only these two moves are made, between these two
 # statuses: blocked, done and abandoned are never changed by anything but an explicit status.
+def on_user(meta):
+    """What the card has waiting on the user: open asks (a snoozed one is still open), open @me
+    todos, and the legacy `waiting_on_me` field the board still counts."""
+    return (any(a.get("state") == "open" for a in read_asks(meta["dir"]))
+            or any(t["state"] == "open" and t["owner"] == "me" for t in meta["todos"])
+            or bool(str(meta.get("waiting_on_me") or "").strip()))
+
+
+def open_me_todos(card):
+    return sum(1 for t in parse_card(card)["todos"] if t["state"] == "open" and t["owner"] == "me")
+
+
 def settle_status(card, via):
-    """waiting-on-me → active once nothing is left on the user: no open ask (a snoozed one is
-    still open) and no open @me todo. Called after an answer or a todo ticked off."""
+    """waiting-on-me → active once nothing is left on the user. Called after an answer, or an
+    @me todo ticked off or dropped — not after other todos: a card waiting on something it never
+    wrote down as an ask or a todo keeps waiting until someone says otherwise."""
     with card_lock(card):
         meta = parse_card(card)
-        if meta.get("status") != "waiting-on-me":
-            return False
-        if any(a.get("state") == "open" for a in read_asks(meta["dir"])):
-            return False
-        if any(t["state"] == "open" and t["owner"] == "me" for t in meta["todos"]):
+        if meta.get("status") != "waiting-on-me" or on_user(meta):
             return False
         _set_fields(card, {"status": "active"})
         append_log(card, f"status waiting-on-me → active (auto, {via}): no open ask or @me todo left", touch=False)
@@ -1273,13 +1282,15 @@ def settle_status(card, via):
 
 
 def await_answer(card, via):
-    """active → waiting-on-me: an ask was opened (or an answer taken back) and nothing said
-    otherwise — the task is waiting on the user's answer."""
+    """active → waiting-on-me: an ask was opened, or an answer or an @me todo taken back, and
+    nothing said otherwise. Checked under the lock: an ask answered in the meantime leaves the
+    task as it is."""
     with card_lock(card):
-        if parse_card(card).get("status") != "active":
+        meta = parse_card(card)
+        if meta.get("status") != "active" or not on_user(meta):
             return False
         _set_fields(card, {"status": "waiting-on-me"})
-        append_log(card, f"status active → waiting-on-me (auto, {via}): an ask is open", touch=False)
+        append_log(card, f"status active → waiting-on-me (auto, {via}): something is open on you", touch=False)
         return True
 
 
@@ -1887,8 +1898,11 @@ def _cmd_todo(args, card):
     if not pick:
         die(f"{args.task} has no todo #{args.index}")
     mark_todo(card, lines, pick, args.state, args.via)
-    if args.state in ("done", "drop"):
-        settle_status(card, args.via)
+    if todo_owner(pick[2].group(3)) == "me":
+        if args.state in ("done", "drop"):
+            settle_status(card, args.via)
+        else:
+            await_answer(card, args.via)    # the board's Undo of a tick
 
 
 def card_todos(lines):
@@ -2187,7 +2201,7 @@ def match_todo(todos, kind, want):
                   f"{'candidates' if hits else 'open todos'}: {listing}")
 
 
-def apply_update(card, block, via="session", change=None):
+def apply_update(card, block, via="session", change=None, settle=True):
     """Apply an hq-update block — the card changes a session writes in its reply instead of running
     `hq log/set/ref/addtodo/todo` one tool call at a time. Every such call is another model round trip
     that re-reads the whole conversation; the block costs a few output tokens.
@@ -2201,18 +2215,23 @@ def apply_update(card, block, via="session", change=None):
     on (PR #9 open → merged) — and repeating it changes nothing.
     A block made only of template placeholders is the protocol's example echoed back: ignored.
     `change`, a dict, gets the card's status before and after ("from", "to"), both read under the
-    same lock as the write, so a status set elsewhere at the same moment is never taken for this one."""
+    same lock as the write, so a status set elsewhere at the same moment is never taken for this one;
+    "status" when the block was applied with a status line, "me_ticked" when it ticked off or
+    dropped an @me todo. `settle`: let such a tick take the task out of waiting-on-me (the Stop
+    hook passes False and decides once for the whole reply)."""
     entries = update_lines(block)
     if entries and all(v and is_placeholder(v) for _, v in entries):
         return []
     with card_lock(card):
-        before = parse_card(card).get("status")
+        before, me_before = parse_card(card).get("status"), open_me_todos(card)
         problems = _apply_update(card, entries, via)
-        if (not problems and any(k in ("done", "drop") for k, _ in entries)
-                and not any(k == "status" for k, _ in entries)):
+        said = not problems and any(k == "status" for k, _ in entries)
+        me_ticked = not problems and open_me_todos(card) < me_before
+        if settle and me_ticked and not said:
             settle_status(card, via)
         if change is not None:
-            change.update({"from": before, "to": parse_card(card).get("status")})
+            change.update({"from": before, "to": parse_card(card).get("status"),
+                           "status": said, "me_ticked": me_ticked})
         return problems
 
 
@@ -4037,9 +4056,9 @@ def _hook_main():
         text = last_assistant_text(payload)
         problems = []
         blocks = hq_blocks(text)
-        # A status the reply wrote itself wins over the automatic moves made for its asks below.
-        status_said = any(b["kind"] == "hq-update" and b["trailing"] and
-                          any(k == "status" for k, _ in update_lines(b["body"])) for b in blocks)
+        # A status the reply wrote itself (and that was applied) wins over the automatic moves,
+        # which are made once, after all its blocks.
+        status_said = me_ticked = False
         asked_before = {a["id"] for a in read_asks(meta["dir"])}
         asked, resolved = False, set()   # resolved: the cards whose asks this reply answered
         for b in blocks:
@@ -4047,8 +4066,10 @@ def _hook_main():
                 # Only at the end of the reply: one quoted or shown mid-reply is an example.
                 if b["trailing"]:
                     change = {}
-                    bad = apply_update(card, b["body"], change=change)
+                    bad = apply_update(card, b["body"], change=change, settle=False)
                     problems += bad
+                    status_said |= bool(change.get("status"))
+                    me_ticked |= bool(change.get("me_ticked"))
                     # This session finished its task: say so on its entry, for the board to treat
                     # like a task finished there (its "Finishing a task" setting: ask, stop, keep).
                     # The next prompt to it takes the mark away: you are still talking to it.
@@ -4073,11 +4094,13 @@ def _hook_main():
                             pass
         # A new question with no status written: the task now waits on the user. Answers recorded
         # with no status written: it stops waiting once nothing is left on the user.
-        if not status_said and asked:
-            await_answer(card, "session")
-        for c in resolved:
-            if not (status_said and c == card):
-                settle_status(c, "session")
+        if not status_said:
+            if asked:
+                await_answer(card, "session")
+            elif me_ticked or card in resolved:
+                settle_status(card, "session")
+        for c in resolved - {card}:
+            settle_status(c, "session")
         if payload.get("stop_hook_active"):
             # One nudge per turn, never a loop. Another Stop hook may have sent the turn back
             # before this one could: tell the session at its next prompt instead of never.
