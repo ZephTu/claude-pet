@@ -10,6 +10,27 @@ import WebKit
 /// this file only renders a page and relays a short, fixed list of operations.
 /// No task logic lives in Swift.
 @MainActor
+extension NSWindow {
+    /// The pet has no main menu (it is an accessory app), so the standard editing shortcuts have
+    /// no menu item to fire: copy and paste simply do nothing unless a window routes them by
+    /// hand. Every window with text in it does, from its `performKeyEquivalent`.
+    ///
+    /// Sent along this window's own responder chain rather than to the key window's: the
+    /// quick-note panel is non-activating, so the app it belongs to is usually not active.
+    func performEditShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        var action: String?
+        if flags == .command {
+            action = ["c": "copy:", "v": "paste:", "x": "cut:", "a": "selectAll:", "z": "undo:"][key]
+        } else if flags == [.command, .shift], key == "z" {
+            action = "redo:"
+        }
+        guard let action else { return false }
+        return (firstResponder ?? self).tryToPerform(Selector(action), with: self)
+    }
+}
+
 final class BoardWindow: NSWindow {
     private let webView: WKWebView
     /// Retained for as long as the web view: WKWebView does not own it.
@@ -178,20 +199,8 @@ final class BoardWindow: NSWindow {
         return icon
     }
 
-    /// The pet has no main menu (it is an accessory app), so the standard
-    /// editing shortcuts have no menu item to fire. Route them by hand, or
-    /// copy and paste simply do nothing in the board.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        var action: String?
-        if flags == .command {
-            action = ["c": "copy:", "v": "paste:", "x": "cut:", "a": "selectAll:", "z": "undo:"][key]
-        } else if flags == [.command, .shift], key == "z" {
-            action = "redo:"
-        }
-        if let action, NSApp.sendAction(Selector(action), to: nil, from: self) { return true }
-        return super.performKeyEquivalent(with: event)
+        performEditShortcut(event) || super.performKeyEquivalent(with: event)
     }
 
     /// Renders the live board to a PNG — the development check for layout,

@@ -44,7 +44,7 @@ final class QuickNotePanel: NSObject, NSWindowDelegate, NSTextViewDelegate {
     func close() { panel?.orderOut(nil) }
 
     private func build() {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 132),
+        let p = NotePanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 132),
                         styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
                         backing: .buffered, defer: false)
         p.title = L("Quick note", "记一笔")
@@ -131,6 +131,14 @@ final class QuickNotePanel: NSObject, NSWindowDelegate, NSTextViewDelegate {
         default:
             return false
         }
+    }
+}
+
+/// The note box's panel: routes ⌘V and the other editing shortcuts, which in this menu-less app
+/// would otherwise reach nothing — and the screenshot paste below with them.
+final class NotePanel: NSPanel {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        performEditShortcut(event) || super.performKeyEquivalent(with: event)
     }
 }
 
