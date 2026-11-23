@@ -7,3 +7,4 @@ pet-emit
 docs/previews/shots/
 art/
 .env
+__pycache__/
