@@ -27,6 +27,15 @@ enum JobTests {
         t.check("a model name with shell characters is refused",
                 Job(id: "j1", name: "n", prompt: "p", model: "opus; rm").problem() != nil)
         t.check("new ids are valid", Jobs.isValidID(Jobs.newID()))
+        t.check("a job without an agent or allowed tools runs as plain Claude Code",
+                sparse?.agent == "" && sparse?.allowedTools == [])
+        let sec = try? JSONDecoder().decode(Job.self, from: Data(#"{"id":"secretary","name":"x","prompt":"hi","agent":"secretary","allowedTools":["Read","Bash(~/.claude/hq/bin/hq:*)"]}"#.utf8))
+        t.check("a job's agent and allowed tools load",
+                sec?.agent == "secretary" && sec?.allowedTools == ["Read", "Bash(~/.claude/hq/bin/hq:*)"] && sec?.problem() == nil)
+        let round = sec.flatMap { try? JSONEncoder().encode($0) }.flatMap { try? JSONDecoder().decode(Job.self, from: $0) }
+        t.check("a job's agent and allowed tools survive a save", round?.agent == "secretary" && round?.allowedTools == sec?.allowedTools)
+        t.check("an agent name with shell characters is refused",
+                Job(id: "j1", name: "n", prompt: "p", agent: "sec; rm").problem() != nil)
 
         // ---- schedules
         let weekdays = Schedule(kind: .weekdays, hour: 9, minute: 0)

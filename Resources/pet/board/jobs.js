@@ -357,6 +357,8 @@ const JOB_DEFAULTS = () => ({
   schedule: { kind: "weekdays", everyMinutes: 60, hour: 9, minute: 0, days: [1], cron: "0 9 * * 1-5" },
   model: "", permission: "standard", timeoutMinutes: 20, skipWeekPct: 90, skipFiveHourPct: 90,
   sessionMode: "fresh", keepSessions: 20, compactAbovePct: 50, notify: "failure",
+  // Not on the form, but kept through it: the secretary's job runs as its agent, with its tools.
+  agent: "", allowedTools: [],
 });
 
 function openJobForm(job) {

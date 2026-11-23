@@ -1,15 +1,17 @@
 import ClaudePetCore
 import Foundation
 
-/// `pet-emit --run-job <id> [--manual]`: one run of a scheduled job — what its LaunchAgent
-/// starts on schedule, and what the board's "Run now" starts.
+/// `pet-emit --run-job <id> [--manual | --trigger <word>] [--prompt-file <path>]`: one run of a
+/// scheduled job — what its LaunchAgent starts on schedule, and what the board's "Run now" starts.
+/// `--prompt-file` sends that file's text in place of the job's prompt (the secretary's chat: one
+/// run per message, into the same session).
 ///
 /// It records the run in the job's `runs.jsonl` (a line when it starts, a line when it ends),
 /// keeps the output in `logs/`, and for a Claude job carries the session between runs or
 /// deletes the old ones. Everything the job runs goes through the user's login shell
 /// (`zsh -lic`), so PATH, and anything else set up for their terminal, is what they expect.
 enum JobRunner {
-    static func run(id: String, trigger: String) -> Int32 {
+    static func run(id: String, trigger: String, promptFile: String? = nil) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
         let store = JobStore()
         guard Jobs.isValidID(id), let job = store.load(id) else {
@@ -24,6 +26,7 @@ enum JobRunner {
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
             store.append(id, ["run": JobStore.newRunID(), "event": "skip", "at": iso(Date()), "trigger": trigger,
                               "summary": "skipped: the previous run was still going"])
+            if let promptFile { try? FileManager.default.removeItem(atPath: promptFile) }
             return 0
         }
         defer { flock(lockFD, LOCK_UN); close(lockFD) }
@@ -45,6 +48,11 @@ enum JobRunner {
         env[Jobs.environmentKey] = id
         env["CLAUDE_PET_RUN"] = runID
         let cwd = job.directory
+        var prompt = job.prompt
+        if let promptFile {
+            prompt = (try? String(contentsOfFile: promptFile, encoding: .utf8)) ?? ""
+            try? FileManager.default.removeItem(atPath: promptFile)
+        }
 
         var start: [String: Any] = ["run": runID, "event": "start", "at": iso(Date()), "trigger": trigger,
                                     "pid": Int(getpid())]
@@ -79,9 +87,16 @@ enum JobRunner {
             var state = store.state(id)
             var sid = UUID().uuidString.lowercased()
             var resuming = false
-            if job.sessionMode == .resume, let s = state["sessionId"] as? String, transcript(of: s) != nil {
-                sid = s
-                resuming = true
+            if job.sessionMode == .resume, let s = state["sessionId"] as? String, Self.isSessionID(s) {
+                if transcript(of: s) != nil {
+                    sid = s
+                    resuming = true
+                } else if state[Jobs.preassignedKey] as? Bool == true {
+                    // Handed out before its first run (the secretary's, so it is bound to its task
+                    // from its first prompt): start it under that id. Any other id not on disk is
+                    // left behind, as before: Claude refuses a --session-id that already exists.
+                    sid = s
+                }
             }
             start["sessionId"] = sid
             store.append(id, start)
@@ -96,7 +111,7 @@ enum JobRunner {
             }
             let session = resuming ? ["--resume", sid] : ["--session-id", sid, "--name", "⏱ " + job.name]
             let r = execute(shellClaude(["-p", "--output-format", "stream-json", "--verbose"] + session + base.all),
-                            cwd: cwd, env: env, stdin: job.prompt, out: outPath, err: errPath,
+                            cwd: cwd, env: env, stdin: prompt, out: outPath, err: errPath,
                             timeout: job.timeoutMinutes, stop: store.stopURL(id))
             let result = ClaudeStreamResult.parse((try? Data(contentsOf: URL(fileURLWithPath: outPath))) ?? Data())
             let errLines = tailLines(errPath, 8)
@@ -127,6 +142,7 @@ enum JobRunner {
                     state["sessionId"] = result.sessionId ?? sid
                     if let c = result.contextTokens { state["contextTokens"] = c }
                     if let w = result.contextWindow { state["contextWindow"] = w }
+                    state.removeValue(forKey: Jobs.preassignedKey)    // it is on disk now
                     store.setState(id) { $0 = state }
                 }
             }
@@ -157,11 +173,15 @@ enum JobRunner {
     static func claudeFlags(_ job: Job) -> Flags {
         let model = job.model.isEmpty ? [] : ["--model", job.model]
         var all = model
+        if !job.agent.isEmpty { all += ["--agent", job.agent] }
         switch job.permission {
         case .standard: break
         case .edits: all += ["--permission-mode", "acceptEdits"]
         case .all: all += ["--dangerously-skip-permissions"]
         }
+        // One value per flag: `--allowedTools` takes a list, and a rule must never swallow the
+        // arguments after it.
+        for tool in job.allowedTools where !tool.isEmpty { all += ["--allowedTools", tool] }
         return Flags(model: model, all: all)
     }
 
@@ -177,9 +197,11 @@ enum JobRunner {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects")
     }
 
+    static func isSessionID(_ s: String) -> Bool { s.range(of: #"^[0-9a-f-]{36}$"#, options: .regularExpression) != nil }
+
     /// Claude Code keeps a session as `~/.claude/projects/<folder>/<id>.jsonl`.
     static func transcript(of session: String) -> URL? {
-        guard session.range(of: #"^[0-9a-f-]{36}$"#, options: .regularExpression) != nil else { return nil }
+        guard isSessionID(session) else { return nil }
         let dirs = (try? FileManager.default.contentsOfDirectory(atPath: projectsDirectory.path)) ?? []
         for d in dirs {
             let f = projectsDirectory.appending(path: d).appending(path: session + ".jsonl")

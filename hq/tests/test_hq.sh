@@ -1066,6 +1066,34 @@ assert a["flags"]==[] and a["sessions"]==[], a
 assert [s["sessionId"] for s in b["sessions"]]==["'"$SS5"'"], b' && ok "status: a session since bound to another task counts there, not on its old card" || fail "status moved session"
 rm -rf "$HOME/.claude/pet"
 
+# hq secretary: scaffolds the agent, its memory and its own card; never overwrites.
+"$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["task"] is None and d["ready"] is False and not d["agentExists"], d' && ok "secretary: not set up yet" || fail "secretary show before init"
+FOCUS_BEFORE="$(cat "$T/root/focus.json" 2>/dev/null || true)"
+"$HQ" secretary init --lang zh --json > "$T/sec.json"
+python3 - "$T/sec.json" "$T/root" <<'PY2' && ok "secretary init makes the agent, memory files and its card" || fail "secretary init"
+import json, os, sys
+d = json.load(open(sys.argv[1])); root = sys.argv[2]
+assert d["ready"] and d["agentExists"] and all(d["files"].values()), d
+assert os.path.isfile(os.path.join(root, ".claude/agents/secretary.md"))
+for f in ("profile.md", "people.md", "playbooks.md"):
+    assert os.path.isfile(os.path.join(root, "secretary", f)), f
+assert json.load(open(os.path.join(root, "hq.json")))["secretary"] == {"task": d["task"]}, d
+card = open(d["card"], encoding="utf-8").read()
+assert "title: \"秘书\"" in card and "lead: secretary" in card and "<what done looks like>" not in card, card
+assert len(d["made"]) == 5, d["made"]
+PY2
+STID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["task"])' "$T/sec.json")"
+[ "$(cat "$T/root/focus.json" 2>/dev/null || true)" = "$FOCUS_BEFORE" ] && ok "secretary's card stays off Focus" || fail "secretary card joined Focus"
+echo "# mine" > "$T/root/secretary/people.md"; rm "$T/root/secretary/playbooks.md"
+"$HQ" secretary init --json | python3 -c 'import json,sys,os; d=json.load(sys.stdin); assert d["task"]=="'"$STID"'" and [os.path.basename(m) for m in d["made"]]==["playbooks.md"], d' || fail "secretary init again made the wrong files"
+[ "$(cat "$T/root/secretary/people.md")" = "# mine" ] && [ -f "$T/root/secretary/playbooks.md" ] && [ "$(ls -d "$T"/root/tasks/"$STID"-* | wc -l | tr -d ' ')" = 1 ] && ok "secretary init again: adds what is missing, keeps the rest, one card" || fail "secretary init idempotent"
+"$HQ" board --json | python3 -c 'import json,sys; s=json.load(sys.stdin)["secretary"]; assert s=="'"$STID"'", s' && ok "board --json names the secretary's card" || fail "board json secretary"
+"$HQ" secretary | grep -q "^task:   $STID" && ok "secretary prints its files" || fail "secretary text"
+grep -q '^category: other' "$T"/root/tasks/"$STID"-*/TASK.md && ok "secretary's card gets the default category" || fail "secretary category"
+"$HQ" bind "$STID" --session=sec-sess >/dev/null
+"$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["sessions"]==["sec-sess"], d' && ok "secretary lists the sessions bound to its card" || fail "secretary sessions"
+"$HQ" unbind --session sec-sess >/dev/null
+
 # hq jumps: the pet's jump log, last N days, by state x source.
 mkdir -p "$HOME/.claude/pet"
 NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"

@@ -82,12 +82,13 @@ final class JobsController {
 
     /// Starts a run now, whatever the schedule says. The runner takes the job's lock, so pressing
     /// it while a run is going only records a skip.
-    func runNow(_ id: String) -> (Any?, String?) {
+    /// `extra`: more runner arguments (the secretary's `--trigger chat --prompt-file …`).
+    func runNow(_ id: String, extra: [String] = ["--manual"]) -> (Any?, String?) {
         guard store.load(id) != nil else { return (nil, L("No such job", "没有这个任务")) }
         guard FileManager.default.isExecutableFile(atPath: program) else { return (nil, Self.noRunner) }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: program)
-        p.arguments = ["--run-job", id, "--manual"]
+        p.arguments = ["--run-job", id] + extra
         p.environment = Self.cleanEnvironment()
         p.standardInput = FileHandle.nullDevice
         p.standardOutput = FileHandle.nullDevice

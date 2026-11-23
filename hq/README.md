@@ -428,6 +428,36 @@ describe the scope, and start it with `claude --agent bench-lead` from the root.
 to the task you name, delegates heavy work to background subagents, keeps its own context
 small and reports in a fixed shape. Small tasks don't need one — the bound session is the lead.
 
+## Secretary
+
+The secretary is a standing agent for the whole board. It answers "how are T-072 and T-071 doing,
+what is blocking them", marks what waits on the user, and proposes changes to the board without
+making them itself. `hq secretary init [--lang en|zh]` scaffolds whatever is missing and never
+overwrites anything:
+
+- `<root>/.claude/agents/secretary.md`: who it is, its boundaries, and which `hq` command
+  answers which question;
+- `<root>/secretary/profile.md`, `people.md` and `playbooks.md`: its memory, which the user can
+  edit and which it changes only after a yes;
+- its own task card, "Secretary" (lead `secretary`, kept off Focus). The card's id is recorded
+  as `"secretary": {"task": "T-…"}` in `hq.json`, and `hq board --json` reports it as
+  `"secretary"`.
+
+`hq secretary [--json]` reports what is there.
+
+Claude Pet runs it from the board's **Secretary** button. The button opens a scheduled job,
+`~/.claude/pet/jobs/secretary/`, which has no schedule, and runs it once per message:
+
+- the job runs `claude -p --agent secretary` in the root, always in the same session, with its
+  compaction and quota guard;
+- the session is bound to the secretary's card before its first run, so its `hq-asks` become
+  that card's asks in Needs you;
+- a **Yes** to one of those asks on the board starts a run, and the hook hands the session the
+  answer at the start of that run.
+
+Unattended, the job is allowed only Read, Grep, Glob, `Bash(~/.claude/hq/bin/hq:*)` and Edit or
+Write under `<root>/secretary/`.
+
 ## Files
 
 ```
@@ -437,7 +467,8 @@ small and reports in a fixed shape. Small tasks don't need one — the bound ses
 ├── templates/PROJECT.md      project template used by `hq project add`
 ├── projects/<name>/PROJECT.md  a project: kind, goal, brief, project grants
 ├── templates/lead.md         lead agent template
-├── .claude/agents/           your leads
+├── .claude/agents/           your leads, and secretary.md
+├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
     └── asks.jsonl            append-only events: {"type":"open"|"resolve", …}

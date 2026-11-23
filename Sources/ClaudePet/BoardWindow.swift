@@ -258,8 +258,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "resolve":
             // "Yes, always" carries the standing grant's wording; hq adds it to the card with the answer.
             let grant = str("grant").isEmpty ? [] : ["--grant=\(str("grant"))"]
-            return await hq(["ask", "resolve", str("id"), str("resolution"),
-                             "--via", "board", "--note=\(str("note"))"] + grant)
+            let r = await hq(["ask", "resolve", str("id"), str("resolution"),
+                              "--via", "board", "--note=\(str("note"))"] + grant)
+            // A yes to one of the secretary's proposals: it carries it out now, not at its next chat.
+            // Not "To todo": the user took that one on themselves.
+            if r.1 == nil {
+                secretary.answered(askID: str("id"), resolution: str("resolution"), toTodo: body["toTodo"] as? Bool == true)
+            }
+            return r
         case "grant":
             // list / add / revoke the standing grants of a task, or of a project (`project`, kept in its
             // PROJECT.md); revoke goes by #n, checked against the text shown.
@@ -277,7 +283,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return await hq(["grant", "revoke"] + who + (index.isEmpty ? [] : [index]) + whose + ["--via=board", "--text=\(str("text"))"])
             default: return await hq(["grant", "list"] + who + whose + ["--json"])
             }
-        case "reopen": return await hq(["ask", "reopen", str("id"), "--via=board"])
+        case "reopen":
+            let r = await hq(["ask", "reopen", str("id"), "--via=board"])
+            if r.1 == nil { secretary.reopened(askID: str("id")) }    // an Undo: the secretary leaves it
+            return r
         case "snooze":
             // "Later": the ask stays open, out of sight until tomorrow (or `until`; "" brings it back).
             let until = body["until"] as? String
@@ -387,6 +396,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "openPath": return openPath(str("path"), cwd: str("cwd"))
 
         // Scheduled jobs — see JobsController.
+        // The secretary's chat (SecretaryController): its state, setting it up, a message, stop.
+        case "secretary": return await secretary.status()
+        case "secretary-setup": return await secretary.setup(lang: str("lang"))
+        case "secretary-send": return await secretary.send(str("text"))
+        case "secretary-stop": return secretary.stop()
         case "jobs": return (JobsController.shared.list(), nil)
         case "job-save": return await JobsController.shared.save(body["job"] as? [String: Any] ?? [:])
         case "job-enable": return await JobsController.shared.setEnabled(str("id"), body["on"] as? Bool ?? false)
@@ -934,6 +948,19 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     // MARK: - hq
+
+    /// The secretary, running hq the way the board does.
+    private var secretary: SecretaryController {
+        let s = SecretaryController.shared
+        if s.hq == nil {
+            s.hq = { [weak self] args in
+                guard let self else { return (nil, "closed") }
+                let r = await self.hq(args)
+                return (r.0 as? String, r.1)
+            }
+        }
+        return s
+    }
 
     private var hqPath: String {
         // HQ_BIN: a worktree's hq for `--render-board` while developing; the installed one otherwise.
