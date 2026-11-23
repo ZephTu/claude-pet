@@ -2272,6 +2272,14 @@ async function resolveAll(taskId) {
   }
 }
 
+// Which Jump button this was, for the pet's jump log (~/.claude/pet/jumps.jsonl, see `hq jumps`).
+function jumpSource(el) {
+  if (el.closest("#modal")) return ui.modal && ui.modal.type === "context" ? "board-context" : "board-peek";
+  if (el.closest(".bsess")) return "board-card";
+  if (el.closest(".session")) return "board-sessions";
+  return "board";
+}
+
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
@@ -2408,7 +2416,7 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
-    case "jump": return act("jump", { session: d.session });
+    case "jump": return act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
     case "decide": {
       if (d.behavior === "allow" && !(ui.allowArmed && ui.allowArmed.ask === d.ask)) {
         clearTimeout(ui.allowArmed && ui.allowArmed.timer);

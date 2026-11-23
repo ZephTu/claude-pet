@@ -1844,6 +1844,64 @@ def cmd_sessions(args):
               f"{x['project']:<20} {x['title'] or ''}")
 
 
+PET_JUMPS = os.path.expanduser("~/.claude/pet/jumps.jsonl")
+JUMP_STATES = ["permission", "question", "replied", "working", "agent", "interrupted", "idle", "gone"]
+JUMP_SOURCES = ["board-card", "board-sessions", "board-peek", "board-context", "board",
+                "pet-list", "pet-finished", "pet-notice", "hotkey"]
+PEEK_RECENT = 600   # a Peek this many seconds before the jump counts as "read it first"
+
+
+def jump_summary(days, now=None):
+    """Jumps of the last `days` days from the pet's jump log, counted by state x source."""
+    since = (now or time.time()) - days * 86400
+    events = []
+    try:
+        with open(PET_JUMPS, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                    at = dt.datetime.fromisoformat(str(e["at"]).replace("Z", "+00:00")).timestamp()
+                except (ValueError, KeyError, TypeError):
+                    continue
+                if at >= since:
+                    events.append(e)
+    except FileNotFoundError:
+        pass
+    grid, by_state, by_source, peeked = {}, {}, {}, {}
+    for e in events:
+        st, src = e.get("state") or "?", e.get("source") or "?"
+        grid.setdefault(st, {}).setdefault(src, 0)
+        grid[st][src] += 1
+        by_state[st] = by_state.get(st, 0) + 1
+        by_source[src] = by_source.get(src, 0) + 1
+        if isinstance(e.get("peekedAgo"), int) and e["peekedAgo"] <= PEEK_RECENT:
+            peeked[st] = peeked.get(st, 0) + 1
+    order = lambda known, seen: [k for k in known if k in seen] + sorted(k for k in seen if k not in known)
+    return {"days": days, "total": len(events), "grid": grid, "byState": by_state, "bySource": by_source,
+            "peekedFirst": peeked, "states": order(JUMP_STATES, by_state),
+            "sources": order(JUMP_SOURCES, by_source)}
+
+
+def cmd_jumps(args):
+    r = jump_summary(args.days)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False, indent=1))
+        return
+    if not r["total"]:
+        print(f"no jumps in the last {args.days} days (log: {PET_JUMPS})")
+        return
+    cols = r["sources"]
+    w = max([len("state")] + [len(x) for x in r["states"]])
+    print(f"{r['total']} jumps in the last {args.days} days, by state x where it was clicked\n")
+    print(f"{'state':<{w}}  " + "  ".join(f"{c:>{len(c)}}" for c in cols) + "  total  peeked")
+    for st in r["states"]:
+        row = r["grid"].get(st, {})
+        print(f"{st:<{w}}  " + "  ".join(f"{row.get(c, 0) or '.':>{len(c)}}" for c in cols)
+              + f"  {r['byState'][st]:>5}  {r['peekedFirst'].get(st, 0):>6}")
+    print(f"{'total':<{w}}  " + "  ".join(f"{r['bySource'][c]:>{len(c)}}" for c in cols) + f"  {r['total']:>5}")
+    print(f"\npeeked = its Peek was open on the board in the {PEEK_RECENT // 60} minutes before the jump")
+
+
 def find_transcript(prefix):
     """A session's transcript by id or id prefix: the pet's record if the session is live,
     else a search of ~/.claude/projects (so closed sessions can still be read)."""
@@ -2123,6 +2181,9 @@ def main():
     p.add_argument("-n", type=int, default=8); p.add_argument("--json", action="store_true")
     p.add_argument("--meta", action="store_true", help="with --json: an object with title, cwd, live")
     p.set_defaults(fn=cmd_peek)
+    p = sub.add_parser("jumps", help="how often you jumped to a terminal, by session state and where you clicked")
+    p.add_argument("--days", type=int, default=7); p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_jumps)
     p = sub.add_parser("history", help="sessions that worked on a task, newest first (to resume one)")
     p.add_argument("task"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_history)
     p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")

@@ -133,6 +133,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// What the pet's list draws each session's dot from — the board draws the same dot.
     static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
+    /// A session's conversation was just shown in Peek (open, or refreshed while open). The jump
+    /// log notes how long before a jump that was — see JumpLog.
+    static var onPeek: ((String) -> Void)?
     /// Answers a session's permission prompt the way the pet's Allow / Deny does — see
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
     /// prompt that was on screen; one that has since gone away approves nothing.
@@ -151,7 +154,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "peek":
             // An open conversation shows the newest reply: that is reading it.
             let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
-            if r.1 == nil { Self.onSeen?(str("session")) }
+            if r.1 == nil {
+                Self.onSeen?(str("session"))
+                Self.onPeek?(str("session"))
+            }
             return r
         case "pet":
             var pet: [String: Any] = ["unread": Self.unreadBySession?() ?? [:], "dots": Self.petDots?() ?? [:]]
@@ -248,7 +254,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (["ok": true], nil)
         case "jump":
             guard let t = terminal(of: str("session")) else { return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端")) }
-            TerminalJump.jump(kind: t.kind, handle: t.handle)
+            // The page says which button: a card's session row, the sessions list, Peek, …
+            TerminalJump.jump(kind: t.kind, handle: t.handle,
+                              from: .init(session: str("session"), source: str("from").isEmpty ? "board" : str("from"),
+                                          view: str("view")))
             Self.onSeen?(str("session"))
             return (["ok": true], nil)
         case "copy":

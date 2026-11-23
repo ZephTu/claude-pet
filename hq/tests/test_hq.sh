@@ -532,6 +532,20 @@ out="$("$HQ" ref remove "$LT" "https://ci.example.com/job/x/42/testReport/")"
 "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert ids[:3]==["'"$PID"'","T-001","T-002"], ids' && ok "Focus can be reordered"
 "$HQ" focus order T-001 T-001 >/dev/null; "$HQ" focus --json | python3 -c 'import json,sys; ids=json.load(sys.stdin)["ids"]; assert len(ids)==len(set(ids)), ids' && ok "focus order drops repeated ids" || fail "focus order kept a repeated id"
 
+# hq jumps: the pet's jump log, last N days, by state x source.
+mkdir -p "$HOME/.claude/pet"
+NOW="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+cat > "$HOME/.claude/pet/jumps.jsonl" <<EOF
+{"at":"$NOW","session":"a","source":"board-card","state":"permission","peekedAgo":30}
+{"at":"$NOW","session":"b","source":"pet-list","state":"replied"}
+{"at":"$NOW","session":"b","source":"board-peek","state":"replied","peekedAgo":5000}
+{"at":"2020-01-01T00:00:00Z","session":"old","source":"hotkey","state":"question"}
+not json
+EOF
+"$HQ" jumps --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["total"]==3 and r["grid"]["replied"]=={"pet-list":1,"board-peek":1} and r["peekedFirst"]=={"permission":1} and r["states"]==["permission","replied"], r' && ok "hq jumps counts the last week by state x source" || fail "hq jumps"
+"$HQ" jumps | grep -q "^permission " && ok "hq jumps prints a table" || fail "hq jumps table"
+rm "$HOME/.claude/pet/jumps.jsonl"; "$HQ" jumps | grep -q "no jumps" && ok "hq jumps without a log says so" || fail "hq jumps empty"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"
