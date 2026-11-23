@@ -1626,28 +1626,323 @@ def ts_seconds(ts):
         return None
 
 
-def recent_messages(path, n=8):
+# ---------------------------------------------------------------- peek activity
+# Peek shows what a session is doing, not just what was said: Claude's tool calls between the
+# messages (one line each, paired with their results), its own todo list, and the turn in
+# progress. Rows carry a summary only; `hq peek <sid> --tool <id>` gives one call's full input
+# and output when a row is opened, so the list the board polls every few seconds stays small.
+PEEK_TOOLS_MAX = 300   # tool rows in one Peek window; older ones drop off (messages never do)
+TODO_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"}  # shown as the todo list
+NOTE_ID = re.compile(r"<tool-use-id>([^<]+)</tool-use-id>")
+NOTE_STATUS = re.compile(r"<status>([^<]+)</status>")
+NOTE_RESULT = re.compile(r"<result>(.*?)(?:</result>|\Z)", re.S)
+
+
+def one_line(s, n=100):
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def entry_ts(o):
+    return o.get("timestamp") or (o.get("attachment") or {}).get("timestamp")
+
+
+def result_text(c):
+    """A tool_result's content as text: a string, or text blocks (images as a placeholder)."""
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(x.get("text", "") if x.get("type") == "text" else "[image]"
+                         for x in c if isinstance(x, dict) and x.get("type") in ("text", "image"))
+    return ""
+
+
+def notification_text(o):
+    """The text of a <task-notification> entry (a background agent or command finished), else None.
+    It arrives as a user entry when the session was idle, or folded into a running turn."""
+    if o.get("type") == "attachment":
+        a = o.get("attachment") or {}
+        t = a.get("prompt") if a.get("type") == "queued_command" else None
+    elif o.get("type") == "user":
+        c = (o.get("message") or {}).get("content")
+        t = c if isinstance(c, str) else result_text(c) if isinstance(c, list) and not any(
+            isinstance(x, dict) and x.get("type") == "tool_result" for x in c) else None
+    else:
+        t = None
+    return t if isinstance(t, str) and "<task-notification>" in t[:200] else None
+
+
+def tool_title(name):
+    """mcp__claude_ai_Atlassian__getJiraIssue → Atlassian · getJiraIssue; built-ins as they are."""
+    parts = name.split("__")
+    if len(parts) >= 3 and parts[0] == "mcp":
+        return f"{re.sub(r'^claude_ai_', '', parts[1])} · {'__'.join(parts[2:])}"
+    return name
+
+
+def tool_label(name, inp):
+    """The one-line gist of a tool call: the command, the file, the pattern, the agent's job…"""
+    inp = inp if isinstance(inp, dict) else {}
+    def base(p):
+        p = str(p or "").rstrip("/")
+        return os.path.basename(p) or p
+    if name == "Bash":
+        # "cd <repo> && make test" is "make test": the directory is noise in a one-line gist.
+        return one_line(re.sub(r"^\s*cd\s+(\"[^\"]*\"|'[^']*'|\S+)\s*(&&|;)\s*", "", str(inp.get("command") or "")))
+    if name in ("Edit", "MultiEdit", "Write", "Read", "NotebookEdit"):
+        label = base(inp.get("file_path") or inp.get("notebook_path"))
+        if name == "Read" and inp.get("offset"):
+            label += f":{inp['offset']}"
+        return label
+    if name in ("Grep", "Glob"):
+        return one_line(str(inp.get("pattern") or "") + (f"  in {base(inp['path'])}" if inp.get("path") else ""))
+    if name in ("Agent", "Task"):
+        return one_line(inp.get("description") or inp.get("prompt"))
+    if name == "AskUserQuestion":
+        qs = inp.get("questions") or [{}]
+        return one_line((qs[0] or {}).get("question") if isinstance(qs[0], dict) else "")
+    for k in ("description", "query", "url", "skill", "pattern", "command", "file_path", "title", "name", "summary"):
+        if isinstance(inp.get(k), str) and inp[k].strip():
+            return one_line(inp[k])
+    return one_line(next((v for v in inp.values() if isinstance(v, str) and v.strip()), ""))
+
+
+def tool_stat(name, tur):
+    """What a finished call changed, where that fits in a few characters: "+12 −3" for an edit."""
+    if not isinstance(tur, dict):
+        return None
+    if name in ("Write",) and tur.get("type") == "create":
+        return f"new · {len(str(tur.get('content') or '').splitlines())} lines"
+    hunks = tur.get("structuredPatch")
+    if name in ("Edit", "MultiEdit", "Write") and isinstance(hunks, list):
+        add = sum(1 for h in hunks for ln in (h or {}).get("lines") or [] if ln.startswith("+"))
+        rem = sum(1 for h in hunks for ln in (h or {}).get("lines") or [] if ln.startswith("-"))
+        return f"+{add} −{rem}"
+    return None
+
+
+def peek_timeline(entries):
+    """A transcript as Peek shows it, oldest first: the messages (see message_text) and, between
+    them, Claude's tool calls, each one {"kind": "tool", id, name, title, label, ts, status, …}.
+    status: ok | error | pending (no result yet: running, or cut short) | background (launched in
+    the background; becomes ok or error when its task notification arrives)."""
+    items, tools, last_user = [], {}, None
+    for o in entries:
+        if o.get("isSidechain"):
+            continue
+        ts = entry_ts(o)
+        c = (o.get("message") or {}).get("content")
+        at = len(items)   # an entry holding text before its tool calls shows the text first
+        text_first = False
+        if o.get("type") == "assistant" and isinstance(c, list):
+            kinds = [x.get("type") for x in c if isinstance(x, dict)]
+            text_first = "text" in kinds and kinds.index("text") < (kinds.index("tool_use") if "tool_use" in kinds else len(kinds))
+            for x in c:
+                if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("id") \
+                        and x.get("name") not in TODO_TOOLS:
+                    name = x.get("name") or "?"
+                    it = {"kind": "tool", "id": x["id"], "name": name, "title": tool_title(name),
+                          "label": tool_label(name, x.get("input")), "ts": ts, "status": "pending"}
+                    tools[x["id"]] = it
+                    items.append(it)
+        elif o.get("type") == "user" and isinstance(c, list):
+            results = [x for x in c if isinstance(x, dict) and x.get("type") == "tool_result"]
+            tur = o.get("toolUseResult") if len(results) == 1 else None
+            for x in results:
+                it = tools.get(x.get("tool_use_id"))
+                if not it:
+                    continue
+                it["endTs"] = ts
+                if x.get("is_error"):
+                    it["status"] = "error"
+                elif isinstance(tur, dict) and (tur.get("backgroundTaskId") or tur.get("isAsync")):
+                    it["status"] = "background"
+                else:
+                    it["status"] = "ok"
+                stat = tool_stat(it["name"], tur)
+                if stat:
+                    it["stat"] = stat
+        note = notification_text(o)
+        if note:
+            m = NOTE_ID.search(note)
+            it = tools.get(m.group(1).strip()) if m else None
+            if it:
+                st = (NOTE_STATUS.search(note) or [None, ""])[1].strip()
+                it["status"] = "ok" if st == "completed" else "error"
+                it["endTs"] = ts
+                it["bg"] = st or "done"
+            continue
+        t = message_text(o)
+        if not t:
+            continue
+        role = message_role(o)
+        if role == "user":
+            # The same prompt is now and then written twice: as the user entry that starts a
+            # turn and, a moment later, as a queued_command folded into it. Show it once.
+            if o.get("type") == "attachment" and last_user and last_user["text"] == t:
+                a, b = ts_seconds(last_user["ts"]), ts_seconds(ts)
+                if a is not None and b is not None and abs(b - a) <= 10:
+                    continue
+            last_user = {"text": t, "ts": ts}
+        items.insert(at if text_first else len(items), {"kind": "msg", "role": role, "text": t, "ts": ts})
+    return items
+
+
+def peek_window(path, n):
+    """The last n messages with the tool calls among them (at most PEEK_TOOLS_MAX, newest kept),
+    and the transcript entries they were read from."""
     for nbytes in (600_000, 6_000_000):
-        msgs = []
-        last_user = None
-        for o in transcript_tail(path, nbytes):
-            t = message_text(o)
-            if not t:
-                continue
-            role = message_role(o)
-            ts = o.get("timestamp") or (o.get("attachment") or {}).get("timestamp")
-            if role == "user":
-                # The same prompt is now and then written twice: as the user entry that starts a
-                # turn and, a moment later, as a queued_command folded into it. Show it once.
-                if o.get("type") == "attachment" and last_user and last_user["text"] == t:
-                    a, b = ts_seconds(last_user["ts"]), ts_seconds(ts)
-                    if a is not None and b is not None and abs(b - a) <= 10:
-                        continue
-                last_user = {"text": t, "ts": ts}
-            msgs.append({"role": role, "text": t, "ts": ts})
-        if len(msgs) >= n:
+        entries = transcript_tail(path, nbytes)
+        items = peek_timeline(entries)
+        at = [i for i, it in enumerate(items) if it["kind"] == "msg"]
+        if len(at) >= n:
+            items = items[at[-n]:]
             break
-    return msgs[-n:]
+    tools = [it for it in items if it["kind"] == "tool"]
+    if len(tools) > PEEK_TOOLS_MAX:
+        drop = {id(it) for it in tools[:-PEEK_TOOLS_MAX]}
+        items = [it for it in items if id(it) not in drop]
+    return items, entries
+
+
+def recent_messages(path, n=8):
+    items, _ = peek_window(path, n)
+    return [{"role": it["role"], "text": it["text"], "ts": it["ts"]} for it in items if it["kind"] == "msg"]
+
+
+def turn_stats(entries):
+    """The turn in progress, or else the last one: when it started, Claude's output tokens in it,
+    how long it took (finished turns: Claude Code logs a turn_duration when one ends), and the
+    context size at its last reply."""
+    ends = [i for i, o in enumerate(entries) if o.get("type") == "system" and o.get("subtype") == "turn_duration"]
+    def spoke(o):
+        return not o.get("isSidechain") and (o.get("type") == "assistant" or (
+            o.get("type") == "user" and (message_text(o) or notification_text(o))))
+    lo, hi, ms = 0, len(entries), None
+    if ends and not any(spoke(o) for o in entries[ends[-1] + 1:]):
+        lo = ends[-2] + 1 if len(ends) > 1 else 0
+        hi, ms = ends[-1], entries[ends[-1]].get("durationMs")
+    elif ends:
+        lo = ends[-1] + 1
+    else:  # no turn markers (older Claude Code): from the last thing the user said
+        lo = next((i for i in range(len(entries) - 1, -1, -1)
+                   if message_role(entries[i]) == "user" and message_text(entries[i])), 0)
+    seg = entries[lo:hi]
+    start = next((entry_ts(o) for o in seg if spoke(o) and entry_ts(o)), None)
+    seen, out, ctx = set(), 0, None
+    for o in seg:
+        if o.get("type") != "assistant" or o.get("isSidechain"):
+            continue
+        msg = o.get("message") or {}
+        u = msg.get("usage") or {}
+        if msg.get("id") not in seen:   # one reply is written as several entries, same usage
+            seen.add(msg.get("id"))
+            out += u.get("output_tokens") or 0
+        ctx = sum(u.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")) or ctx
+    if start is None:
+        return None
+    return {"start": start, "done": ms is not None, "ms": ms, "tokens": out, "context": ctx}
+
+
+def latest_todos(entries):
+    """Claude's own todo list as it last stood: the latest TodoWrite, or the list the
+    TaskCreate / TaskUpdate tools have built since. [{text, status, active}], or None."""
+    items, creating = None, {}
+    for o in entries:
+        if o.get("isSidechain"):
+            continue
+        c = (o.get("message") or {}).get("content")
+        if not isinstance(c, list):
+            continue
+        for x in c:
+            if not isinstance(x, dict):
+                continue
+            inp = x.get("input") if isinstance(x.get("input"), dict) else {}
+            if x.get("type") == "tool_use" and x.get("name") == "TodoWrite" and isinstance(inp.get("todos"), list):
+                items = {str(i): {"text": t.get("content") or "", "status": t.get("status") or "pending",
+                                  "active": t.get("activeForm") or ""}
+                         for i, t in enumerate(inp["todos"]) if isinstance(t, dict)}
+            elif x.get("type") == "tool_use" and x.get("name") == "TaskCreate":
+                creating[x.get("id")] = inp
+            elif x.get("type") == "tool_use" and x.get("name") == "TaskUpdate" and items is not None:
+                t = items.get(str(inp.get("taskId")))
+                if t is not None:
+                    if inp.get("status") == "deleted":
+                        items.pop(str(inp.get("taskId")))
+                        continue
+                    t["status"] = inp.get("status") or t["status"]
+                    t["text"] = inp.get("subject") or t["text"]
+                    t["active"] = inp.get("activeForm") or t["active"]
+            elif x.get("type") == "tool_result" and x.get("tool_use_id") in creating and not x.get("is_error"):
+                inp = creating.pop(x["tool_use_id"])
+                tur = o.get("toolUseResult")
+                tid = ((tur.get("task") or {}).get("id") if isinstance(tur, dict) else None) \
+                    or (re.search(r"#(\d+)", result_text(x.get("content"))) or [None, None])[1]
+                if tid is not None:
+                    items = items if items is not None else {}
+                    items[str(tid)] = {"text": inp.get("subject") or "", "status": "pending",
+                                       "active": inp.get("activeForm") or ""}
+    return list(items.values()) if items else None
+
+
+def tool_detail(path, tool_id, cap_in=100_000, cap_out=200_000):
+    """One tool call in full, for an opened Peek row: its input and output as text (an edit's
+    output is its diff; a background job's, its result once it has finished)."""
+    use = res = tur = note = None
+    use_ts = end_ts = None
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if tool_id not in line:
+                continue
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            # Only the conversation's own entries: request records and snapshots repeat the
+            # call without its toolUseResult (an edit's diff lives there).
+            c = (o.get("message") or {}).get("content") if o.get("type") in ("user", "assistant") \
+                and not o.get("isSidechain") else None
+            for x in c if isinstance(c, list) else []:
+                if isinstance(x, dict) and x.get("type") == "tool_use" and x.get("id") == tool_id and not use:
+                    use, use_ts = x, entry_ts(o)
+                elif isinstance(x, dict) and x.get("type") == "tool_result" and x.get("tool_use_id") == tool_id and not res:
+                    res, end_ts = x, entry_ts(o)
+                    tur = o.get("toolUseResult")
+            t = notification_text(o)
+            if t and NOTE_ID.search(t) and NOTE_ID.search(t).group(1).strip() == tool_id:
+                note, end_ts = t, entry_ts(o)
+    if not use:
+        return None
+    name, inp = use.get("name") or "?", use.get("input") if isinstance(use.get("input"), dict) else {}
+    hunks = tur.get("structuredPatch") if isinstance(tur, dict) else None
+    diff = "\n".join(f"@@ -{h.get('oldStart')},{h.get('oldLines')} +{h.get('newStart')},{h.get('newLines')} @@\n"
+                     + "\n".join(h.get("lines") or []) for h in hunks if isinstance(h, dict)) if hunks else ""
+    if name == "Bash":
+        text_in = (f"# {inp['description']}\n" if inp.get("description") else "") + f"$ {inp.get('command', '')}"
+    elif name in ("Edit", "MultiEdit") and not diff:
+        text_in = f"{inp.get('file_path', '')}\n--- old\n{inp.get('old_string', '')}\n--- new\n{inp.get('new_string', '')}"
+    elif name in ("Edit", "MultiEdit", "Read"):
+        text_in = str(inp.get("file_path", "")) + "".join(
+            f"  {k}={inp[k]}" for k in ("offset", "limit", "replace_all") if inp.get(k))
+    elif name == "Write":
+        text_in = f"{inp.get('file_path', '')}\n\n{inp.get('content', '')}"
+    elif name in ("Agent", "Task"):
+        text_in = f"{inp.get('description', '')}" + (f"  ({inp['subagent_type']})" if inp.get("subagent_type") else "") \
+            + f"\n\n{inp.get('prompt', '')}"
+    else:
+        text_in = json.dumps(inp, ensure_ascii=False, indent=1)
+    if diff and name in ("Edit", "MultiEdit", "Write") and not (res or {}).get("is_error"):
+        text_out = diff
+    else:
+        text_out = result_text((res or {}).get("content"))
+    if note:
+        r = NOTE_RESULT.search(note)
+        st = (NOTE_STATUS.search(note) or [None, ""])[1].strip()
+        text_out = (text_out + "\n\n" if text_out else "") + f"— {st or 'finished'} —\n" + (r.group(1).strip() if r else "")
+    return {"id": tool_id, "name": name, "title": tool_title(name), "ts": use_ts, "endTs": end_ts,
+            "error": bool((res or {}).get("is_error")), "done": res is not None,
+            "input": text_in[:cap_in], "inputChars": len(text_in),
+            "output": text_out[:cap_out], "outputChars": len(text_out)}
 
 
 def session_title(entries):
@@ -1923,14 +2218,27 @@ def find_transcript(prefix):
 
 def cmd_peek(args):
     path, live = find_transcript(args.session)
-    msgs = recent_messages(path, args.n) if path else []
+    if args.tool:
+        d = tool_detail(path, args.tool) if path else None
+        if not d:
+            die(f"no tool call {args.tool} in session {args.session}")
+        if args.json:
+            print(json.dumps(d, ensure_ascii=False, indent=1))
+        else:
+            print(f"[{d['title']}]\n{d['input']}\n\n{d['output']}")
+        return
+    items, entries = peek_window(path, args.n) if path else ([], [])
+    msgs = [{"role": it["role"], "text": it["text"], "ts": it["ts"]} for it in items if it["kind"] == "msg"]
     if args.json:
         if args.meta:
-            entries = transcript_tail(path, 300_000) if path else []
             cwd = next((o.get("cwd") for o in reversed(entries) if o.get("cwd")), None)
+            # items: the messages with the tool calls between them; turn: the turn in progress
+            # (or the last one); todos: Claude's own todo list. `messages` stays for older readers.
             print(json.dumps({"session": os.path.basename(path)[:-6] if path else args.session,
                               "found": bool(path), "live": live, "title": session_title(entries),
-                              "cwd": cwd, "messages": msgs}, ensure_ascii=False, indent=1))
+                              "cwd": cwd, "messages": msgs, "items": items,
+                              "turn": turn_stats(entries), "todos": latest_todos(entries)},
+                             ensure_ascii=False, indent=1))
         else:
             print(json.dumps(msgs, ensure_ascii=False, indent=1))
         return
@@ -2181,7 +2489,9 @@ def main():
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sessions)
     p = sub.add_parser("peek", help="recent messages of a live session"); p.add_argument("session")
     p.add_argument("-n", type=int, default=8); p.add_argument("--json", action="store_true")
-    p.add_argument("--meta", action="store_true", help="with --json: an object with title, cwd, live")
+    p.add_argument("--meta", action="store_true",
+                   help="with --json: an object with title, cwd, live, tool calls, the turn, Claude's todos")
+    p.add_argument("--tool", metavar="ID", help="one tool call's full input and output (id from --meta items)")
     p.set_defaults(fn=cmd_peek)
     p = sub.add_parser("jumps", help="how often you jumped to a terminal, by session state and where you clicked")
     p.add_argument("--days", type=int, default=7); p.add_argument("--json", action="store_true")

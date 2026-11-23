@@ -331,6 +331,62 @@ printf '%s\n' \
   > "$HOME/.claude/projects/-tmp-repo/$DSID.jsonl"
 "$HQ" peek "$DSID" --json | python3 -c 'import json,sys; m=json.load(sys.stdin); assert [(x["role"],x["text"]) for x in m]==[("user","open the PR"),("assistant","opening"),("user","open the PR"),("user","see [Image #1]")], m' && ok "peek shows a prompt written twice once, and keeps a queued prompt with an image" || fail "peek doubled a prompt or lost a queued image prompt"
 
+# peek --meta: tool calls between the messages, paired with their results; Claude's todo list;
+# the turn in progress. Request records repeating a call must not hide its diff in --tool.
+ASID=feedface-3333-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"user","message":{"content":"fix the board"},"timestamp":"2026-01-01T00:01:00Z"}' \
+  '{"type":"assistant","message":{"id":"m1","usage":{"output_tokens":100,"input_tokens":5,"cache_read_input_tokens":1000},"content":[{"type":"tool_use","id":"tA","name":"Bash","input":{"command":"cd /tmp/repo && make test","description":"Run tests"}}]},"timestamp":"2026-01-01T00:01:01Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tA","content":"2 failed","is_error":true}]},"toolUseResult":"Error: 2 failed","timestamp":"2026-01-01T00:01:05Z"}' \
+  '{"type":"assistant","message":{"id":"m2","usage":{"output_tokens":50,"input_tokens":5,"cache_read_input_tokens":2000},"content":[{"type":"tool_use","id":"tB","name":"Edit","input":{"file_path":"/tmp/repo/board.js","old_string":"a","new_string":"b"}}]},"timestamp":"2026-01-01T00:01:06Z"}' \
+  '{"type":"assistant","message":{"id":"m2","usage":{"output_tokens":50,"input_tokens":5,"cache_read_input_tokens":2000},"content":[{"type":"tool_use","id":"tT","name":"TodoWrite","input":{"todos":[{"content":"Fix tests","status":"completed","activeForm":"Fixing tests"},{"content":"Ship","status":"in_progress","activeForm":"Shipping"}]}}]},"timestamp":"2026-01-01T00:01:06Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tB","content":"updated"}]},"toolUseResult":{"structuredPatch":[{"oldStart":1,"oldLines":2,"newStart":1,"newLines":3,"lines":[" x","-a","+b","+c"]}]},"timestamp":"2026-01-01T00:01:07Z"}' \
+  '{"type":"api-request-blob","message":{"content":[{"type":"tool_result","tool_use_id":"tB","content":"updated"}]}}' \
+  '{"type":"assistant","message":{"id":"m3","usage":{"output_tokens":30},"content":[{"type":"text","text":"Edited; agent checking."},{"type":"tool_use","id":"tC","name":"Agent","input":{"description":"Review the fix","prompt":"look"}},{"type":"tool_use","id":"tD","name":"mcp__claude_ai_Atlassian__getJiraIssue","input":{"issueIdOrKey":"QA-1"}},{"type":"tool_use","id":"tE","name":"Bash","input":{"command":"sleep 99"}}]},"timestamp":"2026-01-01T00:01:08Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tC","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched"},"timestamp":"2026-01-01T00:01:09Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tD","content":"QA-1: open"}]},"timestamp":"2026-01-01T00:01:09Z"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<tool-use-id>tC</tool-use-id>\n<status>completed</status>\n<result>Looks right.</result>\n</task-notification>","commandMode":"task-notification","origin":{"kind":"task-notification"}},"timestamp":"2026-01-01T00:02:00Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$ASID.jsonl"
+"$HQ" peek "$ASID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin); it=d["items"]
+row=lambda i: {k: i.get(k) for k in ("kind","title","label","status","stat")}
+got=[(i["kind"], i.get("title") or i.get("role"), i.get("label") or i.get("text"), i.get("status"), i.get("stat")) for i in it]
+assert got==[("msg","user","fix the board",None,None),
+             ("tool","Bash","make test","error",None),
+             ("tool","Edit","board.js","ok","+2 −1"),
+             ("msg","assistant","Edited; agent checking.",None,None),
+             ("tool","Agent","Review the fix","ok",None),
+             ("tool","Atlassian · getJiraIssue","QA-1","ok",None),
+             ("tool","Bash","sleep 99","pending",None)], got
+assert it[4]["bg"]=="completed", it[4]
+assert d["todos"]==[{"text":"Fix tests","status":"completed","active":"Fixing tests"},{"text":"Ship","status":"in_progress","active":"Shipping"}], d["todos"]
+t=d["turn"]; assert t["start"]=="2026-01-01T00:01:00Z" and not t["done"] and t["tokens"]==180 and t["context"]==2005, t
+assert [m["text"] for m in d["messages"]]==["fix the board","Edited; agent checking."], d["messages"]
+' && ok "peek --meta pairs tool calls with results (errors, edits, background agents, MCP), reads Claude's todos and the open turn" || fail "peek --meta tool calls / todos / turn"
+"$HQ" peek "$ASID" --tool tB --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["output"].splitlines()==["@@ -1,2 +1,3 @@"," x","-a","+b","+c"] and d["input"]=="/tmp/repo/board.js" and d["done"], d' && ok "peek --tool shows an edit as its diff" || fail "peek --tool edit diff"
+"$HQ" peek "$ASID" --tool tC --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["output"].endswith("— completed —\nLooks right.") and d["input"].startswith("Review the fix"), d' && ok "peek --tool shows a background agent's result once it finished" || fail "peek --tool background result"
+"$HQ" peek "$ASID" --tool nope --json >/dev/null 2>&1 && fail "peek --tool accepted an unknown id" || ok "peek --tool refuses an unknown id"
+
+# A finished turn (turn_duration logged after it): its length; TaskCreate / TaskUpdate build the
+# todo list when Claude uses those instead of TodoWrite.
+BSID=feedface-4444-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"plan it"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"assistant","message":{"id":"n1","usage":{"output_tokens":7},"content":[{"type":"tool_use","id":"c1","name":"TaskCreate","input":{"subject":"Write parser","activeForm":"Writing parser"}},{"type":"tool_use","id":"c2","name":"TaskCreate","input":{"subject":"Render rows"}}]},"timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","content":"Task #1 created successfully: Write parser"}]},"timestamp":"2026-01-01T00:00:02Z"}' \
+  '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c2","content":"Task #2 created successfully: Render rows"}]},"timestamp":"2026-01-01T00:00:02Z"}' \
+  '{"type":"assistant","message":{"id":"n2","usage":{"output_tokens":3},"content":[{"type":"tool_use","id":"u1","name":"TaskUpdate","input":{"taskId":"1","status":"in_progress"}},{"type":"text","text":"On it."}]},"timestamp":"2026-01-01T00:00:03Z"}' \
+  '{"type":"system","subtype":"turn_duration","durationMs":4000,"timestamp":"2026-01-01T00:00:04Z"}' \
+  '{"type":"custom-title","customTitle":"plan"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$BSID.jsonl"
+"$HQ" peek "$BSID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+assert d["turn"]["done"] and d["turn"]["ms"]==4000 and d["turn"]["tokens"]==10, d["turn"]
+assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progress"),("Render rows","pending")], d["todos"]
+assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
+' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
+
 "$HQ" log "$SID" "timed entry" >/dev/null
 grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}: timed entry$' "$T"/root/tasks/"$SID"-*/TASK.md && ok "a log entry is stamped to the second"
 

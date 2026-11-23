@@ -351,6 +351,51 @@ select.place { max-width: 100px; }
 .pwho .btn { opacity: 0; }
 .pmsg:hover .pwho .btn { opacity: 1; }
 .pmsg.user .md { color: var(--accent); }
+/* Peek activity: tool-call rows between the messages, the live status line, Claude's todos. */
+.pmsg.ptools { padding: 6px 0; }
+.ptool, .pgroup, .ptodo-head { display: flex; align-items: baseline; gap: 8px; padding: 3px 6px; border-radius: 6px;
+  font-size: 12px; color: var(--dim); cursor: pointer; min-width: 0; }
+.ptool:hover, .pgroup:hover, .ptodo-head:hover { background: var(--panel-2); }
+.ptool.open { background: var(--panel-2); }
+.pgroup { color: var(--faint); font-size: 11.5px; }
+.pgroup .bad { color: var(--red); }
+.pcaret { width: 10px; display: inline-block; color: var(--faint); }
+.pico { width: 14px; flex: none; text-align: center; font-size: 11px; }
+.ptool.ok .pico { color: var(--teal); }
+.ptool.err .pico { color: var(--red); }
+.ptool.run .pico, .ptool.wait .pico { color: var(--amber); font-weight: 700; }
+.ptool.bg .pico { color: var(--blue); }
+.ptool.cut .pico { color: var(--faint); }
+.pname { flex: none; color: var(--text); font-weight: 600; }
+.plabel { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); }
+.pstat { flex: none; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--faint); }
+.ptime { flex: none; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ptool.run .ptime, .ptool.wait .ptime { color: var(--amber); }
+.pspin { display: inline-block; width: 8px; height: 8px; border: 1.5px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: dot-turn 0.9s linear infinite; }
+.pdetail { margin: 2px 0 8px 22px; padding: 6px 10px; border-left: 2px solid var(--line); }
+.pdlabel { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); margin: 4px 0 2px; }
+.pdpre { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.pdpre .dadd { color: var(--teal); } .pdpre .drem { color: var(--red); } .pdpre .dhunk { color: var(--blue); }
+.pdpre .pdcut { color: var(--faint); font-style: italic; }
+.pstatus { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--dim); min-width: 0; }
+.pstatus .plead { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 6px; align-items: baseline; }
+.pstatus .plead b { color: var(--text); }
+.pstatus .pbits { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.pstatus.busy .pdot { background: var(--teal); animation: dot-breathe 1.6s ease-in-out infinite; }
+.pstatus.wait .pdot { background: var(--amber); }
+.pstatus.wait .plead { color: var(--amber); }
+.ptodo { padding: 4px 10px; border-bottom: 1px solid var(--line); }
+.ptodo-head { color: var(--dim); }
+.ptodo-list { padding: 2px 0 6px 22px; font-size: 12px; }
+.ptodo-item { display: flex; gap: 6px; padding: 1px 0; color: var(--text); }
+.ptodo-item.completed { color: var(--faint); text-decoration: line-through; }
+.ptodo-item.in_progress { color: var(--teal); font-weight: 600; }
 .md { line-height: 1.6; font-size: 13px; overflow-wrap: anywhere; }
 .md p { margin: 6px 0; }
 .md h4 { margin: 12px 0 4px; font-size: 13.5px; }

@@ -1744,6 +1744,8 @@ async function openPeek(sid, back, opt = {}) {
   const s = ui.sessions.find((x) => x.sessionId === sid || x.sessionId.startsWith(sid));
   ui.modal = { type: "peek", sid: s ? s.sessionId : sid, title: (s && (s.title || s.project)) || opt.title || sid.slice(0, 8),
                project: s ? s.project : "", cwd: s ? s.cwd : "", live: Boolean(s), msgs: null, sig: "", back: back || null,
+               items: null, turn: null, todos: null, details: {}, openTools: new Set(), openGroups: new Set(),
+               fullTools: new Set(), todoOpen: false,
                // Just started from the board: not live yet, but not ended either — it is coming up.
                starting: Boolean(opt.starting) && !s, startedAt: Date.now() };
   drawPeek(true);
@@ -1757,7 +1759,7 @@ function closePeek() {
 async function refreshPeek(first) {
   const m = ui.modal;
   if (!m) return;
-  let msgs;
+  let msgs, act = { items: null, turn: null, todos: null };
   try { msgs = await apiJSON("peek", { session: m.sid, opened: Boolean(first) }); } catch (e) { return toast(String(e.message || e), true); }
   if (ui.modal !== m) return;
   // A session that has come up (or ended) since the window opened: send box on or off.
@@ -1772,15 +1774,22 @@ async function refreshPeek(first) {
     if (!m.live) { m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
                    m.project = m.project || (msgs.cwd || "").split("/").pop(); }
     m.found = msgs.found;
+    act = { items: msgs.items || null, turn: msgs.turn || null, todos: msgs.todos || null };
     msgs = msgs.messages || [];
   }
-  const sig = JSON.stringify(msgs);
+  const sig = JSON.stringify([msgs, act]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
   if (!first && sel && !sel.isCollapsed && $("#modal").contains(sel.anchorNode)) return;
   m.msgs = msgs;
   m.sig = sig;
+  Object.assign(m, act);
+  // An opened row whose call has since finished (or failed) shows its new output.
+  for (const id of m.openTools) {
+    const t = (m.items || []).find((x) => x.id === id);
+    if (t && m.details[id] && m.details[id]._st !== t.status) loadToolDetail(m, id);
+  }
   drawPeek(first);
 }
 function drawPeek(toBottom) {
@@ -1807,12 +1816,16 @@ function drawPeek(toBottom) {
   const canSend = m.live && canMessage(s);
   const noSend = m.starting ? T("Starting the session — you can type here as soon as it is up", "session 正在启动——起来后就可以在这里输入") : !m.live ? T("This session has ended — history only", "这个 session 已结束——只能看历史") : T("Not supported in this terminal", "这个终端不支持");
   const msgs = m.msgs;
-  m.keys = msgs ? msgs.map((x) => `${x.role}|${x.ts}|${x.text}`) : null;
+  // Messages, with each run of tool calls between them as one block (see peekBlocks).
+  const blocks = msgs === null ? null : peekBlocks(m.items || msgs.map((x) => ({ kind: "msg", ...x })));
+  m.keys = blocks ? blocks.map((b) => (b.kind === "group" ? `g|${b.tools[0].id}` : `${b.role}|${b.ts}|${b.text}`)) : null;
+  const run = peekRun(m, s);
+  let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
-    : !msgs.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
-    : msgs.map((x, i) => `<div class="pmsg ${x.role}">
+    : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
+    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · ${ago(x.ts)}
-          <button class="btn small ghost" data-action="copy-msg" data-i="${i}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
+          <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text)}</div>
       </div>`).join("");
   const keepDraft = box.querySelector("textarea") ? null : draft("msg:" + m.sid);
@@ -1825,6 +1838,7 @@ function drawPeek(toBottom) {
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
       <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
     </div>
+    ${peekStatus(m, s, run)}${peekTodos(m)}
     <div class="peek-body">${list}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(m.sid)}" data-session="${esc(m.sid)}" ${canSend ? "" : "disabled"}
@@ -1844,6 +1858,150 @@ function drawPeek(toBottom) {
     nb.scrollTop += el.getBoundingClientRect().top - nb.getBoundingClientRect().top - anchor.off;
   }
 }
+
+// ------------------------------------------------------------------ peek activity
+// Between the messages, Claude's tool calls: one line each, a run of them folded to its newest
+// line, a click on a line opens its input and output (fetched then: the list the board polls
+// stays summaries). Above the conversation, one line on what the turn is doing now and, when
+// Claude keeps one, its todo list.
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
+  return `${Math.floor(sec / 3600)}h ${String(Math.floor((sec % 3600) / 60)).padStart(2, "0")}m`;
+}
+const fmtTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+const secsSince = (iso) => (Date.now() - new Date(iso).getTime()) / 1000;
+const secsBetween = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / 1000;
+function peekBlocks(items) {
+  const out = [];
+  for (const it of items) {
+    const last = out[out.length - 1];
+    if (it.kind !== "tool") out.push(it);
+    else if (last && last.kind === "group") last.tools.push(it);
+    else out.push({ kind: "group", tools: [it] });
+  }
+  return out;
+}
+// What the session is doing now, as far as Peek can tell: its state, and the call it is in.
+function peekRun(m, s) {
+  const state = m.live ? liveState(s) : "";
+  const turnOpen = state === "busy" || state === "waiting";
+  const pending = turnOpen ? (m.items || []).filter((t) => t.kind === "tool" && t.status === "pending") : [];
+  return { state, turnOpen, pending: new Set(pending.map((t) => t.id)), current: pending[pending.length - 1] || null };
+}
+// A call that is still going: in this turn, or a background agent / command not yet finished.
+const toolActive = (t, run) => run.pending.has(t.id) || (t.status === "background" && run.state !== "");
+function toolRow(t, m, run) {
+  const open = m.openTools.has(t.id);
+  let ico, cls, time = "", tip = "";
+  if (run.pending.has(t.id) && run.state === "waiting" && t === run.current) {
+    ico = "?"; cls = "wait"; tip = T("Waiting for you in the terminal", "在终端里等你");
+    time = `<span data-since="${esc(t.ts)}">${fmtDur(secsSince(t.ts))}</span>`;
+  } else if (run.pending.has(t.id)) {
+    ico = '<span class="pspin"></span>'; cls = "run"; tip = T("Running", "运行中");
+    time = `<span data-since="${esc(t.ts)}">${fmtDur(secsSince(t.ts))}</span>`;
+  } else if (t.status === "background") {
+    ico = "⧗"; cls = "bg"; tip = T("Running in the background", "在后台运行");
+    if (run.state) time = `<span data-since="${esc(t.ts)}">${fmtDur(secsSince(t.ts))}</span>`;
+  } else if (t.status === "pending") {
+    ico = "–"; cls = "cut"; tip = T("Stopped before it returned", "没等到结果就停了");
+  } else {
+    ico = t.status === "error" ? "✗" : "✓"; cls = t.status === "error" ? "err" : "ok";
+    tip = t.status === "error" ? T("Failed, or you declined it", "失败了，或者被你拒绝了") : T("Done", "完成");
+    if (t.endTs && secsBetween(t.ts, t.endTs) >= 1) time = fmtDur(secsBetween(t.ts, t.endTs));
+  }
+  if (t.bg) tip += ` (${t.bg})`;
+  return `<div class="ptool ${cls}${open ? " open" : ""}" data-action="ptool" data-id="${esc(t.id)}" title="${esc(tip)}">
+      <span class="pico">${ico}</span><b class="pname">${esc(t.title)}</b><span class="plabel">${esc(t.label || "")}</span>${t.stat ? `<span class="pstat">${esc(t.stat)}</span>` : ""}<span class="ptime">${time}</span>
+    </div>${open ? toolDetail(t, m) : ""}`;
+}
+function toolDetail(t, m) {
+  const d = m.details[t.id];
+  if (!d) return `<div class="pdetail"><div class="empty">${T("Loading…", "加载中…")}</div></div>`;
+  if (d.err) return `<div class="pdetail"><div class="empty">${esc(d.err)}</div></div>`;
+  const LIMIT = 4000;
+  const part = (label, text, total, which) => {
+    if (!text) return "";
+    const full = m.fullTools.has(`${t.id}|${which}`);
+    const shown = full ? text : text.slice(0, LIMIT);
+    const cut = (total || text.length) - shown.length;
+    const diff = which === "out" && ["Edit", "MultiEdit", "Write"].includes(d.name) && !d.error;
+    const body = diff ? shown.split("\n").map((ln) => `<span class="${ln.startsWith("+") ? "dadd" : ln.startsWith("-") ? "drem" : ln.startsWith("@@") ? "dhunk" : ""}">${esc(ln)}</span>`).join("\n") : esc(shown);
+    return `<div class="pdlabel">${label}
+        <button class="btn small ghost" data-action="copy-tool" data-id="${esc(t.id)}" data-which="${which}">${T("Copy", "复制")}</button>
+        ${cut > 0 && !full ? `<button class="btn small ghost" data-action="tool-full" data-id="${esc(t.id)}" data-which="${which}">${T("Show all", "全部显示")}</button>` : ""}</div>
+      <pre class="pdpre">${body}${cut > 0 ? `<span class="pdcut">\n… ${T(`${cut.toLocaleString()} more characters`, `还有 ${cut.toLocaleString()} 个字符`)}${full ? "" : T(" — Show all or Copy for the rest", "——全部显示或复制可看完整内容")}</span>` : ""}</pre>`;
+  };
+  return `<div class="pdetail">${part(T("Input", "输入"), d.input, d.inputChars, "in")}${part(T("Output", "输出"), d.output, d.outputChars, "out")
+    || (d.done ? "" : `<div class="pdlabel">${T("No output yet", "还没有输出")}</div>`)}</div>`;
+}
+function toolGroup(g, m, run) {
+  const n = g.tools.length;
+  if (n === 1) return toolRow(g.tools[0], m, run);
+  const key = g.tools[0].id;
+  const open = m.openGroups.has(key);
+  // Folded: the newest call, plus any still going (the rest of the run is one line).
+  const shown = open ? g.tools : g.tools.filter((t, i) => i === n - 1 || toolActive(t, run));
+  const tally = {};
+  for (const t of g.tools) tally[t.title] = (tally[t.title] || 0) + 1;
+  const kinds = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, c]) => (c > 1 ? `${esc(k)} ×${c}` : esc(k))).join(" · ");
+  const failed = g.tools.filter((t) => t.status === "error").length;
+  const hidden = n - shown.length;
+  const label = open ? T(`${n} steps`, `${n} 步`) : T(`${hidden} earlier step${hidden === 1 ? "" : "s"}`, `前面还有 ${hidden} 步`);
+  return `<div class="pgroup" data-action="pgroup" data-key="${esc(key)}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${label} · ${kinds}${failed ? ` · <span class="bad">${T(`${failed} failed`, `${failed} 个失败`)}</span>` : ""}</div>`
+    + shown.map((t) => toolRow(t, m, run)).join("");
+}
+// The line under the title: what it is doing now, how long this turn has run, its tokens.
+function peekStatus(m, s, run) {
+  if (m.msgs === null) return "";
+  const turn = m.turn;
+  let lead, cls;
+  if (run.state === "busy") {
+    const c = run.current;
+    cls = "busy";
+    lead = c ? `${T("Running", "正在运行")} <b>${esc(c.title)}</b> <span class="plabel">${esc(c.label || "")}</span>` : T("Thinking…", "思考中…");
+  } else if (run.state === "waiting") {
+    cls = "wait";
+    lead = s.waitingOn ? `${T("Waiting for your OK:", "等你批准：")} <span class="plabel">${esc(s.waitingOn)}</span>` : T("Waiting for your answer in the terminal", "在终端里等你回答");
+  } else if (m.live) {
+    cls = "idle"; lead = T("Idle — its turn is over", "空闲——这一轮已结束");
+  } else {
+    cls = "ended"; lead = m.starting ? T("Starting…", "启动中…") : T("Not running", "没在运行");
+  }
+  const bits = [];
+  if (turn) {
+    if (run.turnOpen && !turn.done) bits.push(`<span title="${T("This turn so far", "这一轮已用时间")}">⏱ <span data-since="${esc(turn.start)}">${fmtDur(secsSince(turn.start))}</span></span>`);
+    else bits.push(T(`last turn ${turn.ms ? fmtDur(turn.ms / 1000) : ""}`, `上一轮 ${turn.ms ? fmtDur(turn.ms / 1000) : ""}`).trim());
+    bits.push(`<span title="${T("Tokens Claude wrote this turn (thinking included)", "这一轮 Claude 输出的 token（含思考）")}">↓ ${fmtTok(turn.tokens)} tokens</span>`);
+    if (turn.context) bits.push(`<span title="${T("Context size at its latest reply", "最近一次回复时的上下文大小")}">${T("context", "上下文")} ${fmtTok(turn.context)}</span>`);
+  }
+  return `<div class="pstatus ${cls}"><span class="pdot"></span><span class="plead">${lead}</span><span style="flex:1"></span><span class="pbits">${bits.join(" · ")}</span></div>`;
+}
+// Claude's own todo list (TodoWrite / TaskCreate), as it last left it.
+function peekTodos(m) {
+  const td = m.todos;
+  if (!td || !td.length) return "";
+  const done = td.filter((t) => t.status === "completed").length;
+  const cur = td.find((t) => t.status === "in_progress");
+  const now = cur ? ` · ${esc(cur.active || cur.text)}` : done === td.length ? T(" · all done", " · 全部完成") : "";
+  const mark = { completed: "☑", in_progress: "◐" };
+  return `<div class="ptodo">
+    <div class="ptodo-head" data-action="ptodo"><span class="pcaret">${m.todoOpen ? "▾" : "▸"}</span> ${T("Claude's todos", "Claude 的待办")} ${done}/${td.length}${now}</div>
+    ${m.todoOpen ? `<div class="ptodo-list">${td.map((t) => `<div class="ptodo-item ${esc(t.status)}"><span>${mark[t.status] || "☐"}</span> ${esc(t.text)}</div>`).join("")}</div>` : ""}
+  </div>`;
+}
+async function loadToolDetail(m, id) {
+  try { m.details[id] = await apiJSON("peek-tool", { session: m.sid, id }); } catch (e) { m.details[id] = { err: String(e.message || e) }; }
+  m.details[id]._st = ((m.items || []).find((x) => x.id === id) || {}).status;
+  if (ui.modal === m) drawPeek(false);
+}
+// Running times tick between refreshes without rebuilding the window.
+setInterval(() => {
+  if (!ui.modal || ui.modal.type !== "peek") return;
+  document.querySelectorAll("#modal [data-since]").forEach((el) => { el.textContent = fmtDur(secsSince(el.dataset.since)); });
+}, 1000);
+
 document.addEventListener("mousedown", (ev) => {
   // Backdrop only: a drag that starts inside the panel (selecting text) must not close it.
   if (ui.modal && ev.target === $("#modal")) closePeek();
@@ -2458,6 +2616,32 @@ document.addEventListener("click", async (ev) => {
     case "copy-msg": {
       const m = ui.modal && ui.modal.msgs[Number(d.i)];
       if (m) await copyText(m.text, T("Message copied", "已复制消息"));
+      return;
+    }
+    case "ptool": {
+      const m = ui.modal;
+      if (!m || String(window.getSelection() || "").trim()) return;   // ended a text selection
+      if (m.openTools.has(d.id)) { m.openTools.delete(d.id); return drawPeek(false); }
+      m.openTools.add(d.id);
+      drawPeek(false);
+      if (!m.details[d.id] || m.details[d.id].err) loadToolDetail(m, d.id);
+      return;
+    }
+    case "pgroup": {
+      const m = ui.modal;
+      if (!m || String(window.getSelection() || "").trim()) return;
+      m.openGroups.has(d.key) ? m.openGroups.delete(d.key) : m.openGroups.add(d.key);
+      return drawPeek(false);
+    }
+    case "ptodo":
+      if (ui.modal) { ui.modal.todoOpen = !ui.modal.todoOpen; drawPeek(false); }
+      return;
+    case "tool-full":
+      if (ui.modal) { ui.modal.fullTools.add(`${d.id}|${d.which}`); drawPeek(false); }
+      return;
+    case "copy-tool": {
+      const t = ui.modal && ui.modal.details[d.id];
+      if (t) await copyText(d.which === "in" ? t.input : t.output, d.which === "in" ? T("Input copied", "已复制输入") : T("Output copied", "已复制输出"));
       return;
     }
     case "copy-all":
