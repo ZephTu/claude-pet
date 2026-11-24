@@ -84,13 +84,33 @@ leaves your cards alone.
 ## Start from the sessions you already have
 
 ```bash
-hq scan                                   # read-only: suggested projects + recent sessions
-hq scan --apply-projects --only api,web   # create the ones you want
+hq scan                                   # read-only: recent sessions, grouped by repository
 ```
 
-Then run `/hq-onboard` in any Claude Code session: Claude reads your recent sessions, drafts task
-cards per project, shows them and asks before creating anything, and binds live sessions to their
-tasks. The board offers the same on an empty board and under Projects & duties → Suggest from sessions.
+Then run `/hq-onboard` in any Claude Code session (an empty board offers to copy it). Claude reads
+your recent sessions, drafts a task per piece of work and groups the tasks into lines of work —
+existing projects, or new duties and goals, which are not the same as repositories — shows you
+everything and creates nothing until you confirm. Then it writes the whole plan as one JSON file
+and runs `hq import`:
+
+```bash
+hq import plan.json --dry-run   # check the whole plan, print what it would create
+hq import plan.json             # create it all: refused whole, problems listed, if any part is wrong
+```
+
+```json
+{"projects": [{"name": "perf", "kind": "duty", "title": "Performance testing", "goal": "…", "paths": ["/abs/dir"]},
+              {"name": "perf-427", "kind": "goal", "title": "Rebaseline 4.2.7", "parent": "perf", "due": "2026-12-31"}],
+ "tasks": [{"title": "Rebaseline LDBC", "project": "perf-427", "status": "waiting-on-me", "next": "…",
+            "state": ["…"], "todos": ["@me …"], "refs": ["PR #12 https://…"], "workdirs": ["/abs/dir"],
+            "sessions": ["<session id or 8+ char prefix>"], "confidence": "medium"}]}
+```
+
+`projects` holds only new ones (also `done_when`, `brief`); a task names an existing project
+directly (also `goal`, `log`). Live sessions are bound to their tasks, ended ones recorded on the
+cards; a session already on a task, a taken name or an open card with the same title is refused.
+`hq scan --apply-projects [--only a,b]` still makes one project per repository, without a kind —
+kept for scripts; onboarding doesn't use it.
 
 ## Daily use
 
@@ -381,7 +401,7 @@ task that has no project by its workdirs.
 On the board all of this is on Projects & duties: ＋ New project / ＋ New duty (with an optional
 default directory), drag a card to reorder, and on a project's page rename it (Details → Name),
 add or remove its default directories and delete it (its tasks move to another project or none
-first); the list has Assign by directory (`auto`) and Suggest from sessions (`hq scan`).
+first); the list has Assign by directory (`auto`).
 
 What the project *is* lives in `<root>/projects/<name>/PROJECT.md` (`hq project add` writes one
 from `templates/PROJECT.md`; projects without one still work):

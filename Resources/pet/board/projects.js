@@ -148,11 +148,9 @@ function projList() {
   const sec = (icon, kind, title, sub, n) => `<div class="sec-h k-${kind}">${icon ? `<i class="ki ${kind}">${icon}</i>` : ""}${title}<span class="c">${n}</span><span class="sub">${sub}</span></div>`;
   let html = `<div class="vhead"><h1>${T("Projects & duties", "项目与职责")}</h1>
       <span class="meta">${T(`${goals.length} projects · ${duties.length} duties`, `${goals.length} 个项目 · ${duties.length} 个职责`)}</span><span class="spacer"></span>
-      <button class="btn small ghost" data-action="scan" title="${T("Find the repositories and directories your Claude Code sessions worked in, and pick which become projects", "找出你的 Claude Code session 干过活的仓库和目录，挑出哪些成为项目")}">${T("Suggest from sessions", "从 session 推荐")}</button>
       <button class="btn small" data-action="p-create" data-k="goal">${T("＋ New project", "＋ 新项目")}</button>
       <button class="btn small" data-action="p-create" data-k="duty">${T("＋ New duty", "＋ 新职责")}</button></div>`;
-  html += renderScan();
-  if (!listed().length && !ui.scan) html += renderOnboarding();
+  if (!listed().length) html += renderOnboarding();
   if (f) html += taskHits();
   // While filtering, a section shows only when something in it matches.
   if (!f || goals.length) html += sec("◆", "goal", T("Projects", "项目"), T("have an end — a goal, done-when, tasks under them", "有终点——目标、完成标准、下面挂任务"), goals.length) +

@@ -142,6 +142,48 @@ printf '%s\n' "{\"type\":\"user\",\"cwd\":\"$T/repo-g\",\"message\":{\"content\"
 "$HQ" scan --json | python3 -c 'import json,sys; d=json.load(sys.stdin); p=[x for x in d["projects"] if x["name"]=="repo-g"][0]; assert p["count"]==1 and not p["existing"]; s=[x for x in d["sessions"] if x["sessionId"].startswith("abcdef12")][0]; assert s["title"]=="flaky test" and s["first"]=="fix the flaky test"' && ok "scan proposes a project per repo with its sessions"
 "$HQ" scan --apply-projects --only repo-g >/dev/null && "$HQ" project list | grep -q "^repo-g" && ok "scan --apply-projects creates the chosen project"
 "$HQ" scan --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert [x for x in d["projects"] if x["name"]=="repo-g"][0]["existing"]=="repo-g"' && ok "rescan marks it existing"
+# hq import: the plan /hq-onboard writes — duties and goals with PROJECT.md, task cards, sessions
+IP="$T/import"; mkdir -p "$IP/repo" "$HOME/.claude/projects/-x-imp" "$HOME/.claude/pet/sessions"
+touch "$HOME/.claude/projects/-x-imp/11112222-aaaa-bbbb-cccc-000000000001.jsonl" "$HOME/.claude/projects/-x-imp/33334444-aaaa-bbbb-cccc-000000000002.jsonl"
+echo "{\"pid\": $$, \"sessionId\": \"11112222-aaaa-bbbb-cccc-000000000001\", \"cwd\": \"$IP/repo\"}" > "$HOME/.claude/pet/sessions/11112222-aaaa-bbbb-cccc-000000000001.json"
+cat > "$IP/plan.json" <<EOF
+{"projects": [
+  {"name": "imp-goal", "kind": "goal", "title": "Rebaseline", "parent": "imp-duty", "due": "2030-01-31", "goal": "New baseline numbers"},
+  {"name": "imp-duty", "kind": "duty", "title": "Perf", "goal": "Benchmarks and regressions", "brief": "Run perf on the lab box.", "paths": ["$IP/repo"]}],
+ "tasks": [
+  {"title": "Imp rebaseline LDBC", "project": "imp-goal", "status": "waiting-on-me", "next": "Review the diff",
+   "state": ["Numbers collected"], "todos": ["@me review the diff"], "refs": ["PR #3 https://github.com/o/r/pull/3"],
+   "sessions": ["11112222"], "confidence": "medium", "workdirs": ["$IP/repo"]},
+  {"title": "Imp old fix", "project": "imp-duty", "status": "done", "sessions": ["33334444-aaaa-bbbb-cccc-000000000002"]}]}
+EOF
+n_before="$(ls "$T/root/tasks" | wc -l)"
+"$HQ" import "$IP/plan.json" --dry-run | grep -q "imp-duty .*duty" && [ "$(ls "$T/root/tasks" | wc -l)" = "$n_before" ] \
+  && ! "$HQ" project list | grep -q "^imp-" && ok "import --dry-run previews and writes nothing" || fail "import dry run"
+python3 - "$IP/plan.json" "$IP/bad.json" <<'PY2'
+import json, sys
+p = json.load(open(sys.argv[1]))
+p["projects"][0]["kind"] = "epic"
+p["tasks"][1]["project"] = "nope"
+p["tasks"][1]["sessions"] = ["99999999"]
+json.dump(p, open(sys.argv[2], "w"))
+PY2
+rc=0; out="$("$HQ" import "$IP/bad.json")" || rc=$?
+[ "$rc" = 1 ] && echo "$out" | grep -q "kind is goal" && echo "$out" | grep -q "no project 'nope'" && echo "$out" | grep -q "99999999.*not a session" \
+  && [ "$(ls "$T/root/tasks" | wc -l)" = "$n_before" ] && ! "$HQ" project list | grep -q "^imp-" && ok "import refuses a bad plan whole, naming every problem" || fail "import bad plan: $out"
+"$HQ" import "$IP/plan.json" >/dev/null \
+  && "$HQ" project list | grep -q "^imp-duty .*duty · active" && "$HQ" project list | grep -q "^imp-goal .*goal · active · due 2030-01-31" \
+  && grep -q "^parent: imp-duty" "$T/root/projects/imp-goal/PROJECT.md" && grep -q "Run perf on the lab box." "$T/root/projects/imp-duty/PROJECT.md" \
+  && grep -q "^## Healthy when" "$T/root/projects/imp-duty/PROJECT.md" && ok "import makes duties and goals with PROJECT.md (goal under its duty)" || fail "import projects"
+C1="$(ls -d "$T"/root/tasks/*imp-rebaseline-ldbc)/TASK.md"; C2="$(ls -d "$T"/root/tasks/*imp-old-fix)/TASK.md"
+grep -q "^status: waiting-on-me" "$C1" && grep -q '^next: "Review the diff"' "$C1" && grep -q "^Numbers collected" "$C1" \
+  && grep -q -- "- \[ \] @me review the diff" "$C1" && grep -q "pull/3" "$C1" && grep -q "confidence medium" "$C1" \
+  && grep -q "^status: done" "$C2" && ok "import writes each card's status, next, state, todos, links and an onboarding log line" || fail "import cards"
+[ "$("$HQ" whoami --session 11112222-aaaa-bbbb-cccc-000000000001)" = "$(sed -n 's/^id: //p' "$C1")" ] && grep -q '^sessions: \["33334444"\]' "$C2" \
+  && ok "import binds live sessions and records ended ones on the card" || fail "import sessions"
+rc=0; out="$("$HQ" import "$IP/plan.json")" || rc=$?
+[ "$rc" = 1 ] && echo "$out" | grep -q "already exists" && echo "$out" | grep -q "33334444 is already on" && ok "importing the same plan again is refused" || fail "import rerun: $out"
+rm "$HOME/.claude/pet/sessions/11112222-aaaa-bbbb-cccc-000000000001.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null || true
+rm -r "$HOME/.claude/projects/-x-imp"
 
 # PROJECT.md: a project is a goal or a duty, with a brief every session on its tasks is given.
 PF="$T/root/projects/goalp/PROJECT.md"

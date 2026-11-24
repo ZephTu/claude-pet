@@ -13,6 +13,7 @@ import contextlib
 import datetime as dt
 import fcntl
 import hashlib
+import io
 import json
 import os
 import re
@@ -6122,10 +6123,10 @@ def live_sessions():
 
 
 # ---------------------------------------------------------------- onboarding scan
-# Reads the Claude Code transcripts already on this machine and proposes projects (one per git
-# repository, or per directory outside a repository) with the sessions that worked in them.
-# Deterministic and read-only unless --apply-projects; turning sessions into task cards needs
-# judgment, which is what the /hq-onboard command (Claude) does with this output.
+# Reads the Claude Code transcripts already on this machine and lists the sessions, grouped by git
+# repository (or directory outside one). Deterministic and read-only unless --apply-projects (one
+# kind-less project per repository: kept for scripts). Turning sessions into task cards and lines of
+# work needs judgment: /hq-onboard (Claude) does that with this output and writes it with `hq import`.
 SCAN_SKIP = re.compile(r"-private-|-var-folders-|^-tmp-|-T-tgkb-|scratchpad")
 
 
@@ -6248,8 +6249,300 @@ def cmd_scan(args):
         live = "live " if r["live"] else "     "
         print(f"  {r['sessionId'][:8]} {live}{r['last'][:16]}  {os.path.basename(r.get('root') or r['cwd']):<20} "
               f"{(r['title'] or r['first'] or '')[:60]}")
-    print("\nCreate the new projects: hq scan --apply-projects [--only name,name]"
-          "\nTurn sessions into task cards: run /hq-onboard in Claude Code.")
+    print("\nThese are repositories, not projects: one often holds several lines of work."
+          "\nTurn the sessions into duties, projects and task cards: run /hq-onboard in Claude Code.")
+
+
+# ---------------------------------------------------------------- onboarding import
+# /hq-onboard ends in one plan: the projects (goals and duties) and task cards Claude drafted from
+# the user's sessions and the user confirmed. `hq import` checks the whole plan before writing
+# anything — one call instead of a new/set/addtodo/ref/log/bind per task, each a model round trip
+# over the whole conversation — and --dry-run shows the user what it would create.
+IMPORT_PROJECT_KEYS = ("name", "kind", "title", "goal", "done_when", "brief", "parent", "due", "paths")
+IMPORT_TASK_KEYS = ("title", "project", "status", "next", "state", "goal", "todos", "refs", "workdirs",
+                    "sessions", "confidence", "log")
+
+
+def checked(fn, *a):
+    """fn(*a) → (result, None), or (None, why) where fn would have died."""
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            return fn(*a), None
+    except SystemExit:
+        return None, re.sub(r"^hq: ", "", err.getvalue().strip()) or "invalid"
+
+
+def flat_text(v):
+    """One line, the whole of it (one_line cuts it short)."""
+    return " ".join(str(v).split())
+
+
+def transcript_ids():
+    base = os.path.expanduser("~/.claude/projects")
+    out = set()
+    for slug in os.listdir(base) if os.path.isdir(base) else []:
+        d = os.path.join(base, slug)
+        if os.path.isdir(d):
+            out.update(n[:-6] for n in os.listdir(d) if n.endswith(".jsonl"))
+    return out
+
+
+def import_check(plan):
+    """(problems, projects, tasks): the plan's projects and tasks normalized, and every reason it
+    can't be applied as it stands. Writes nothing."""
+    problems = []
+    if not isinstance(plan, dict):
+        return ["the plan is a JSON object: {\"projects\": [...], \"tasks\": [...]}"], [], []
+    extra = set(plan) - {"projects", "tasks"}
+    if extra:
+        problems.append(f"unknown top-level key(s): {', '.join(sorted(extra))} (a plan has projects and tasks)")
+    listed = [x["name"] for x in load_projects()]
+    used = {(parse_card(p).get("project") or "") for p in card_paths()}
+    projects, tasks, kinds = [], [], {}
+
+    def strings(where, item, key):
+        v = item.get(key)
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            problems.append(f"{where}: `{key}` is a list of strings")
+            return []
+        return [flat_text(x) for x in v if x.strip()]
+
+    def dirs(where, raw):
+        out = []
+        for d in raw:
+            n = os.path.normpath(os.path.expanduser(d))
+            if not os.path.isabs(n) or not os.path.isdir(n):
+                problems.append(f"{where}: {d!r} is not an existing absolute path")
+            elif not ok_workdir(n):
+                problems.append(f"{where}: {d!r} — /, the home folder and the HQ root are never a project's or task's directory")
+            else:
+                out.append(n)
+        return list(dict.fromkeys(out))
+
+    raw_projects = plan.get("projects") or []
+    if not isinstance(raw_projects, list):
+        problems.append("`projects` is a list")
+        raw_projects = []
+    for i, pr in enumerate(raw_projects):
+        where = f"project #{i + 1}"
+        if not isinstance(pr, dict):
+            problems.append(f"{where} is not an object")
+            continue
+        where = f"project {pr.get('name') or '#' + str(i + 1)!r}"
+        bad = set(pr) - set(IMPORT_PROJECT_KEYS)
+        if bad:
+            problems.append(f"{where}: unknown key(s) {', '.join(sorted(bad))} (keys: {', '.join(IMPORT_PROJECT_KEYS)})")
+        name, why = checked(check_project_name, str(pr.get("name") or ""))
+        if why:
+            problems.append(f"{where}: {why}")
+            continue
+        if name in listed:
+            problems.append(f"{where} already exists — leave it out of `projects` and use it by name in tasks")
+        elif same_name_project(name, listed + list(used)):
+            problems.append(f"{where}: {same_name_project(name, listed + list(used))!r} already exists — "
+                            "names that differ only in case would share a folder")
+        elif name in kinds or same_name_project(name, list(kinds)):
+            problems.append(f"{where} is in the plan twice")
+        kind = pr.get("kind")
+        if kind not in PROJECT_KINDS:
+            problems.append(f"{where}: kind is goal (has an end) or duty (a standing responsibility), got {kind!r}")
+        due = flat_text(pr.get("due") or "")
+        if due:
+            try:
+                dt.date.fromisoformat(due)
+            except ValueError:
+                problems.append(f"{where}: due is a date, YYYY-MM-DD (got {due!r})")
+            if kind == "duty":
+                problems.append(f"{where}: a duty has no deadline")
+        text = {k: str(pr.get(k) or "").strip() for k in ("goal", "done_when", "brief")}
+        for k, v in text.items():
+            if v and is_placeholder(v):
+                problems.append(f"{where}: `{k}` is a placeholder, not a value")
+        kinds[name] = kind
+        projects.append({"name": name, "kind": kind, "title": flat_text(pr.get("title") or "") or name,
+                         "parent": flat_text(pr.get("parent") or ""), "due": due,
+                         "paths": dirs(where, strings(where, pr, "paths")), **text})
+    for pr in projects:
+        parent = pr["parent"]
+        if not parent:
+            continue
+        where = f"project {pr['name']!r}"
+        if pr["kind"] != "goal":
+            problems.append(f"{where}: only a goal sits under a duty")
+        elif parent == pr["name"]:
+            problems.append(f"{where} can't sit under itself")
+        elif kinds.get(parent, (load_project(parent) or {}).get("kind") if parent in listed else None) != "duty":
+            problems.append(f"{where}: parent must be a duty, existing or in the plan (no duty {parent!r})")
+
+    raw_tasks = plan.get("tasks") or []
+    if not isinstance(raw_tasks, list):
+        problems.append("`tasks` is a list")
+        raw_tasks = []
+    known_ids = transcript_ids() | {n[:-5] for n in (os.listdir(PET_SESSIONS) if os.path.isdir(PET_SESSIONS) else [])
+                                    if n.endswith(".json")}
+    state = load_state()
+    me = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    claimed = {}
+    open_titles, on_cards = {}, {}
+    for p in card_paths():
+        m = parse_card(p)
+        for x in m.get("sessions") if isinstance(m.get("sessions"), list) else []:
+            on_cards.setdefault(str(x)[:8], m.get("id"))
+        if m.get("status") not in ("done", "abandoned"):
+            open_titles.setdefault((m.get("project") or "", flat_text(m.get("title") or "").casefold()), m.get("id"))
+    for i, t in enumerate(raw_tasks):
+        where = f"task #{i + 1}"
+        if not isinstance(t, dict):
+            problems.append(f"{where} is not an object")
+            continue
+        title = flat_text(t.get("title") or "")
+        if title:
+            where = f"task {title!r}"
+        else:
+            problems.append(f"{where} has no title")
+        bad = set(t) - set(IMPORT_TASK_KEYS)
+        if bad:
+            problems.append(f"{where}: unknown key(s) {', '.join(sorted(bad))} (keys: {', '.join(IMPORT_TASK_KEYS)})")
+        project = flat_text(t.get("project") or "")
+        if project and project not in listed and project not in kinds:
+            problems.append(f"{where}: no project {project!r} — existing ({', '.join(listed) or 'none'}) or in the plan's projects")
+        status = flat_text(t.get("status") or "active")
+        if status not in STATUSES:
+            problems.append(f"{where}: status must be one of {', '.join(STATUSES)} (got {status!r})")
+        dup = open_titles.get((project, title.casefold()))
+        if title and dup:
+            problems.append(f"{where}: {dup} already has this title in {project or 'no project'} — leave it out, or say what is new")
+        state_lines = strings(where, t, "state")
+        if any(x.startswith("#") for x in state_lines):
+            problems.append(f"{where}: a state line can't be a heading")
+        sessions = []
+        for sid in strings(where, t, "sessions"):
+            hits = [x for x in known_ids if x == sid] or ([x for x in known_ids if x.startswith(sid)] if len(sid) >= 8 else [])
+            if len(hits) != 1:
+                problems.append(f"{where}: session {sid!r} " + ("matches several — give more of it" if hits else "is not a session on this machine"))
+                continue
+            full = hits[0]
+            bound = state.get(full, {}).get("task") or on_cards.get(full[:8])
+            if full == me:
+                problems.append(f"{where}: {full[:8]} is this session — it isn't one of the sessions being imported")
+            elif bound:
+                problems.append(f"{where}: session {full[:8]} is already on {bound}")
+            elif full in claimed:
+                problems.append(f"{where}: session {full[:8]} is also on task {claimed[full]!r} — one task per session")
+            else:
+                claimed[full] = title
+                pet = pet_session(full) or {}
+                sessions.append({"id": full, "live": bool(pet) and pid_alive(pet.get("pid"))})
+        values = {"next": flat_text(t.get("next") or ""), "confidence": flat_text(t.get("confidence") or ""),
+                  "goal": str(t.get("goal") or "").strip()}
+        lists = {k: strings(where, t, k) for k in ("todos", "refs", "log")}
+        for v in [title, values["next"], values["goal"]] + state_lines + sum(lists.values(), []):
+            if v and is_placeholder(v):
+                problems.append(f"{where}: {v!r} is a placeholder, not a value")
+        tasks.append({"title": title, "project": project, "status": status, "state": state_lines,
+                      "workdirs": dirs(where, strings(where, t, "workdirs")), "sessions": sessions,
+                      **values, **lists})
+    if not projects and not tasks and not problems:
+        problems.append("the plan is empty")
+    return problems, projects, tasks
+
+
+def import_apply(projects, tasks):
+    """Write a checked plan: duties first (a goal can sit under one made here), then the tasks."""
+    made_projects, made_tasks = [], []
+    for pr in sorted(projects, key=lambda x: x["kind"] != "duty"):
+        save_projects(load_projects() + [{"name": pr["name"], "paths": pr["paths"]}])
+        fields = {k: pr[k] for k in ("kind", "title", "parent", "due") if pr[k]}
+        path = ensure_project_file(pr["name"], fields)
+        for k in ("goal", "done_when", "brief"):
+            if pr[k]:
+                write_project_section(path, k, pr[k], pr["kind"])
+        append_log(path, "Created by /hq-onboard (hq import) from the user's Claude Code sessions", touch=False)
+        made_projects.append(pr["name"])
+    for t in tasks:
+        tid, card = new_card(t["title"], project=t["project"] or None, workdirs=t["workdirs"], focus=False)
+        if t["goal"]:
+            set_card_goal(card, t["goal"])
+        ids = ", ".join(s["id"][:8] for s in t["sessions"]) or "none"
+        note = f"Created by /hq-onboard from sessions {ids}" + (f" (confidence {t['confidence']})" if t["confidence"] else "") \
+            + "; the status was inferred from the conversations — check it."
+        entries = [("status", t["status"])] + [("next", t["next"])] * bool(t["next"]) \
+            + [("state", x) for x in t["state"]] + [("todo", x) for x in t["todos"]] \
+            + [("ref", x) for x in t["refs"]] + [("log", note)] + [("log", x) for x in t["log"]]
+        with card_lock(card):
+            left = _apply_update(card, entries, "import")
+        for s in t["sessions"]:
+            if s["live"]:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cmd_bind(argparse.Namespace(session=s["id"], task=tid))
+        ended = [s["id"][:8] for s in t["sessions"] if not s["live"]]
+        if ended:
+            have = parse_card(card).get("sessions")
+            have = have if isinstance(have, list) else []
+            set_fields(card, {"sessions": have + [x for x in ended if x not in have]})
+        made_tasks.append({"id": tid, "title": t["title"], "project": t["project"], "status": t["status"],
+                           "problems": left})
+    return made_projects, made_tasks
+
+
+def import_preview(projects, tasks):
+    out = []
+    if projects:
+        out.append(f"Projects to create ({len(projects)}):")
+        for pr in sorted(projects, key=lambda x: x["kind"] != "duty"):
+            bits = [pr["kind"], f'"{pr["title"]}"'] + [f"under {pr['parent']}"] * bool(pr["parent"]) \
+                + [f"due {pr['due']}"] * bool(pr["due"]) + [f"dirs {', '.join(pr['paths'])}"] * bool(pr["paths"])
+            out.append(f"  + {pr['name']:<20} " + " · ".join(bits))
+    if tasks:
+        out.append(f"Tasks to create ({len(tasks)}):")
+        for name in dict.fromkeys(t["project"] for t in tasks):
+            out.append(f"  {name or '(no project)'}")
+            for t in (x for x in tasks if x["project"] == name):
+                ses = ", ".join(s["id"][:8] + (" live" if s["live"] else "") for s in t["sessions"]) or "no sessions"
+                meta = [f"{len(t['todos'])} todo(s)"] * bool(t["todos"]) + [f"{len(t['refs'])} link(s)"] * bool(t["refs"]) \
+                    + [ses] + [t["confidence"]] * bool(t["confidence"])
+                out.append(f"    {t['status']:<13} {t['title']}")
+                if t["next"]:
+                    out.append(f"    {'':<13} next: {t['next']}")
+                out.append(f"    {'':<13} " + " · ".join(meta))
+    return "\n".join(out)
+
+
+def cmd_import(args):
+    try:
+        raw = sys.stdin.read() if args.plan == "-" else open(os.path.expanduser(args.plan), encoding="utf-8").read()
+        plan = json.loads(raw)
+    except OSError as e:
+        die(f"can't read the plan: {e}")
+    except ValueError as e:
+        die(f"the plan is not valid JSON: {e}")
+    problems, projects, tasks = import_check(plan)
+    if problems or args.dry_run:
+        if args.json:
+            print(json.dumps({"ok": not problems, "dry_run": True, "problems": problems,
+                              "projects": projects, "tasks": tasks}, ensure_ascii=False, indent=1))
+        else:
+            if problems:
+                print("Nothing written — fix these and run it again:\n" + "\n".join(f"  - {p}" for p in problems)
+                      + ("\n" if projects or tasks else ""))
+            if projects or tasks:
+                print(import_preview(projects, tasks))
+        sys.exit(1 if problems else 0)
+    made_projects, made_tasks = import_apply(projects, tasks)
+    if args.json:
+        print(json.dumps({"ok": True, "projects": made_projects, "tasks": made_tasks}, ensure_ascii=False, indent=1))
+        return
+    if made_projects:
+        print(f"created {len(made_projects)} project(s): {', '.join(made_projects)}")
+    for t in made_tasks:
+        print(f"{t['id']}  {t['status']:<13} {t['project'] or '-':<16} {t['title']}")
+        for p in t["problems"]:
+            print(f"      ! {p}")
 
 
 def cmd_sessions(args):
@@ -8034,10 +8327,14 @@ def main():
     p = sub.add_parser("asks", help="list open asks"); p.add_argument("task", nargs="?")
     p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_asks)
-    p = sub.add_parser("scan", help="propose projects and list sessions from existing transcripts (onboarding)")
+    p = sub.add_parser("scan", help="recent sessions from existing transcripts, grouped by repository (onboarding)")
     p.add_argument("--days", type=int, default=60); p.add_argument("--json", action="store_true")
     p.add_argument("--apply-projects", action="store_true"); p.add_argument("--only")
     p.set_defaults(fn=cmd_scan)
+    p = sub.add_parser("import", help="create the projects and task cards of an onboarding plan (JSON; /hq-onboard writes it)")
+    p.add_argument("plan", help="the plan's file, or - for stdin")
+    p.add_argument("--dry-run", action="store_true", help="check it and show what it would create; write nothing")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_import)
     p = sub.add_parser("sessions", help="live Claude Code sessions (needs Claude Pet)")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_sessions)
     p = sub.add_parser("peek", help="recent messages of a live session"); p.add_argument("session")
