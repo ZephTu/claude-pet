@@ -93,6 +93,21 @@ hq/install.sh --root ~/claude-hq                  # 可选：任务看板；先�
 hq/install.sh --root ~/claude-hq --no-hooks       # 只装看板和命令行，不碰 settings.json
 ```
 
+### 让 Claude 帮你安装
+
+在任意目录打开 Claude Code，粘贴：
+
+> 从 https://github.com/ZephTu/claude-pet 安装 Claude Pet 和它的任务看板（按 README 里"让 Claude 帮你安装"一节做），然后用我已有的 session 把看板初始化好。
+
+**给执行安装的 Claude**——按下面的顺序做，写了"问"的地方要先问用户：
+
+1. **检查**：macOS 14+（`sw_vers -productVersion`）、Swift 工具链（`swift --version`；没有的话让用户运行 `xcode-select --install`，会弹系统对话框，装好后告诉你）、`python3`、`~/.claude` 存在。缺什么就停下来说清楚。
+2. **克隆** `main` 到用户愿意长期保留的目录（编译用的就是它，比如 `~/claude-pet`），只从这份代码安装——不切分支，不加 `--force`。
+3. **问**任务卡放在哪（建议 `~/claude-hq`）。先不加 `--yes` 运行 `hq/install.sh --root <那个目录>`：不在终端里时，它会列出要做的所有改动（`settings.json` 里的 hook、slash 命令、目录）然后停下。把这份清单给用户看，确认后再继续。用户不想要 HQ 的 hook 就加 `--no-hooks`。
+4. **安装**：先 `./scripts/install.sh` 装桌宠（编译、接上 hook——改 `settings.json` 前会先备份——并启动小猫），再 `hq/install.sh --root <目录> --yes` 装 HQ。
+5. **初始化**：读 `~/.claude/commands/hq-onboard.md` 并照着做（`/hq-onboard` 命令刚装上，当前 session 可能还不认识它）。它在创建任何东西之前都会先问用户。
+6. **收尾**时告诉用户：双击小猫打开看板（或右键 → Task Board…）；hook 只对从现在起新开的 session 生效，想被跟踪的 session 要重开；Claude Code 默认只保留约 30 天的对话记录（`cleanupPeriodDays`），更早的工作找不回来。
+
 **桌宠的安装脚本会改 `~/.claude/settings.json`**：追加十一个 hook，你原有的一个字节都不动；改之前先备份，原子写入、写完校验。HQ 再加三个（除非用 `--no-hooks`），只在绑定了任务的 session 里起作用。hook 只对**新开**的 session 生效。
 
 **`scripts/install.sh` 装的是它所在的那份代码**，所以它会先抓取 `origin/main`（20 秒没响应就放弃，用上次抓到的副本），再检查这份代码是否包含它的全部提交。如果不包含（比如某个修复合并之前就切出来的功能分支），它会列出缺的提交并停下；在交互式终端里运行时会先问你。加 `--force`（或设 `CLAUDE_PET_INSTALL_ANYWAY=1`）才会照装。否则装上去的小猫会悄悄少掉已经合并的修复。

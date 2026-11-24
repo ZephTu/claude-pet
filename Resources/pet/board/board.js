@@ -99,7 +99,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -2404,29 +2404,14 @@ function renderSessionSettings() {
   </div>`;
 }
 
-// ---- onboarding: suggest projects from the sessions already on this machine (hq scan)
-function renderScan() {
-  if (!ui.scan) return "";
-  if (ui.scan === "loading") return `<div class="empty">${T("Scanning your Claude Code sessions…", "正在扫描你的 Claude Code session…")}</div>`;
-  const fresh = ui.scan.projects.filter((p) => !p.existing);
-  if (!fresh.length) return `<div class="empty">${T("Every directory your sessions worked in already belongs to a project.", "你的 session 干过活的每个目录都已经属于某个项目了。")}</div>`;
-  return `<div class="res" style="margin-top:6px">
-    <div class="meta" style="margin-bottom:4px">${T(`${ui.scan.sessions.length} sessions in the last ${ui.scan.days} days. Pick the projects to create (skip personal or throwaway folders):`, `最近 ${ui.scan.days} 天有 ${ui.scan.sessions.length} 个 session。勾选要创建的项目（个人或临时的目录可以跳过）：`)}</div>
-    ${fresh.map((p) => `<label class="scan-i"><input type="checkbox" data-action="scan-pick" data-name="${esc(p.name)}" ${ui.scanPick.has(p.name) ? "checked" : ""}>
-      <b>${esc(p.name)}</b> <span class="meta">${T(`${p.count} session${p.count === 1 ? "" : "s"}`, `${p.count} 个 session`)} · ${ago(p.last)} · ${esc(p.path)}</span></label>`).join("")}
-    <div class="row" style="margin-top:6px"><button class="btn small primary" data-action="scan-apply" ${ui.scanPick.size ? "" : "disabled"}>${T(`Create ${ui.scanPick.size || ""} project${ui.scanPick.size === 1 ? "" : "s"}`, `创建 ${ui.scanPick.size || ""} 个项目`)}</button>
-      <button class="btn small ghost" data-action="scan-close">${T("Close", "关闭")}</button></div>
-  </div>`;
-}
+// ---- onboarding: an empty board points to /hq-onboard, which turns existing sessions into cards
 function renderOnboarding() {
   return `<div class="card onboard">
     <h4>${T("Start from the sessions you already have", "从已有的 session 开始")}</h4>
     <ol>
-      <li>${T(`<b>Projects.</b> Find the repositories and folders your Claude Code sessions worked in, and pick which become projects.`, `<b>项目。</b>找出你的 Claude Code session 干过活的仓库和目录，挑出哪些成为项目。`)}
-        <div class="row" style="margin-top:4px"><button class="btn small primary" data-action="scan-open">${T("Suggest projects", "推荐项目")}</button></div></li>
-      <li>${T(`<b>Tasks.</b> In any Claude Code session, run <code>/hq-onboard</code>. Claude reads your recent sessions, drafts task cards (status, next step, your todos, links), shows you the list and creates nothing until you confirm. Live sessions get bound to their tasks.`, `<b>任务。</b>在任意 Claude Code session 里运行 <code>/hq-onboard</code>。Claude 会读你最近的 session，起草任务卡（状态、下一步、你的待办、链接），列给你看，你确认之前不会创建任何东西。正在运行的 session 会绑定到对应的任务。`)}
-        <div class="row" style="margin-top:4px"><button class="btn small" data-action="copy-onboard">${T("Copy /hq-onboard", "复制 /hq-onboard")}</button></div></li>
-      <li>${T(`Adjust anything here afterwards — or start fresh with <b>+ New task</b>.`, `之后在这里随便改——或者直接用 <b>+ 新建任务</b> 从头开始。`)}</li>
+      <li>${T(`In any Claude Code session, run <code>/hq-onboard</code>. Claude reads your recent sessions, drafts the tasks and the lines of work they belong to — duties and projects, which aren't the same as folders — shows you everything and creates nothing until you confirm. Live sessions get bound to their tasks.`, `在任意 Claude Code session 里运行 <code>/hq-onboard</code>。Claude 会读你最近的 session，起草任务，并把任务归到职责和项目下（按在做什么归，不按目录），全部列给你看，你确认之前不会创建任何东西。正在运行的 session 会绑定到对应的任务。`)}
+        <div class="row" style="margin-top:4px"><button class="btn small primary" data-action="copy-onboard">${T("Copy /hq-onboard", "复制 /hq-onboard")}</button></div></li>
+      <li>${T(`Adjust anything here afterwards — or start fresh with <b>＋ New project</b> / <b>＋ New duty</b>.`, `之后在这里随便改——或者直接用 <b>＋ 新项目</b> / <b>＋ 新职责</b> 从头开始。`)}</li>
     </ol>
   </div>`;
 }
@@ -4606,20 +4591,6 @@ document.addEventListener("click", async (ev) => {
     }
     case "open-settings": ui.settings = true; return render();
     case "close-settings": closeSettings(); return;
-    // The first-run card's "Suggest projects": the list of Projects & duties, then the scan.
-    case "scan-open": if (ui.mode !== "projects" || ui.proj) goToProject(""); // fall through to scan
-    case "scan":
-      ui.scan = "loading"; ui.scanPick = new Set(); render();
-      try {
-        ui.scan = await apiJSON("scan");
-      } catch (e) { ui.scan = null; toast(String(e.message || e), true); }
-      return render();
-    case "scan-close": ui.scan = null; return render();
-    case "scan-apply": {
-      const names = [...ui.scanPick];
-      ui.scan = null;
-      return act("scan-apply", { names }, T(`Created ${names.length} project(s) and sorted tasks into them`, `已创建 ${names.length} 个项目，并把任务归了进去`));
-    }
     case "copy-onboard": return copyText("/hq-onboard", T("Copied — paste it into any Claude Code session", "已复制——粘贴到任意 Claude Code session 里"));
     case "new-in-project": return openCreate("task", d.p);   // projects.js
     case "clear-filter": ui.filter = $("#search").value = ""; return render();
@@ -4742,7 +4713,6 @@ document.addEventListener("change", (ev) => {
   if (el.tagName === "SELECT" && d.action) el.blur();  // render() holds off while a select has focus
   if (d.action === "push-group") { for (const id of d.ids.split(" ")) ui.drafts["push:" + id] = el.checked; saveDrafts(); return; }
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
-  if (d.action === "scan-pick") { el.checked ? ui.scanPick.add(d.name) : ui.scanPick.delete(d.name); return render(); }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
   if (d.action === "finish-stop-pref") { savePref("hq-finish-stop", el.value); return render(); }

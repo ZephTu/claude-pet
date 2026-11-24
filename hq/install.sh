@@ -165,10 +165,10 @@ echo ""
 echo "Done. New Claude Code sessions pick up the hooks."
 echo ""
 echo "Optional — start from the sessions you already have:"
-echo "  $HQ_HOME/bin/hq scan            see the projects and sessions it would suggest (read-only)"
+echo "  $HQ_HOME/bin/hq scan            see your recent sessions, grouped by repository (read-only)"
 if [ "$COMMANDS" = 1 ]; then
-echo "  /hq-onboard                    in any Claude Code session: Claude drafts projects and task cards"
-echo "                                 from those sessions, shows you the list and asks before creating"
+echo "  /hq-onboard                    in any Claude Code session: Claude drafts task cards and the duties"
+echo "                                 and projects they belong to, shows you and asks before creating"
 fi
 echo ""
 echo "Open the board: double-click the Claude Pet cat (or right-click → Task Board…)."

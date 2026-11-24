@@ -350,11 +350,6 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "log": return await hq(["log", str("task"), "--", str("message")])
         case "focus":
             return await hq(["focus", str("action")] + ((body["tasks"] as? [String]) ?? []) + ["--json"])
-        case "scan": return await hq(["scan", "--json"])
-        case "scan-apply":
-            let only = ((body["names"] as? [String]) ?? []).joined(separator: ",")
-            guard !only.isEmpty else { return (nil, L("nothing selected", "什么都没选")) }
-            return await hq(["scan", "--apply-projects", "--only=\(only)"])
         case "project":
             // `project [options] ACTION -- NAMES…`: after "--" a name or a section's text starting with
             // "-" can't read as an option (a Done when list is "- …" lines). Options go before the
