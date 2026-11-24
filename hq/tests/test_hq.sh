@@ -580,6 +580,25 @@ assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progr
 assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
 ' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
 
+# Claude Code's queue, from its queue-operation lines: enqueue (text), dequeue (the head, taken as
+# the next prompt), remove (text: taken in mid-turn or pulled back). Task notifications queue too
+# but are not shown.
+QSID=feedface-5555-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"go"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z","content":"first"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:02Z","content":"second"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:03Z","content":"third"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:04Z","content":"<task-notification><task-id>x</task-id></task-notification>"}' \
+  '{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:05Z"}' \
+  '{"type":"queue-operation","operation":"remove","timestamp":"2026-01-01T00:00:06Z","content":"third"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:07Z","content":[{"type":"text","text":"fourth"}]}' \
+  > "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+"$HQ" peek "$QSID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+assert [(x["text"],x["ts"]) for x in d["queued"]]==[("second","2026-01-01T00:00:02Z"),("fourth","2026-01-01T00:00:07Z")], d["queued"]
+' && ok "peek --meta: queued lists what waits in Claude Code's queue, oldest first" || fail "peek --meta queued"
+
 # Background calls that end without a tool-use id: TaskStop on a command, an agent's notification
 # naming only its agentId, one that was killed; an interrupted turn; odd input and a U+0085 result.
 CSID=feedface-5555-2222-3333-444455556666

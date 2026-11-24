@@ -2625,7 +2625,7 @@ function closePeek() {
 async function refreshPeek(first) {
   const m = ui.modal;
   if (!m) return;
-  let msgs, act = { items: null, turn: null, todos: null };
+  let msgs, act = { items: null, turn: null, todos: null, queued: null };
   let secChanged = false;
   if (m.secretary) {
     // Its state first: the session's id is handed out with the first message, and whether it is
@@ -2656,7 +2656,7 @@ async function refreshPeek(first) {
     if (!m.live) { if (!m.secretary) m.title = msgs.title || m.title; m.cwd = msgs.cwd || m.cwd;
                    m.project = m.project || (msgs.cwd || "").split("/").pop(); }
     m.found = msgs.found;
-    act = { items: msgs.items || null, turn: msgs.turn || null, todos: msgs.todos || null };
+    act = { items: msgs.items || null, turn: msgs.turn || null, todos: msgs.todos || null, queued: msgs.queued || null };
     msgs = msgs.messages || [];
   }
   // The session's state counts too: stopping on a permission prompt changes no transcript line,
@@ -2666,7 +2666,7 @@ async function refreshPeek(first) {
   // alone only redraws those lines, so the list you are reading or scrolling is left alone.
   const bodySig = JSON.stringify([msgs, act.items, s ? liveState(s) : null]);
   // (The secretary's window shows neither tokens nor todos: only the turn ending counts there.)
-  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, s ? s.waitingOn || "" : null]);
+  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, act.queued, s ? s.waitingOn || "" : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
@@ -2721,6 +2721,8 @@ function drawPeekLive() {
   if (!live || m.secretary) return false;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   live.innerHTML = peekStatus(m, s, peekRun(m, s)) + peekTodos(m);
+  const q = $("#modal .pqueue-slot");
+  if (q) q.innerHTML = peekQueue(m, s);
   $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
   return true;
 }
@@ -2788,6 +2790,7 @@ function drawPeek(toBottom) {
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
+    <div class="pqueue-slot">${peekQueue(m, s)}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
         placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
@@ -3380,6 +3383,17 @@ function peekTodos(m) {
   return `<div class="ptodo">
     <div class="ptodo-head" data-action="ptodo"><span class="pcaret">${m.todoOpen ? "▾" : "▸"}</span> ${T("Claude's todos", "Claude 的待办")} ${done}/${td.length}${now}</div>
     ${m.todoOpen ? `<div class="ptodo-list">${td.map((t) => `<div class="ptodo-item ${esc(t.status)}"><span>${mark[t.status] || "☐"}</span> ${esc(t.text)}</div>`).join("")}</div>` : ""}
+  </div>`;
+}
+// Messages waiting in Claude Code's queue (sent while it was busy, not taken in yet), oldest
+// first, just above the reply box: what it will read when this turn ends. Only while the session
+// is live and in a turn: a queue never outlives one.
+function peekQueue(m, s) {
+  const q = m.queued;
+  if (!m.live || !q || !q.length || (s.state !== "busy" && s.state !== "waiting")) return "";
+  return `<div class="pqueue">
+    <div class="pqueue-head">${T(`Queued · ${q.length} — it reads ${q.length === 1 ? "this" : "these"} when the turn ends`, `排队中 · ${q.length} 条——这一轮结束后它会读到`)}</div>
+    ${q.map((x) => `<div class="pqueue-item"><span class="pqueue-text">${esc(x.text)}</span><span class="pqueue-at" data-ago="${esc(x.ts || "")}">${ago(x.ts)}</span></div>`).join("")}
   </div>`;
 }
 const toolStatus = (m, id) => ((m.items || []).find((x) => x.id === id) || {}).status;
