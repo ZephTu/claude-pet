@@ -100,6 +100,20 @@ enum IdleTabTests {
         t.check("a session waiting on a prompt is not typed into",
                 BoardSend.refuses(state: .waiting) && !BoardSend.refuses(state: .busy)
                     && !BoardSend.refuses(state: .idle) && !BoardSend.refuses(state: nil))
+        t.check("Esc goes only to a session mid-turn",
+                BoardSend.mayInterrupt(state: .busy) && BoardSend.mayInterrupt(state: .waiting)
+                    && !BoardSend.mayInterrupt(state: .idle) && !BoardSend.mayInterrupt(state: nil))
+        t.check("…and not once Claude Code itself says the turn is over (a second Esc would open its rewind menu)",
+                !BoardSend.mayInterrupt(state: .busy, claudeStatus: "idle")
+                    && BoardSend.mayInterrupt(state: .busy, claudeStatus: "busy"))
+        let escScript = TerminalTarget.iTermEscapeScript(uuid: "ABCD-1234")
+        t.check("iTerm2's Esc is one ESC byte with no newline, to the session named",
+                escScript.contains("write text (character id 27) newline no") && escScript.contains("\"ABCD-1234\"")
+                    && !escScript.contains("character id 13"))
+        t.check("the escape is the ESC byte", BoardSend.escape.unicodeScalars.map(\.value) == [27])
+        t.check("/model alone opens a menu; with a name it doesn't",
+                BoardSend.opensMenu("/model") && BoardSend.opensMenu(" /Model ")
+                    && !BoardSend.opensMenu("/model opus") && !BoardSend.opensMenu("/compact"))
         let run = IdleTab.terminalRunScript(tty: "/dev/ttys002", line: "cd '/x' && claude", focus: false)
         t.check("running a line without focus does not activate Terminal",
                 run.contains("do script") && !run.contains("activate"))

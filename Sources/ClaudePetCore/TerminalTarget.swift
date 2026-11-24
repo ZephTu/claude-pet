@@ -171,6 +171,27 @@ public enum TerminalTarget {
         return String(sessionID[sessionID.index(after: colon)...])
     }
 
+    /// Presses Esc in the iTerm2 session whose id contains `uuid`: a lone ESC byte, with no
+    /// newline, which Claude Code reads as the Esc key — mid-turn, that interrupts the turn.
+    /// `uuid` must pass `isSafeITermUUID`.
+    public static func iTermEscapeScript(uuid: String) -> String {
+        """
+        tell application "iTerm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if (id of s as text) contains "\(uuid)" then
+                  tell s to write text (character id 27) newline no
+                  return "ok"
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        return "notfound"
+        """
+    }
+
     /// Types `text` into the iTerm2 session whose id contains `uuid` and then presses Return,
     /// as two writes a moment apart: in one write Claude Code takes the text and the Return as a
     /// single paste, and the Return becomes a newline in its input instead of submitting it.

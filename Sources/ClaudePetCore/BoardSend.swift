@@ -50,4 +50,27 @@ public enum BoardSend {
     public static func refuses(state: SessionActivity?) -> Bool {
         state == .waiting
     }
+
+    /// The Esc key, as the byte a terminal sends for it.
+    public static let escape = "\u{1B}"
+
+    /// May the board press Esc in this session's terminal? Only mid-turn: there Esc interrupts
+    /// the turn (on a prompt it declines it, as in the terminal). Between turns it would do
+    /// nothing useful, and a second one opens Claude Code's rewind menu, out of the board's sight.
+    /// `claudeStatus` is Claude Code's own status for the session (`ClaudeSessionStatus`), which
+    /// turns "idle" the moment a turn ends — an Esc included — while the pet's record stays
+    /// "busy" until it notices. Nil when it can't be read: the pet's state decides alone.
+    public static func mayInterrupt(state: SessionActivity?, claudeStatus: String? = nil) -> Bool {
+        (state == .busy || state == .waiting) && claudeStatus != "idle"
+    }
+
+    /// Slash commands that open a menu in the terminal when given no argument. Typed from the
+    /// board, the session would sit in that menu where the board can't see it, so the board
+    /// sends them only with an argument (`/model opus`, which switches without a menu).
+    public static let menuWithoutArgument: Set<String> = ["/model"]
+
+    /// Would typing this open a terminal menu the board can't answer?
+    public static func opensMenu(_ text: String) -> Bool {
+        menuWithoutArgument.contains(text.trimmingCharacters(in: .whitespaces).lowercased())
+    }
 }

@@ -72,6 +72,18 @@ const ON_PROMPT = () => T("It is waiting on a prompt in its terminal — answer 
   "它在终端里等你确认或回答——先跳到终端（↗）在那里处理，再给它发消息。");
 // Can the board type into this session right now?
 const canSendNow = (s) => canMessage(s) && !onPrompt(s);
+// Esc for a session mid-turn: pressed in its terminal, it interrupts the turn as it would there.
+// Only terminals that can take a lone key (Orca, iTerm2); Terminal.app always adds a Return.
+const INTERRUPTIBLE = { orca: true, iterm2: true };
+// After a press the pet still says busy until it notices the turn ended (about 10 s), so the
+// button stays away that long: a second Esc on a stopped session opens Claude Code's rewind menu.
+const ESC_HOLD_MS = 12_000;
+const escHeld = (sid) => Date.now() - ((ui.interrupted || {})[sid] || 0) < ESC_HOLD_MS;
+const canInterrupt = (s) => Boolean(s && !s.background && INTERRUPTIBLE[s.terminal && s.terminal.kind]
+  && liveState(s) === "busy" && !escHeld(s.sessionId));
+const escButton = (s) => canInterrupt(s)
+  ? `<button class="icon esc" data-action="interrupt" data-session="${esc(s.sessionId)}" title="${T("Interrupt — press Esc in its terminal to stop this turn; the session stays open for your next message", "中断——在它的终端里按 Esc，停下这一轮；session 还开着，可以接着发消息")}">Esc</button>`
+  : "";
 // What a send needs beyond the text: a background session goes by its short id, and is continued
 // with the board's skip-permissions choice, as a session started from here would be.
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
@@ -1908,7 +1920,7 @@ function renderTaskBody(t) {
           ${s.background
             ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Attach — open it in", "Attach——在这里打开：")} ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
-            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+            : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
         </div></div>`;
@@ -2167,7 +2179,7 @@ function renderSessionList(items, plain) {
             ${s.background
               ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="${T("Attach — open it in a terminal", "Attach——在终端里打开")}">${ICON.attach}</button>
                  <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
-              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+              : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(sid)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                  <button class="icon ${ui.stopArmed === sid ? "armed" : ""}" data-action="stop-session" data-session="${esc(sid)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === sid ? T("Stop?", "停止？") : ICON.stop}</button>`}
             <span title="${esc(canSend ? (open ? T("Hide the message box", "收起消息框") : T("Message this session", "给这个 session 发消息")) : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
@@ -4350,6 +4362,16 @@ document.addEventListener("click", async (ev) => {
       catch (e) { toast(String(e.message || e), true); }
       return;
     }
+    case "interrupt": {
+      // One press: the button goes away until the pet has caught up (escHeld).
+      if (escHeld(d.session)) return;
+      ui.interrupted = { ...(ui.interrupted || {}), [d.session]: Date.now() };
+      render();
+      try { await api("interrupt", { session: d.session }); toast(T("Pressed Esc — the turn stops in a moment", "已按 Esc——这一轮马上停下")); }
+      catch (e) { delete ui.interrupted[d.session]; toast(String(e.message || e), true); }
+      setTimeout(render, ESC_HOLD_MS + 100);
+      return;
+    }
     case "stop-session":
       if (ui.stopArmed !== d.session) {
         ui.stopArmed = d.session;
@@ -4534,11 +4556,14 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 // skills are the session's own, as Claude Code listed them in its transcript (`hq peek --commands`):
 // that already accounts for its project, the user's skills and its plugins. Of Claude Code's
 // built-in commands only those that do their work without the terminal are offered: one that
-// opens a menu (/model, /config, /resume…) would leave the session sitting in it, out of the
-// board's sight, and one that only prints (/context, /cost) prints where the board can't see.
+// opens a menu (/config, /resume…, or /model with no name) would leave the session sitting in
+// it, out of the board's sight (/model is offered for `/model <name>`, which switches without
+// one; the bridge refuses it bare), and one that only prints (/context, /cost) prints where the
+// board can't see.
 const SLASH_BUILTIN = () => [
   { name: "compact", desc: T("Compact the conversation now (add instructions after it if you like)", "现在压缩对话（后面可以接要保留什么的说明）"), builtin: true },
   { name: "clear", desc: T("Start over: a new, empty session in the same terminal", "清空重来：在同一个终端里开一个新的空 session"), builtin: true },
+  { name: "model", desc: T("Switch model — follow it with a name: /model opus, /model sonnet, /model haiku", "换模型——后面要接模型名：/model opus、/model sonnet、/model haiku"), builtin: true },
 ];
 const SLASH_MAX = 50;
 const slashCache = {};   // sessionId → { at, skills, loading, failed }

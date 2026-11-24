@@ -377,6 +377,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                bg: str("bg"), skip: body["skip"] as? Bool ?? false)
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
+        case "interrupt": return await interrupt(session: str("session"))
         case "saveImage": return saveImage(dataURL: str("data"))
         case "note-add":
             return await Self.noteAdd(text: str("text"), images: body["images"] as? [String] ?? [], via: "board")
@@ -1090,6 +1091,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                       skip: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, L("empty message", "消息是空的")) }
+        // `/model` alone opens a menu in the terminal that the board can't see or answer.
+        if BoardSend.opensMenu(text) {
+            return (nil, L("give it a model: /model opus, /model sonnet, … — alone it opens a menu in the terminal",
+                           "要带上模型名：/model opus、/model sonnet……——不带参数会在终端里打开一个菜单"))
+        }
         guard let t = terminal(of: session) else {
             if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
@@ -1161,6 +1167,49 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, L("typed into its iTerm2 session, but no turn started — check it and press Return there", "已经输入到它的 iTerm2 session，但没有开始新一轮 — 去那里看看，在那里按回车"))
         default:
             return (nil, L("sending to \(t.kind) terminals is not supported yet — use Jump", "还不支持给 \(t.kind) 终端发消息 — 请用跳转"))
+        }
+    }
+
+    /// Presses Esc in the session's terminal, as the user would to interrupt a turn. Only while
+    /// it is mid-turn (`BoardSend.mayInterrupt`), and only in a terminal that can take a lone key:
+    /// Orca writes the byte to the PTY as is, iTerm2 writes it with no newline. Terminal.app's
+    /// `do script` always ends with a Return, so it is left to Jump.
+    private func interrupt(session: String) async -> (Any?, String?) {
+        guard let t = terminal(of: session) else {
+            return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
+        }
+        // An Esc in a tab whose session has ended goes to the shell, or to whatever runs there now.
+        guard let pid = Self.recordedPid(session), ProcessProbe.isClaude(pid: pid),
+              SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf:
+                  FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")),
+                                              arguments: ProcessProbe.arguments(pid: pid))
+        else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        guard BoardSend.mayInterrupt(state: Self.currentState(session),
+                                     claudeStatus: ClaudeSessionStatus.read(pid: pid, sessionId: session)?.status) else {
+            return (nil, L("it is not in a turn — nothing to interrupt", "它不在一轮里——没有可中断的"))
+        }
+        switch t.kind {
+        case "orca":
+            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
+                return (nil, L("Orca is not installed", "没有安装 Orca"))
+            }
+            let cli = app.appending(path: "Contents/Resources/bin/orca").path
+            // Without --enter Orca writes the text to the PTY verbatim, control bytes included.
+            let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", BoardSend.escape, "--json"])
+            return r.status == 0 ? (["ok": true], nil)
+                                 : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
+        case "iterm2":
+            let uuid = TerminalTarget.iTermUUID(from: t.handle)
+            guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
+            let r = await Self.run("/usr/bin/osascript", ["-e", TerminalTarget.iTermEscapeScript(uuid: uuid)])
+            guard r.status == 0, r.out.contains("ok") else {
+                return (nil, r.out.contains("notfound") ? L("iTerm2 session not found", "找不到 iTerm2 session") :
+                        "iTerm2: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
+            }
+            return (["ok": true], nil)
+        default:
+            return (nil, L("interrupting a session in \(t.kind) is not supported — Jump and press Esc there",
+                           "还不支持中断 \(t.kind) 里的 session——跳过去在那里按 Esc"))
         }
     }
 
