@@ -615,7 +615,10 @@ function render() {
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
-  const activeRegion = active && active.closest ? active.closest("#modal") : null;
+  // Which copy it was: the conversation window, the task drawer and the page can each show a box
+  // with the same key (an ask's note box is in Needs you and in the drawer).
+  const regionOf = (x) => (x.closest("#modal, #drawer") || {}).id || "";
+  const activeRegion = active && active.closest ? regionOf(active) : "";
   const taScrolls = textScrolls(document);
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
@@ -678,10 +681,9 @@ function render() {
   // a session's message box in the Sessions column shares its key with the conversation window's
   // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
   if (key && !active.isConnected) {
-    const inModal = Boolean(activeRegion && activeRegion.id === "modal");
     // …and a visible one: Today's cards stay in the DOM, hidden, while All is showing.
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
-      .find((x) => Boolean(x.closest("#modal")) === inModal && x.getClientRects().length);
+      .find((x) => regionOf(x) === activeRegion && x.getClientRects().length);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -1294,7 +1296,7 @@ const kindIcon = (pr) => (pr && pr.kind ? `<i class="ki ${esc(pr.kind)}">${KIND_
 // in Needs you; anything longer (a note, Later, a grant) is the drawer's, which "…" opens at it.
 function quickAnswer(t, a) {
   const busy = ui.resolving.has(a.id);
-  const btn = (r, label) => `<button class="qa-b res-${r}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${busy ? "disabled" : ""}
+  const btn = (r, label) => `<button class="qa-b res-${r}" data-action="resolve" data-quick="1" data-id="${esc(a.id)}" data-res="${r}" ${busy ? "disabled" : ""}
     title="${esc((RESOLUTIONS.find((x) => x[0] === r) || [])[2] || "")}">${label}</button>`;
   return `<span class="qa">${btn("do", T("Yes", "可以"))}${btn("drop", T("No", "不要"))}<button class="qa-b" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}"
     title="${T("Answer with a note, Later, a grant… — opens the task at this question", "写说明、稍后、授权……——打开任务，停在这个问题")}">…</button></span>`;
@@ -3726,6 +3728,12 @@ function jumpSource(el) {
   return "board";
 }
 
+// Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
+// say) is still the drawer's, and a slash-command pick hides its list on mousedown.
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch";
+let pressedIn = false;
+document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
+
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
@@ -3733,8 +3741,8 @@ document.addEventListener("click", async (ev) => {
   // The task drawer closes on a click anywhere outside it — but not one in a dialog or toast over
   // it, one that ends a text selection, or one on a card or button that opens a drawer itself
   // (they switch or toggle it). A target already gone was redrawn under the click: leave it.
-  if (ui.drawer && document.contains(ev.target)
-      && !ev.target.closest("#drawer, #modal, #confirm, #toast, #settings, .launch")
+  if (ui.drawer && document.contains(ev.target) && !pressedIn
+      && !ev.target.closest(DRAWER_KEEPERS)
       && !(el && ["open-task", "open-sessions", "goto", "ctx-goto", "ask-answer"].includes(el.dataset.action))
       && !String(window.getSelection() || "").trim()) {
     ui.drawer = null;
@@ -3766,7 +3774,8 @@ document.addEventListener("click", async (ev) => {
       // one answer per ask, even if the button is clicked again while it's being sent
       if (ui.resolving.has(d.id)) return;
       ui.resolving.add(d.id);
-      const note = answerNote(d.id);
+      // A card's one-click Yes / No sends no note: the card doesn't show the draft one.
+      const note = d.quick ? "" : answerNote(d.id);
       const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
       // Later leaves the ask open, so a half-written note and its images stay for tomorrow.
       if (d.res !== "snooze") { delete ui.drafts["note:" + d.id]; delete ui.atts["ask:" + d.id]; }
@@ -3819,9 +3828,16 @@ document.addEventListener("click", async (ev) => {
     case "do-todo": return doTodo(d.task, d.text);
     case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.add(d.id); return render();
-    case "grant-open": ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
-      { const el = document.querySelector(`[data-key="${CSS.escape("grant:" + d.id)}"]`); if (el) { el.focus(); el.select(); } }
+    case "grant-open": {
+      // The box by the button clicked: Needs you, the drawer and the conversation window can each
+      // have one. (Asked before render() replaces the button.)
+      const where = el.closest("#drawer, #modal");
+      ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
+      { const box = [...document.querySelectorAll(`[data-key="${CSS.escape("grant:" + d.id)}"]`)]
+          .find((x) => x.closest("#drawer, #modal") === where && x.getClientRects().length);
+        if (box) { box.focus(); box.select(); } }
       return;
+    }
     case "grant-cancel": ui.granting.delete(d.id); delete ui.drafts["grant:" + d.id]; return render();
     case "grant-preset": ui.drafts["grant:" + d.id] = d.text; saveDrafts(); return render();
     case "grant-preset-task": ui.drafts["addgrant:" + d.for] = d.text; saveDrafts(); return render();
@@ -3895,7 +3911,9 @@ document.addEventListener("click", async (ev) => {
       return refresh();
     }
     case "ask-answer": {
-      // Open the task with its questions on top, at this one, its note box ready to type in.
+      // Open the task with its questions on top, at this one, its note box ready to type in —
+      // unless the click ended a text selection (copying the question).
+      if (el.tagName !== "BUTTON" && String(window.getSelection() || "").trim()) return;
       ui.drawer = d.task; ui.launchMenu = null;
       render();
       const box = d.id ? document.querySelector(`#drawer [data-key="${CSS.escape("note:" + d.id)}"]`) : document.querySelector("#drawer .dr-asks");
