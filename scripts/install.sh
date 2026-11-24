@@ -32,8 +32,11 @@ echo "==> building ($MODE / ${ARCH})"
 
 echo "==> installing hook binary to $PET_DIR/pet-emit"
 mkdir -p "$PET_DIR/sessions"
-cp "$ROOT/pet-emit" "$PET_DIR/pet-emit"
-chmod +x "$PET_DIR/pet-emit"
+# Into place as a new file, never copied over the old one: running sessions' hooks keep calling
+# it, and macOS kills (SIGKILL, "Killed: 9") a signed binary whose file was rewritten in place.
+cp "$ROOT/pet-emit" "$PET_DIR/pet-emit.new"
+chmod +x "$PET_DIR/pet-emit.new"
+mv -f "$PET_DIR/pet-emit.new" "$PET_DIR/pet-emit"
 
 # settings.json drives every Claude Code session on this machine and is the
 # riskiest thing here. Backup, atomic write, parse-back verification and
