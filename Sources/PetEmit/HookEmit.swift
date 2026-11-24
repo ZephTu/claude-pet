@@ -86,12 +86,14 @@ enum HookEmit {
         let event = hook["hook_event_name"] as? String ?? ""
         let toolName = hook["tool_name"] as? String ?? ""
         let toolInput = hook["tool_input"] as? [String: Any] ?? [:]
-        // A question card is answered on the card — see
-        // PermissionSummary.isQuestion — so it is waiting for a reply, not for
-        // a permission the pet could grant.
-        let question = event == "PermissionRequest" && PermissionSummary.isQuestion(toolName: toolName)
-        let message = question
-            ? PermissionSummary.questionNote(toolInput: toolInput)
+        // A question card is answered on the card, and a plan is approved in its
+        // own dialog — see PermissionSummary.isQuestion / isPlan — so either is
+        // waiting for a reply, not for a permission the pet could grant. The board
+        // answers both with their own controls (askKind).
+        let askKind = event == "PermissionRequest" ? PermissionSummary.askKind(toolName: toolName) : ""
+        let question = !askKind.isEmpty
+        let message = askKind == "question" ? PermissionSummary.questionNote(toolInput: toolInput)
+            : askKind == "plan" ? PermissionSummary.planNote
             : hook["message"] as? String ?? ""
 
         // The session is over: drop its file now instead of leaving the watcher
@@ -164,9 +166,7 @@ enum HookEmit {
         // PermissionDecision. Minted per request, and carried forward by the
         // other events that arrive while the same prompt is still up.
         let askId: String
-        if question {
-            askId = ""
-        } else if event == "PermissionRequest" {
+        if event == "PermissionRequest" {
             askId = UUID().uuidString
         } else if state == "waiting" {
             askId = previousField("askId", at: path)
@@ -174,6 +174,18 @@ enum HookEmit {
             askId = ""
         }
         if !askId.isEmpty { document["askId"] = askId }
+        // A question's menu or a plan's text, for the board to show and answer — carried like
+        // the askId while the same prompt stays up.
+        if event == "PermissionRequest", !askKind.isEmpty {
+            document["askKind"] = askKind
+            if askKind == "plan" {
+                document["plan"] = String((toolInput["plan"] as? String ?? "").prefix(PermissionSummary.planLimit))
+            } else if let questions = toolInput["questions"] as? [Any] {
+                document["questions"] = questions
+            }
+        } else if !askId.isEmpty, let old = readDocument(at: path), old["askId"] as? String == askId {
+            for key in ["askKind", "plan", "questions"] { if let v = old[key] { document[key] = v } }
+        }
         // The whole of what would be allowed, for the board — carried like the phrase above.
         let waitingOnFull: String
         if question || askId.isEmpty {
@@ -274,7 +286,7 @@ enum HookEmit {
         // itself is asking for it regardless.
         if holdsAsk {
             awaitDecision(sessionID: sessionID, askId: askId, sessionFile: path,
-                          claudePID: pid, askedAt: askedAt)
+                          claudePID: pid, askedAt: askedAt, toolInput: toolInput)
         }
 
         // A finished tool call, with the duration Claude Code measured itself.
@@ -559,7 +571,7 @@ enum HookEmit {
     /// - the Claude process is gone;
     /// - `PermissionDecision.wait` ran out.
     private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
-                                      claudePID: Int32?, askedAt: Date) {
+                                      claudePID: Int32?, askedAt: Date, toolInput: [String: Any]) {
         let answerFile = PermissionDecision.fileURL(petHome: baseDirectory, sessionId: sessionID)
         // `PET_PERMISSION_WAIT` overrides the wait for tests; 0 turns it off.
         let wait = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
@@ -569,7 +581,7 @@ enum HookEmit {
             if let data = try? Data(contentsOf: answerFile),
                let answer = PermissionDecision.decode(data), answer.askId == askId {
                 try? FileManager.default.removeItem(at: answerFile)
-                FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer.behavior))
+                FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer, toolInput: toolInput))
                 return
             }
             if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {

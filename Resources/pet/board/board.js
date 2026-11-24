@@ -280,7 +280,8 @@ const DOT_TIP = { quiet: T("Gone quiet — nothing heard for a while", "没动�
 function statusWord(s) {
   const p = (ui.dots || {})[s.sessionId];
   if (!p) return LANG === "zh" ? ({ busy: "在干活", waiting: "等你", idle: "空闲" }[s.state] || s.state || "?") : s.state || "?";
-  if (p.state === "waiting") return p.asks === "permission" ? T("Needs approval", "等你授权") : T("Awaiting reply", "等你回答");
+  if (p.state === "waiting") return p.asks === "permission" ? T("Needs approval", "等你授权")
+    : p.askKind === "plan" ? T("Plan to approve", "等你批准计划") : T("Awaiting reply", "等你回答");
   if (p.activity) return p.activity;
   if (p.quiet) return T("No recent activity", "最近没有动静");
   if (p.state === "busy") return T("Working", "在干活");
@@ -308,6 +309,7 @@ function ctxTag(s) {
 // row's Allow arms that one instead of approving it.
 function approveBar(s) {
   const p = (ui.dots || {})[s.sessionId];
+  if (p && p.state === "waiting" && p.promptAsk) return promptBar(s, p);
   if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
   const armed = ui.allowArmed && ui.allowArmed.ask === p.askId;
   const data = `data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}"`;
@@ -317,6 +319,128 @@ function approveBar(s) {
       <button class="btn small ghost" data-action="decide" data-behavior="deny" ${data}>${T("Deny", "拒绝")}</button></div>
     <code class="ap-what">${esc(p.approveText || s.waitingOn || T("this tool call", "这次工具调用"))}</code></div>`;
 }
+// A question menu (AskUserQuestion) or a plan (ExitPlanMode) the session has up in its terminal,
+// answered here in a dialog (openPrompt): the pet-emit holding the prompt hands the picks, or the
+// feedback, back to Claude Code; a plan is approved by pressing Enter in the terminal (a hook's
+// "allow" is ignored for it). Shown only while the pet is holding the prompt (`promptAsk`).
+function promptBar(s, p) {
+  const plan = p.askKind === "plan";
+  return `<div class="approve prompt"><div class="ap-head"><span class="ap-k">${plan ? T("Plan", "计划") : T("Question", "提问")}</span>
+      <button class="btn small primary" data-action="open-prompt" data-session="${esc(s.sessionId)}">${plan ? T("Review plan…", "看计划…") : T("Answer…", "回答…")}</button></div>
+    <div class="ap-what">${esc(s.waitingOn || p.detail || (plan ? T("A plan is ready for your approval", "计划写好了，等你批准") : T("It asked you a question", "它问了你一个问题")))}</div></div>`;
+}
+
+async function openPrompt(sid) {
+  let d;
+  try { d = await apiJSON("prompt", { session: sid }); }
+  catch (e) { return toast(String(e.message || e), true); }
+  const s = ui.sessions.find((x) => x.sessionId === sid);
+  ui.modal = { type: "prompt", sid, title: (s && (s.title || s.project)) || sid.slice(0, 8), kind: d.kind, ask: d.ask,
+    plan: d.plan || "", questions: Array.isArray(d.questions) ? d.questions : [], picks: {}, busy: false };
+  drawPrompt();
+}
+const promptOtherKey = (m, i) => `qother:${m.ask}:${i}`;
+const planFeedbackKey = (m) => `planfb:${m.ask}`;
+// question text → what goes back: the picked labels (several joined with ", "), and your own
+// words after them when you wrote any. Null while a question has neither.
+function promptAnswers(m) {
+  const out = {};
+  for (const [i, q] of m.questions.entries()) {
+    const picked = [...(m.picks[i] || [])];
+    const own = (draft(promptOtherKey(m, i)) || "").trim();
+    const parts = q.multiSelect ? [...picked, ...(own ? [own] : [])] : own ? [own] : picked.slice(0, 1);
+    if (!parts.length) return null;
+    out[String(q.question || "")] = parts.join(", ");
+  }
+  return out;
+}
+function drawPrompt() {
+  const m = ui.modal;
+  const box = $("#modal");
+  const head = `<div class="phead">
+      <div><div class="meta">${m.kind === "plan" ? T("Plan to approve", "等你批准的计划") : T("Question to answer", "等你回答的问题")}</div>
+        <div class="stitle ctx-title">${esc(m.title)}</div></div>
+      <span style="flex:1"></span>
+      <button class="btn small ghost" data-action="jump" data-session="${esc(m.sid)}" title="${T("Answer it in its terminal instead", "改去它的终端里回答")}">↗ Jump</button>
+      <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
+    </div>`;
+  let body, foot;
+  if (m.kind === "plan") {
+    body = `<div class="md plan-md">${m.plan ? markdown(m.plan) : `<div class="empty">${T("(no plan text)", "（没有计划内容）")}</div>`}</div>`;
+    const fb = draft(planFeedbackKey(m));
+    foot = `<div class="prompt-foot">
+      <textarea class="grow" rows="2" data-key="${esc(planFeedbackKey(m))}" placeholder="${T("What to change — sent back, and it keeps planning", "要改什么——发回给它，它继续规划")}">${esc(fb)}</textarea>
+      <div class="row-btns">
+        <button class="btn small" data-action="plan-feedback" ${m.busy || !fb.trim() ? "disabled" : ""}>${T("Keep planning", "继续规划")}</button>
+        <button class="btn small primary" data-action="plan-approve" ${m.busy ? "disabled" : ""} title="${T("Presses Enter in its terminal: the dialog's first option, “Yes”, and it starts", "在它的终端里按回车：选对话框的第一项「Yes」，开始执行")}">${T("Approve", "批准")}</button>
+      </div></div>`;
+  } else {
+    body = m.questions.map((q, i) => {
+      const picked = m.picks[i] || new Set();
+      const opts = (Array.isArray(q.options) ? q.options : []).map((o) => {
+        const on = picked.has(o.label);
+        return `<button class="qopt ${on ? "on" : ""}" data-action="prompt-pick" data-q="${i}" data-label="${esc(o.label)}">
+          <span class="qo-l">${q.multiSelect ? (on ? "☑" : "☐") : on ? "◉" : "○"} ${esc(o.label)}</span>
+          ${o.description ? `<span class="qo-d">${esc(o.description)}</span>` : ""}</button>`;
+      }).join("");
+      return `<section class="ctx-sec qblock">
+        ${q.header ? `<h4>${esc(q.header)}${q.multiSelect ? T(" · pick any", " · 可多选") : ""}</h4>` : ""}
+        <div class="q-text">${esc(q.question || "")}</div>
+        <div class="qopts">${opts}</div>
+        <input class="q-other" data-key="${esc(promptOtherKey(m, i))}" value="${esc(draft(promptOtherKey(m, i)))}" placeholder="${T("Or in your own words…", "或者自己写…")}">
+      </section>`;
+    }).join("");
+    foot = `<div class="prompt-foot"><div class="row-btns">
+      <button class="btn small primary" data-action="prompt-send" ${m.busy || !promptAnswers(m) ? "disabled" : ""}>${T("Send answers", "发送回答")}</button></div></div>`;
+  }
+  box.innerHTML = `<div class="panel ppanel prompt-panel" role="dialog" aria-label="${T("Prompt", "提问")}">${head}
+    <div class="peek-body">${body}</div>${foot}</div>`;
+  box.hidden = false;
+}
+// The prompt went away (answered in the terminal, or replaced): the dialog has nothing to answer.
+function checkPrompt() {
+  const m = ui.modal;
+  const p = (ui.dots || {})[m.sid];
+  if (m.busy || (p && p.promptAsk === m.ask)) return;
+  closePeek();
+  toast(T("That prompt was answered or closed in its terminal", "这个提问已经在终端里回答或关掉了"));
+}
+// Typing doesn't redraw the dialog (the cursor would jump); it only turns its buttons on or off.
+// Your own words for a single-choice question replace its pick.
+function syncPromptButtons(el) {
+  const m = ui.modal;
+  const other = /^qother:[^:]*:(\d+)$/.exec(el.dataset.key || "");
+  if (other && el.value.trim()) {
+    const i = Number(other[1]);
+    const q = m.questions[i] || {};
+    if (!q.multiSelect && m.picks[i] && m.picks[i].size) {
+      m.picks[i] = new Set();
+      document.querySelectorAll(`#modal .qopt[data-q="${i}"]`).forEach((b) => { b.classList.remove("on"); b.querySelector(".qo-l").textContent = "○ " + b.dataset.label; });
+    }
+  }
+  const send = $("#modal [data-action=prompt-send]");
+  if (send) send.disabled = m.busy || !promptAnswers(m);
+  const fb = $("#modal [data-action=plan-feedback]");
+  if (fb) fb.disabled = m.busy || !(draft(planFeedbackKey(m)) || "").trim();
+}
+async function promptSubmit(op, args, ok) {
+  const m = ui.modal;
+  m.busy = true;
+  drawPrompt();
+  try {
+    await api(op, { session: m.sid, ask: m.ask, ...args });
+    for (const k of Object.keys(ui.drafts)) if (k.includes(m.ask)) delete ui.drafts[k];
+    saveDrafts();
+    closePeek();
+    toast(ok);
+  } catch (e) {
+    m.busy = false;
+    drawPrompt();
+    toast(String(e.message || e), true);
+  }
+  refresh();
+}
+
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -357,6 +481,7 @@ async function refresh(force) {
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
   else if (ui.modal && ui.modal.type === "project") drawProjectPanel(true);
+  else if (ui.modal && ui.modal.type === "prompt") checkPrompt();
   loadFlags();
   sessionFinishes();
 }
@@ -4362,6 +4487,31 @@ document.addEventListener("click", async (ev) => {
       catch (e) { toast(String(e.message || e), true); }
       return;
     }
+    case "open-prompt": return openPrompt(d.session);
+    case "prompt-pick": {
+      const m = ui.modal;
+      if (!m || m.type !== "prompt") return;
+      const q = m.questions[Number(d.q)] || {};
+      const cur = m.picks[d.q] || new Set();
+      if (q.multiSelect) { cur.has(d.label) ? cur.delete(d.label) : cur.add(d.label); m.picks[d.q] = cur; }
+      else {
+        m.picks[d.q] = cur.has(d.label) ? new Set() : new Set([d.label]);
+        // A pick replaces your own words for a single-choice question.
+        if (m.picks[d.q].size) { delete ui.drafts[promptOtherKey(m, Number(d.q))]; saveDrafts(); }
+      }
+      return drawPrompt();
+    }
+    case "prompt-send": {
+      const answers = ui.modal && promptAnswers(ui.modal);
+      if (!answers) return;
+      return promptSubmit("answer-question", { answers }, T("Answered — it carries on", "已回答——它会接着干"));
+    }
+    case "plan-approve": return promptSubmit("plan-approve", {}, T("Approved — pressed Enter in its terminal", "已批准——在它的终端里按了回车"));
+    case "plan-feedback": {
+      const text = (draft(planFeedbackKey(ui.modal)) || "").trim();
+      if (!text) return;
+      return promptSubmit("plan-feedback", { text }, T("Sent back — it keeps planning", "已发回——它会继续规划"));
+    }
     case "interrupt": {
       // One press: the button goes away until the pet has caught up (escHeld).
       if (escHeld(d.session)) return;
@@ -4527,6 +4677,7 @@ document.addEventListener("input", (ev) => {
   if (el.tagName === "TEXTAREA" && bulkInsert) tidyInserted(ev);
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
+  if (ui.modal && ui.modal.type === "prompt" && el.closest("#modal")) syncPromptButtons(el);
   const note = /^note:(.+)$/.exec(el.dataset.key || "");
   if (note) autoPick(note[1], el.value.trim() !== "");
   if (el.dataset.field) render();

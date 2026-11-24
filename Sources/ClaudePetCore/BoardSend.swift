@@ -51,9 +51,6 @@ public enum BoardSend {
         state == .waiting
     }
 
-    /// The Esc key, as the byte a terminal sends for it.
-    public static let escape = "\u{1B}"
-
     /// May the board press Esc in this session's terminal? Only mid-turn: there Esc interrupts
     /// the turn (on a prompt it declines it, as in the terminal). Between turns it would do
     /// nothing useful, and a second one opens Claude Code's rewind menu, out of the board's sight.

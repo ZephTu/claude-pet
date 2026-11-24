@@ -106,11 +106,25 @@ enum IdleTabTests {
         t.check("…and not once Claude Code itself says the turn is over (a second Esc would open its rewind menu)",
                 !BoardSend.mayInterrupt(state: .busy, claudeStatus: "idle")
                     && BoardSend.mayInterrupt(state: .busy, claudeStatus: "busy"))
-        let escScript = TerminalTarget.iTermEscapeScript(uuid: "ABCD-1234")
+        let escScript = TerminalTarget.iTermKeyScript(uuid: "ABCD-1234", key: .escape)
         t.check("iTerm2's Esc is one ESC byte with no newline, to the session named",
                 escScript.contains("write text (character id 27) newline no") && escScript.contains("\"ABCD-1234\"")
                     && !escScript.contains("character id 13"))
-        t.check("the escape is the ESC byte", BoardSend.escape.unicodeScalars.map(\.value) == [27])
+        t.check("…and its Enter one CR byte",
+                TerminalTarget.iTermKeyScript(uuid: "A", key: .enter).contains("write text (character id 13) newline no"))
+        t.check("the keys are the ESC and CR bytes",
+                BoardPrompt.Key.escape.text.unicodeScalars.map(\.value) == [27]
+                    && BoardPrompt.Key.enter.text.unicodeScalars.map(\.value) == [13])
+        t.check("a plan's feedback tells Claude to keep planning, with the user's words",
+                BoardPrompt.planFeedback("  use sqlite \n").hasSuffix("Their feedback:\n\nuse sqlite")
+                    && BoardPrompt.planFeedback("x").contains("call ExitPlanMode again"))
+        let dotQ: [String: Any] = ["promptAsk": "a1", "askKind": "question"]
+        t.check("an answer goes only to the prompt the dots still show, of the same kind",
+                BoardPrompt.matches(dot: dotQ, ask: "a1", kind: "question")
+                    && !BoardPrompt.matches(dot: dotQ, ask: "a2", kind: "question")
+                    && !BoardPrompt.matches(dot: dotQ, ask: "a1", kind: "plan")
+                    && !BoardPrompt.matches(dot: nil, ask: "a1", kind: "question")
+                    && !BoardPrompt.matches(dot: ["askKind": "question"], ask: "", kind: "question"))
         t.check("/model alone opens a menu; with a name it doesn't",
                 BoardSend.opensMenu("/model") && BoardSend.opensMenu(" /Model ")
                     && !BoardSend.opensMenu("/model opus") && !BoardSend.opensMenu("/compact"))

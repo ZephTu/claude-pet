@@ -227,6 +227,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         BoardBridge.onDecide = { [weak self] id, ask, behavior in
             self?.answer(sessionID: id, askId: ask, behavior: behavior)
         }
+        BoardBridge.onReply = { [weak self] id, reply in
+            self?.answer(sessionID: id, reply: reply)
+        }
         // The board shows the same quota reading the pet does — one pick from the same sources.
         BoardBridge.usage = { [weak self] in
             guard let u = self?.currentUsage(), u.percentagesUsable(now: Date()) else { return nil }
@@ -687,12 +690,17 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// checks the askId, so an answer to a prompt that has since gone away
     /// approves nothing.
     private func answer(sessionID: String, askId: String, behavior: PermissionDecision.Behavior) {
+        answer(sessionID: sessionID, reply: PermissionDecision.Answer(askId: askId, behavior: behavior))
+    }
+
+    /// `answer`, with what a question or a plan is answered with: the picks, or feedback.
+    private func answer(sessionID: String, reply: PermissionDecision.Answer) {
         let now = Date()
+        let askId = reply.askId
         let file = PermissionDecision.fileURL(petHome: petHome, sessionId: sessionID)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
-        guard (try? PermissionDecision.encode(PermissionDecision.Answer(askId: askId, behavior: behavior))
-            .write(to: file, options: .atomic)) != nil else {
+        guard (try? PermissionDecision.encode(reply).write(to: file, options: .atomic)) != nil else {
             bridge?.say(L("could not answer — use the terminal", "没能回应 — 请到终端里处理"), hold: 5, variant: .warn)
             return
         }

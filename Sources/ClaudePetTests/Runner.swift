@@ -1075,6 +1075,10 @@ struct Runner {
                 PermissionSummary.questionNote(toolInput: ["questions": [1, 2, 3]]) == "3 questions to answer"
                 && PermissionSummary.questionNote(toolInput: ["questions": [1]]) == "a question to answer"
                 && PermissionSummary.questionNote(toolInput: [:]) == "a question to answer")
+        t.check("ExitPlanMode is a plan to approve, AskUserQuestion a question, anything else a permission",
+                PermissionSummary.askKind(toolName: "ExitPlanMode") == "plan"
+                    && PermissionSummary.askKind(toolName: "AskUserQuestion") == "question"
+                    && PermissionSummary.askKind(toolName: "Bash").isEmpty)
         t.check("a bash command is quoted back verbatim",
                 PermissionSummary.describe(toolName: "Bash",
                                            toolInput: ["command": "rm -rf build/"])
@@ -2374,6 +2378,28 @@ struct Runner {
         t.check("a denial tells Claude a person said no",
                 denyDecision?["behavior"] as? String == "deny"
                     && denyDecision?["message"] as? String == PermissionDecision.denyMessage)
+        let picks = PermissionDecision.Answer(askId: "a1", behavior: .allow, answers: ["Which colour?": "Blue"])
+        t.check("a question's picks survive the file",
+                PermissionDecision.decode(PermissionDecision.encode(picks)) == picks)
+        let feedback = PermissionDecision.Answer(askId: "a1", behavior: .deny, message: "keep planning")
+        t.check("a plan's feedback survives the file",
+                PermissionDecision.decode(PermissionDecision.encode(feedback)) == feedback)
+        let questionInput: [String: Any] = ["questions": [["question": "Which colour?", "options": [["label": "Red"], ["label": "Blue"]]]]]
+        let picked = ((try? JSONSerialization.jsonObject(with: PermissionDecision.hookOutput(picks, toolInput: questionInput)))
+            as? [String: Any])?["hookSpecificOutput"] as? [String: Any]
+        let pickedDecision = picked?["decision"] as? [String: Any]
+        let updated = pickedDecision?["updatedInput"] as? [String: Any]
+        t.check("picks go back as the tool's input with answers added",
+                pickedDecision?["behavior"] as? String == "allow"
+                    && (updated?["answers"] as? [String: String]) == ["Which colour?": "Blue"]
+                    && (updated?["questions"] as? [Any])?.count == 1)
+        t.check("a plain allow hands back no input",
+                ((((try? JSONSerialization.jsonObject(with: PermissionDecision.hookOutput(allowAnswer, toolInput: questionInput)))
+                    as? [String: Any])?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any])?["updatedInput"] == nil)
+        let sentBack = ((((try? JSONSerialization.jsonObject(with: PermissionDecision.hookOutput(feedback, toolInput: [:])))
+            as? [String: Any])?["hookSpecificOutput"] as? [String: Any])?["decision"] as? [String: Any])
+        t.check("a plan sent back says the user's words, not the stock denial",
+                sentBack?["behavior"] as? String == "deny" && sentBack?["message"] as? String == "keep planning")
         t.check("a hook stops waiting once the prompt has moved on",
                 PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "busy", "askId": "a1"])
                     && PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a2"])

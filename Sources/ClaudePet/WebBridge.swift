@@ -412,7 +412,7 @@ final class WebBridge {
     private(set) var dotState: [String: [String: Any]] = [:]
     private static let dotKeys: Set<String> = ["state", "quiet", "asks", "agent", "struggle", "background",
                                                "activity", "replied", "context", "contextTokens",
-                                               "contextBudget", "askId", "approveText"]
+                                               "contextBudget", "askId", "approveText", "promptAsk", "askKind"]
 
     func pushSessions(_ sessions: [SessionState], now: Date, hiddenCount: Int = 0,
                       background: [String: [BackgroundShells.Shell]] = [:],
@@ -460,9 +460,17 @@ final class WebBridge {
             if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
             // Present only when the pet can answer this prompt itself.
             // Only while a pet-emit is still holding that prompt open — see askAnswerable.
+            // A question or a plan is not answered with Allow / Deny: the pet's own card shows
+            // no buttons for it, and the board gets its id under another name to answer it with
+            // its own controls (the menu's picks, or Approve / Keep planning).
             if s.askAnswerable(now: now) {
-                item["askId"] = s.askId
-                item["approveText"] = s.waitingOnFull.isEmpty ? s.waitingOn : s.waitingOnFull
+                if s.askKind.isEmpty {
+                    item["askId"] = s.askId
+                    item["approveText"] = s.waitingOnFull.isEmpty ? s.waitingOn : s.waitingOnFull
+                } else {
+                    item["promptAsk"] = s.askId
+                    item["askKind"] = s.askKind
+                }
             }
             // How long the conversation has gone on, and how full its context
             // is — see TranscriptStats.

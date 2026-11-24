@@ -171,17 +171,17 @@ public enum TerminalTarget {
         return String(sessionID[sessionID.index(after: colon)...])
     }
 
-    /// Presses Esc in the iTerm2 session whose id contains `uuid`: a lone ESC byte, with no
-    /// newline, which Claude Code reads as the Esc key — mid-turn, that interrupts the turn.
-    /// `uuid` must pass `isSafeITermUUID`.
-    public static func iTermEscapeScript(uuid: String) -> String {
+    /// Presses one key in the iTerm2 session whose id contains `uuid`: the key's lone byte
+    /// (`BoardPrompt.Key`), with no newline. Esc mid-turn interrupts the turn; Return on a plan
+    /// dialog picks its highlighted option. `uuid` must pass `isSafeITermUUID`.
+    public static func iTermKeyScript(uuid: String, key: BoardPrompt.Key) -> String {
         """
         tell application "iTerm2"
           repeat with w in windows
             repeat with t in tabs of w
               repeat with s in sessions of t
                 if (id of s as text) contains "\(uuid)" then
-                  tell s to write text (character id 27) newline no
+                  tell s to write text (character id \(key.rawValue)) newline no
                   return "ok"
                 end if
               end repeat
