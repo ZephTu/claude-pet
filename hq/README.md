@@ -515,16 +515,17 @@ newest first, five per group before "N more". Shorthand becomes a link through `
 A task's `workdirs` fill themselves: binding a session to a task adds that session's directory
 (not your home folder or the task root). You can also type one when creating a task.
 
-## Focus, All, Needs you
+## Focus, Projects & duties, Needs you
 
-(The board's **Projects & duties** page — a card per project and duty, a page each with its
-PROJECT.md sections, criteria, phases, templates and recurring jobs — is described in the
-guide.) The board has three task pages. It opens on **Focus**: the tasks you keep in view
+The board has three task pages. It opens on **Focus**: the tasks you keep in view
 (`<root>/focus.json`, one list — it doesn't reset each day; a task stays until you take it off),
 each with its asks, open todos and sessions, and a ⚠ line for each `hq status` flag. New tasks join automatically. `hq focus
 [add|remove|order]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does);
-an older per-day `focus.json` carries its latest day's list over. **All** is every task and every
-session; **Needs you** is every unanswered ask and your `@me` todos, counted on its tab.
+an older per-day `focus.json` carries its latest day's list over. **Projects & duties** is every
+project and duty: a card each naming the tasks waiting on you and the ones running, and a page
+each with its lanes, PROJECT.md sections, criteria, phases, templates and recurring jobs (the
+guide has the details); while the board's filter is on, it lists every matching task, closed
+ones too. **Needs you** is every unanswered ask and your `@me` todos, counted on its tab.
 The cat shows each session's task in its list, counts open asks in its badge and announces new
 ones.
 
@@ -570,7 +571,7 @@ by its sha256), so existing setups pick up new instructions; one the user edited
 `hq secretary [--json]` reports what is there (`agentStale` when the agent is an old shipped
 version, `reports`: the newest four reports). Its `--json` also lists the sessions bound to the
 card (`sessions`) and the card's state lines (`state`: what the secretary is keeping an eye on).
-The board leaves the card out of All, Focus and the counts, shows its asks in Needs you and in
+The board leaves the card out of Focus, Projects & duties and the counts, shows its asks in Needs you and in
 the secretary's window, and shows `state` at the top of that window.
 
 Claude Pet runs it from the board's **Secretary** button. The button opens a scheduled job,
