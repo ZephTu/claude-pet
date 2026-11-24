@@ -56,9 +56,11 @@ public enum BoardSend {
     /// nothing useful, and a second one opens Claude Code's rewind menu, out of the board's sight.
     /// `claudeStatus` is Claude Code's own status for the session (`ClaudeSessionStatus`), which
     /// turns "idle" the moment a turn ends — an Esc included — while the pet's record stays
-    /// "busy" until it notices. Nil when it can't be read: the pet's state decides alone.
-    public static func mayInterrupt(state: SessionActivity?, claudeStatus: String? = nil) -> Bool {
-        (state == .busy || state == .waiting) && claudeStatus != "idle"
+    /// "busy" until it notices. Nil when it can't be read: the pet's state decides alone, and
+    /// `quiet` (StateAggregator.isQuiet — no Stop hook comes after an Esc) rules out a turn that
+    /// already ended. Not `waiting`: an Esc there would decline a prompt the user never saw.
+    public static func mayInterrupt(state: SessionActivity?, claudeStatus: String? = nil, quiet: Bool = false) -> Bool {
+        state == .busy && !quiet && claudeStatus != "idle"
     }
 
     /// Slash commands that open a menu in the terminal when given no argument. Typed from the

@@ -75,12 +75,13 @@ const canSendNow = (s) => canMessage(s) && !onPrompt(s);
 // Esc for a session mid-turn: pressed in its terminal, it interrupts the turn as it would there.
 // Only terminals that can take a lone key (Orca, iTerm2); Terminal.app always adds a Return.
 const INTERRUPTIBLE = { orca: true, iterm2: true };
-// After a press the pet still says busy until it notices the turn ended (about 10 s), so the
-// button stays away that long: a second Esc on a stopped session opens Claude Code's rewind menu.
+// No Stop hook follows an Esc: the pet's record stays busy and only turns quiet (about 10 s later,
+// Claude Code's own status says idle), so the button stays away that long and for good once quiet:
+// a second Esc on a stopped session opens Claude Code's rewind menu.
 const ESC_HOLD_MS = 12_000;
 const escHeld = (sid) => Date.now() - ((ui.interrupted || {})[sid] || 0) < ESC_HOLD_MS;
 const canInterrupt = (s) => Boolean(s && !s.background && INTERRUPTIBLE[s.terminal && s.terminal.kind]
-  && liveState(s) === "busy" && !escHeld(s.sessionId));
+  && liveState(s) === "busy" && !((ui.dots || {})[s.sessionId] || {}).quiet && !escHeld(s.sessionId));
 const escButton = (s) => canInterrupt(s)
   ? `<button class="icon esc" data-action="interrupt" data-session="${esc(s.sessionId)}" title="${T("Interrupt — press Esc in its terminal to stop this turn; the session stays open for your next message", "中断——在它的终端里按 Esc，停下这一轮；session 还开着，可以接着发消息")}">Esc</button>`
   : "";
@@ -309,7 +310,7 @@ function ctxTag(s) {
 // row's Allow arms that one instead of approving it.
 function approveBar(s) {
   const p = (ui.dots || {})[s.sessionId];
-  if (p && p.state === "waiting" && p.promptAsk) return promptBar(s, p);
+  if (p && p.state === "waiting" && p.promptAsk) return ui.approvedPlans && ui.approvedPlans.has(p.promptAsk) ? "" : promptBar(s, p);
   if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
   const armed = ui.allowArmed && ui.allowArmed.ask === p.askId;
   const data = `data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}"`;
@@ -327,7 +328,7 @@ function promptBar(s, p) {
   const plan = p.askKind === "plan";
   return `<div class="approve prompt"><div class="ap-head"><span class="ap-k">${plan ? T("Plan", "计划") : T("Question", "提问")}</span>
       <button class="btn small primary" data-action="open-prompt" data-session="${esc(s.sessionId)}">${plan ? T("Review plan…", "看计划…") : T("Answer…", "回答…")}</button></div>
-    <div class="ap-what">${esc(s.waitingOn || p.detail || (plan ? T("A plan is ready for your approval", "计划写好了，等你批准") : T("It asked you a question", "它问了你一个问题")))}</div></div>`;
+    <div class="ap-what">${esc(s.waitingOn || (plan ? T("A plan is ready for your approval", "计划写好了，等你批准") : T("It asked you a question", "它问了你一个问题")))}</div></div>`;
 }
 
 async function openPrompt(sid) {
@@ -352,7 +353,7 @@ function promptAnswers(m) {
     if (!parts.length) return null;
     out[String(q.question || "")] = parts.join(", ");
   }
-  return out;
+  return Object.keys(out).length ? out : null;
 }
 function drawPrompt() {
   const m = ui.modal;
@@ -429,6 +430,8 @@ async function promptSubmit(op, args, ok) {
   drawPrompt();
   try {
     await api(op, { session: m.sid, ask: m.ask, ...args });
+    // An approved plan's box stays away until the next hook clears it: one Enter per plan.
+    if (op === "plan-approve") (ui.approvedPlans ||= new Set()).add(m.ask);
     for (const k of Object.keys(ui.drafts)) if (k.includes(m.ask)) delete ui.drafts[k];
     saveDrafts();
     closePeek();

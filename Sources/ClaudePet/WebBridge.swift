@@ -464,13 +464,7 @@ final class WebBridge {
             // no buttons for it, and the board gets its id under another name to answer it with
             // its own controls (the menu's picks, or Approve / Keep planning).
             if s.askAnswerable(now: now) {
-                if s.askKind.isEmpty {
-                    item["askId"] = s.askId
-                    item["approveText"] = s.waitingOnFull.isEmpty ? s.waitingOn : s.waitingOnFull
-                } else {
-                    item["promptAsk"] = s.askId
-                    item["askKind"] = s.askKind
-                }
+                item.merge(BoardPrompt.dotFields(of: s)) { _, new in new }
             }
             // How long the conversation has gone on, and how full its context
             // is — see TranscriptStats.

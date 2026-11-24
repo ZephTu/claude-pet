@@ -25,6 +25,17 @@ public enum BoardPrompt {
     /// Does the board's answer still belong to the prompt the session has up? The pet's dots
     /// carry the prompt's id (`promptAsk`) and kind only while a pet-emit holds it open, and a
     /// new prompt gets a new id — so an answer drawn from a board seconds old answers nothing else.
+    /// What the dots carry for a prompt the pet is holding: a permission's askId and text, for
+    /// Allow / Deny; a question's or a plan's id under `promptAsk`, never `askId` — Allow on a plan
+    /// does nothing (Claude Code ignores it) and a question wants its picks, not a yes.
+    public static func dotFields(of s: SessionState) -> [String: Any] {
+        guard !s.askId.isEmpty else { return [:] }
+        if s.askKind.isEmpty {
+            return ["askId": s.askId, "approveText": s.waitingOnFull.isEmpty ? s.waitingOn : s.waitingOnFull]
+        }
+        return ["promptAsk": s.askId, "askKind": s.askKind]
+    }
+
     public static func matches(dot: [String: Any]?, ask: String, kind: String) -> Bool {
         guard !ask.isEmpty, let dot else { return false }
         return dot["promptAsk"] as? String == ask && dot["askKind"] as? String == kind

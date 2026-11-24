@@ -244,6 +244,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// What the pet's list draws each session's dot from — the board draws the same dot.
     static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
+    /// Plans (by askId) the board has pressed Enter on — see approvePlan.
+    private static var approvedPlans = Set<String>()
     /// A session's conversation was just opened in Peek. The jump log notes how long before a
     /// jump that was — see JumpLog.
     static var onPeek: ((String) -> Void)?
@@ -1195,8 +1197,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
         guard let pid = Self.sessionRunning(session)
         else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        let quiet = Self.sessionDoc(session).map { StateAggregator.isQuiet($0, now: Date()) } ?? false
         guard BoardSend.mayInterrupt(state: Self.currentState(session),
-                                     claudeStatus: ClaudeSessionStatus.read(pid: pid, sessionId: session)?.status) else {
+                                     claudeStatus: ClaudeSessionStatus.read(pid: pid, sessionId: session)?.status,
+                                     quiet: quiet) else {
             return (nil, L("it is not in a turn — nothing to interrupt", "它不在一轮里——没有可中断的"))
         }
         return await press(.escape, in: t) ?? (nil, L("interrupting a session in \(t.kind) is not supported — Jump and press Esc there",
@@ -1277,9 +1281,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, L("no terminal to press Enter in — Attach and approve it there", "没有可以按回车的终端 — 用 Attach 打开后在那里批准"))
         }
         guard Self.sessionRunning(session) != nil else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        // One Enter per plan: until the next hook clears the prompt from the dots, a second
+        // Approve would press Enter again in whatever the session shows next.
+        guard !Self.approvedPlans.contains(ask) else {
+            return (nil, L("already approved — Enter was pressed in its terminal", "已经批准过了——终端里按过回车"))
+        }
         let r = await press(.enter, in: t) ?? (nil, L("approving in \(t.kind) is not supported — Jump and approve it there",
                                                      "还不支持在 \(t.kind) 里批准——跳过去在那里批准"))
-        if r.1 == nil { Self.onSeen?(session) }
+        if r.1 == nil { Self.approvedPlans.insert(ask); Self.onSeen?(session) }
         return r
     }
 
@@ -1307,12 +1316,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// After a send, busy with no new prompt means the message went into Claude Code's queue
     /// behind a turn the board did not know had started.
     private static func currentState(_ session: String) -> SessionActivity? {
-        guard !session.isEmpty, !session.contains("/"),
-              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
-                  .appending(path: ".claude/pet/sessions/\(session).json")),
-              let s = SessionState.decode(from: data) else { return nil }
+        guard let s = sessionDoc(session) else { return nil }
         if StateAggregator.wasApproved(s) { return .busy }
         return (StateAggregator.waitEnded(s) ?? s).state
+    }
+
+    /// The pet's record of the session, as pet-emit last wrote it.
+    private static func sessionDoc(_ session: String) -> SessionState? {
+        guard !session.isEmpty, !session.contains("/"),
+              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                  .appending(path: ".claude/pet/sessions/\(session).json")) else { return nil }
+        return SessionState.decode(from: data)
     }
 
     /// When the session last took a prompt, per the pet's record — changes when a message lands.
