@@ -1852,6 +1852,7 @@ def cmd_board(args):
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],
                             "todos": [todo_fields(x) for x in (TODO_RE.match(i.split("\n", 1)[0]) for i in h["Todos"]) if x]}
             d["historyInfo"] = history_info(m["path"])
+            d["lastActive"] = last_active(m, h)
             out.append(d)
         cfg = load_json(root_config_path(), {})
         links = cfg.get("links", []) if isinstance(cfg, dict) else []
@@ -6248,6 +6249,18 @@ def card_log(body, n=3):
         if x and not re.match(r"todo #\d+ → ", x.group(2)):
             out.append({"at": x.group(1), "text": x.group(2)})
     return out[-n:]
+
+
+def last_active(meta, history):
+    """When the task last moved, to the second where the log says so: its newest log line (on the
+    card or moved to HISTORY.md) or its `closed` date, else its `updated` date. What the board's Finished
+    list orders by — `updated` alone is a date, so tasks of one day had no order of their own."""
+    m = LOG_HEADING_RE.search(meta.get("body", "") + "\n")
+    lines = (m.group(1) if m else "").splitlines() + [x.split("\n", 1)[0] for x in history.get("Log", [])]
+    stamps = [x.group(1).replace("T", " ") for x in (LOG_ENTRY_RE.match(l.strip()) for l in lines) if x]
+    # `updated` only without either: any write moves it, a log line or not.
+    stamps += [str(meta["closed"])] if meta.get("closed") else []
+    return max(stamps) if stamps else str(meta.get("updated") or "")
 
 
 def card_state_lines(body):

@@ -451,7 +451,9 @@ for one holding only the template's hints) and `stats`, and each task a
 `repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
 as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
 card's `closed` date — written when a task becomes done or abandoned — not `updated`, which any
-later log line moves.
+later log line moves. Each task also has `lastActive`: its newest log line's time (card or
+HISTORY.md) or its `closed` date, whichever is later, else `updated` — what a project page's
+Finished list orders by, newest first, then by id.
 
 ## Categories
 

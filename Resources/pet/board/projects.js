@@ -236,7 +236,10 @@ function phaseRows(pr, items) {
   return `<div class="swim-cols" ${grid}>${LANES.map((l) => laneHead(l, items.filter((t) => lane(t) === l).length)).join("")}</div>${rows}`;
 }
 function doneList(name) {
-  const done = projTasks(name).filter((t) => !isOpen(t)).sort((a, b) => String(b.closed || b.updated).localeCompare(String(a.closed || a.updated)));
+  // Last active first (hq's lastActive: the newest log line, to the second), then the higher id —
+  // a fixed order, where a date alone left the tasks of one day to shuffle.
+  const at = (t) => String(t.lastActive || t.closed || t.updated || "");
+  const done = projTasks(name).filter((t) => !isOpen(t)).sort((a, b) => at(b).localeCompare(at(a)) || String(b.id).localeCompare(String(a.id)));
   if (!done.length) return "";
   const all = pui.doneAll.has(name);
   const shown = all ? done : done.slice(0, 8);

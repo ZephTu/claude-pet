@@ -1747,6 +1747,14 @@ for i in 1 2 3 4 5 6 7; do "$HQ" todo "$BT" "$i" done --text "step $i" >/dev/nul
 for i in $(seq 1 25); do "$HQ" log "$BT" "note $i" >/dev/null; done
 [ "$(sed -n '/^## Log/,$p' "$BC" | grep -c ': note ')" = 20 ] && grep -q ': note 25$' "$BC" && ! grep -q ': note 5$' "$BC" \
   && grep -q ': note 1$' "$BH" && grep -q ': note 5$' "$BH" && ok "budget: the card keeps the newest 20 log entries, the rest go to HISTORY.md" || fail "log budget: $(sed -n '/^## Log/,$p' "$BC")"
+blast() { "$HQ" board --json | python3 -c 'import json,sys; print([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$BT"'"][0]["lastActive"])'; }
+newest="$(grep -hoE "^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" "$BC" "$BH" | cut -c3- | sort | tail -1)"
+[ "$(blast)" = "$newest" ] && ok "board json: lastActive is the newest log line's time, to the second" || fail "lastActive: $(blast) vs $newest"
+cp "$BH" "$BH.bak"; python3 - "$BH" <<'PY'
+import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("## Log\n", "## Log\n- 2099-01-02 03:04:05: later\n", 1))
+PY
+[ "$(blast)" = "2099-01-02 03:04:05" ] && ok "...counting the log lines moved to HISTORY.md" || fail "lastActive history: $(blast)"
+mv "$BH.bak" "$BH"
 "$HQ" ref add "$BT" "PR #5 https://github.com/o/r/pull/5" >/dev/null
 "$HQ" ref add "$BT" "build #77 https://jenkins.example.com/job/x/77/" >/dev/null
 "$HQ" ref add "$BT" "run https://github.com/o/r/actions/runs/123" >/dev/null
