@@ -580,6 +580,39 @@ assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progr
 assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
 ' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
 
+# Claude Code's queue, from its queue-operation lines, matched by text: an entry leaves when a
+# remove or a user entry (prompt, queued_command, meta) holds its text — not by replaying dequeues
+# as a FIFO, which one stale entry (here: an empty enqueue, a notification queued twice) would
+# throw off. One still there after a turn ended and another prompt began is stale.
+QSID=feedface-5555-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"go"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z","content":"<task-notification><task-id>x</task-id></task-notification>"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z","content":"<task-notification><task-id>x</task-id></task-notification>"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:02Z","content":"!aws sso login"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:03Z","content":"first"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:04Z","content":"second"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:05Z","content":"third"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:06Z","content":[{"type":"text","text":"fourth"}]}' \
+  '{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:07Z"}' \
+  '{"type":"queue-operation","operation":"remove","timestamp":"2026-01-01T00:00:08Z","content":"third"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"second"},"timestamp":"2026-01-01T00:00:09Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+queued() { "$HQ" peek "$QSID" --json --meta | python3 -c 'import json,sys; print(json.dumps([x["text"] for x in json.load(sys.stdin)["queued"]]))'; }
+[ "$(queued)" = '["!aws sso login", "first", "fourth"]' ] \
+  && ok "peek --meta: queued lists what waits in Claude Code's queue, oldest first, matched by text" || fail "peek --meta queued: $(queued)"
+printf '%s\n' \
+  '{"type":"system","subtype":"turn_duration","durationMs":9000,"timestamp":"2026-01-01T00:00:10Z"}' \
+  '{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:11Z"}' \
+  '{"type":"user","message":{"content":"first"},"timestamp":"2026-01-01T00:00:11Z"}' \
+  >> "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+[ "$(queued)" = '["!aws sso login", "fourth"]' ] && ok "...a message leaves when it comes in as the next prompt" || fail "queued after prompt: $(queued)"
+printf '%s\n' \
+  '{"type":"user","isMeta":true,"message":{"content":"<local-command-caveat>ran a command</local-command-caveat>"},"timestamp":"2026-01-01T00:00:12Z"}' \
+  >> "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+[ "$(queued)" = '[]' ] && ok "...and what a turn's end and another prompt left behind is stale" || fail "queued stale: $(queued)"
+
 # Background calls that end without a tool-use id: TaskStop on a command, an agent's notification
 # naming only its agentId, one that was killed; an interrupted turn; odd input and a U+0085 result.
 CSID=feedface-5555-2222-3333-444455556666
@@ -1747,6 +1780,20 @@ for i in 1 2 3 4 5 6 7; do "$HQ" todo "$BT" "$i" done --text "step $i" >/dev/nul
 for i in $(seq 1 25); do "$HQ" log "$BT" "note $i" >/dev/null; done
 [ "$(sed -n '/^## Log/,$p' "$BC" | grep -c ': note ')" = 20 ] && grep -q ': note 25$' "$BC" && ! grep -q ': note 5$' "$BC" \
   && grep -q ': note 1$' "$BH" && grep -q ': note 5$' "$BH" && ok "budget: the card keeps the newest 20 log entries, the rest go to HISTORY.md" || fail "log budget: $(sed -n '/^## Log/,$p' "$BC")"
+blast() { "$HQ" board --json | python3 -c 'import json,sys; print([t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$BT"'"][0]["lastActive"])'; }
+newest="$(grep -hoE "^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" "$BC" "$BH" | cut -c3- | sort | tail -1)"
+[ "$(blast)" = "$newest" ] && ok "board json: lastActive is the newest log line's time, to the second" || fail "lastActive: $(blast) vs $newest"
+cp "$BH" "$BH.bak"; python3 - "$BH" <<'PY'
+import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("## Log\n", "## Log\n- 2099-01-02 03:04:05: later\n", 1))
+PY
+[ "$(blast)" = "2099-01-02 03:04:05" ] && ok "...counting the log lines moved to HISTORY.md" || fail "lastActive history: $(blast)"
+mv "$BH.bak" "$BH"
+LT="$("$HQ" new "Last active" --no-focus | head -1)"; LC="$(ls "$T"/root/tasks/$LT-*/TASK.md)"
+printf -- '- 2099-01-01: onboarded\n' >> "$LC"   # a date-only line (hq-onboard) is no time
+"$HQ" log "$LT" "a note" >/dev/null; "$HQ" set "$LT" status=done >/dev/null
+lt() { "$HQ" board --json | python3 -c 'import json,sys; t=[t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$LT"'"][0]; print(t.get("closed_at",""), "|", t["lastActive"])'; }
+python3 -c 'import sys; a,b=sys.argv[1].split(" | "); assert len(a)==19 and b==a, sys.argv[1]' "$(lt)" \
+  && ok "closing writes closed_at, to the second, and lastActive is it (date-only log lines don't count)" || fail "closed_at: $(lt)"
 "$HQ" ref add "$BT" "PR #5 https://github.com/o/r/pull/5" >/dev/null
 "$HQ" ref add "$BT" "build #77 https://jenkins.example.com/job/x/77/" >/dev/null
 "$HQ" ref add "$BT" "run https://github.com/o/r/actions/runs/123" >/dev/null

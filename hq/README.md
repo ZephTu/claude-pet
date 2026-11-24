@@ -47,7 +47,11 @@ hq-update moved its task from open to done or abandoned (the board then applies 
 `turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply
 since, its `compact_boundary`'s `postTokens` plus what a request sent besides the conversation
 after the previous compaction, else the session's first reply, at most 60k) and `todos` (Claude's latest
-TodoWrite / TaskCreate list: `{text, status, active}`); `hq peek <sid> --tool <tool_use id>`
+TodoWrite / TaskCreate list: `{text, status, active}`) and `queued` (messages waiting in Claude
+Code's queue — sent while it was busy, not taken in yet — from the transcript's
+`queue-operation` lines, matched by text: an entry leaves when a `remove` or a later user entry
+holds it, or once a turn has ended and another prompt began; `[{text, ts}]`, oldest first, task
+notifications left out); `hq peek <sid> --tool <tool_use id>`
 prints one call's full input and output (an Edit's diff), `--json` for the fields.
 `hq peek <sid> --commands [--json]` lists the skills the session can run as slash commands —
 the newest `skill_listing` Claude Code wrote into the transcript plus skills added after it,
@@ -451,7 +455,10 @@ for one holding only the template's hints) and `stats`, and each task a
 `repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
 as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
 card's `closed` date — written when a task becomes done or abandoned — not `updated`, which any
-later log line moves.
+later log line moves. Closing a task also writes `closed_at`, the moment, to the
+second. Each task also has `lastActive`: the later of its newest timed log line (card or
+HISTORY.md; date-only lines don't count) and `closed_at` (`closed` on older cards), else
+`updated` — what a project page's Finished list orders by, newest first, then by id.
 
 ## Categories
 
