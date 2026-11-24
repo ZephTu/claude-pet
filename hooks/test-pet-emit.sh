@@ -474,16 +474,22 @@ emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
 wait $pid
 check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
-# A multiple-choice question is answered on its card; Allow from outside would
-# hand Claude no answers, so the pet must not offer it or hold the hook.
-start=$(date +%s)
+# A multiple-choice question is answered on its card: the hook is held like a
+# permission's, and the picks come back as the tool's input — Allow alone would
+# hand Claude no answers.
 printf '{"hook_event_name":"PermissionRequest","session_id":"sA","cwd":"/tmp/p","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"a?"},{"question":"b?"}]}}' \
-  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sA.out"
-check "a question card does not hold the hook" "$(( $(date +%s) - start < 3 ))" "1"
-check "...and answers nothing" "$(cat "$PET_HOME/sA.out")" ""
-check "...but the session is waiting" "$(field sA state)" "waiting"
-check "...on a reply, not an approval" "$(field sA waitingOn)|$(field sA askId)" "|"
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sA.out" &
+pid=$!; id="$(await_ask sA)"
+check "a question card holds the hook under an ask" "$([ -n "$id" ] && echo yes)" "yes"
+check "...the session is waiting" "$(field sA state)" "waiting"
+check "...on a reply, not an approval" "$(field sA waitingOn)|$(field sA askKind)" "|question"
 check "...and says how many questions" "$(field sA detail)" "2 questions to answer"
+mkdir -p "$PET_HOME/decisions"
+printf '{"askId":"%s","behavior":"allow","answers":{"a?":"yes","b?":"no"}}' "$id" > "$PET_HOME/decisions/sA.json"
+wait $pid
+check "the picks come back as the tool's answers" \
+  "$(/usr/bin/python3 -c "import json,sys;d=json.load(open(sys.argv[1]))['hookSpecificOutput']['decision'];print(d['behavior'],d['updatedInput']['answers']['b?'],len(d['updatedInput']['questions']))" "$PET_HOME/sA.out")" \
+  "allow no 2"
 
 # ---- an editor's integrated terminal ------------------------------------------
 terminal() {  # terminal <session_id> → "kind handle"
