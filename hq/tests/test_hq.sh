@@ -580,6 +580,39 @@ assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progr
 assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
 ' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
 
+# Claude Code's queue, from its queue-operation lines, matched by text: an entry leaves when a
+# remove or a user entry (prompt, queued_command, meta) holds its text — not by replaying dequeues
+# as a FIFO, which one stale entry (here: an empty enqueue, a notification queued twice) would
+# throw off. One still there after a turn ended and another prompt began is stale.
+QSID=feedface-5555-2222-3333-444455556666
+printf '%s\n' \
+  '{"type":"user","message":{"content":"go"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z","content":"<task-notification><task-id>x</task-id></task-notification>"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:01Z","content":"<task-notification><task-id>x</task-id></task-notification>"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:02Z","content":"!aws sso login"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:03Z","content":"first"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:04Z","content":"second"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:05Z","content":"third"}' \
+  '{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:06Z","content":[{"type":"text","text":"fourth"}]}' \
+  '{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:07Z"}' \
+  '{"type":"queue-operation","operation":"remove","timestamp":"2026-01-01T00:00:08Z","content":"third"}' \
+  '{"type":"attachment","attachment":{"type":"queued_command","prompt":"second"},"timestamp":"2026-01-01T00:00:09Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+queued() { "$HQ" peek "$QSID" --json --meta | python3 -c 'import json,sys; print(json.dumps([x["text"] for x in json.load(sys.stdin)["queued"]]))'; }
+[ "$(queued)" = '["!aws sso login", "first", "fourth"]' ] \
+  && ok "peek --meta: queued lists what waits in Claude Code's queue, oldest first, matched by text" || fail "peek --meta queued: $(queued)"
+printf '%s\n' \
+  '{"type":"system","subtype":"turn_duration","durationMs":9000,"timestamp":"2026-01-01T00:00:10Z"}' \
+  '{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:11Z"}' \
+  '{"type":"user","message":{"content":"first"},"timestamp":"2026-01-01T00:00:11Z"}' \
+  >> "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+[ "$(queued)" = '["!aws sso login", "fourth"]' ] && ok "...a message leaves when it comes in as the next prompt" || fail "queued after prompt: $(queued)"
+printf '%s\n' \
+  '{"type":"user","isMeta":true,"message":{"content":"<local-command-caveat>ran a command</local-command-caveat>"},"timestamp":"2026-01-01T00:00:12Z"}' \
+  >> "$HOME/.claude/projects/-tmp-repo/$QSID.jsonl"
+[ "$(queued)" = '[]' ] && ok "...and what a turn's end and another prompt left behind is stale" || fail "queued stale: $(queued)"
+
 # Background calls that end without a tool-use id: TaskStop on a command, an agent's notification
 # naming only its agentId, one that was killed; an interrupted turn; odd input and a U+0085 result.
 CSID=feedface-5555-2222-3333-444455556666

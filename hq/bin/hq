@@ -5511,6 +5511,57 @@ def turn_stats(entries, path=None):
     return {"start": start, "done": ms is not None, "ms": ms, "tokens": out, "context": ctx}
 
 
+def queued_messages(entries):
+    """What waits in Claude Code's queue: messages sent while the session was busy that it has not
+    taken in yet, [{text, ts}], oldest first. Claude Code logs the queue in the transcript as
+    queue-operation lines: `enqueue` and `remove` carry the text, `dequeue` doesn't.
+    Matched by text, not replayed as a FIFO: a stale entry (an enqueue written just before Claude
+    Code exited, a notification enqueued twice, an enqueue with no text) would make every later
+    dequeue pop the wrong one. So an entry leaves when a `remove` has its text, or when a user
+    entry — a prompt, a queued_command attachment, a meta prompt from /loop or another session —
+    holds it. A queued message is always taken in by the end of the next turn (measured
+    2026-11-24 over 169 enqueues in 91 transcripts), so one still there after a turn ended and a
+    different prompt started the next is stale and dropped: a `!` command, which runs without
+    coming back as its own text, or a queue lost to a restart. Task notifications and enqueues
+    with no text are not shown; nobody typed them here. Only the window peek read is seen: a
+    queue is short-lived, so its start is in it."""
+    def text(c):
+        if isinstance(c, list):
+            c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        return c.strip() if isinstance(c, str) else ""
+    q = []   # [text, ts, a turn has ended since]
+    for o in entries:
+        kind = o.get("type")
+        if kind == "system" and o.get("subtype") == "turn_duration":
+            for x in q:
+                x[2] = True
+            continue
+        if kind == "queue-operation":
+            op, t = o.get("operation"), text(o.get("content"))
+            if op == "enqueue" and t and not t.startswith("<task-notification>"):
+                q.append([t, o.get("timestamp"), False])
+            elif op == "remove" and t:
+                q = [x for i, x in enumerate(q) if i != next((j for j, y in enumerate(q) if y[0] == t), -1)]
+            continue
+        if kind == "attachment":
+            a = o.get("attachment") or {}
+            t = text(a.get("prompt")) if a.get("type") == "queued_command" else ""
+        elif kind == "user" and not o.get("isSidechain"):
+            c = (o.get("message") or {}).get("content")
+            t = "" if isinstance(c, list) and any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c) else text(c)
+        else:
+            continue
+        if not t:
+            continue
+        # Whole lines: several queued messages can come in as one prompt, joined by newlines.
+        hit = next((i for i, x in enumerate(q) if f"\n{x[0]}\n" in f"\n{t}\n"), None)
+        if hit is not None:
+            q.pop(hit)
+        elif not t.startswith("<task-notification>"):
+            q = [x for x in q if not x[2]]
+    return [{"text": x[0], "ts": x[1]} for x in q]
+
+
 def latest_todos(entries):
     """Claude's own todo list as it last stood: the latest TodoWrite, or the list the
     TaskCreate / TaskUpdate tools have built since. [{text, status, active}], or None."""
@@ -6100,11 +6151,13 @@ def cmd_peek(args):
         if args.meta:
             cwd = next((o.get("cwd") for o in reversed(entries) if o.get("cwd")), None)
             # items: the messages with the tool calls between them; turn: the turn in progress
-            # (or the last one); todos: Claude's own todo list. `messages` stays for older readers.
+            # (or the last one); todos: Claude's own todo list; queued: messages waiting in Claude
+            # Code's queue. `messages` stays for older readers.
             print(json.dumps({"session": os.path.basename(path)[:-6] if path else args.session,
                               "found": bool(path), "live": live, "title": session_title(entries),
                               "cwd": cwd, "messages": msgs, "items": items,
-                              "turn": turn_stats(entries, path), "todos": latest_todos(entries)},
+                              "turn": turn_stats(entries, path), "todos": latest_todos(entries),
+                              "queued": queued_messages(entries)},
                              ensure_ascii=False, indent=1))
         else:
             print(json.dumps(msgs, ensure_ascii=False, indent=1))
