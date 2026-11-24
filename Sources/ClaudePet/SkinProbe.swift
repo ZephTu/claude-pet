@@ -47,6 +47,9 @@ enum SkinProbe {
         let handler = PetSchemeHandler(root: root)
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(handler, forURLScheme: PetSchemeHandler.scheme)
+        // The language the real window would show (CLAUDE_PET_LANG overrides), so a probe of a
+        // Chinese pet is a picture of the Chinese pet.
+        config.userContentController.installLanguageScript()
 
         let size = PetLayout.windowSize
         let webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stands in for hq while the promo stills render: the board never reads the real HQ, so a
+# late refresh can't swap the demo data for someone's actual tasks. An empty answer rather
+# than an error, so no error banner lands on the picture.
+echo '{}'

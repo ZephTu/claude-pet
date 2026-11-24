@@ -1,0 +1,78 @@
+<template>
+  <style>
+@font-face { font-family: "PF"; font-weight: 400; src: local("PingFangSC-Regular"), local("PingFang SC"); }
+@font-face { font-family: "PF"; font-weight: 500; src: local("PingFangSC-Medium"), local("PingFang SC"); }
+@font-face { font-family: "PF"; font-weight: 600; src: local("PingFangSC-Semibold"), local("PingFang SC"); }
+#root { position: absolute; inset: 0; overflow: hidden; background: #2b2a28; font-family: "PF", sans-serif; color: #e8ebf1; }
+#root .grain { position: absolute; inset: 0; opacity: .05; background-size: 256px 256px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3'/></filter><rect width='256' height='256' filter='url(%23n)'/></svg>"); }
+#root .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+#root .win { position: absolute; border-radius: 12px; overflow: hidden; background: #1a1d24;
+  box-shadow: 0 24px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06); }
+#root .win .bar { position: absolute; left: 0; top: 0; right: 0; height: 28px; background: #23262e; }
+#root .win .bar i { position: absolute; top: 9px; width: 11px; height: 11px; border-radius: 50%; }
+#root .win .bar span { position: absolute; left: 0; right: 0; top: 6px; text-align: center; font-size: 13px; color: #8a909c; }
+#root .win img.st { position: absolute; left: 0; width: 100%; }
+#root .hl { position: absolute; border: 3px solid #f2a541; border-radius: 10px; opacity: 0; }
+#root .cover { position: absolute; background: #1a1d24; opacity: 0; }
+#root .typed { position: absolute; white-space: nowrap; color: #e8ebf1; clip-path: inset(0 100% 0 0); }
+#root .spr { position: absolute; background-repeat: no-repeat; --f: 0;
+  --i: mod(var(--f), var(--n));
+  background-position: calc(mod(var(--i), 8) * var(--s) * -1) calc(round(down, var(--i) / 8, 1) * var(--s) * -1); }
+#root .cur { position: absolute; left: 0; top: 0; width: 34px; height: 50px; opacity: 0; }
+#root .rip { position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  border: 3px solid #ef6f5a; opacity: 0; }
+#root .term { position: absolute; border-radius: 10px; overflow: hidden; background: #15171c;
+  box-shadow: 0 18px 44px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.06); }
+#root .term .tb { position: absolute; left: 0; right: 0; top: 0; height: 30px; background: #22252c; }
+#root .term .tb i { position: absolute; top: 10px; width: 11px; height: 11px; border-radius: 50%; }
+#root .term .tb span { position: absolute; left: 70px; right: 12px; top: 6px; text-align: center; font-size: 14px; color: #8a909c;
+  white-space: nowrap; overflow: hidden; }
+#root .term .tc { position: absolute; left: 0; right: 0; top: 30px; bottom: 0; overflow: hidden; padding: 12px 16px; }
+#root .term .tl { font-family: "JetBrains Mono", "PF", monospace; white-space: pre-wrap; line-height: 1.5; color: #c9ced8; }
+#root .term .tl div { min-height: 1.5em; }
+#root .tl .u { color: #f2a541; } #root .tl .t { color: #7cc4a4; } #root .tl .d { color: #8f96a3; }
+#root .tl .w { color: #ef6f5a; } #root .tl .b { color: #9db4ff; }
+#root .tl .box { border: 1.5px solid #ef6f5a; border-radius: 8px; padding: 8px 12px; margin: 6px 0; }
+#root .lab { position: absolute; left: 150px; width: 820px; opacity: 0; }
+#root .lab b { display: block; font-size: 104px; font-weight: 600; letter-spacing: -1px; color: #fff; }
+#root .lab em { display: block; font-style: normal; font-size: 46px; font-weight: 500; color: #f2a541; margin-top: 14px; }
+#root .clock { position: absolute; right: 48px; top: 26px; font-size: 30px; font-weight: 500; color: rgba(255,255,255,.78);
+  opacity: 0; letter-spacing: .5px; }
+#root .big { position: absolute; left: 0; right: 0; text-align: center; color: #fff; opacity: 0; }
+#root .bubble { position: absolute; left: 0; top: 0; padding: 14px 22px; border-radius: 18px; background: #f2a541; color: #1a1d24;
+  font-size: 26px; font-weight: 600; white-space: nowrap; opacity: 0; }
+#root .dim { position: absolute; inset: 0; background: #000; opacity: 0; }
+</style>
+  <div id="root" data-composition-id="s09" data-width="1920" data-height="1080">
+    <div class="grain"></div><div class="cam" id="s09-cam"><div class="win" id="s09-win" style="left:180px;top:42px;width:1560px;height:995.7px"><div class="bar"><i style="left:12px;background:#ef6f5a"></i><i style="left:30px;background:#f2c14e"></i><i style="left:48px;background:#7cc4a4"></i><span>HQ</span></div><img class="st" id="s09-im-day2-focus" src="assets/board/day2-focus.png" style="top:28px;opacity:1"><img class="st" id="s09-im-jobs" src="assets/board/jobs.png" style="top:28px;opacity:0"><img class="st" id="s09-im-jobs-run" src="assets/board/jobs-run.png" style="top:28px;opacity:0"><div id="s09-wo"></div></div><div class="spr" id="s09-cat1" style="left:1650px;top:835px;width:220px;height:220px;--s:220px;--n:20;background-image:url(assets/cat/working.webp);background-size:1760px auto;opacity:1"></div><div class="cur" id="s09-cur"><svg viewBox="0 0 24 36" width="34" height="50"><path d="M2 2 L2 28 L8.5 22 L13 33 L17.5 31 L13 20.5 L21.5 20.5 Z" fill="#111" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="rip" id="s09-rip2" style="left:724.7px;top:104.4px"></div><div class="cur" id="s09-cur"><svg viewBox="0 0 24 36" width="34" height="50"><path d="M2 2 L2 28 L8.5 22 L13 33 L17.5 31 L13 20.5 L21.5 20.5 Z" fill="#111" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="rip" id="s09-rip3" style="left:981.2px;top:288.1px"></div></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.set("#s09-cam", { transformOrigin: "0 0" }, 0);
+    tl.fromTo("#s09-cat1", { "--f": 0 }, { "--f": 120, duration: 10.000, ease: "steps(120)" }, 0.0);
+    tl.set("#s09-cam", { x: 0.0, y: 0.0, scale: 1.0 }, 0);
+    tl.set("#s09-cur", { x: 1105.4237288135594, y: 598.8135593220339 }, 0);
+    tl.to("#s09-cur", { opacity: 1, duration: 0.2 }, 0.0);
+    tl.to("#s09-cur", { x: 724.7, y: 104.4, duration: 0.6, ease: "power2.inOut" }, 0.1);
+    tl.fromTo("#s09-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 0.75);
+    tl.to("#s09-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 0.75);
+    tl.to("#s09-im-jobs", { opacity: 1, duration: 0.2, ease: "none" }, 0.85);
+    tl.set("#s09-im-day2-focus", { opacity: 0 }, 1.05);
+    tl.to("#s09-cur", { opacity: 0, duration: 0.2 }, 1.0);
+    tl.to("#s09-cam", { x: -442.37, y: -133.13, scale: 1.75, duration: 0.5, ease: "expo.inOut" }, 2.751);
+    tl.to("#s09-cam", { x: 112.88, y: -133.13, scale: 1.75, duration: 0.5, ease: "expo.inOut" }, 3.65);
+    tl.to("#s09-cam", { x: 0.0, y: 0.0, scale: 1.0, duration: 0.6, ease: "expo.inOut" }, 6.596);
+    tl.set("#s09-cur", { x: 1105.4237288135594, y: 466.6101694915254 }, 0);
+    tl.to("#s09-cur", { opacity: 1, duration: 0.2 }, 6.596);
+    tl.to("#s09-cur", { x: 981.2, y: 288.1, duration: 0.6, ease: "power2.inOut" }, 6.596);
+    tl.fromTo("#s09-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 7.296);
+    tl.to("#s09-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 7.296);
+    tl.to("#s09-im-jobs-run", { opacity: 1, duration: 0.2, ease: "none" }, 7.396);
+    tl.set("#s09-im-jobs", { opacity: 0 }, 7.596);
+    tl.to("#s09-cur", { opacity: 0, duration: 0.2 }, 7.596);
+    tl.to("#s09-cam", { x: -385.63, y: -100.81, scale: 1.6, duration: 0.6, ease: "expo.inOut" }, 7.596);
+    tl.set({}, {}, 10.0);
+    window.__timelines["s09"] = tl;
+  </script>
+</template>
