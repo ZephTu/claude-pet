@@ -283,7 +283,9 @@ function projAside(pr) {
 }
 
 // Its default directories: a task started in one, with no project yet, joins it. ✎ to add or remove.
+// A name only used on cards (not listed in hq.json) has none, and hq can't give it any.
 function dirsSec(pr) {
+  if (!projectByName(pr.name)) return "";
   const name = pr.name, on = editing(name, "dirs"), paths = pr.paths || [];
   const rows = paths.map((x) => `<div class="pdir"><code>${esc(x)}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
   const add = on ? `<div class="row nowrap pdir-add"><input class="note" list="pdir-list" data-key="${esc("pdir:" + name)}" data-pdir="${esc(name)}" value="${esc(draft("pdir:" + name))}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}">${dirList("pdir-list")}
@@ -298,7 +300,9 @@ function dirsSec(pr) {
 function removeSec(pr) {
   const name = pr.name, n = tasks().filter((t) => t.project === name).length;
   const what = pr.kind === "duty" ? T("duty", "职责") : T("project", "项目");
-  const kept = pr.defined ? T(" Its PROJECT.md is kept in projects/.removed.", "它的 PROJECT.md 会挪到 projects/.removed 里留着。") : "";
+  const jobs = recurJobs(name).length;
+  const kept = (pr.defined ? T(" Its PROJECT.md is kept in projects/.removed.", "它的 PROJECT.md 会挪到 projects/.removed 里留着。") : "")
+    + (jobs ? T(` Its ${jobs} recurring job${jobs === 1 ? "" : "s"} stay on the Scheduled page and fail until deleted.`, `它的 ${jobs} 个定期任务会留在定时任务页上，删掉之前每次都会失败。`) : "");
   if (pui.removing === name && n) {
     const key = "pto:" + name;
     const others = projects().filter((x) => x.name !== name && (!projectClosed(x) || x.name === draft(key)));
@@ -628,7 +632,7 @@ async function projAction(d) {
     case "p-status": return run(() => api("project", { action: "set", names: [name, "status=" + d.s] }), T("Status saved", "状态已保存"));
     case "p-check": return run(() => api("project", { action: "check", names: [name, String(d.i), d.done ? "done" : "open"] }));
     case "p-edit": {
-      const pr = projectByName(name) || {};
+      const pr = projectByName(name) || { name };
       const part = d.part;
       if (editing(name, part)) { pui.edit = null; return render(); }
       pui.edit = name + "|" + part;

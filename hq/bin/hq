@@ -348,7 +348,7 @@ def save_categories(cats):
 def check_category(name):
     name = (name or "").strip()
     if not CATEGORY_RE.match(name):
-        die(f"invalid category {name!r}: 1-40 characters, no # quotes : , [ ]")
+        die(f"invalid name {name!r}: 1-40 characters, no # quotes : , [ ]")
     return name
 
 
