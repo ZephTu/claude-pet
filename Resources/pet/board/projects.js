@@ -2,6 +2,11 @@
 // uses their helpers (api, act, esc, T, toast, render, refresh, markdown, laneCol, kcard,
 // loadJobs, scheduleText, jwhen…).
 //
+// The list page is where every project's state shows at a glance: each card names the tasks
+// waiting on you and the ones running, projects with a live session come first (Active first),
+// and the cards drag into your order. While the search box filters, the tasks it matches — closed
+// ones too — are listed above the projects.
+//
 // Two kinds of project sit at the top (PROJECT.md `kind:`): a goal (◆) has an end — done-when
 // criteria, a deadline, optional phases its tasks go through; a duty (↻) is ongoing — healthy-when
 // criteria, and work that comes in: tasks made from its templates ("常见的活"), recurring jobs that
@@ -64,6 +69,32 @@ function progress(pr) {
 const bigProg = (p) => (p.n ? `<div class="bigprog" title="${esc(p.what)}"><span class="bar"><i style="width:${Math.round(100 * p.d / p.n)}%"></i></span>${p.d}/${p.n}</div>` : "");
 
 // ------------------------------------------------------------------ the list
+// The tasks a card names: waiting on you, then running — up to CARD_TASKS, then "+N more" (a click
+// there opens the project). The other lanes are only counted.
+const CARD_TASKS = 4;
+function cardTasks(open) {
+  const pick = ["you", "run"].flatMap((l) => open.filter((t) => lane(t) === l).sort((a, b) => laneOrder(a, b)));
+  if (!pick.length) return "";
+  const shown = pick.slice(0, CARD_TASKS), more = pick.length - shown.length;
+  return `<div class="ptasks">${shown.map((t) => { const l = lane(t);
+    return `<div class="ptask l-${l}" data-action="open-task" data-task="${esc(t.id)}" title="${esc(LANE_NAME[l])} · ${esc(t.title)}"><i></i><span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="t">${esc(t.title)}</span></div>`; }).join("")}
+    ${more ? `<div class="ptask more">${T(`+${more} more`, `还有 ${more} 个`)}</div>` : ""}</div>`;
+}
+// When a session last did something in the project, as "● 3m ago".
+function actTag(name) {
+  const at = projectActivity(name);
+  return at ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● ${ago(new Date(at).toISOString())}</span>` : "";
+}
+// Active first: projects with a live session first, newest activity first; the rest keep your
+// dragged order (the sort is stable). Held while the pointer is over the grid (see steady()).
+function activeOrder(key, list) {
+  if (!ui.activeFirst) return list;
+  return steady(key, list, (a, b, was) => {
+    const x = hotAct(projectActivity(a.name)), y = hotAct(projectActivity(b.name));
+    return y - x || (x === HOT ? was(a, b) : 0);
+  }, (p) => p.name);
+}
+
 function projCard(pr, underParent) {
   const open = projTasks(pr.name).filter(isOpen);
   const n = laneCounts(open);
@@ -84,12 +115,15 @@ function projCard(pr, underParent) {
     if (kids) kv.push(`◆ <b>${kids}</b>`);
   }
   const tpls = pr.kind === "duty" ? (pr.templates || []) : [];
-  return `<div class="pcard k-${esc(pr.kind)} ${projectClosed(pr) ? "closed" : ""}" data-action="p-open" data-p="${esc(pr.name)}" title="${T("Open its page", "打开它的页面")}">
-    <div class="pt">${kindIcon(pr)}<span class="nm">${esc(projLabel(pr, pr.name))}</span>
+  // Dragging puts it elsewhere in your order — not a finished one, nor one drawn under its duty.
+  const movable = !underParent && !projectClosed(pr) && projectNames().includes(pr.name);
+  return `<div class="pcard k-${esc(pr.kind)} ${projectClosed(pr) ? "closed" : ""}" data-action="p-open" data-p="${esc(pr.name)}"
+    title="${T("Open its page", "打开它的页面")}${movable ? T(" · drag to reorder", " · 拖动调整顺序") : ""}"${movable ? ` draggable="true" data-drag-project="${esc(pr.name)}" data-kind="${esc(pr.kind)}"` : ""}>
+    <div class="pt">${kindIcon(pr)}<span class="nm">${esc(projLabel(pr, pr.name))}</span>${actTag(pr.name)}
       <span class="st s-${esc(pr.status || "active")}">${PSTATUS_LABEL[pr.status] || esc(pr.status || "")}</span></div>
     ${pr.goal ? `<div class="pg">${esc(pr.goal.replace(/\s+/g, " "))}</div>` : `<div class="pg none">${pr.kind === "duty" ? T("No scope written yet", "还没写职责范围") : T("No goal written yet", "还没写目标")}</div>`}
     ${pr.kind === "goal" ? bigProg(progress(pr)) : ""}
-    ${open.length ? laneBar(n) + laneNums(n) : `<div class="lcs"><span class="lc none">${T("No open tasks", "没有进行中的任务")}</span></div>`}
+    ${open.length ? laneBar(n) + laneNums(n) + cardTasks(open) : `<div class="lcs"><span class="lc none">${T("No open tasks", "没有进行中的任务")}</span></div>`}
     ${kv.length ? `<div class="kv">${kv.join("")}</div>` : ""}
     ${tpls.length ? `<div class="tplchips">${tpls.map((x) => `<button class="tplchip" data-action="p-tpl-new" data-p="${esc(pr.name)}" data-t="${esc(x.name)}" title="${T("Make a task from this template now", "用这个模板马上建一个任务")}${x.title ? ": " + esc(x.title) : ""}">＋ ${esc(x.name)}</button>`).join("")}</div>` : ""}
   </div>`;
@@ -102,7 +136,7 @@ function projList() {
   const all = projects();
   const f = filterText();
   const match = (pr) => !f || [pr.name, pr.title, pr.goal].join(" ").toLowerCase().includes(f);
-  const live = (kind) => all.filter((p) => p.defined && p.kind === kind && !projectClosed(p) && match(p));
+  const live = (kind) => activeOrder("plist:" + kind, all.filter((p) => p.defined && p.kind === kind && !projectClosed(p) && match(p)));
   const goals = live("goal"), duties = live("duty");
   const closed = all.filter((p) => projectClosed(p) && match(p));
   const untyped = all.filter((p) => !p.kind && match(p));
@@ -112,10 +146,13 @@ function projList() {
       <span class="meta">${T(`${goals.length} projects · ${duties.length} duties`, `${goals.length} 个项目 · ${duties.length} 个职责`)}</span><span class="spacer"></span>
       <button class="btn small" data-action="p-create" data-k="goal">${T("＋ New project", "＋ 新项目")}</button>
       <button class="btn small" data-action="p-create" data-k="duty">${T("＋ New duty", "＋ 新职责")}</button></div>`;
-  html += sec("◆", "goal", T("Projects", "项目"), T("have an end — a goal, done-when, tasks under them", "有终点——目标、完成标准、下面挂任务"), goals.length) +
-    `<div class="pgrid">${goals.map((x) => projCard(x)).join("")}${f ? "" : addCard("goal")}</div>`;
-  html += sec("↻", "duty", T("Duties", "职责"), T("ongoing — work comes in from time to time", "长期负责——时不时来活"), duties.length) +
-    `<div class="pgrid">${duties.map((x) => projCard(x)).join("")}${f ? "" : addCard("duty")}</div>`;
+  if (!listed().length) html += renderOnboarding();
+  if (f) html += taskHits();
+  // While filtering, a section shows only when something in it matches.
+  if (!f || goals.length) html += sec("◆", "goal", T("Projects", "项目"), T("have an end — a goal, done-when, tasks under them", "有终点——目标、完成标准、下面挂任务"), goals.length) +
+    `<div class="pgrid" data-okey="plist:goal">${goals.map((x) => projCard(x)).join("")}${f ? "" : addCard("goal")}</div>`;
+  if (!f || duties.length) html += sec("↻", "duty", T("Duties", "职责"), T("ongoing — work comes in from time to time", "长期负责——时不时来活"), duties.length) +
+    `<div class="pgrid" data-okey="plist:duty">${duties.map((x) => projCard(x)).join("")}${f ? "" : addCard("duty")}</div>`;
   if (untyped.length) {
     html += sec("", "none", T("Not set up yet", "还没定类型"), T("listed projects without a PROJECT.md kind — say what each one is", "列表里有、但还没说是项目还是职责的"), untyped.length) +
       `<div class="plist">${untyped.map((p) => `<div class="prow"><span class="nm link" data-action="p-open" data-p="${esc(p.name)}">${esc(projLabel(p, p.name))}</span>
@@ -123,13 +160,33 @@ function projList() {
         <button class="btn small" data-action="p-kind" data-p="${esc(p.name)}" data-k="goal">${T("◆ It's a project", "◆ 设为项目")}</button>
         <button class="btn small" data-action="p-kind" data-p="${esc(p.name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div>`).join("")}</div>`;
   }
-  html += `<div class="sec-h">${T("Not in a project", "未归属")}<span class="sub">${T("one-off tasks", "零散任务")}</span></div>
-    <div class="plist"><div class="prow link" data-action="p-open" data-p="(none)"><span class="nm">${T(`${loose.length} open task${loose.length === 1 ? "" : "s"} in no project`, `${loose.length} 个进行中的任务没有归属`)}</span><span class="spacer"></span><span class="meta">${T("Open ›", "打开 ›")}</span></div></div>`;
+  if (!f) html += `<div class="sec-h">${T("Not in a project", "未归属")}<span class="sub">${T("one-off tasks", "零散任务")}</span></div>
+    <div class="plist"><div class="prow link" data-action="p-open" data-p="(none)"><span class="nm">${T(`${loose.length} open task${loose.length === 1 ? "" : "s"} in no project`, `${loose.length} 个进行中的任务没有归属`)}</span><span class="spacer"></span><span class="meta">${T("Open ›", "打开 ›")}</span></div>
+      ${cardTasks(loose)}</div>`;
   if (closed.length) {
     html += `<div class="sec-h fold ${pui.closedOpen ? "open" : ""}" data-action="p-closed">${T("Finished", "已结束")}<span class="c">${closed.length}</span><span class="sub">${pui.closedOpen ? T("click to fold", "点击收起") : T("click to show", "点击展开")}</span></div>
       ${pui.closedOpen ? `<div class="pgrid">${closed.map((x) => projCard(x)).join("")}</div>` : ""}`;
   }
   return html;
+}
+
+// While the search box filters: every task it matches, open ones first (newest first), then the
+// closed ones — older and abandoned too — so any task can be found by its id or title.
+const HITS_MAX = 30;
+function taskHits() {
+  const when = (t) => String(t.closed || t.updated || "");
+  const hits = listed().filter((t) => taskMatches(t))
+    .sort((a, b) => isOpen(b) - isOpen(a) || when(b).localeCompare(when(a)));
+  const head = `<div class="sec-h">${T("Matching tasks", "匹配的任务")}<span class="c">${hits.length}</span><span class="sub">${T("closed ones too", "包括已结束的")}</span></div>`;
+  if (!hits.length) return head + `<div class="empty hits-none">${T("No task matches.", "没有匹配的任务。")}</div>`;
+  const shown = hits.slice(0, HITS_MAX);
+  return head + `<div class="donelist hits">${shown.map((t) => {
+    const open = isOpen(t), pr = t.project ? projectByName(t.project) : null;
+    return `<div class="dl ${open ? "" : "shut"}" data-action="open-task" data-task="${esc(t.id)}"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="t">${esc(t.title)}</span>
+      ${t.project ? `<span class="pj">${kindIcon(pr)}${esc(projLabel(pr, t.project))}</span>` : ""}
+      ${open ? `<span class="ln l-${lane(t)}">${LANE_NAME[lane(t)]}</span>` : `<span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>`}
+      <span class="d">${esc(when(t))}</span></div>`; }).join("")}
+    ${hits.length > shown.length ? `<div class="meta hits-more">${T(`${hits.length - shown.length} more — type a little more to narrow it down`, `还有 ${hits.length - shown.length} 个——多输入几个字缩小范围`)}</div>` : ""}</div>`;
 }
 
 // ------------------------------------------------------------------ a project's page
