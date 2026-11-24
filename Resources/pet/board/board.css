@@ -1633,7 +1633,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
   box-shadow: -10px 0 30px rgba(0,0,0,.18); }
 #reader[hidden] { display: none; }
 body.reading > main { margin-right: var(--reader-w); }
-body.reading .drawer { right: var(--reader-w); }
+body.reading .drawer { right: var(--reader-w); width: min(560px, calc(100vw - var(--reader-w) - 24px)); }
 body.reading #modal, body.reading #settings, body.reading #confirm { right: var(--reader-w); }
 body.reading #statusbar { right: var(--reader-w); }
 body.rd-resizing { cursor: col-resize; user-select: none; }
@@ -1692,6 +1692,8 @@ span.rd-cmt { display: inline; margin: 0; padding: 0 4px; }
 .rd-txt { white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   background: none; border: 0; padding: 0; margin: 0; }
 .rd-err { color: var(--red); padding: 12px 0; }
+.rd-stale { margin: 0 0 12px; padding: 6px 10px; border-radius: 6px; background: var(--wash-amber); color: var(--amber); font-size: 12.5px; }
+.rd-stale span { color: var(--faint); }
 #reader-pill { position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 21; display: flex; flex-direction: column;
   align-items: center; gap: 2px; padding: 10px 6px; border: 1px solid var(--line); border-right: 0; border-radius: 10px 0 0 10px;
   background: var(--panel); color: var(--text); cursor: pointer; box-shadow: var(--shadow); font-size: 12px; }

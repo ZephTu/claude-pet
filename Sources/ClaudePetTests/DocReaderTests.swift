@@ -46,8 +46,23 @@ enum DocReaderTests {
         if case .failure(.notDocument) = DocReader.read(dir.path, cwd: "") { t.check("a folder is not read", true) } else { t.check("a folder is not read", false) }
         if case .failure(.notFound) = DocReader.read("nope.md", cwd: dir.path) { t.check("a missing file is not found", true) } else { t.check("a missing file is not found", false) }
 
+        // A link: read through to its target, which sets the mtime and the size limit.
+        let link = dir.appendingPathComponent("CLAUDE.md")
+        try? FileManager.default.createSymbolicLink(at: link, withDestinationURL: md)
+        if case .success(.text(let p, let text, let m, _)) = DocReader.read(link.path, cwd: "") {
+            t.check("a symlink reads its target, keeps its own path", text == "# Hi\n中文\n" && p.hasSuffix("/CLAUDE.md") && m == mtime)
+        } else {
+            t.check("a symlink reads its target, keeps its own path", false)
+        }
+        let fifo = dir.appendingPathComponent("pipe.md")
+        mkfifo(fifo.path, 0o600)
+        if case .failure(.notDocument) = DocReader.read(fifo.path, cwd: "") { t.check("a pipe is not read", true) } else { t.check("a pipe is not read", false) }
+
         let big = dir.appendingPathComponent("big.txt")
         try? Data(count: DocReader.maxBytes + 1).write(to: big)
         if case .failure(.tooBig) = DocReader.read(big.path, cwd: "") { t.check("a huge file is refused", true) } else { t.check("a huge file is refused", false) }
+        let bigLink = dir.appendingPathComponent("big.md")
+        try? FileManager.default.createSymbolicLink(at: bigLink, withDestinationURL: big)
+        if case .failure(.tooBig) = DocReader.read(bigLink.path, cwd: "") { t.check("a link to a huge file is refused", true) } else { t.check("a link to a huge file is refused", false) }
     }
 }

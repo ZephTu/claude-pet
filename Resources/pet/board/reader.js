@@ -64,8 +64,13 @@ function rdMarkdown() {
   md.renderer.rules.link_open = (tokens, i, opts, env) => {
     const href = tokens[i].attrGet("href") || "";
     if (/^(https?:|mailto:)/i.test(href)) return `<a href="#" data-action="link" data-url="${esc(href)}" title="${esc(href)}">`;
-    if (href.startsWith("#")) return `<a href="#" data-action="rd-anchor" data-id="${esc(rdSlug(decodeURIComponent(href.slice(1))))}">`;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return `<a class="rd-dead" title="${esc(href)}">`;
+    if (href.startsWith("#")) {
+      let id = href.slice(1);
+      try { id = decodeURIComponent(id); } catch (e) { /* a broken escape: as written */ }
+      return `<a href="#" data-action="rd-anchor" data-id="${esc(rdSlug(id))}">`;
+    }
+    // Another scheme (not "notes.md:12", a file and its line): nothing to open.
+    if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(href)) return `<a class="rd-dead" title="${esc(href)}">`;
     return `<a href="#" class="path" data-action="link" data-path="${esc(rdJoin(env.dir, href))}" title="${esc(href)}">`;
   };
   md.renderer.rules.image = (tokens, i, opts, env) => {
@@ -114,30 +119,44 @@ function rdFront(text) {
 function rdRender(tab) {
   const d = tab.doc;
   if (!d) return tab.err ? `<div class="rd-err">${esc(tab.err)}</div>` : `<div class="empty">${T("Loading…", "加载中…")}</div>`;
+  const stale = tab.err ? `<div class="rd-stale">${T("Can't read it right now — showing the last version read.", "现在读不到——显示的是上次读到的内容。")} <span>${esc(tab.err)}</span></div>` : "";
+  return stale + rdRenderDoc(tab, d);
+}
+function rdRenderDoc(tab, d) {
   if (!/\.(md|markdown|mdown|mkd)$/i.test(tab.path)) return `<pre class="rd-txt">${linkifyCode(d.text)}</pre>`;
   const md = rdMarkdown();
   if (!md) return `<div class="md">${markdown(d.text, `rd|${tab.path}`)}</div>`;
   const { meta, body } = rdFront(d.text);
+  let html;
+  try { html = md.render(body, { dir: rdDir(tab.path), path: tab.path }); }
+  // Whatever a document holds, it still shows: as plain text if it can't be rendered.
+  catch (e) { return `<pre class="rd-txt">${linkifyCode(d.text)}</pre>`; }
   // Task-list items, as GitHub draws them.
-  const html = md.render(body, { dir: rdDir(tab.path), path: tab.path })
-    .replace(/<li>(<p>)?\[([ xX])\]\s/g, (_, p, x) => `<li class="task-li">${p || ""}<span class="tick">${x === " " ? "☐" : "☑"}</span> `);
-  return meta + html;
+  return meta + html.replace(/<li>(<p>)?\[([ xX])\]\s/g, (_, p, x) => `<li class="task-li">${p || ""}<span class="tick">${x === " " ? "☐" : "☑"}</span> `);
 }
 
 // ---- opening, reading, closing
+// Reads the tab's file again. The tab may have moved to another file by the time the answer
+// comes (a link followed, ← →): then the answer is dropped. A failed read keeps what is shown
+// (an editor's save can remove the file for a moment) and marks it; with nothing shown yet, the
+// error is what shows.
 async function rdFetch(tab, force) {
+  const path = tab.path;
+  const args = { path, cwd: "" };
+  if (!force && tab.doc) args.since = tab.doc.mtime;
   try {
-    const args = { path: tab.path, cwd: "" };
-    if (!force && tab.doc) args.since = tab.doc.mtime;
     const r = await apiObj("read-doc", args);
+    if (tab.path !== path) return false;
+    const was = tab.err;
     tab.err = "";
-    if (r.unchanged) return false;
+    if (r.unchanged) return Boolean(was);
     tab.doc = { text: r.text || "", mtime: r.mtime, size: r.size };
     return true;
   } catch (e) {
-    tab.doc = null;
-    tab.err = String(e.message || e);
-    return true;
+    if (tab.path !== path) return false;
+    const err = String(e.message || e), changed = err !== tab.err;
+    tab.err = err;
+    return changed;
   }
 }
 

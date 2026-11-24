@@ -49,15 +49,19 @@ public enum DocReader {
                             home: String = NSHomeDirectory()) -> Result<Outcome, Failure> {
         guard let path = resolve(raw, cwd: cwd, home: home) else { return .failure(.relativeWithoutDir) }
         let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return .failure(.notFound(path)) }
-        guard !isDir.boolValue, isDocument(path) else { return .failure(.notDocument(path)) }
-        let attrs = (try? fm.attributesOfItem(atPath: path)) ?? [:]
+        guard fm.fileExists(atPath: path) else { return .failure(.notFound(path)) }
+        guard isDocument(path) else { return .failure(.notDocument(path)) }
+        // The file a link points to (CLAUDE.md → AGENTS.md): its size, its mtime, its bytes. The
+        // tab keeps the path as written, so links in it resolve from where it was opened.
+        let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let attrs = (try? fm.attributesOfItem(atPath: target)) ?? [:]
+        // A regular file only: not a folder, and not a pipe or device that would block the read.
+        guard attrs[.type] as? FileAttributeType == .typeRegular else { return .failure(.notDocument(path)) }
         let size = (attrs[.size] as? NSNumber)?.intValue ?? 0
         let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         guard size <= maxBytes else { return .failure(.tooBig(path)) }
         if let since, since == mtime { return .success(.unchanged(path: path, mtime: mtime)) }
-        guard let data = fm.contents(atPath: path) else { return .failure(.unreadable(path)) }
+        guard let data = fm.contents(atPath: target), data.count <= maxBytes else { return .failure(.unreadable(path)) }
         // Not UTF-8 throughout (a stray Latin-1 byte): shown with replacement marks, not refused.
         return .success(.text(path: path, text: String(decoding: data, as: UTF8.self), mtime: mtime, size: data.count))
     }

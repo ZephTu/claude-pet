@@ -3467,34 +3467,45 @@ const DIFF_FOLD = 8, DIFF_EDGE = 3;
 function parseDiff(code) {
   const lines = code.replace(/\n$/, "").split("\n");
   const files = [];
-  let f = null, on = 0, nn = 0, numbered = false;
-  const start = (name) => { f = { name, rows: [], add: 0, del: 0 }; files.push(f); numbered = false; };
+  // `left`: the lines still due in the open hunk ({o, n} from its @@ counts), null outside one
+  // or when its header gave no counts. Inside a hunk, "--- x" / "+++ y" are a removed and an
+  // added line (an SQL comment, a C ++i), not the next file's header.
+  let f = null, on = 0, nn = 0, numbered = false, left = null, inHunk = false;
+  const start = (name) => { f = { name, rows: [], add: 0, del: 0 }; files.push(f); numbered = false; inHunk = false; left = null; };
   const strip = (p) => p.replace(/\t.*$/, "").replace(/^"(.*)"$/, "$1").replace(/^[ab]\//, "").trim();
+  const due = () => !inHunk || (left && left.o <= 0 && left.n <= 0);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     let m;
+    // (A hunk's lines start with " ", "+" or "-": "diff --git" can't be one of them.)
     if ((m = /^diff --git "?a\/(.+?)"? "?b\/(.+?)"?$/.exec(l))) { start(m[2]); f.git = true; continue; }
     if (f && f.git && !f.rows.length && /^(index |new file mode|deleted file mode|old mode|new mode|similarity index|rename from|rename to|Binary files)/.test(l)) continue;
-    // A header only when "+++ " follows: "--- x" alone is a removed line "-- x".
-    if (l.startsWith("--- ") && (lines[i + 1] || "").startsWith("+++ ")) {
+    // A header only outside a hunk and when "+++ " follows: "--- x" alone is a removed line "-- x".
+    // In a hunk without counts, only when an @@ comes right after the pair.
+    if ((due() || (!left && /^@@/.test(lines[i + 2] || ""))) && l.startsWith("--- ") && (lines[i + 1] || "").startsWith("+++ ")) {
       const oldName = strip(l.slice(4)), newName = strip(lines[i + 1].slice(4));
       const name = newName === "/dev/null" ? oldName : newName;
       if (!f || !f.git || f.rows.length) start(name); else f.name = name;
       i++;
       continue;
     }
-    if ((m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$/.exec(l))) {
+    // A hunk header; models often leave out the numbers ("@@" or "@@ … @@"): then no line numbers.
+    if (/^@@/.test(l)) {
       if (!f) start("");
-      on = Number(m[1]); nn = Number(m[2]); numbered = true;
+      m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(l);
+      numbered = Boolean(m);
+      if (m) { on = Number(m[1]); nn = Number(m[3]); left = { o: m[2] === undefined ? 1 : Number(m[2]), n: m[4] === undefined ? 1 : Number(m[4]) }; }
+      else left = null;
+      inHunk = true;
       f.rows.push({ t: "hunk", text: l });
       continue;
     }
     if (!f) start("");
     const c = l[0], body = l.slice(1);
-    if (c === "+") { f.rows.push({ t: "add", n: numbered ? nn++ : "", text: body }); f.add++; }
-    else if (c === "-") { f.rows.push({ t: "del", o: numbered ? on++ : "", text: body }); f.del++; }
+    if (c === "+") { f.rows.push({ t: "add", n: numbered ? nn++ : "", text: body }); f.add++; if (left) left.n--; }
+    else if (c === "-") { f.rows.push({ t: "del", o: numbered ? on++ : "", text: body }); f.del++; if (left) left.o--; }
     else if (c === "\\") f.rows.push({ t: "note", text: l });
-    else f.rows.push({ t: "ctx", o: numbered ? on++ : "", n: numbered ? nn++ : "", text: c === " " ? body : l });
+    else { f.rows.push({ t: "ctx", o: numbered ? on++ : "", n: numbered ? nn++ : "", text: c === " " ? body : l }); if (left) { left.o--; left.n--; } }
   }
   return files.filter((x) => x.rows.length || x.name);
 }
@@ -3533,10 +3544,12 @@ function diffView(code, key) {
       let j = i; while (j < rows.length && rows[j].t === "ctx") j++;
       const k = `${key}|${fi}|${i}`;
       if (j - i > DIFF_FOLD && !ui.diffOpen.has(k)) {
-        // The file's first and last runs keep only the edge next to a change.
+        // The file's first and last runs keep only the edge next to a change. The folded lines are
+        // there, hidden: a click shows them in place, whatever window the diff is in.
         const head = i === 0 ? 0 : DIFF_EDGE, tail = j === rows.length ? 0 : DIFF_EDGE;
         for (let x = i; x < i + head; x++) out.push(line(rows[x], x));
         out.push(`<tr class="dv-fold" data-action="diff-unfold" data-key="${esc(k)}"><td class="ln" colspan="2">⋯</td><td class="dv-c">${T(`Show ${j - i - head - tail} unchanged lines`, `展开 ${j - i - head - tail} 行未改动`)}</td></tr>`);
+        for (let x = i + head; x < j - tail; x++) out.push(line(rows[x], x).replace("<tr ", '<tr hidden data-folded="1" '));
         for (let x = j - tail; x < j; x++) out.push(line(rows[x], x));
       } else for (let x = i; x < j; x++) out.push(line(rows[x], x));
       i = j;
@@ -3562,7 +3575,7 @@ function draftView(code) {
   let i = 0;
   for (; i < lines.length; i++) {
     const m = /^\s*([A-Za-z]+|[一-鿿]{2,3})\s*[:：]\s*(.*)$/.exec(lines[i]);
-    const k = m && DRAFT_KEYS[m[1].toLowerCase()];
+    const k = m && Object.hasOwn(DRAFT_KEYS, m[1].toLowerCase()) ? DRAFT_KEYS[m[1].toLowerCase()] : null;
     if (!k) break;
     meta[k] = m[2].trim();
   }
@@ -3598,7 +3611,8 @@ function markdown(text, scope = "") {
         out.push(`<div class="hqblock ${lang} fold ${open ? "open" : ""}"><div class="hqb-t hqb-fold" data-action="hqfold" data-key="${esc(key)}" title="${T("Click to show or hide", "点击展开或收起")}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${title} · ${hqSummary(lang, items)}</div>${list}</div>`);
         return;
       }
-      const tpl = TEMPLATES[lang.toLowerCase()];
+      // Own keys only: an inherited one (`constructor`) must never stand in for a template.
+      const tpl = Object.hasOwn(TEMPLATES, lang.toLowerCase()) ? TEMPLATES[lang.toLowerCase()] : null;
       if (tpl) { out.push(tpl(code, `${scope}|${lang}|${hashText(code)}`)); return; }
       out.push(`<pre><code>${linkifyCode(code.replace(/\n$/, ""))}</code></pre>`);
       return;
@@ -4277,10 +4291,14 @@ document.addEventListener("click", async (ev) => {
       if (d.path && rdIsDoc(d.path)) return openDoc(d.path, cwd, { inPlace: Boolean(inReader) && !ev.metaKey });
       if (d.path) return act2("openPath", { path: d.path, cwd });
       return;
-    case "diff-unfold":
+    case "diff-unfold": {
+      // In place, like hqfold: the diff can be in any window (Peek, a plan, a job run, a document).
       ui.diffOpen.add(d.key);
-      if (el.closest("#reader")) return drawReader({ keepScroll: true });
-      return ui.modal && el.closest("#modal") ? drawPeek(false) : render();
+      let r = el.nextElementSibling;
+      while (r && r.dataset.folded) { r.hidden = false; delete r.dataset.folded; r = r.nextElementSibling; }
+      el.remove();
+      return;
+    }
     case "copy-draft": return copyText(d.text || "", T("Draft copied", "已复制草稿"));
     case "toggle-add": {
       const key = `${d.task}:${d.what}`;
