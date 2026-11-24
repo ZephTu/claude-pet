@@ -2076,7 +2076,10 @@ function renderTaskBody(t) {
       ${field("next", T("Next", "下一步"), T("the next concrete step", "下一个具体的步骤"))}
     </div>`
     : `<div class="now">
-      <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div></div>
+      <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div>
+        ${t.closing && isOpen(t) ? `<div class="meta">${t.closing === "abandoned"
+          ? T("Its session abandoned it: it closes once the open questions are answered and the session has acted on them", "session 已经说要放弃：等没答的问题答完、session 处理完再关")
+          : T("Its session finished it: it closes as done once the open questions are answered and the session has acted on them", "session 已经说做完了：等没答的问题答完、session 处理完再标为完成")}</div>` : ""}</div>
       ${tools}
     </div>`;
   const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">

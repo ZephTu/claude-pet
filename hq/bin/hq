@@ -284,6 +284,10 @@ def _set_fields(path, fields):
             # for everything that reads it as one.
             fields["closed_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, v in fields.items():
+        if v is None:
+            # None takes the field out.
+            fm = re.sub(rf"^{re.escape(k)}:.*(?:\n|$)", "", fm, flags=re.M).rstrip("\n")
+            continue
         if isinstance(v, list):
             val = json.dumps(v, ensure_ascii=False)
         else:
@@ -1573,6 +1577,10 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
         print(json.dumps({"id": aid, "granted": g["text"], "existed": bool(g.get("existed"))}, ensure_ascii=False))
     if settle:
         settle_status(card, via)
+        # A close held for this question: with a No and no session alive to send it to, there is
+        # nothing left to do. Otherwise the session closes it at the end of its turn on the answer.
+        if resolution in ("drop", "archive") and session_alive(a.get("session")) is not True:
+            release_close(card, via)
 
 
 # Automatic status moves. A status is otherwise only what a session's hq-update, `hq set` or the
@@ -1580,7 +1588,8 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
 # session happened to write `status: active`. Only these moves are made: waiting-on-me ↔ active,
 # and blocked → waiting-on-me when a session opens a new ask on a blocked task (its open asks and
 # @me todos don't keep it out of the board's Blocked lane, but a new question is the user's turn).
-# Done and abandoned are never changed by anything but an explicit status.
+# Done and abandoned are never changed by anything but an explicit status, or a session's own close
+# held until its questions were answered (hold_close).
 def on_user(meta):
     """What the card has waiting on the user: open asks (a snoozed one is still open), open @me
     todos, and the legacy `waiting_on_me` field the board still counts."""
@@ -1619,6 +1628,45 @@ def await_answer(card, via, new_ask=False):
         why = "a new question for you" if old == "blocked" else "something is open on you"
         append_log(card, f"status {old} → waiting-on-me (auto, {via}): {why}", touch=False)
         return True
+
+
+# A reply that closes its task while questions on it are still open (often a last one, asked in
+# that same reply: "delete the old worktrees?") doesn't close it yet. Closing would stop its session
+# (the board's "Finishing a task" setting), and the answer would reach no one. The task waits on the
+# user instead, with the close held in `closing:`; it closes once nothing is left open — at the end of
+# the session's turn on the last answer, or at once when that answer is a No (or No context) with no
+# live session to send it to. A status written outright (hq-update, `hq set`, the board) replaces it.
+OPEN_CLOSE_STATUSES = ("done", "abandoned")
+
+
+def open_ask_count(card):
+    return sum(1 for a in read_asks(os.path.dirname(card)) if a.get("state") == "open")
+
+
+def hold_close(card, block):
+    """An hq-update block that would close a card with open asks, rewritten to keep it waiting on
+    the user: (block, the held status) — or (block, None) when there is nothing to hold."""
+    st = None
+    for k, v in update_lines(block):
+        if k == "status" and v and v.lower() in STATUSES:
+            st = v.lower()
+    if st not in OPEN_CLOSE_STATUSES or not open_ask_count(card):
+        return block, None
+    out = [("status: waiting-on-me" if update_lines(line)[:1] and update_lines(line)[0][0] == "status" else line)
+           for line in block.splitlines()]
+    return "\n".join(out), st
+
+
+def release_close(card, via):
+    """Close a card whose close was held, once no ask is left open: the held status, else None."""
+    with card_lock(card):
+        meta = parse_card(card)
+        st = meta.get("closing")
+        if st not in OPEN_CLOSE_STATUSES or open_ask_count(card):
+            return None
+        _set_fields(card, {"status": st, "closing": None})
+        append_log(card, f"status → {st} (auto, {via}): closed as the session said, now that its open questions are answered", touch=False)
+        return st
 
 
 # ---------------------------------------------------------------- session state
@@ -4021,6 +4069,8 @@ def cmd_set(args):
             v = check_category(v)
             ensure_project(v)
         fields[k] = v
+    if "status" in fields:
+        fields.setdefault("closing", None)   # a status set outright replaces a held close
     set_fields(find_card(args.task), fields)
 
 
@@ -4986,6 +5036,8 @@ def _apply_update(card, entries, via):
         have = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
         known = {os.path.normpath(h) for h in have}
         fields["workdirs"] = have + [d for d in dict.fromkeys(dirs) if d not in known]
+    if "status" in fields:
+        fields["closing"] = None        # a status written outright replaces a held close
     set_fields(card, fields)            # also stamps `updated`, so a `touch` block is a touch
     # A log line already there — on the card, or moved to HISTORY.md past the budget — isn't added again.
     logged = open(card, encoding="utf-8").read() + "\n" + "\n".join(hist["Log"])
@@ -7444,21 +7496,32 @@ def _hook_main():
         status_said = me_ticked = False
         asked_before = {a["id"] for a in read_asks(meta["dir"])}
         asked, resolved = False, set()   # resolved: the cards whose asks this reply answered
-        for b in blocks:
+
+        def finished(after):
+            # This session finished its task: say so on its entry, for the board to treat like a
+            # task finished there (its "Finishing a task" setting: ask, stop, keep). The next
+            # prompt to it takes the mark away: you are still talking to it.
+            update_session(sid, lambda e: e.update(finished={"task": meta["id"], "status": after, "at": now_iso()}))
+
+        # Questions and answers first, the hq-update after: whether the reply may close its task
+        # depends on what is still open once its own asks and answers are in.
+        for b in sorted(blocks, key=lambda b: b["kind"] == "hq-update"):
             if b["kind"] == "hq-update":
                 # Only at the end of the reply: one quoted or shown mid-reply is an example.
                 if b["trailing"]:
                     change = {}
-                    bad = apply_update(card, b["body"], change=change, settle=False)
+                    body, held = hold_close(card, b["body"])
+                    bad = apply_update(card, body, change=change, settle=False)
                     problems += bad
                     status_said |= bool(change.get("status"))
                     me_ticked |= bool(change.get("me_ticked"))
-                    # This session finished its task: say so on its entry, for the board to treat
-                    # like a task finished there (its "Finishing a task" setting: ask, stop, keep).
-                    # The next prompt to it takes the mark away: you are still talking to it.
                     after = change.get("to")
-                    if not bad and change.get("from") in OPEN_STATUSES and after in ("done", "abandoned"):
-                        update_session(sid, lambda e: e.update(finished={"task": meta["id"], "status": after, "at": now_iso()}))
+                    if held and not bad:
+                        with card_lock(card):
+                            _set_fields(card, {"closing": held})
+                            append_log(card, f"status {held} held (auto, session): {open_ask_count(card)} open question(s) on the task — it closes once they are answered", touch=False)
+                    elif not bad and change.get("from") in OPEN_STATUSES and after in OPEN_CLOSE_STATUSES:
+                        finished(after)
                 continue
             kind = b["kind"]
             for line in b["body"].splitlines():
@@ -7477,7 +7540,9 @@ def _hook_main():
                             pass
         # A new question with no status written: the task now waits on the user. Answers recorded
         # with no status written: it stops waiting once nothing is left on the user.
-        if not status_said:
+        if not status_said and (after := release_close(card, "session")):
+            finished(after)       # its close was held for questions, all answered now
+        elif not status_said:
             if asked:
                 await_answer(card, "session", new_ask=True)
             elif me_ticked or card in resolved:

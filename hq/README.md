@@ -197,6 +197,16 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    a task, asks and todos and all). `done` and `abandoned` are never changed automatically, and
    `blocked` only by a new ask. Each move is logged on the card with `(auto, <via>)`.
 
+   **A reply can't close its task over an open question.** When a session's `hq-update` says
+   `status: done` (or `abandoned`) while the card still has an open ask — often a last one asked
+   in that same reply ("delete the old worktrees?") — the close is held: the task goes to
+   `waiting-on-me` and the card gets `closing: done`. Closing at once would have the board stop
+   the session (its "Finishing a task" setting) and the answer would reach no one. Once no ask is
+   left open, the close happens at the end of the session's turn on the answer (and marks the
+   session finished, as a close in the reply itself would); a No (`drop` / `archive`) given on the
+   board or with `hq ask resolve` closes it at once when the asking session isn't running. A
+   status written outright — another `hq-update` status, `hq set`, the board — drops `closing`.
+
    **Claude's open todos come along at session start.** SessionStart — for every source:
    `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
    context, each exactly as written on the card, with the instruction to check them against how
