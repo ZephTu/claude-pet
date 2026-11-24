@@ -238,6 +238,8 @@ final class BoardWindow: NSWindow {
 @MainActor
 final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static let orcaBundleID = "com.stablyai.orca"
+    /// The installed hq a recurring job runs (not the one bundled for the board's own calls).
+    static let hqBin = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/hq/bin/hq"
     /// The pet's unread finishes per session, and how the board marks one session's read.
     /// Set by the app; nil when the board is rendered on its own (`--render-board`).
     static var unreadBySession: (() -> [String: Int])?
@@ -354,11 +356,24 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard !only.isEmpty else { return (nil, L("nothing selected", "什么都没选")) }
             return await hq(["scan", "--apply-projects", "--only=\(only)"])
         case "project":
+            // `project [options] ACTION -- NAMES…`: after "--" a name or a section's text starting with
+            // "-" can't read as an option (a Done when list is "- …" lines). Options go before the
+            // action: Python 3.9's argparse (the app's python3) fills ACTION alone when an option
+            // sits between it and "--", then rejects the names.
             let action = str("action")
-            var args = ["project", action] + ((body["names"] as? [String]) ?? [])
-            if action == "add" { for p in (body["paths"] as? [String]) ?? [] { args.append("--path=\(p)") } }
-            if let to = body["to"] as? String { args.append("--to=\(to)") }
-            return await hq(args)
+            var opts: [String] = []
+            if action == "add" {
+                for p in (body["paths"] as? [String]) ?? [] { opts.append("--path=\(p)") }
+                for k in ["kind", "title", "due", "parent"] where !str(k).isEmpty { opts.append("--\(k)=\(str(k))") }
+            }
+            if let to = body["to"] as? String { opts.append("--to=\(to)") }
+            let names = (body["names"] as? [String]) ?? []
+            let r = await hq(["project"] + opts + [action, "--"] + names)
+            // A renamed project's recurring work makes its cards under the new name.
+            if action == "rename", r.1 == nil, names.count == 2 {
+                JobsController.shared.retargetRecurring(from: names[0], to: names[1], hq: Self.hqBin)
+            }
+            return r
         case "category":
             var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
             if let to = body["to"] as? String { args.append("--to=\(to)") }
@@ -375,7 +390,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("category").isEmpty { args.append("--category=\(str("category"))") }
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
+            for k in ["goal", "template", "phase"] where !str(k).isEmpty { args.append("--\(k)=\(str(k))") }
+            if body["focus"] as? Bool == false { args.append("--no-focus") }
             return await hq(args + ["--", str("title")])
+        case "recur-save":
+            // A duty's recurring work: a shell job that makes a card from one of its templates.
+            let raw: [String: Any] = [
+                "id": str("id"), "name": "↻ \(str("project")) · \(str("template"))", "kind": "shell",
+                "command": Recurring.command(hq: Self.hqBin, project: str("project"), template: str("template")),
+                "cwd": "~", "schedule": body["schedule"] as? [String: Any] ?? [:],
+                "enabled": body["enabled"] as? Bool ?? true, "timeoutMinutes": 5, "notify": "failure"]
+            return await JobsController.shared.save(raw)
         case "send":
             let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false,
                                bg: str("bg"), skip: body["skip"] as? Bool ?? false)

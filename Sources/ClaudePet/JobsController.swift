@@ -25,6 +25,9 @@ final class JobsController {
             o["runs"] = runs.prefix(30).map { $0.json() }
             o["running"] = runs.first(where: { $0.status != .skipped })?.status == .running
             o["installed"] = FileManager.default.fileExists(atPath: LaunchAgent.plistURL(for: job.id).path)
+            if job.kind == .shell, let r = Recurring.parse(job.command) {     // a duty's recurring work
+                o["recur"] = ["project": r.project, "template": r.template]
+            }
             // How full the carried-on session is, for "same session every run".
             let state = store.state(job.id)
             if job.sessionMode == .resume, let ctx = state["contextTokens"] as? Int,
@@ -63,6 +66,17 @@ final class JobsController {
         // Only a changed schedule reloads the agent: launchd stops a running job when it does.
         if let err = await apply(job, onlyIfChanged: true) { return (nil, err) }
         return (["ok": true, "id": job.id], nil)
+    }
+
+    /// A project renamed: its recurring jobs (Recurring commands) now name the new one. The command
+    /// is read at each run, so the schedule (and launchd) is left as it is.
+    func retargetRecurring(from old: String, to new: String, hq: String) {
+        for var job in store.list() where job.kind == .shell {
+            guard let r = Recurring.parse(job.command), r.project == old else { continue }
+            job.command = Recurring.command(hq: hq, project: new, template: r.template)
+            job.name = "↻ \(new) · \(r.template)"
+            try? store.save(job)
+        }
     }
 
     func setEnabled(_ id: String, _ on: Bool) async -> (Any?, String?) {

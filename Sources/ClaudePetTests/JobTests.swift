@@ -37,6 +37,16 @@ enum JobTests {
         t.check("an agent name with shell characters is refused",
                 Job(id: "j1", name: "n", prompt: "p", agent: "sec; rm").problem() != nil)
 
+        // ---- a duty's recurring work
+        let rc = Recurring.command(hq: "/Users/a b/.claude/hq/bin/hq", project: "ci-oncall", template: "Bob's 值班交接")
+        t.check("a recurring rule's command quotes every part",
+                rc == #"'/Users/a b/.claude/hq/bin/hq' new --project='ci-oncall' --template='Bob'\''s 值班交接'"#)
+        let back = Recurring.parse(rc)
+        t.check("a recurring rule reads back from its command", back?.project == "ci-oncall" && back?.template == "Bob's 值班交接")
+        t.check("other shell jobs are not recurring rules",
+                Recurring.parse("'/x/hq' feed all") == nil && Recurring.parse("'/x/hq' new --project='p' --template='t'; rm -rf ~") == nil
+                    && Recurring.parse(#"'/x/hq' new --project="$P" --template='t'"#) == nil)
+
         // ---- schedules
         let weekdays = Schedule(kind: .weekdays, hour: 9, minute: 0)
         let wdIntervals = (try? weekdays.spec()?.launchdIntervals()) ?? []
