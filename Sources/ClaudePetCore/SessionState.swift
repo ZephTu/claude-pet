@@ -112,6 +112,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// tool's arguments — for the board's Approve box. `waitingOn` is the 48-character phrase
     /// for a bubble, and approving from a phrase is approving something unread.
     public let waitingOnFull: String
+    /// What kind of prompt `askId` is: "" for a permission, "question" for AskUserQuestion's
+    /// menu, "plan" for ExitPlanMode's plan approval. Only a permission takes Allow / Deny;
+    /// the other two are answered on the board with their own controls.
+    public let askKind: String
     /// The pet-emit process holding this prompt's hook open, and until when. An askId alone
     /// does not mean anyone is listening: the hold ends after `PermissionDecision.wait`, and
     /// none starts when the pet was not running as the prompt came up — a click then writes a
@@ -146,6 +150,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         backgroundAgents: [String] = [],
         askId: String = "",
         waitingOnFull: String = "",
+        askKind: String = "",
         askHeldBy: Int32? = nil,
         askHeldUntil: Date? = nil,
         failStreak: Int = 0,
@@ -171,6 +176,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.backgroundAgents = backgroundAgents
         self.askId = askId
         self.waitingOnFull = waitingOnFull
+        self.askKind = askKind
         self.askHeldBy = askHeldBy
         self.askHeldUntil = askHeldUntil
         self.failStreak = failStreak
@@ -182,7 +188,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
         case backgroundAgents, askId, failStreak, failTarget, transcript
-        case waitingOnFull, askHeldBy, askHeldUntil
+        case waitingOnFull, askKind, askHeldBy, askHeldUntil
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -215,6 +221,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
             (try? c.decodeIfPresent([String].self, forKey: .backgroundAgents)) as? [String] ?? []
         askId = (try? c.decodeIfPresent(String.self, forKey: .askId)) as? String ?? ""
         waitingOnFull = (try? c.decodeIfPresent(String.self, forKey: .waitingOnFull)) as? String ?? ""
+        askKind = (try? c.decodeIfPresent(String.self, forKey: .askKind)) as? String ?? ""
         askHeldBy = (try? c.decodeIfPresent(Int32.self, forKey: .askHeldBy)) ?? nil
         askHeldUntil = (try? c.decodeIfPresent(Date.self, forKey: .askHeldUntil)) ?? nil
         failStreak = (try? c.decodeIfPresent(Int.self, forKey: .failStreak)) as? Int ?? 0

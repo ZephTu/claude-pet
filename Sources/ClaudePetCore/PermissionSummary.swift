@@ -24,10 +24,28 @@ public enum PermissionSummary {
     /// picking options on the card, and Claude Code passes the picks on as the
     /// tool's input. Allowing it from outside hands over no picks at all —
     /// Claude Code itself marks these "one-tap Approve/Deny must not be
-    /// offered" — so the pet treats them as a question to go and answer.
+    /// offered" — so the pet treats them as a question to go and answer. The
+    /// board answers it with the picks (`PermissionDecision.Answer.answers`).
     public static func isQuestion(toolName: String) -> Bool {
         toolName == "AskUserQuestion"
     }
+
+    /// ExitPlanMode: a plan to approve. Claude Code ignores a hook's "allow" for it
+    /// (measured 2026-11-24: the dialog stays up), so it is no permission the pet can
+    /// grant — the board approves it with the Enter key, and sends a "keep planning"
+    /// as a denial carrying the user's feedback, which Claude Code does honour.
+    public static func isPlan(toolName: String) -> Bool {
+        toolName == "ExitPlanMode"
+    }
+
+    /// The `askKind` a PermissionRequest for this tool is: "question", "plan", or "" for a
+    /// permission.
+    public static func askKind(toolName: String) -> String {
+        isQuestion(toolName: toolName) ? "question" : isPlan(toolName: toolName) ? "plan" : ""
+    }
+
+    /// The longest plan kept in the session file for the board, in characters.
+    public static let planLimit = 40_000
 
     /// "2 questions to answer": what a question prompt says in its row, without
     /// repeating any of the questions themselves.
@@ -35,6 +53,9 @@ public enum PermissionSummary {
         let n = (toolInput["questions"] as? [Any])?.count ?? 0
         return n > 1 ? "\(n) questions to answer" : "a question to answer"
     }
+
+    /// What a plan prompt says in its row.
+    public static let planNote = "a plan to approve"
 
     public static func describe(toolName: String, toolInput: [String: Any]) -> String {
         switch toolName {

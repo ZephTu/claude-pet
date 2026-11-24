@@ -17,7 +17,9 @@ import Foundation
 /// - the board shows the conversation in Peek, by the session's id;
 /// - a second job, `secretary-feed`, brings in what reached the user on Zulip and Jira: a shell job
 ///   running `hq feed all` hourly on weekdays (off until turned on from the window), which files
-///   each conversation or issue into the inbox for the sorter.
+///   each conversation or issue into the inbox for the sorter;
+/// - a third, `secretary-autoclose`, closes the todos whose PR merged, Jira issue is done or Jenkins
+///   build passed: a shell job running `hq autoclose` every 5 minutes (off until turned on).
 @MainActor
 final class SecretaryController {
     static let shared = SecretaryController()
@@ -26,6 +28,22 @@ final class SecretaryController {
     static let feedJobID = "secretary-feed"
     /// Weekdays, every hour from 9:00 to 19:00.
     static let feedSchedule = Schedule(kind: .cron, cron: "0 9-19 * * 1-5")
+    static let closeJobID = "secretary-autoclose"
+    static let closeSchedule = Schedule(kind: .every, everyMinutes: 5)
+
+    /// The secretary's shell jobs: what makes each one what it is, put back if edited away.
+    private struct ShellJob {
+        let id: String, name: String, command: String, schedule: Schedule, notify: Job.Notify, timeout: Int
+    }
+    private static var feedJob: ShellJob {
+        ShellJob(id: feedJobID, name: L("Secretary: scan Zulip · Jira", "秘书：扫描 Zulip · Jira"), command: hqCommand("feed all"),
+                 schedule: feedSchedule, notify: .failure, timeout: 15)
+    }
+    /// Every 5 minutes: a failure (no token, a site down) shows on its row, not as a notification each time.
+    private static var closeJob: ShellJob {
+        ShellJob(id: closeJobID, name: L("Secretary: close finished todos", "秘书：自动勾选完成的待办"), command: hqCommand("autoclose"),
+                 schedule: closeSchedule, notify: .never, timeout: 5)
+    }
     private var jobs: JobsController { JobsController.shared }
     private var store: JobStore { jobs.store }
 
@@ -83,53 +101,61 @@ final class SecretaryController {
                              "hour": sch.hour, "minute": sch.minute,
                              "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
         }
-        o["feed"] = feedStatus()
+        o["feed"] = jobStatus(Self.feedJobID)
+        o["autoclose"] = jobStatus(Self.closeJobID)
         return (o, nil)
     }
 
-    /// The scan's job: on or off, when next, and how its last run went.
-    private func feedStatus() -> [String: Any] {
-        guard let job = store.load(Self.feedJobID) else { return ["job": false, "enabled": false] }
+    /// A shell job's state: on or off, its schedule, when next, and how its last run went.
+    private func jobStatus(_ id: String) -> [String: Any] {
+        guard let job = store.load(id) else { return ["job": false, "enabled": false] }
         var f: [String: Any] = ["job": true, "enabled": job.enabled, "kind": job.schedule.kind.rawValue,
-                                "cron": job.schedule.cron, "running": store.runs(Self.feedJobID).first(where: { $0.status != .skipped })?.status == .running,
+                                "cron": job.schedule.cron, "everyMinutes": job.schedule.everyMinutes,
+                                "running": store.runs(id).first(where: { $0.status != .skipped })?.status == .running,
                                 "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
-        if let r = store.runs(Self.feedJobID).first {
+        if let r = store.runs(id).first {
             f["last"] = ["status": r.status.rawValue, "summary": r.summary, "at": Jobs.iso(r.ended ?? r.started), "failed": r.failed]
         }
         return f
     }
 
-    /// The scan on or off. Made on first use; the user may change its schedule in Scheduled, and
-    /// what makes it the scan (a shell job running `hq feed all` in the task root) is put back.
-    func setFeed(on: Bool) async -> (Any?, String?) {
+    /// The scan on or off (a shell job running `hq feed all` in the task root).
+    func setFeed(on: Bool) async -> (Any?, String?) { await setShellJob(Self.feedJob, on: on) }
+    /// One scan now (the job is made, off, if it isn't there yet).
+    func feedNow() async -> (Any?, String?) { await runShellJob(Self.feedJob) }
+    /// Closing finished todos on or off (a shell job running `hq autoclose` in the task root).
+    func setAutoclose(on: Bool) async -> (Any?, String?) { await setShellJob(Self.closeJob, on: on) }
+    func autocloseNow() async -> (Any?, String?) { await runShellJob(Self.closeJob) }
+
+    /// A shell job on or off. Made on first use; the user may change its schedule in Scheduled, and
+    /// what makes it that job (its command, run in the task root) is put back.
+    private func setShellJob(_ spec: ShellJob, on: Bool) async -> (Any?, String?) {
         if info["root"] == nil, let err = await refreshInfo() { return (nil, err) }
         guard let root = info["root"] as? String, !root.isEmpty else { return (nil, L("No HQ root", "找不到 HQ 根目录")) }
-        let command = Self.feedCommand
-        var job = store.load(Self.feedJobID) ?? Job(
-            id: Self.feedJobID, name: L("Secretary: scan Zulip · Jira", "秘书：扫描 Zulip · Jira"), kind: .shell, command: command,
-            cwd: root, schedule: Self.feedSchedule, enabled: false, timeoutMinutes: 15, notify: .failure)
-        if store.load(Self.feedJobID) == nil || job.kind != .shell || job.command != command || job.directory != root {
-            job.kind = .shell; job.command = command; job.cwd = root
+        let old = store.load(spec.id)
+        var job = old ?? Job(id: spec.id, name: spec.name, kind: .shell, command: spec.command, cwd: root,
+                             schedule: spec.schedule, enabled: false, timeoutMinutes: spec.timeout, notify: spec.notify)
+        if old == nil || job.kind != .shell || job.command != spec.command || job.directory != root {
+            job.kind = .shell; job.command = spec.command; job.cwd = root
             if let err = await save(job) { return (nil, err) }
         }
-        let r = await jobs.setEnabled(Self.feedJobID, on)
+        let r = await jobs.setEnabled(spec.id, on)
         if let err = r.1 { return (nil, err) }
         return await status()
     }
 
-    /// One scan now (the job is made, off, if it isn't there yet).
-    func feedNow() async -> (Any?, String?) {
-        if store.load(Self.feedJobID) == nil {
-            let r = await setFeed(on: false)
+    private func runShellJob(_ spec: ShellJob) async -> (Any?, String?) {
+        if store.load(spec.id) == nil {
+            let r = await setShellJob(spec, on: false)
             if let err = r.1 { return (nil, err) }
         }
-        let r = jobs.runNow(Self.feedJobID)
+        let r = jobs.runNow(spec.id)
         if let err = r.1 { return (nil, err) }
         return await status()
     }
 
-    static var feedCommand: String {
-        "'\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/hq/bin/hq' feed all"
+    static func hqCommand(_ args: String) -> String {
+        "'\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/hq/bin/hq' \(args)"
     }
 
     /// Scaffolds what is missing and makes the job. `lang`: the board's language, for the memory

@@ -72,6 +72,19 @@ const ON_PROMPT = () => T("It is waiting on a prompt in its terminal — answer 
   "它在终端里等你确认或回答——先跳到终端（↗）在那里处理，再给它发消息。");
 // Can the board type into this session right now?
 const canSendNow = (s) => canMessage(s) && !onPrompt(s);
+// Esc for a session mid-turn: pressed in its terminal, it interrupts the turn as it would there.
+// Only terminals that can take a lone key (Orca, iTerm2); Terminal.app always adds a Return.
+const INTERRUPTIBLE = { orca: true, iterm2: true };
+// No Stop hook follows an Esc: the pet's record stays busy and only turns quiet (about 10 s later,
+// Claude Code's own status says idle), so the button stays away that long and for good once quiet:
+// a second Esc on a stopped session opens Claude Code's rewind menu.
+const ESC_HOLD_MS = 12_000;
+const escHeld = (sid) => Date.now() - ((ui.interrupted || {})[sid] || 0) < ESC_HOLD_MS;
+const canInterrupt = (s) => Boolean(s && !s.background && INTERRUPTIBLE[s.terminal && s.terminal.kind]
+  && liveState(s) === "busy" && !((ui.dots || {})[s.sessionId] || {}).quiet && !escHeld(s.sessionId));
+const escButton = (s) => canInterrupt(s)
+  ? `<button class="icon esc" data-action="interrupt" data-session="${esc(s.sessionId)}" title="${T("Interrupt — press Esc in its terminal to stop this turn; the session stays open for your next message", "中断——在它的终端里按 Esc，停下这一轮；session 还开着，可以接着发消息")}">Esc</button>`
+  : "";
 // What a send needs beyond the text: a background session goes by its short id, and is continued
 // with the board's skip-permissions choice, as a session started from here would be.
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
@@ -268,7 +281,8 @@ const DOT_TIP = { quiet: T("Gone quiet — nothing heard for a while", "没动�
 function statusWord(s) {
   const p = (ui.dots || {})[s.sessionId];
   if (!p) return LANG === "zh" ? ({ busy: "在干活", waiting: "等你", idle: "空闲" }[s.state] || s.state || "?") : s.state || "?";
-  if (p.state === "waiting") return p.asks === "permission" ? T("Needs approval", "等你授权") : T("Awaiting reply", "等你回答");
+  if (p.state === "waiting") return p.asks === "permission" ? T("Needs approval", "等你授权")
+    : p.askKind === "plan" ? T("Plan to approve", "等你批准计划") : T("Awaiting reply", "等你回答");
   if (p.activity) return p.activity;
   if (p.quiet) return T("No recent activity", "最近没有动静");
   if (p.state === "busy") return T("Working", "在干活");
@@ -296,6 +310,7 @@ function ctxTag(s) {
 // row's Allow arms that one instead of approving it.
 function approveBar(s) {
   const p = (ui.dots || {})[s.sessionId];
+  if (p && p.state === "waiting" && p.promptAsk) return ui.approvedPlans && ui.approvedPlans.has(p.promptAsk) ? "" : promptBar(s, p);
   if (!p || p.state !== "waiting" || p.asks !== "permission" || !p.askId) return "";
   const armed = ui.allowArmed && ui.allowArmed.ask === p.askId;
   const data = `data-session="${esc(s.sessionId)}" data-ask="${esc(p.askId)}"`;
@@ -305,6 +320,130 @@ function approveBar(s) {
       <button class="btn small ghost" data-action="decide" data-behavior="deny" ${data}>${T("Deny", "拒绝")}</button></div>
     <code class="ap-what">${esc(p.approveText || s.waitingOn || T("this tool call", "这次工具调用"))}</code></div>`;
 }
+// A question menu (AskUserQuestion) or a plan (ExitPlanMode) the session has up in its terminal,
+// answered here in a dialog (openPrompt): the pet-emit holding the prompt hands the picks, or the
+// feedback, back to Claude Code; a plan is approved by pressing Enter in the terminal (a hook's
+// "allow" is ignored for it). Shown only while the pet is holding the prompt (`promptAsk`).
+function promptBar(s, p) {
+  const plan = p.askKind === "plan";
+  return `<div class="approve prompt"><div class="ap-head"><span class="ap-k">${plan ? T("Plan", "计划") : T("Question", "提问")}</span>
+      <button class="btn small primary" data-action="open-prompt" data-session="${esc(s.sessionId)}">${plan ? T("Review plan…", "看计划…") : T("Answer…", "回答…")}</button></div>
+    <div class="ap-what">${esc(s.waitingOn || (plan ? T("A plan is ready for your approval", "计划写好了，等你批准") : T("It asked you a question", "它问了你一个问题")))}</div></div>`;
+}
+
+async function openPrompt(sid) {
+  let d;
+  try { d = await apiJSON("prompt", { session: sid }); }
+  catch (e) { return toast(String(e.message || e), true); }
+  const s = ui.sessions.find((x) => x.sessionId === sid);
+  ui.modal = { type: "prompt", sid, title: (s && (s.title || s.project)) || sid.slice(0, 8), kind: d.kind, ask: d.ask,
+    plan: d.plan || "", questions: Array.isArray(d.questions) ? d.questions : [], picks: {}, busy: false };
+  drawPrompt();
+}
+const promptOtherKey = (m, i) => `qother:${m.ask}:${i}`;
+const planFeedbackKey = (m) => `planfb:${m.ask}`;
+// question text → what goes back: the picked labels (several joined with ", "), and your own
+// words after them when you wrote any. Null while a question has neither.
+function promptAnswers(m) {
+  const out = {};
+  for (const [i, q] of m.questions.entries()) {
+    const picked = [...(m.picks[i] || [])];
+    const own = (draft(promptOtherKey(m, i)) || "").trim();
+    const parts = q.multiSelect ? [...picked, ...(own ? [own] : [])] : own ? [own] : picked.slice(0, 1);
+    if (!parts.length) return null;
+    out[String(q.question || "")] = parts.join(", ");
+  }
+  return Object.keys(out).length ? out : null;
+}
+function drawPrompt() {
+  const m = ui.modal;
+  const box = $("#modal");
+  const head = `<div class="phead">
+      <div><div class="meta">${m.kind === "plan" ? T("Plan to approve", "等你批准的计划") : T("Question to answer", "等你回答的问题")}</div>
+        <div class="stitle ctx-title">${esc(m.title)}</div></div>
+      <span style="flex:1"></span>
+      <button class="btn small ghost" data-action="jump" data-session="${esc(m.sid)}" title="${T("Answer it in its terminal instead", "改去它的终端里回答")}">↗ Jump</button>
+      <button class="btn small ghost" data-action="close-modal" title="${T("Close (Esc)", "关闭 (Esc)")}">✕</button>
+    </div>`;
+  let body, foot;
+  if (m.kind === "plan") {
+    body = `<div class="md plan-md">${m.plan ? markdown(m.plan) : `<div class="empty">${T("(no plan text)", "（没有计划内容）")}</div>`}</div>`;
+    const fb = draft(planFeedbackKey(m));
+    foot = `<div class="prompt-foot">
+      <textarea class="grow" rows="2" data-key="${esc(planFeedbackKey(m))}" placeholder="${T("What to change — sent back, and it keeps planning", "要改什么——发回给它，它继续规划")}">${esc(fb)}</textarea>
+      <div class="row-btns">
+        <button class="btn small" data-action="plan-feedback" ${m.busy || !fb.trim() ? "disabled" : ""}>${T("Keep planning", "继续规划")}</button>
+        <button class="btn small primary" data-action="plan-approve" ${m.busy ? "disabled" : ""} title="${T("Presses Enter in its terminal: the dialog's first option, “Yes”, and it starts", "在它的终端里按回车：选对话框的第一项「Yes」，开始执行")}">${T("Approve", "批准")}</button>
+      </div></div>`;
+  } else {
+    body = m.questions.map((q, i) => {
+      const picked = m.picks[i] || new Set();
+      const opts = (Array.isArray(q.options) ? q.options : []).map((o) => {
+        const on = picked.has(o.label);
+        return `<button class="qopt ${on ? "on" : ""}" data-action="prompt-pick" data-q="${i}" data-label="${esc(o.label)}">
+          <span class="qo-l">${q.multiSelect ? (on ? "☑" : "☐") : on ? "◉" : "○"} ${esc(o.label)}</span>
+          ${o.description ? `<span class="qo-d">${esc(o.description)}</span>` : ""}</button>`;
+      }).join("");
+      return `<section class="ctx-sec qblock">
+        ${q.header ? `<h4>${esc(q.header)}${q.multiSelect ? T(" · pick any", " · 可多选") : ""}</h4>` : ""}
+        <div class="q-text">${esc(q.question || "")}</div>
+        <div class="qopts">${opts}</div>
+        <input class="q-other" data-key="${esc(promptOtherKey(m, i))}" value="${esc(draft(promptOtherKey(m, i)))}" placeholder="${T("Or in your own words…", "或者自己写…")}">
+      </section>`;
+    }).join("");
+    foot = `<div class="prompt-foot"><div class="row-btns">
+      <button class="btn small primary" data-action="prompt-send" ${m.busy || !promptAnswers(m) ? "disabled" : ""}>${T("Send answers", "发送回答")}</button></div></div>`;
+  }
+  box.innerHTML = `<div class="panel ppanel prompt-panel" role="dialog" aria-label="${T("Prompt", "提问")}">${head}
+    <div class="peek-body">${body}</div>${foot}</div>`;
+  box.hidden = false;
+}
+// The prompt went away (answered in the terminal, or replaced): the dialog has nothing to answer.
+function checkPrompt() {
+  const m = ui.modal;
+  const p = (ui.dots || {})[m.sid];
+  if (m.busy || (p && p.promptAsk === m.ask)) return;
+  closePeek();
+  toast(T("That prompt was answered or closed in its terminal", "这个提问已经在终端里回答或关掉了"));
+}
+// Typing doesn't redraw the dialog (the cursor would jump); it only turns its buttons on or off.
+// Your own words for a single-choice question replace its pick.
+function syncPromptButtons(el) {
+  const m = ui.modal;
+  const other = /^qother:[^:]*:(\d+)$/.exec(el.dataset.key || "");
+  if (other && el.value.trim()) {
+    const i = Number(other[1]);
+    const q = m.questions[i] || {};
+    if (!q.multiSelect && m.picks[i] && m.picks[i].size) {
+      m.picks[i] = new Set();
+      document.querySelectorAll(`#modal .qopt[data-q="${i}"]`).forEach((b) => { b.classList.remove("on"); b.querySelector(".qo-l").textContent = "○ " + b.dataset.label; });
+    }
+  }
+  const send = $("#modal [data-action=prompt-send]");
+  if (send) send.disabled = m.busy || !promptAnswers(m);
+  const fb = $("#modal [data-action=plan-feedback]");
+  if (fb) fb.disabled = m.busy || !(draft(planFeedbackKey(m)) || "").trim();
+}
+async function promptSubmit(op, args, ok) {
+  const m = ui.modal;
+  m.busy = true;
+  drawPrompt();
+  try {
+    await api(op, { session: m.sid, ask: m.ask, ...args });
+    // An approved plan's box stays away until the next hook clears it: one Enter per plan.
+    if (op === "plan-approve") (ui.approvedPlans ||= new Set()).add(m.ask);
+    for (const k of Object.keys(ui.drafts)) if (k.includes(m.ask)) delete ui.drafts[k];
+    saveDrafts();
+    closePeek();
+    toast(ok);
+  } catch (e) {
+    m.busy = false;
+    drawPrompt();
+    toast(String(e.message || e), true);
+  }
+  refresh();
+}
+
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -344,6 +483,7 @@ async function refresh(force) {
     else render();
   }
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
+  else if (ui.modal && ui.modal.type === "prompt") checkPrompt();
   loadFlags();
   sessionFinishes();
 }
@@ -1949,7 +2089,7 @@ function renderTaskBody(t) {
           ${s.background
             ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Attach — open it in", "Attach——在这里打开：")} ${esc(PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()])}">${ICON.attach}</button>
                <button class="icon ${ui.stopArmed === (s.bgId || s.sessionId) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || s.sessionId)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
-            : `<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+            : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
         </div></div>`;
@@ -2209,7 +2349,7 @@ function renderSessionList(items, plain) {
             ${s.background
               ? `<button class="icon" data-action="attach" data-session="${esc(s.bgId || sid)}" title="${T("Attach — open it in a terminal", "Attach——在终端里打开")}">${ICON.attach}</button>
                  <button class="icon ${ui.stopArmed === (s.bgId || sid) ? "armed" : ""}" data-action="stop" data-session="${esc(s.bgId || sid)}" title="${T("Stop this background session (its conversation is kept)", "停止这个后台 session（对话保留）")}">${ui.stopArmed === (s.bgId || s.sessionId) ? T("Stop?", "停止？") : ICON.stop}</button>`
-              : `<button class="icon" data-action="jump" data-session="${esc(sid)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
+              : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(sid)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                  <button class="icon ${ui.stopArmed === sid ? "armed" : ""}" data-action="stop-session" data-session="${esc(sid)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === sid ? T("Stop?", "停止？") : ICON.stop}</button>`}
             <span title="${esc(canSend ? (open ? T("Hide the message box", "收起消息框") : T("Message this session", "给这个 session 发消息")) : why)}"><button class="icon ${open ? "on" : ""}" data-action="toggle-msg" data-session="${esc(sid)}" ${canSend ? "" : "disabled"}>${ICON.message}</button></span>
           </div>
@@ -2849,6 +2989,18 @@ function secFeedItems(st, cls) {
   return `<button class="${cls}" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
     <button class="${cls}" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
+// Closing finished todos (`hq autoclose`, a job of its own, every 5 minutes): a todo about merging a
+// PR, closing a Jira issue or waiting for a Jenkins build is ticked once that is done. Rows as above.
+function secCloseItems(st, cls) {
+  const f = st.autoclose || {};
+  const mins = f.job ? f.everyMinutes : 5;     // not made yet: it will run every 5 minutes
+  const every = !f.job || f.kind === "every" ? T(`every ${mins} min`, `每 ${mins} 分钟`) : T("as set in Scheduled", "按定时任务的设置");
+  const last = f.last;
+  const tip = T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",
+    "待办写的是合并或 review 某个 PR 的，PR 合并后勾掉（没合并就关了的标成不做）；写的是关闭、修复、跟进某个 Jira 单子的，单子完成后勾掉；写的是等某个 Jenkins 构建的，构建成功后勾掉。后面还跟着别的步骤的（“合并 #12，然后重装”）不动，你重新打开的也不动。每次勾选都在任务的 Log 里记一行。");
+  return `<button class="${cls}" data-action="secretary-autoclose" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Tick finished todos", "自动勾选完成的待办")}</span><span class="meta">${every}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
+    <button class="${cls}" data-action="secretary-autoclose-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Checking…", "检查中…") : T("Check now", "现在查一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
+}
 const localDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const kindWord = (k) => (k === "weekly" ? T("Weekly report", "周报") : T("Daily report", "日报"));
 
@@ -3002,7 +3154,7 @@ function drawSecretary(toBottom) {
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
     : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
-  const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}
+  const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}<hr><div class="ph">${T("Finished todos", "完成的待办")}</div>${secCloseItems(st, "pi")}
     ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
   const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
@@ -3027,6 +3179,7 @@ function drawSecretary(toBottom) {
       ${evening.replace('class="pi"', 'class="ss-row"')}
       <button class="ss-row ss-act" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button>`)}
     ${sideSec("Zulip · Jira", 0, secFeedItems(st, "ss-row"))}
+    ${sideSec(T("Finished todos", "完成的待办"), 0, secCloseItems(st, "ss-row"))}
     ${mem.length ? sideSec(T("What it remembers", "它记得的"), 0, mem.map((f) => `<button class="ss-row" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")) : ""}
   </aside>`;
 
@@ -3744,7 +3897,7 @@ document.addEventListener("click", async (ev) => {
   }
   // The secretary's menus close on any click but their own button's, or the evening report's
   // or the scan's switch (you see it flip).
-  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
+  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed", "secretary-autoclose"].includes(el.dataset.action))) {
     ui.modal.pop = null;
     drawPeek(false);   // (an item clicked in it still acts: its dataset outlives the redraw)
   }
@@ -3996,6 +4149,12 @@ document.addEventListener("click", async (ev) => {
       catch (e) { return toast(String(e.message || e), true); }
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
       return toast(d.action === "secretary-feed-now" ? T("Scanning…", "正在扫描…") : d.on === "1" ? T("Scan on", "扫描已开启") : T("Scan off", "扫描已关闭"));
+    case "secretary-autoclose":
+    case "secretary-autoclose-now":
+      try { ui.secretary = await apiObj(d.action, { on: d.on === "1" }); }
+      catch (e) { return toast(String(e.message || e), true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
+      return toast(d.action === "secretary-autoclose-now" ? T("Checking…", "正在检查…") : d.on === "1" ? T("Auto-tick on", "自动勾选已开启") : T("Auto-tick off", "自动勾选已关闭"));
     case "secretary-report-now":
       return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":
@@ -4310,6 +4469,41 @@ document.addEventListener("click", async (ev) => {
       catch (e) { toast(String(e.message || e), true); }
       return;
     }
+    case "open-prompt": return openPrompt(d.session);
+    case "prompt-pick": {
+      const m = ui.modal;
+      if (!m || m.type !== "prompt") return;
+      const q = m.questions[Number(d.q)] || {};
+      const cur = m.picks[d.q] || new Set();
+      if (q.multiSelect) { cur.has(d.label) ? cur.delete(d.label) : cur.add(d.label); m.picks[d.q] = cur; }
+      else {
+        m.picks[d.q] = cur.has(d.label) ? new Set() : new Set([d.label]);
+        // A pick replaces your own words for a single-choice question.
+        if (m.picks[d.q].size) { delete ui.drafts[promptOtherKey(m, Number(d.q))]; saveDrafts(); }
+      }
+      return drawPrompt();
+    }
+    case "prompt-send": {
+      const answers = ui.modal && promptAnswers(ui.modal);
+      if (!answers) return;
+      return promptSubmit("answer-question", { answers }, T("Answered — it carries on", "已回答——它会接着干"));
+    }
+    case "plan-approve": return promptSubmit("plan-approve", {}, T("Approved — pressed Enter in its terminal", "已批准——在它的终端里按了回车"));
+    case "plan-feedback": {
+      const text = (draft(planFeedbackKey(ui.modal)) || "").trim();
+      if (!text) return;
+      return promptSubmit("plan-feedback", { text }, T("Sent back — it keeps planning", "已发回——它会继续规划"));
+    }
+    case "interrupt": {
+      // One press: the button goes away until the pet has caught up (escHeld).
+      if (escHeld(d.session)) return;
+      ui.interrupted = { ...(ui.interrupted || {}), [d.session]: Date.now() };
+      render();
+      try { await api("interrupt", { session: d.session }); toast(T("Pressed Esc — the turn stops in a moment", "已按 Esc——这一轮马上停下")); }
+      catch (e) { delete ui.interrupted[d.session]; toast(String(e.message || e), true); }
+      setTimeout(render, ESC_HOLD_MS + 100);
+      return;
+    }
     case "stop-session":
       if (ui.stopArmed !== d.session) {
         ui.stopArmed = d.session;
@@ -4451,6 +4645,7 @@ document.addEventListener("input", (ev) => {
   if (el.tagName === "TEXTAREA" && bulkInsert) tidyInserted(ev);
   if (el.id === "search") { ui.filter = el.value; return render(); }
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
+  if (ui.modal && ui.modal.type === "prompt" && el.closest("#modal")) syncPromptButtons(el);
   const note = /^note:(.+)$/.exec(el.dataset.key || "");
   if (note) autoPick(note[1], el.value.trim() !== "");
   if (el.dataset.field) render();
@@ -4480,11 +4675,14 @@ document.addEventListener("focusout", compositionDone, true);   // in case a com
 // skills are the session's own, as Claude Code listed them in its transcript (`hq peek --commands`):
 // that already accounts for its project, the user's skills and its plugins. Of Claude Code's
 // built-in commands only those that do their work without the terminal are offered: one that
-// opens a menu (/model, /config, /resume…) would leave the session sitting in it, out of the
-// board's sight, and one that only prints (/context, /cost) prints where the board can't see.
+// opens a menu (/config, /resume…, or /model with no name) would leave the session sitting in
+// it, out of the board's sight (/model is offered for `/model <name>`, which switches without
+// one; the bridge refuses it bare), and one that only prints (/context, /cost) prints where the
+// board can't see.
 const SLASH_BUILTIN = () => [
   { name: "compact", desc: T("Compact the conversation now (add instructions after it if you like)", "现在压缩对话（后面可以接要保留什么的说明）"), builtin: true },
   { name: "clear", desc: T("Start over: a new, empty session in the same terminal", "清空重来：在同一个终端里开一个新的空 session"), builtin: true },
+  { name: "model", desc: T("Switch model — follow it with a name: /model opus, /model sonnet, /model haiku", "换模型——后面要接模型名：/model opus、/model sonnet、/model haiku"), builtin: true },
 ];
 const SLASH_MAX = 50;
 const slashCache = {};   // sessionId → { at, skills, loading, failed }
