@@ -407,6 +407,62 @@ import json, sys
 p = sys.argv[1]; s = json.load(open(p)); s["sess-1"].pop("finished", None); json.dump(s, open(p, "w"))
 PY
 
+# A reply that closes its task with a question still open (the last "delete the old worktrees?")
+# holds the close: closing would stop the session, and the answer would reach no one.
+for a in $("$HQ" asks T-001 --json | python3 -c 'import json,sys; print(" ".join(a["id"] for a in json.load(sys.stdin) if a["state"]=="open"))'); do "$HQ" ask resolve "$a" drop >/dev/null; done
+field() { python3 -c 'import re,sys; m=re.search(r"^"+sys.argv[2]+r":[ \t]*(.*)$", open(sys.argv[1]).read().split("\n---")[0], re.M); print(m.group(1) if m else "-")' "$C1" "$1"; }
+openask() { "$HQ" asks T-001 --json | python3 -c 'import json,sys; print(" ".join(a["id"] for a in json.load(sys.stdin) if a["state"]=="open"))'; }
+heldof() { python3 -c 'import json,sys; print(json.dumps((json.load(open(sys.argv[1])).get(sys.argv[2]) or {}).get("held")))' "$HOME/.claude/hq/state/sessions.json" "$1"; }
+prompt() { hook "{\"session_id\":\"$1\",\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go on\"}" >/dev/null; }
+clearfin() { python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
+import json, sys
+p = sys.argv[1]; s = json.load(open(p))
+for e in s.values():
+    e.pop("finished", None); e.pop("held", None)
+json.dump(s, open(p, "w"))
+PY
+}
+stop sess-1 "$(printf 'All done.\n```hq-update\nstatus: done\nlog: wrapped up\n```\n\n```hq-asks\n- delete the old worktrees?\n```')" >/dev/null
+Q="$(openask)"
+[ -n "$Q" ] && [ "$(field status)" = waiting-on-me ] && [ "$(field closing)" = done ] && [ "$(fin)" = null ] && grep -q "wrapped up" "$C1" \
+  && heldof sess-1 | python3 -c 'import json,sys; h=json.load(sys.stdin); assert h["task"]=="T-001" and h["status"]=="done" and h["at"], h' \
+  && ok "status done with a question asked in the same reply: held — waiting on you, closing: done, a held mark, no finished mark" || fail "held close: $(field status) / $(field closing) / $(fin) / $(heldof sess-1)"
+prompt sess-1; stop sess-1 "$(printf 'Waiting.\n```hq-update\nlog: still waiting\n```')" >/dev/null
+[ "$(field status)" = waiting-on-me ] && [ "$(field closing)" = done ] && ok "a turn that answers nothing leaves the close held" || fail "held close released early: $(field status)"
+# A Yes on the board while the session is on another turn: that turn's end must not close it.
+prompt sess-1; "$HQ" ask resolve "$Q" do --via board >/dev/null
+stop sess-1 "$(printf 'Other thing done.\n```hq-update\nlog: other thing\n```')" >/dev/null
+[ "$(field status)" != done ] && [ "$(field closing)" = done ] && [ "$(fin)" = null ] \
+  && ok "a Yes given during another turn (not yet delivered): that turn's end leaves the close held" || fail "released before delivery: $(field status) / $(fin)"
+stop sess-2 "$(printf 'Unrelated.\n```hq-update\nlog: second session\n```')" >/dev/null
+[ "$(field closing)" = done ] && ok "another session's turn never releases the close" || fail "released by another session: $(field status)"
+"$HQ" ask delivered "$Q" --session sess-1 >/dev/null; sleep 1; prompt sess-1
+stop sess-1 "$(printf 'Deleted them.\n```hq-update\nlog: deleted the worktrees\n```')" >/dev/null
+[ "$(field status)" = done ] && [ "$(field closing)" = - ] && [ "$(heldof sess-1)" = null ] && fin | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"]=="done"' \
+  && grep -q "closed as the session said" "$C1" && ok "the turn that began with the Yes delivered closes the task and marks the session finished" || fail "release: $(field status) / $(field closing) / $(fin)"
+# On a task that was already done, a reply saying done again with a question doesn't reopen it.
+prompt sess-1; stop sess-1 "$(printf 'Still done.\n```hq-update\nstatus: done\n```\n```hq-asks\n- also prune the branches?\n```')" >/dev/null
+[ "$(field status)" = done ] && [ "$(field closing)" = - ] && [ "$(heldof sess-1)" = null ] && ok "a closed task is never reopened to hold a close" || fail "reopened: $(field status) / $(field closing)"
+"$HQ" ask resolve "$(openask)" drop >/dev/null; clearfin
+# A No with the holding session gone closes it at once; a Yes still waiting for it does not.
+stop sess-1 "$(printf 'back\n```hq-update\nstatus: active\n```')" >/dev/null
+stop sess-1 "$(printf 'Gave up.\n```hq-update\nstatus: abandoned\n```\n```hq-asks\n- remove the cluster too?\n- and the bucket?\n```')" >/dev/null
+set -- $(openask); "$HQ" ask resolve "$1" do --via board >/dev/null; "$HQ" ask resolve "$2" drop --via board >/dev/null
+[ "$(field status)" != abandoned ] && [ "$(field closing)" = abandoned ] && ok "a No while a Yes is still to be acted on leaves the close held" || fail "closed over a Yes: $(field status)"
+"$HQ" set T-001 status=active >/dev/null; clearfin
+stop sess-1 "$(printf 'Gave up.\n```hq-update\nstatus: abandoned\n```\n```hq-asks\n- remove the cluster as well?\n```')" >/dev/null
+"$HQ" ask resolve "$(openask)" drop --via board >/dev/null
+[ "$(field status)" = abandoned ] && [ "$(field closing)" = - ] && [ "$(heldof sess-1)" = null ] && ok "a No with the holding session gone: the held close happens at once" || fail "drop release: $(field status) / $(field closing)"
+stop sess-1 "$(printf 'back\n```hq-update\nstatus: active\n```')" >/dev/null
+stop sess-1 "$(printf 'Done.\n```hq-update\nstatus: done\n```\n```hq-asks\n- send the summary?\n```')" >/dev/null
+"$HQ" set T-001 status=blocked >/dev/null
+[ "$(field status)" = blocked ] && [ "$(field closing)" = - ] && ok "a status set outright replaces a held close" || fail "set kept closing: $(field closing)"
+"$HQ" ask resolve "$(openask)" drop >/dev/null; prompt sess-1; stop sess-1 "$(printf 'ok\n```hq-update\nlog: after the set\n```')" >/dev/null
+[ "$(field status)" = blocked ] && [ "$(heldof sess-1)" = null ] && [ "$(fin)" = null ] && ok "and answering afterwards no longer closes it" || fail "closed after set: $(field status)"
+out="$(stop sess-1 "$(printf 'Done.\n```hq-update\nstatus: done\nstatus: finished\n```\n```hq-asks\n- one more?\n```')")"
+echo "$out" | grep -q "status must be one of" && [ "$(field status)" != done ] && ok "a bad status line is still reported while a close would be held" || fail "bad line hidden: $out"
+"$HQ" ask resolve "$(openask)" drop >/dev/null; clearfin
+
 # hq-update review fixes (PR #51): what is a block, all-or-nothing, matching, leniency, locking
 cardof() { cat "$C1"; }
 before="$(cardof)"

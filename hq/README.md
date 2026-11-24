@@ -197,6 +197,21 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    a task, asks and todos and all). `done` and `abandoned` are never changed automatically, and
    `blocked` only by a new ask. Each move is logged on the card with `(auto, <via>)`.
 
+   **A reply can't close its task over an open question.** When a session's `hq-update` says
+   `status: done` (or `abandoned`) on an open task that still has an open ask — often a last one
+   asked in that same reply ("delete the old worktrees?") — the close is held: the task goes to
+   `waiting-on-me`, the card gets `closing: done`, and the session's entry in `sessions.json` a
+   `held` mark (`{task, status, at, seq}`). Closing at once would have the board stop the session (its
+   "Finishing a task" setting) and the answer would reach no one. Only that session releases it,
+   at the end of a turn with no ask open that began with every answer given since the hold in
+   hand — answered in its own reply, or delivered to it (`delivered`) before the turn started;
+   a No (`drop` / `archive`) needs nothing done. Releasing marks the session finished, as a close
+   in the reply itself would. A turn on something else, or another session on the task, never
+   releases it. A No given on the board or with `hq ask resolve` closes it at once when the
+   holding session isn't running and no Yes since is still waiting for it. A task already done or
+   abandoned is never reopened to hold a close. A status written outright — another `hq-update`
+   status, `hq set`, the board — drops `closing`.
+
    **Claude's open todos come along at session start.** SessionStart — for every source:
    `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
    context, each exactly as written on the card, with the instruction to check them against how
