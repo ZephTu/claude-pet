@@ -1755,6 +1755,12 @@ import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("## Log
 PY
 [ "$(blast)" = "2099-01-02 03:04:05" ] && ok "...counting the log lines moved to HISTORY.md" || fail "lastActive history: $(blast)"
 mv "$BH.bak" "$BH"
+LT="$("$HQ" new "Last active" --no-focus | head -1)"; LC="$(ls "$T"/root/tasks/$LT-*/TASK.md)"
+printf -- '- 2099-01-01: onboarded\n' >> "$LC"   # a date-only line (hq-onboard) is no time
+"$HQ" log "$LT" "a note" >/dev/null; "$HQ" set "$LT" status=done >/dev/null
+lt() { "$HQ" board --json | python3 -c 'import json,sys; t=[t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$LT"'"][0]; print(t.get("closed_at",""), "|", t["lastActive"])'; }
+python3 -c 'import sys; a,b=sys.argv[1].split(" | "); assert len(a)==19 and b==a, sys.argv[1]' "$(lt)" \
+  && ok "closing writes closed_at, to the second, and lastActive is it (date-only log lines don't count)" || fail "closed_at: $(lt)"
 "$HQ" ref add "$BT" "PR #5 https://github.com/o/r/pull/5" >/dev/null
 "$HQ" ref add "$BT" "build #77 https://jenkins.example.com/job/x/77/" >/dev/null
 "$HQ" ref add "$BT" "run https://github.com/o/r/actions/runs/123" >/dev/null
