@@ -431,11 +431,25 @@ PROJECT_KINDS = ("goal", "duty")
 PROJECT_STATUSES = ("active", "paused", "done", "abandoned")
 PROJECT_SECTIONS = {            # heading words (either language; "A / B" headings match either part)
     "goal": re.compile(r"^(?:goal|scope|目标|职责范围|职责)$", re.I),
+    "out": re.compile(r"^(?:out of scope|not|不管)$", re.I),
     "done_when": re.compile(r"^(?:done when|healthy when|完成标准|健康标准)$", re.I),
+    "templates": re.compile(r"^(?:templates|task templates|常见的活|模板)$", re.I),
     "brief": re.compile(r"^(?:brief|project brief|简报|项目简报)$", re.I),
 }
+# The heading a section gets when `hq project section` writes one the file doesn't have yet
+# (in the file's language): {key: (zh, en)}; done_when depends on the kind.
+PROJECT_HEADINGS = {"goal": ("目标", "Goal"), "out": ("不管", "Out of scope"),
+                    "done_when": ("完成标准", "Done when"), "templates": ("常见的活", "Templates"),
+                    "brief": ("简报", "Brief")}
+DUTY_HEALTH_HEADING = ("健康标准", "Healthy when")
 PROJECT_END_RE = re.compile(r"^(?:log|decision log|decisions|决策记录|日志)$", re.I)
-PROJECT_SET_KEYS = ("title", "kind", "status", "due", "jira", "fixVersions")
+PROJECT_SET_KEYS = ("title", "kind", "status", "due", "jira", "fixVersions", "parent", "phases", "auto")
+PROJECT_LIST_KEYS = ("jira", "fixVersions", "phases", "auto")
+# Where a duty's work could come in by itself. Only a switch for now: nothing reads them yet.
+AUTO_SOURCES = ("qahub-ci", "github-review", "jira-filter")
+# "不管：…" / "Out of scope: …" written as a line of the goal (as older PROJECT.md files do).
+OUT_LINE_RE = re.compile(r"^\s*(?:不管|out of scope|not)\s*[:：]\s*(.+)$", re.I)
+CRIT_RE = re.compile(r"^(\s*)[-*] (?:\[([ xX])\] )?(.*\S)\s*$")
 BRIEF_CHARS = 2000              # of the brief a session is given; the rest: read PROJECT.md
 
 
@@ -489,6 +503,81 @@ def project_sections(body):
     return clean
 
 
+def project_spans(lines):
+    """{key: (heading line, end line)} of the sections of PROJECT.md `lines`, by the rules of
+    project_sections (the end is the next Goal / Done when / … / Grants / Log heading)."""
+    spans, key, start, fence = {}, None, None, False
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*(```|~~~)", line):
+            fence = not fence
+            continue
+        if fence or not line.startswith("## "):
+            continue
+        words = [w.strip() for w in line[3:].split("/")]
+        new = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
+        if new or is_grants_heading(line) or any(PROJECT_END_RE.match(w) for w in words):
+            if key and key not in spans:
+                spans[key] = (start, i)
+            key, start = new, i
+            if new is None:
+                spans.setdefault("_stop", (i, i))
+    if key and key not in spans:
+        spans[key] = (start, len(lines))
+    return spans
+
+
+def project_criteria(text):
+    """The bullet lines of a Done when / Healthy when section: [{i, text, done}]. A plain bullet is
+    an unticked criterion; `- [x]` a ticked one."""
+    out = []
+    for line in text.splitlines():
+        m = CRIT_RE.match(line)
+        if m and not m.group(1):
+            out.append({"i": len(out) + 1, "text": m.group(3), "done": (m.group(2) or "").lower() == "x"})
+    return out
+
+
+def project_templates(text):
+    """A Templates section as [{name, title, goal, todos}]. Each template is a `### name` block of
+    `title: …`, `goal: …` (more lines continue it) and `- [ ] @owner todo` lines; a bare
+    `- name: title` line (before any block) is a template with just a title."""
+    out, cur, in_goal = [], None, False
+    for line in text.splitlines():
+        h = re.match(r"^###\s+(.+?)\s*$", line)
+        if h:
+            cur, in_goal = {"name": h.group(1), "title": "", "goal": "", "todos": []}, False
+            out.append(cur)
+            continue
+        if cur is None:
+            m = re.match(r"^[-*]\s+([^:：]+?)\s*[:：]\s*(.+)$", line)
+            if m:
+                out.append({"name": m.group(1), "title": m.group(2).strip(), "goal": "", "todos": []})
+            continue
+        kv = re.match(r"^(title|标题|goal|目标)\s*[:：]\s*(.*)$", line, re.I)
+        t = TODO_RE.match(line)
+        if kv:
+            is_title = kv.group(1).lower() in ("title", "标题")
+            cur["title" if is_title else "goal"] = kv.group(2).strip()
+            in_goal = not is_title
+        elif t:
+            cur["todos"].append(t.group(3).strip())
+            in_goal = False
+        elif in_goal and line.strip():
+            cur["goal"] += "\n" + line.strip()
+        elif not line.strip():
+            in_goal = False
+    return out
+
+
+def fill_template(text):
+    """A template's placeholders that hq can fill: {date} / {日期} and {week} / {周}."""
+    d = dt.date.today()
+    for k, v in (("date", d.isoformat()), ("日期", d.isoformat()),
+                 ("week", f"W{d.isocalendar()[1]:02d}"), ("周", f"W{d.isocalendar()[1]:02d}")):
+        text = text.replace("{" + k + "}", v)
+    return text
+
+
 def as_list(v):
     if isinstance(v, list):
         return [str(x).strip() for x in v if str(x).strip()]
@@ -506,12 +595,23 @@ def load_project(name):
         return None
     sec = project_sections(body)
     kind, status = str(meta.get("kind") or "").lower(), str(meta.get("status") or "").lower()
+    goal, out = sec.get("goal", ""), sec.get("out", "")
+    if not out:     # older files say what is out of scope as a "不管：…" line of the goal
+        lines = goal.split("\n")
+        outs = [m.group(1).strip() for m in (OUT_LINE_RE.match(l) for l in lines) if m]
+        if outs:
+            goal = "\n".join(l for l in lines if not OUT_LINE_RE.match(l)).strip()
+            out = "\n".join(outs)
     return {"name": name, "file": path, "title": str(meta.get("title") or ""),
             "kind": kind if kind in PROJECT_KINDS else "",
             "status": status if status in PROJECT_STATUSES else "active",
             "due": str(meta.get("due") or ""), "jira": as_list(meta.get("jira")),
             "fixVersions": as_list(meta.get("fixVersions")), "updated": str(meta.get("updated") or ""),
-            "goal": sec.get("goal", ""), "done_when": sec.get("done_when", ""),
+            "parent": str(meta.get("parent") or ""), "phases": as_list(meta.get("phases")),
+            "auto": as_list(meta.get("auto")),
+            "goal": goal, "out": out, "done_when": sec.get("done_when", ""),
+            "criteria": project_criteria(sec.get("done_when", "")),
+            "templates": project_templates(sec.get("templates", "")), "templates_raw": sec.get("templates", ""),
             "brief": sec.get("brief", ""), "grants": card_grants(body)}
 
 
@@ -519,7 +619,8 @@ def project_info(pr):
     """A listed project (hq.json entry) with what its PROJECT.md says; `defined` false without one."""
     p = load_project(pr["name"])
     base = {"title": "", "kind": "", "status": "active", "due": "", "jira": [], "fixVersions": [],
-            "updated": "", "goal": "", "done_when": "", "brief": "", "grants": [], "file": None}
+            "updated": "", "parent": "", "phases": [], "auto": [], "goal": "", "out": "", "done_when": "",
+            "criteria": [], "templates": [], "templates_raw": "", "brief": "", "grants": [], "file": None}
     return {**base, **(p or {}), "name": pr["name"], "paths": pr.get("paths", []), "defined": bool(p)}
 
 
@@ -535,7 +636,11 @@ def ensure_project_file(name, fields=None):
     """PROJECT.md for this project, made from the template if it has none. Returns its path."""
     path = project_file(check_project_name(name))
     if not os.path.isfile(path):
-        atomic_write(path, project_template())
+        text = project_template()
+        if (fields or {}).get("kind") == "duty":    # a duty is healthy, never done
+            text = re.sub(r"(?m)^## Done when$", "## " + DUTY_HEALTH_HEADING[1], text)
+            text = re.sub(r"(?m)^## 完成标准$", "## " + DUTY_HEALTH_HEADING[0], text)
+        atomic_write(path, text)
         set_fields(path, {"name": name, "title": name, "updated": today()})
     if fields:
         set_fields(path, fields)
@@ -552,7 +657,7 @@ def check_project_fields(pairs):
         k, v = k.strip(), v.strip()
         if k not in PROJECT_SET_KEYS:
             die(f"can't set {k!r} on a project (keys: {', '.join(PROJECT_SET_KEYS)}); "
-                "goal, done-when and the brief are sections of PROJECT.md — edit the file")
+                "goal, out of scope, done-when, templates and the brief are sections: hq project section")
         if k == "kind" and v and v not in PROJECT_KINDS:
             die("kind is goal (has an end) or duty (a standing responsibility)")
         if k == "status" and v not in PROJECT_STATUSES:
@@ -562,8 +667,64 @@ def check_project_fields(pairs):
                 dt.date.fromisoformat(v)
             except ValueError:
                 die(f"due is a date, YYYY-MM-DD (got {v!r})")
-        fields[k] = as_list(v) if k in ("jira", "fixVersions") else v
+        if k == "auto" and [x for x in as_list(v) if x not in AUTO_SOURCES]:
+            die(f"auto sources are {', '.join(AUTO_SOURCES)}")
+        fields[k] = as_list(v) if k in PROJECT_LIST_KEYS else v
     return fields
+
+
+def check_project_parent(name, fields, cur, names):
+    """A project can sit under a duty: only a goal, only under a listed duty other than itself."""
+    parent = fields.get("parent", cur.get("parent", ""))
+    if not parent:
+        return
+    if fields.get("kind", cur.get("kind")) != "goal":
+        die("only a goal (kind=goal) sits under a duty")
+    if parent == name:
+        die("a project can't sit under itself")
+    pp = load_project(parent) if parent in names else None
+    if not pp or pp["kind"] != "duty":
+        die(f"parent must be a duty (no duty {parent!r})")
+
+
+def write_project_section(path, key, text, kind=""):
+    """Replace a section's text (made, in the file's language, when it has none): before the
+    first later section, the Grants or the Log heading — else at the end."""
+    lines = open(path, encoding="utf-8").read().rstrip("\n").split("\n")
+    spans = project_spans(lines)
+    body = [l.rstrip() for l in text.strip("\n").split("\n")] if text.strip() else []
+    if key in spans:
+        a, b = spans[key]
+        while b > a + 1 and not lines[b - 1].strip():
+            b -= 1
+        new = lines[:a + 1] + body + lines[b:]
+    else:
+        zh = any(re.search(r"[\u4e00-\u9fff]", l) for l in lines if l.startswith("## "))
+        names = DUTY_HEALTH_HEADING if key == "done_when" and kind == "duty" else PROJECT_HEADINGS[key]
+        order = list(PROJECT_SECTIONS)
+        later = [spans[k][0] for k in order[order.index(key) + 1:] if k in spans]
+        at = min(later + ([spans["_stop"][0]] if "_stop" in spans else []) or [len(lines)])
+        block = [f"## {names[0] if zh else names[1]}"] + body + [""]
+        if at == len(lines):
+            block = [""] + block[:-1]
+        new = lines[:at] + block + lines[at:]
+    atomic_write(path, "\n".join(new) + "\n")
+
+
+def tick_criterion(path, n, done):
+    """Tick (or untick) the n-th criterion of Done when / Healthy when."""
+    lines = open(path, encoding="utf-8").read().split("\n")
+    span = project_spans(lines).get("done_when")
+    k = 0
+    for i in range(span[0] + 1, span[1]) if span else ():
+        m = CRIT_RE.match(lines[i])
+        if m and not m.group(1):
+            k += 1
+            if k == n:
+                lines[i] = f"- [{'x' if done else ' '}] {m.group(3)}"
+                atomic_write(path, "\n".join(lines))
+                return m.group(3)
+    die(f"no criterion #{n}")
 
 
 def project_brief_text(meta):
@@ -669,6 +830,14 @@ def relabel(field, old, new, why):
     return n
 
 
+def reparent(old, new, names):
+    """Goals that sat under duty `old` now sit under `new` ('' = under nothing)."""
+    for n in names:
+        f = project_file(n)
+        if f and os.path.isfile(f) and (load_project(n) or {}).get("parent") == old:
+            set_fields(f, {"parent": new})
+
+
 def project_line(r):
     """`[goal · active · due 2026-12-19]` — what PROJECT.md says, for a one-line listing."""
     if not r.get("defined"):
@@ -736,7 +905,7 @@ def cmd_project(args):
         die(f"usage: hq project {a} NAME ...")
     name = check_category(args.names[0])
     known = name in names or usage.get(name)
-    if a in ("show", "brief", "set") and not known:
+    if a in ("show", "brief", "set", "section", "check") and not known:
         die(f"no project {name!r}")
     if a == "show":
         info = project_info(next((pr for pr in projects if pr["name"] == name), {"name": name, "paths": []}))
@@ -756,9 +925,15 @@ def cmd_project(args):
             print(f"jira:  {', '.join(info['jira']) or '-'}   fix versions: {', '.join(info['fixVersions']) or '-'}")
         print(f"tasks: {st['open']} open, {st['done']} done ({st['done_7d']} in the last 7 days), "
               f"{st['abandoned']} abandoned · {st['on_me']} waiting on you")
-        for label, k in (("Goal", "goal"), ("Done when", "done_when"), ("Brief", "brief")):
+        if info["parent"] or info["phases"]:
+            print(f"under: {info['parent'] or '-'}   phases: {', '.join(info['phases']) or '-'}")
+        for label, k in (("Goal", "goal"), ("Out of scope", "out"), ("Done when", "done_when"), ("Brief", "brief")):
             if info[k]:
                 print(f"\n{label}:\n{info[k]}")
+        if info["templates"]:
+            print("\nTemplates:")
+            for t in info["templates"]:
+                print(f"  {t['name']}: {t['title'] or '-'}" + (f"  ({len(t['todos'])} todo(s))" if t["todos"] else ""))
         if info["grants"]:
             print("\nGrants:")
             for g in info["grants"]:
@@ -772,12 +947,43 @@ def cmd_project(args):
         if len(args.names) < 2 and not (args.kind or args.title or args.due):
             die(f"usage: hq project set NAME key=value ... (keys: {', '.join(PROJECT_SET_KEYS)})")
         fields = check_project_fields(args.names[1:] + [f"{k}={v}" for k, v in
-                                      (("kind", args.kind), ("title", args.title), ("due", args.due)) if v])
+                                      (("kind", args.kind), ("title", args.title), ("due", args.due),
+                                       ("parent", args.parent)) if v])
         cur = load_project(name) or {}
         if fields.get("kind", cur.get("kind")) == "duty" and fields.get("status", cur.get("status")) in ("done", "abandoned"):
             die("a duty is active or paused — it has no end (make it kind=goal first, if it does)")
+        check_project_parent(name, fields, cur, names)
+        if fields.get("kind") == "goal" and cur.get("kind") == "duty":
+            kids = [n for n in names if n != name and (load_project(n) or {}).get("parent") == name]
+            if kids:
+                die(f"{', '.join(kids)} sit(s) under {name!r}; move them first")
         ensure_project(name)
         print(ensure_project_file(name, fields))
+        return
+    if a == "section":
+        # hq project section NAME goal|out|done_when|templates|brief [TEXT…] — TEXT, or stdin.
+        if len(args.names) < 2 or args.names[1] not in PROJECT_SECTIONS:
+            die(f"usage: hq project section NAME {'|'.join(PROJECT_SECTIONS)} [TEXT] (no TEXT: read stdin)")
+        text = " ".join(args.names[2:]) if len(args.names) > 2 else sys.stdin.read()
+        ensure_project(name)
+        path = ensure_project_file(name)
+        with card_lock(path):
+            write_project_section(path, args.names[1], text, (load_project(name) or {}).get("kind", ""))
+        set_fields(path, {})
+        print(path)
+        return
+    if a == "check":
+        # hq project check NAME N [done|open] — tick a Done when / Healthy when criterion.
+        if len(args.names) < 2 or not args.names[1].isdigit() or (args.names[2:] and args.names[2] not in ("done", "open")):
+            die("usage: hq project check NAME N [done|open]")
+        path = project_file(name)
+        if not path or not os.path.isfile(path):
+            die(f"project {name!r} has no PROJECT.md")
+        done = (args.names[2:] or ["done"])[0] == "done"
+        with card_lock(path):
+            text = tick_criterion(path, int(args.names[1]), done)
+        set_fields(path, {})
+        append_log(path, f"{'ticked' if done else 'unticked'}: {text}", touch=False)
         return
     if a == "add":
         name = check_project_name(name)
@@ -786,7 +992,9 @@ def cmd_project(args):
         if same_name_project(name, names):
             die(f"project {same_name_project(name, names)!r} already exists — names that differ only in case would share a folder")
         fields = check_project_fields([f"{k}={v}" for k, v in
-                                       (("kind", args.kind), ("title", args.title), ("due", args.due)) if v])
+                                       (("kind", args.kind), ("title", args.title), ("due", args.due),
+                                        ("parent", args.parent)) if v])
+        check_project_parent(name, fields, {}, names)
         if same_name_project(name, list(usage)):
             die(f"tasks use {same_name_project(name, list(usage))!r} — names that differ only in case would share a folder")
         save_projects(projects + [{"name": name, "paths": [os.path.abspath(os.path.expanduser(x)) for x in args.path or []]}])
@@ -824,6 +1032,7 @@ def cmd_project(args):
             save_projects([dict(pr, name=new) if pr["name"] == name else pr for pr in projects])
         else:
             save_projects(projects + [{"name": new, "paths": []}])
+        reparent(name, new, [n for n in names if n != name])
         print(f"renamed {name!r} → {new!r} ({relabel('project', name, new, 'project renamed')} task(s) updated)")
     elif a == "remove":
         n_used = usage.get(name, 0)
@@ -851,6 +1060,7 @@ def cmd_project(args):
             os.rename(os.path.dirname(f), dest)
             kept = f"; its folder is now {dest}"
         save_projects([pr for pr in load_projects() if pr["name"] != name])
+        reparent(name, to if to and (load_project(to) or {}).get("kind") == "duty" else "", [n for n in names if n != name])
         n = relabel("project", name, to, "project removed") if n_used else 0
         print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else "") + kept)
 
@@ -1671,10 +1881,48 @@ def cmd_focus(args):
 
 
 def cmd_new(args):
-    tid, p = new_card(args.title, slug=args.slug, category=args.category or None, project=args.project,
+    title, goal, todos = args.title, args.goal, []
+    if args.template:
+        # One of the project's "common work" templates: its title (unless one is given), goal and todos.
+        if not args.project:
+            die("--template needs --project (the duty or project the template belongs to)")
+        pr = load_project(check_category(args.project)) or {}
+        want = args.template.strip().casefold()
+        tpl = next((t for t in pr.get("templates", []) if t["name"].casefold() == want), None)
+        if not tpl:
+            names = ", ".join(t["name"] for t in pr.get("templates", [])) or "none"
+            die(f"project {args.project!r} has no template {args.template!r} (templates: {names})")
+        # A title or goal the board prefilled from the template still has its {date} to fill.
+        title = fill_template(title or tpl["title"] or tpl["name"])
+        goal = fill_template(goal or tpl["goal"])
+        todos = [fill_template(t) for t in tpl["todos"]]
+    if not (title or "").strip():
+        die("a task needs a title")
+    tid, p = new_card(title, slug=args.slug, category=args.category or None, project=args.project,
                       lead=args.lead, workdirs=args.workdir, focus=not args.no_focus)
+    if args.phase:
+        set_fields(p, {"phase": args.phase})
+    if (goal or "").strip():
+        set_card_goal(p, goal)
+    for t in todos:
+        add_todo(p, t)
     print(tid)
     print(p)
+
+
+def set_card_goal(card, text):
+    """Replace what the Goal section of a card says (the template's placeholder, on a new card)."""
+    with card_lock(card):
+        lines = open(card, encoding="utf-8").read().split("\n")
+        head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+(Goal|目标)\b", l, re.I)), None)
+        body = text.strip().split("\n")
+        if head is None:
+            m = next((i for i, l in enumerate(lines) if l.startswith("## ")), len(lines))
+            lines[m:m] = ["## Goal"] + body + [""]
+        else:
+            end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+            lines[head + 1:end] = body + [""]
+        atomic_write(card, "\n".join(lines))
 
 
 def new_card(title, slug=None, category=None, project=None, lead=None, workdirs=None, focus=True):
@@ -6641,8 +6889,11 @@ def main():
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_board)
     p = sub.add_parser("show", help="print a task card and its open asks"); p.add_argument("task")
     p.set_defaults(fn=cmd_show)
-    p = sub.add_parser("new", help="create a task card")
-    p.add_argument("title"); p.add_argument("--slug"); p.add_argument("--category"); p.add_argument("--project")
+    p = sub.add_parser("new", help="create a task card: hq new TITLE [--project P] [--template T] [--goal G] [--phase PH]")
+    p.add_argument("title", nargs="?", default=""); p.add_argument("--slug"); p.add_argument("--category")
+    p.add_argument("--project"); p.add_argument("--goal", help="what done looks like (the card's Goal section)")
+    p.add_argument("--template", help="one of the project's templates (PROJECT.md \"Templates\"): title, goal, todos")
+    p.add_argument("--phase", help="the phase of its project this task belongs to")
     p.add_argument("--no-focus", action="store_true", help="don't add it to Focus")
     p.add_argument("--lead"); p.add_argument("--workdir", action="append"); p.set_defaults(fn=cmd_new)
     p = sub.add_parser("continue", help="continue an open task on a new card (its open todos, status, links, "
@@ -6698,11 +6949,14 @@ def main():
     p.add_argument("action", choices=["list", "add", "rename", "remove"]); p.add_argument("names", nargs="*")
     p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
     p = sub.add_parser("project", help="hq project list | show NAME | brief NAME | add NAME [--kind goal|duty] "
-                                         "[--title T] [--due D] [--path DIR] | set NAME key=value... | "
+                                         "[--title T] [--due D] [--parent DUTY] [--path DIR] | set NAME key=value... | "
+                                         "section NAME goal|out|done_when|templates|brief [TEXT] | check NAME N [done|open] | "
                                          "paths NAME DIR... | rename OLD NEW | remove NAME [--to OTHER] | auto | order NAME...")
-    p.add_argument("action", choices=["list", "show", "brief", "add", "set", "paths", "rename", "remove", "auto", "order"])
+    p.add_argument("action", choices=["list", "show", "brief", "add", "set", "section", "check", "paths",
+                                      "rename", "remove", "auto", "order"])
     p.add_argument("names", nargs="*"); p.add_argument("--path", action="append"); p.add_argument("--to")
     p.add_argument("--kind", choices=list(PROJECT_KINDS)); p.add_argument("--title"); p.add_argument("--due")
+    p.add_argument("--parent", help="the duty a goal sits under")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_project)
     p = sub.add_parser("focus", help="the Focus list: hq focus [add|remove|order T-012 ...] [--json]")
     p.add_argument("action", nargs="?", choices=["show", "add", "remove", "order", "carry"], default="show")

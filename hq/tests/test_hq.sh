@@ -237,6 +237,49 @@ BR="$("$HQ" new "Bare worktree" --workdir "$T/proj-T1" --no-focus | head -1)"
 "$HQ" set "$DT" status=done >/dev/null && grep -q "^closed: $(date +%F)" "$T"/root/tasks/$DT-*/TASK.md && ok "closing a task records when" || fail "closed date"
 sed -i.bak "s/^closed: .*/closed: 2000-01-01/" "$T"/root/tasks/$DT-*/TASK.md && "$HQ" log "$DT" "late note" >/dev/null
 "$HQ" project show dp --json | python3 -c 'import json,sys; s=json.load(sys.stdin)["stats"]; assert s["done"]==1 and s["done_7d"]==0, s' && ok "done in 7 days goes by when it closed, not the last edit" || fail "done_7d"
+# Duties and goals: a goal under a duty, phases, sections written from the board, criteria ticks,
+# templates ("common work") a new task starts from.
+"$HQ" project add ops --kind duty --title "Keep CI green" >/dev/null
+"$HQ" project add rel --kind goal --parent ops >/dev/null && grep -q '^parent: ops' "$T/root/projects/rel/PROJECT.md" && ok "project add --parent puts a goal under a duty" || fail "add --parent"
+rc=0; "$HQ" project add rel2 --kind duty --parent ops 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "only a goal sits under a duty" || fail "duty under duty"
+rc=0; "$HQ" project set rel parent=dp 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a parent must be a duty" || fail "parent not a duty"
+rc=0; "$HQ" project set ops kind=goal 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a duty with goals under it stays a duty" || fail "duty with kids → goal"
+rc=0; "$HQ" project set ops auto=bogus 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "project set checks auto sources" || fail "auto bogus"
+"$HQ" project set ops auto=qahub-ci,jira-filter >/dev/null && "$HQ" project set rel "phases=Design,Build,Ship" >/dev/null
+"$HQ" project show rel --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["parent"]=="ops" and p["phases"]==["Design","Build","Ship"], p' \
+  && "$HQ" project show ops --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["auto"]==["qahub-ci","jira-filter"], p' && ok "project show: parent, phases, auto" || fail "parent/phases/auto json"
+"$HQ" project show rel | grep -q '^under: ops   phases: Design, Build, Ship' && ok "project show prints under and phases" || fail "show under/phases"
+OPS="$T/root/projects/ops/PROJECT.md"
+"$HQ" project section ops goal "Every nightly run is green or has an owner." >/dev/null
+printf 'No perf runs\nNo customer tickets\n' | "$HQ" project section ops out >/dev/null
+printf -- '- Nightly green 5 days in a row\n- No failure older than a day\n' | "$HQ" project section ops done_when >/dev/null
+"$HQ" project show ops --json | python3 -c '
+import json,sys; p=json.load(sys.stdin)
+assert p["goal"]=="Every nightly run is green or has an owner." and p["out"]=="No perf runs\nNo customer tickets", p
+assert [c["text"] for c in p["criteria"]]==["Nightly green 5 days in a row","No failure older than a day"] and not any(c["done"] for c in p["criteria"]), p' \
+  && grep -q '^## Healthy when' "$OPS" && grep -q '^## Out of scope' "$OPS" && ok "project section writes goal, out and a duty's Healthy when" || fail "project section"
+"$HQ" project section ops goal "Nightly runs stay green." >/dev/null && [ "$(grep -c '^## Goal' "$OPS")" = 1 ] && "$HQ" project show ops --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["goal"]=="Nightly runs stay green." and p["out"].startswith("No perf"), p' && ok "project section replaces a section in place" || fail "section replace"
+awk '/^## /{print}' "$OPS" | python3 -c 'import sys; h=[l.strip() for l in sys.stdin]; assert h.index("## Goal")<h.index("## Out of scope")<h.index("## Healthy when")<h.index("## Brief"), h' && ok "new sections go in their order, before the brief" || fail "section order"
+"$HQ" project check ops 2 >/dev/null && grep -q '^- \[x\] No failure older than a day' "$OPS" && grep -q 'ticked: No failure older than a day' "$OPS" && ok "project check ticks a criterion and logs it" || fail "project check"
+"$HQ" project check ops 2 open >/dev/null && grep -q '^- \[ \] No failure older than a day' "$OPS" && ok "project check N open unticks it" || fail "project uncheck"
+rc=0; "$HQ" project check ops 9 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "project check refuses a criterion that isn't there" || fail "check #9"
+ZH="$T/root/projects/zhp/PROJECT.md"; "$HQ" project add zhp --kind goal >/dev/null
+printf -- '---\nname: zhp\nkind: goal\n---\n\n## 目标\n发布 v2。\n不管：性能测试\n\n## 简报\n用 worktree。\n' > "$ZH"
+"$HQ" project show zhp --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["goal"]=="发布 v2。" and p["out"]=="性能测试", p' && ok "a 不管： line of the goal reads as out of scope" || fail "out line"
+"$HQ" project section zhp done_when "- 团队都在用" >/dev/null && grep -q '^## 完成标准' "$ZH" && ok "a section is made in the file's language" || fail "zh heading"
+"$HQ" project section ops templates "$(printf '### triage\ntitle: Triage nightly {date}\ngoal: Every red job has an owner.\n- [ ] @claude collect the failures\n- [ ] @me assign owners\n\n### bump\ntitle: Bump the CI image')" >/dev/null
+"$HQ" project show ops --json | python3 -c '
+import json,sys; t=json.load(sys.stdin)["templates"]
+assert [x["name"] for x in t]==["triage","bump"] and t[0]["todos"]==["@claude collect the failures","@me assign owners"] and t[0]["goal"]=="Every red job has an owner.", t' && ok "templates read as name, title, goal, todos" || fail "templates json"
+TT="$("$HQ" new --project ops --template Triage --no-focus | head -1)"; TC="$(ls "$T"/root/tasks/$TT-*/TASK.md)"
+grep -q "^title: \"Triage nightly $(date +%F)\"" "$TC" && grep -q '^Every red job has an owner.' "$TC" && grep -q '^- \[ \] @me assign owners' "$TC" && grep -q '^project: ops' "$TC" && ok "hq new --template: title (date filled), goal, todos" || fail "new --template"
+rc=0; "$HQ" new --project ops --template nope --no-focus 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "an unknown template is refused" || fail "unknown template"
+rc=0; "$HQ" new --no-focus 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a task needs a title" || fail "new without title"
+NG="$("$HQ" new "Cut the branch" --project rel --phase Build --goal "Branch cut and announced." --no-focus | head -1)"; NC="$(ls "$T"/root/tasks/$NG-*/TASK.md)"
+grep -q '^phase: Build' "$NC" && grep -q '^Branch cut and announced.' "$NC" && "$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$NG"'"][0]; assert t["phase"]=="Build", t' && ok "hq new --phase --goal" || fail "new --phase --goal"
+"$HQ" project rename ops ops2 >/dev/null && grep -q '^parent: ops2' "$T/root/projects/rel/PROJECT.md" && ok "renaming a duty moves its goals along" || fail "reparent rename"
+"$HQ" project remove ops2 --to "" >/dev/null && "$HQ" project show rel --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["parent"]=="", "parent kept"' && ok "removing a duty leaves its goals under nothing" || fail "reparent remove"
+for x in "$TT" "$NG"; do "$HQ" set "$x" status=abandoned >/dev/null; done
 grep -q "@me ping Wenbing <!--t:" "$T"/root/tasks/T-001-*/TASK.md && ok "addtodo stamps a hidden creation time"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; o=[x for x in t["todos"] if x["state"]=="open"]; assert all(x["created"] for x in o) and not any("<!--" in x["text"] for x in t["todos"]), o' && ok "every open todo has a created time; the stamp is hidden"
 # Focus: new tasks join it, and it stays until you take a task off — no daily reset.

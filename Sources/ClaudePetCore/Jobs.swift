@@ -159,6 +159,52 @@ public struct Job: Codable, Equatable, Sendable {
     public var directory: String { (cwd.isEmpty ? "~" : cwd as NSString).expandingTildeInPath }
 }
 
+// MARK: - A duty's recurring work
+
+/// A duty's recurring work ("定期来活") is a shell job that runs `hq new --project=P --template=T`
+/// on its schedule: the board's duty page makes these jobs and finds them again by their command.
+public enum Recurring {
+    public static func command(hq: String, project: String, template: String) -> String {
+        "\(quote(hq)) new --project=\(quote(project)) --template=\(quote(template))"
+    }
+
+    /// The project and template of a command `command(hq:project:template:)` made; nil for any other.
+    public static func parse(_ command: String) -> (project: String, template: String)? {
+        guard let w = words(command), w.count == 4, w[0].hasSuffix("/hq"), w[1] == "new",
+              w[2].hasPrefix("--project="), w[3].hasPrefix("--template=") else { return nil }
+        let project = String(w[2].dropFirst("--project=".count)), template = String(w[3].dropFirst("--template=".count))
+        return project.isEmpty || template.isEmpty ? nil : (project, template)
+    }
+
+    static func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'" }
+
+    /// The words of a command line of plain and single-quoted parts, as `sh` reads them; nil when
+    /// it has anything else (double quotes, `$`, `;` …), which `command` never writes.
+    static func words(_ s: String) -> [String]? {
+        var out: [String] = [], cur = "", started = false, quoted = false, escaped = false
+        for ch in s {
+            if quoted {
+                if ch == "'" { quoted = false } else { cur.append(ch) }
+            } else if escaped {
+                cur.append(ch); escaped = false
+            } else if ch == "'" {
+                quoted = true; started = true
+            } else if ch == "\\" {
+                escaped = true; started = true
+            } else if ch == " " {
+                if started { out.append(cur); cur = ""; started = false }
+            } else if "\"$`;&|<>()*?![]{}~#\n\t".contains(ch) {
+                return nil
+            } else {
+                cur.append(ch); started = true
+            }
+        }
+        if quoted || escaped { return nil }
+        if started { out.append(cur) }
+        return out
+    }
+}
+
 // MARK: - When it runs
 
 public struct Schedule: Codable, Equatable, Sendable {

@@ -350,11 +350,18 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard !only.isEmpty else { return (nil, L("nothing selected", "什么都没选")) }
             return await hq(["scan", "--apply-projects", "--only=\(only)"])
         case "project":
+            // `project [options] ACTION -- NAMES…`: after "--" a name or a section's text starting with
+            // "-" can't read as an option (a Done when list is "- …" lines). Options go before the
+            // action: Python 3.9's argparse (the app's python3) fills ACTION alone when an option
+            // sits between it and "--", then rejects the names.
             let action = str("action")
-            var args = ["project", action] + ((body["names"] as? [String]) ?? [])
-            if action == "add" { for p in (body["paths"] as? [String]) ?? [] { args.append("--path=\(p)") } }
-            if let to = body["to"] as? String { args.append("--to=\(to)") }
-            return await hq(args)
+            var opts: [String] = []
+            if action == "add" {
+                for p in (body["paths"] as? [String]) ?? [] { opts.append("--path=\(p)") }
+                for k in ["kind", "title", "due", "parent"] where !str(k).isEmpty { opts.append("--\(k)=\(str(k))") }
+            }
+            if let to = body["to"] as? String { opts.append("--to=\(to)") }
+            return await hq(["project"] + opts + [action, "--"] + ((body["names"] as? [String]) ?? []))
         case "category":
             var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
             if let to = body["to"] as? String { args.append("--to=\(to)") }
@@ -371,7 +378,18 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !str("category").isEmpty { args.append("--category=\(str("category"))") }
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
+            for k in ["goal", "template", "phase"] where !str(k).isEmpty { args.append("--\(k)=\(str(k))") }
+            if body["focus"] as? Bool == false { args.append("--no-focus") }
             return await hq(args + ["--", str("title")])
+        case "recur-save":
+            // A duty's recurring work: a shell job that makes a card from one of its templates.
+            let hqBin = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/hq/bin/hq"
+            let raw: [String: Any] = [
+                "id": str("id"), "name": "↻ \(str("project")) · \(str("template"))", "kind": "shell",
+                "command": Recurring.command(hq: hqBin, project: str("project"), template: str("template")),
+                "cwd": "~", "schedule": body["schedule"] as? [String: Any] ?? [:],
+                "enabled": body["enabled"] as? Bool ?? true, "timeoutMinutes": 5, "notify": "failure"]
+            return await JobsController.shared.save(raw)
         case "send":
             let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false,
                                bg: str("bg"), skip: body["skip"] as? Bool ?? false)

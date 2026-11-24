@@ -25,6 +25,9 @@ final class JobsController {
             o["runs"] = runs.prefix(30).map { $0.json() }
             o["running"] = runs.first(where: { $0.status != .skipped })?.status == .running
             o["installed"] = FileManager.default.fileExists(atPath: LaunchAgent.plistURL(for: job.id).path)
+            if job.kind == .shell, let r = Recurring.parse(job.command) {     // a duty's recurring work
+                o["recur"] = ["project": r.project, "template": r.template]
+            }
             // How full the carried-on session is, for "same session every run".
             let state = store.state(job.id)
             if job.sessionMode == .resume, let ctx = state["contextTokens"] as? Int,

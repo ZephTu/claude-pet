@@ -364,20 +364,27 @@ title: 性能基线与回归        # the display name
 kind: goal                 # goal = has an end · duty = a standing responsibility
 status: active             # active | paused | done | abandoned (a duty: active | paused)
 due: 2026-12-19            # a goal's deadline
+parent: qa-oncall          # a goal can sit under a duty (only a goal, only under a duty)
+phases: ["Design", "Build", "Ship"]   # a goal's phases, in order; a card's `phase:` picks one
+auto: ["qahub-ci"]         # a duty's switches for work that comes in by itself:
+                           #   qahub-ci | github-review | jira-filter (switches only, for now)
 jira: ["QA-9397"]          # epics it tracks
 fixVersions: ["4.2.7"]
 updated: 2026-11-23
 ---
 
 ## Goal                    ← or 目标 / 职责范围
-## Done when               ← or 完成标准 / 健康标准
+## Out of scope            ← or 不管: what it leaves to others
+## Done when               ← or 完成标准; a duty's is "Healthy when" / 健康标准. One `- ` line
+                           #   per criterion, `- [x] ` once it holds (the board ticks them)
+## Templates               ← or 常见的活: a duty's kinds of recurring work, see below
 ## Brief                   ← or 简报: given to every session on one of its tasks
 ## Grants                  ← or 授权: project grants, same format as a card's
 ## Log                     ← or 决策记录
 ```
 
 Headings are read in either language, or both (`## 目标 / Goal`). A section runs to the next
-Goal / Done when / Brief / Grants / Log heading, so other `##` headings (a brief's own
+Goal / Out of scope / Done when / Templates / Brief / Grants / Log heading, so other `##` headings (a brief's own
 `## Commands`) stay inside it. Two projects whose names differ only in case are refused: on
 macOS they would be one folder.
 
@@ -398,16 +405,40 @@ hq project list [--json]                    # open / done / on-you counts, kind,
 hq project show NAME [--json]               # the file, plus task counts: open, done, done in 7
                                             #   days, waiting on you (open asks + @me todos)
 hq project brief NAME
-hq project add NAME [--kind goal|duty] [--title T] [--due YYYY-MM-DD] [--path DIR]
+hq project add NAME [--kind goal|duty] [--title T] [--due YYYY-MM-DD] [--parent DUTY] [--path DIR]
 hq project set NAME kind=duty status=paused due= title="…" jira=QA-1,QA-2 fixVersions=4.2.7
+                    parent=DUTY phases=Design,Build auto=qahub-ci,jira-filter
+hq project section NAME goal|out|done_when|templates|brief [TEXT]   # no TEXT: stdin; a missing
+                                            #   section is made, in the file's language
+hq project check NAME N [done|open]         # tick criterion N (1-based) of done-when; logged
 hq project paths NAME DIR…                  # replace its directories
 hq project rename OLD NEW                   # every card, hq.json, and projects/OLD/ follow
 hq project remove NAME --to OTHER|''        # its folder goes to projects/.removed/, not deleted
 hq project auto | order NAME…
 ```
 
-Goal, done-when and the brief are edited in PROJECT.md directly. `hq board --json` gives each
-project its PROJECT.md fields (`defined` says whether there is one) and `stats`, and each task a
+Sections can be edited in PROJECT.md directly, with `hq project section`, or with ✎ on the
+project's page on the board. Only a goal sits under a duty; a duty with goals under it can't
+become a goal, and renaming or removing a duty moves its goals along (or frees them).
+
+**Templates** ("common work") are a duty's kinds of task that come up again and again:
+
+```markdown
+## Templates
+### triage
+title: Triage {date}       # {date} / {日期} and {week} / {周} are filled in
+goal: Go through today's failures
+- [ ] @claude list the new failures
+```
+
+`hq new --project NAME --template triage` makes a task from one: its title (unless one is
+given), goal and todos. A recurring job on the Scheduled page runs that command on a timetable
+(the board's "Recurring" box on a duty's page writes it). `hq new` also takes `--goal` (the
+card's Goal), `--phase` (the card's `phase:`; `hq set ID phase=…` changes it) and `--no-focus`.
+
+`hq board --json` gives each project its PROJECT.md fields (`defined` says whether there is
+one; also `parent`, `phases`, `auto`, `out`, `criteria` [{i, text, done}], `templates`
+[{name, title, goal, todos}] and `templates_raw`, the section's text) and `stats`, and each task a
 `repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
 as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
 card's `closed` date — written when a task becomes done or abandoned — not `updated`, which any
@@ -470,7 +501,9 @@ A task's `workdirs` fill themselves: binding a session to a task adds that sessi
 
 ## Focus, All, Needs you
 
-The board has three pages, two columns each. It opens on **Focus**: the tasks you keep in view
+(The board's **Projects & duties** page — a card per project and duty, a page each with its
+PROJECT.md sections, criteria, phases, templates and recurring jobs — is described in the
+guide.) The board has three task pages. It opens on **Focus**: the tasks you keep in view
 (`<root>/focus.json`, one list — it doesn't reset each day; a task stays until you take it off),
 each with its asks, open todos and sessions, and a ⚠ line for each `hq status` flag. New tasks join automatically. `hq focus
 [add|remove|order]` (`order T-3 T-1 …` sets the order, as dragging a card on the board does);
