@@ -29,8 +29,14 @@ NOW="${D1}T10:05:00" "$S" "$OUT/peek-1.png"       'render(); openPeek(DEMO_IDS.c
 waitall
 NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-drawer.png"        'render(); openDrawer("T-014");' & PIDS+=($!)
 NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-drawer-bottom.png" "render(); openDrawer(\"T-014\"); $BOTTOM" & PIDS+=($!)
-NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-peek.png"          'render(); openPeek(DEMO_IDS.next);' & PIDS+=($!)
-NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-peek-typed.png"    'ui.drafts["msg:" + DEMO_IDS.next] = "压测用 200 并发，跑 10 分钟"; render(); openPeek(DEMO_IDS.next);' & PIDS+=($!)
+waitall
+# Settings → clicking a session on the pet opens its task on the board; then a finish notice,
+# clicked: hqReveal is what the pet calls — the task's drawer, the session picked out, its Peek.
+REVEAL='ui.clickTarget = "board"; render(); hqReveal("T-014", DEMO_IDS.next);'
+NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-settings.png"     'ui.clickTarget = "board"; ui.settings = true; render();' & PIDS+=($!)
+NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-reveal-drawer.png" 'ui.clickTarget = "board"; ui.hlSession = DEMO_IDS.next; render(); openDrawer("T-014");' & PIDS+=($!)
+NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-reveal.png"       "$REVEAL" & PIDS+=($!)
+NOW="${D2}T09:20:00" DAY2=1 "$S" "$OUT/day2-reveal-typed.png" "ui.drafts[\"msg:\" + DEMO_IDS.next] = \"压测用 200 并发，跑 10 分钟\"; $REVEAL" & PIDS+=($!)
 waitall
 NOW="${D2}T17:02:00" DAY2=1 "$S" "$OUT/jobs.png"       'ui.mode = "jobs"; loadJobs().then(() => render());' & PIDS+=($!)
 NOW="${D2}T17:02:00" DAY2=1 "$S" "$OUT/jobs-run.png"   'ui.mode = "jobs"; loadJobs().then(() => { render(); openJobRun("ci-morning"); });' & PIDS+=($!)

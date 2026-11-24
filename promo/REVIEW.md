@@ -1,6 +1,6 @@
-# REVIEW — second cut, storyline A 「一张卡走完一天」
+# REVIEW — third cut, storyline A 「一张卡走完一天」
 
-Length 179.0 s (2:59), 14 scenes, 1920×1080 @ 30 fps. Narration is Edge TTS zh-CN-XiaoyiNeural; the
+Length 189.0 s (3:09), 14 scenes, 1920×1080 @ 30 fps. Narration is Edge TTS zh-CN-XiaoyiNeural; the
 voice-over files set the timeline. `python3 build.py` regenerates index.html and compositions/
 from demo/narration.json and the stills in assets/.
 
@@ -35,20 +35,31 @@ from demo/narration.json and the stills in assets/.
 - **Click rings, all scenes.** The rings used `fromTo` with GSAP's default immediate render, so each
   ring sat on screen as a small red circle from the start of its scene until its click. They now
   render only from the click.
+- **Third cut: s08, finish notices open the task.** Also at the user's request. The old s08 (click
+  the eye icon, Peek, reply) is replaced, since the new flow ends in the same Peek. It shows:
+  the board's settings with 「在宠物上点击 session 时打开」 set to 看板上它的任务 → the board closes
+  into the cat → two finish notices stack over the cat's head → a click on one → the board opens
+  on T-014 with its drawer, the session highlighted, then its conversation → a reply typed and sent.
+  - Every still is the real board (`ui.clickTarget = "board"`, `hqReveal("T-014", …)`), and the
+    notices are the pet page's own `notify()` bubbles rendered through `--probe-skin`.
+  - The reply shot is framed at 1.45× so the box and 发送 sit above the captions.
+  - A second cursor in the same scene now uses `cursor_back`, which re-shows the one cursor instead
+    of adding a twin element with the same id.
 
 ## Measured vs. looked at
 - Measured:
   - `check` reports ok with 0 errors.
   - Caption timing comes from the per-scene SRT that Edge TTS returns.
   - Positions of board elements were probed from the live DOM (scratch probe), not guessed.
-  - The second cut's mix came out at -19.4 LUFS. The delivered file (renders/claude-pet-promo-v2.mp4)
-    has its audio normalized to -15.9 LUFS, -1.5 dBFS peak, with ffmpeg loudnorm; the video stream was
-    copied. (The first cut measured -19.5 LUFS and a -4.4 dBTP peak.)
+  - The delivered file (renders/claude-pet-promo-v3.mp4) has its audio normalized with ffmpeg
+    loudnorm (I=-16, TP=-1.5); the video stream was copied. Measured: -15.9 LUFS, -1.5 dBFS peak.
+    (The second cut went from -19.4 to -15.9 LUFS the same way; the first cut measured -19.5 LUFS.)
 - Looked at:
   - the snapshot review (26 beats, 12 seams, phone-size sheets) — first cut;
   - s05c at ten beats, twice: the first pass found the keys over the box, bubbles too small to read and
     the card's outline left over the drawer, all fixed;
-  - the s06 ask-click sequence, frame by frame.
+  - the s06 ask-click sequence, frame by frame;
+  - s08 at a dozen beats from setting to send, plus the s07→s08 and s08→s09 seams.
 - Not checked:
   - Nobody has listened to the mix. Balance between narration and music, and how the SFX sound,
     are unverified.
@@ -72,4 +83,4 @@ from demo/narration.json and the stills in assets/.
   - For the end card the check is wrong: frames at 153 s and 158.25 s show the card fully, so it
     holds about 6 s.
 - **first_frame_empty.** A false positive: frame 0 shows the terminal wall (snapshot checked).
-- **timeline_track_too_dense.** This comes from the 62 caption clips on one captions host.
+- **timeline_track_too_dense.** This comes from the 67 caption clips on one captions host.

@@ -169,7 +169,7 @@ hq/uninstall.sh             # 摘掉 HQ 的 hook 和命令；任务卡保留
 
 - [docs/pet.zh-CN.md](docs/pet.zh-CN.md)：桌宠的完整说明
 - [hq/README.md](hq/README.md)：任务看板的原理、`hq` 命令行、任务卡格式
-- [promo/](promo/README.md)：2 分 59 秒的中文配音演示片，以及它是怎么做出来的
+- [promo/](promo/README.md)：3 分 9 秒的中文配音演示片，以及它是怎么做出来的
 - [docs/development.zh-CN.md](docs/development.zh-CN.md)：测试、调试 hook、改代码之前要知道的三件事
 
 ## License

@@ -212,6 +212,13 @@ class Scene:
         self.t(f'tl.to("#{self.id}-cur", {{ opacity: 1, duration: 0.2 }}, {t_in});')
         self.cur_pos = (x, y)
 
+    def cursor_back(self, t, x, y):
+        """The cursor again, after cursor_out: one element per scene, so a second cursor() would
+        put a twin under the same id (GSAP would move both)."""
+        self.t(f'tl.set("#{self.id}-cur", {{ x: {x:.1f}, y: {y:.1f} }}, {t});')
+        self.t(f'tl.to("#{self.id}-cur", {{ opacity: 1, duration: 0.2 }}, {t});')
+        self.cur_pos = (x, y)
+
     def move(self, t, x, y, dur=0.6, ease="power2.inOut"):
         self.t(f'tl.to("#{self.id}-cur", {{ x: {x:.1f}, y: {y:.1f}, duration: {dur}, ease: "{ease}" }}, {t});')
         self.cur_pos = (x, y)
@@ -489,6 +496,7 @@ def s05b():
 QN_W, QN_H = 520 * K, 132 * K
 QN_X, QN_Y = 960 - QN_W / 2, 196
 QN_TEXT = "订单导出成 CSV 中文全是乱码，客户在催，今天修掉"
+BUBN = 2.0  # the finish notices (assets/bubble-done-*.png), likewise
 BUB = 2.4   # the pet's bubbles (assets/bubble-*.png, 2x) shown larger than life, to read at full view
 
 
@@ -691,20 +699,66 @@ def s07():
 
 
 def s08():
-    sc = board_scene("s08", 10.0, 0.5, ["day2-focus", "day2-peek", "day2-peek-typed"])
-    t = sc.at("点开小眼睛", 0.2)
-    sc.cursor(bx(600), by(420), 0.0)
-    sc.cam(0.2, bx(330), by(330), 1.6, dur=0.6)
-    sc.move(t - 0.8, bx(262), by(326), dur=0.6)
-    sc.click(t)
-    sc.show(t + 0.1, "day2-peek")
-    sc.cam(t + 0.2, bx(560), by(380), 1.3, dur=0.6)
-    tr = sc.at("直接在这里回复", -0.2)
-    sc.cam(tr, bx(560), by(640), 1.6, dur=0.6, sy=560)
+    """Settings → a click on a session opens its task on the board; a finish notice, clicked."""
+    sc = Scene("s08", 20.0, 0.5)
+    wall(sc, opacity=0.35, scroll=True)
+    sc.window(["day2-focus", "day2-settings", "day2-reveal-drawer", "day2-reveal", "day2-reveal-typed"])
+    sc.cat("working", 0, None)
+    sc.cam_set(960, 540, 1.0)
+    # the setting
+    sc.cursor(bx(700), by(400), 0.0)
+    sc.move(0.1, bx(1113), by(25), dur=0.6)
+    sc.click(0.75)
+    sc.show(0.85, "day2-settings")
+    sc.cam(sc.at("在宠物上点击", -0.4), bx(590), by(414), 1.65, dur=0.6)
+    sc.move(sc.at("在宠物上点击", -0.3), bx(890), by(411), dur=0.6)
+    t_set = sc.at("设成看板上", -0.1)
+    sc.highlight(t_set, 227, 372, 726, 85, out=t_set + 1.4)
+    sc.move(t_set + 1.2, bx(932), by(135), dur=0.5)
+    sc.click(t_set + 1.8)
+    sc.show(t_set + 1.9, "day2-focus")
+    sc.cursor_out(t_set + 2.0)
+    # the board goes away into the pet; a session finishes
+    t_close = max(sc.at("之后", -0.3), t_set + 2.1)
+    sc.cam(t_close, 960, 540, 1.0, dur=0.5, ease="power2.inOut")
+    ox, oy = CATC[0] - WX, CATC[1] - WY
+    sc.t(f'tl.to("#s08-win", {{ opacity: 0, scale: 0.06, transformOrigin: "{ox:.0f}px {oy:.0f}px", duration: 0.5, ease: "power2.in" }}, {t_close + 0.2});')
+    sc.sfx.append((t_close + 0.2, "whoosh-short", 0.35, None))
+    bw, bh = 296 * BUBN / 2, 238 * BUBN / 2
+    bl, bt = min(CATC[0] - bw / 2, 1860 - bw), CAT[1] + 18 - bh
+    for k in (1, 2):
+        sc.cam_html.append(f'<img id="s08-n{k}" src="assets/bubble-done-{k}.png" style="position:absolute;left:{bl:.1f}px;top:{bt:.1f}px;'
+                           f'width:{bw:.1f}px;height:{bh:.1f}px;opacity:0">')
+    t_n1 = max(sc.at("哪个 session 干完了", 0.2), t_close + 0.8)
+    sc.t(f'tl.fromTo("#s08-n1", {{ opacity: 0, y: 8 }}, {{ opacity: 1, y: 0, duration: 0.2, ease: "power2.out" }}, {t_n1});')
+    sc.sfx.append((t_n1, "pop", 0.35, None))
+    t_n2 = max(sc.at("冒出气泡", -0.1), t_n1 + 0.9)
+    sc.t(f'tl.to("#s08-n2", {{ opacity: 1, duration: 0.15, ease: "none" }}, {t_n2});')
+    sc.t(f'tl.set("#s08-n1", {{ opacity: 0 }}, {t_n2 + 0.15});')
+    sc.sfx.append((t_n2, "notification", 0.35, None))
+    sc.cam(t_n1 - 0.3, 1600, 760, 1.6, dur=0.7)
+    # click the checkout one: the board opens at its task, the session picked out, its conversation open
+    t_c = sc.at("点一下气泡", 0.35)
+    sc.cursor_back(t_c - 1.1, 1480, 930)
+    sc.move(t_c - 1.0, bl + bw / 2, bt + bh * 0.72, dur=0.8)
+    sc.click(t_c)
+    sc.t(f'tl.to("#s08-n2", {{ opacity: 0, duration: 0.2 }}, {t_c + 0.15});')
+    sc.cursor_out(t_c + 0.2)
+    sc.show(t_c, "day2-reveal-drawer", dur=0.05)
+    sc.t(f'tl.to("#s08-win", {{ opacity: 1, scale: 1, duration: 0.6, ease: "power3.out" }}, {t_c + 0.2});')
+    sc.sfx.append((t_c + 0.2, "whoosh-short", 0.4, None))
+    sc.cam(t_c + 0.2, 960, 540, 1.0, dur=0.6, ease="power2.inOut")
+    sc.highlight(t_c + 0.8, 630, 301, 541, 73, out=t_c + 1.6)
+    t_pk = max(sc.at("对话也已经展开", -0.3), t_c + 1.4)
+    sc.show(t_pk, "day2-reveal")
+    sc.cam(t_pk + 0.1, bx(560), by(380), 1.3, dur=0.6)
+    tr = max(sc.at("在这里就能回复", -0.3), t_pk + 0.9)
+    sc.cam(tr, bx(596), by(640), 1.45, dur=0.6, sy=700)   # the box and 发送 both in frame, above the captions
+    sc.cursor_back(tr, bx(700), by(560))
     sc.move(tr, bx(300), by(675), dur=0.6)
     sc.click(tr + 0.65)
     sc.type_in(tr + 0.8, 124, 668, "压测用 200 并发，跑 10 分钟", 1.1, out=tr + 2.0, cover=330)
-    sc.show(tr + 1.95, "day2-peek-typed")
+    sc.show(tr + 1.95, "day2-reveal-typed")
     sc.move(tr + 2.1, bx(1043), by(671), dur=0.6)
     sc.click(tr + 2.8)
     return sc
@@ -721,7 +775,7 @@ def s09():
     sc.cam(sc.at("Claude", -0.3), bx(230), by(238), 1.75)
     t = sc.at("猫关着也照跑", -0.2)
     sc.cam(t, 960, 540, 1.0, dur=0.6)
-    sc.cursor(bx(700), by(300), t)
+    sc.cursor_back(t, bx(700), by(300))
     sc.move(t, bx(606), by(165), dur=0.6)
     sc.click(t + 0.7)
     sc.show(t + 0.8, "jobs-run")

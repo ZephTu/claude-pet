@@ -1,13 +1,14 @@
 # Claude Pet promo film
 
-A 2:59 Chinese-narrated demo of Claude Pet and HQ, made with [HyperFrames](https://hyperframes.heygen.com)
+A 3:09 Chinese-narrated demo of Claude Pet and HQ, made with [HyperFrames](https://hyperframes.heygen.com)
 (HTML rendered to video). It follows one task card, T-014, through a day, and shows a
-new one, T-017, filed from a quick note (⌃⌥⌘N) and started with New session. The story and shot list are in
+new one, T-017, filed from a quick note (⌃⌥⌘N) and started with New session, and a finish notice
+over the cat that opens its task on the board. The story and shot list are in
 `SPEC.md`, the alternatives that were not built are in `STORYLINES.md`, and the last review is in `REVIEW.md`.
 
 All the data on screen is made up: `demo/board-demo-zh.js` (the board) and `demo/panel-zh.js` (the session
 list). The quick-note box is a native panel the renderers can't capture, so `build.py` draws it from
-`QuickNotePanel.swift`'s size and wording; the pet's bubbles under it are real renders. Board stills render with a stub `hq` (`scripts/nohq/hq`), and the demo replaces the board's data,
+`QuickNotePanel.swift`'s size and wording; the pet's bubbles (quick-note replies and finish notices) are real renders. Board stills render with a stub `hq` (`scripts/nohq/hq`), and the demo replaces the board's data,
 drafts, picks and outbox before the shutter. A few calls still run for real while the page loads (`claude agents`,
 the pet's own settings) but the demo overwrites what they return, so none of your HQ reaches a frame. Some view
 prefs (show done, grouping) are read from the debug app's WebKit store, so stills can differ between machines.

@@ -169,7 +169,7 @@ Your transcripts are read on your machine. The drafting is done by Claude in the
 
 - [docs/pet.md](docs/pet.md) — the pet in full
 - [hq/README.md](hq/README.md) — the Task Board: how it works, the `hq` CLI, the card format
-- [promo/](promo/README.md) — the 2:59 demo film (Chinese narration) and how it is built
+- [promo/](promo/README.md) — the 3:09 demo film (Chinese narration) and how it is built
 - [docs/development.md](docs/development.md) — tests, debugging hooks, and three things to know before changing anything
 
 ## License
