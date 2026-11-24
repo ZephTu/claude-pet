@@ -622,6 +622,9 @@ function render() {
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
     scrolls[p.dataset.sid] = p.scrollHeight - p.scrollTop - p.clientHeight < 8 ? "bottom" : p.scrollTop;
   });
+  // So are the lanes of Focus, All and Needs you: each keeps its own scroll, or a refresh
+  // every few seconds would throw a long lane back to its top.
+  const laneScrolls = grabLaneScrolls();
 
   renderCounts();
   drawSecretaryButton();
@@ -670,6 +673,7 @@ function render() {
     const v = scrolls[p.dataset.sid];
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
+  restoreLaneScrolls(laneScrolls);
   paintTaskIds();
   paintArmed();
   fitAllGrow();
@@ -990,6 +994,30 @@ function renderMyTodos() {
 
 // Needs you: three columns — what Claude asks, what you are to do, what you jotted down — under a
 // line of totals.
+// The scrolling boxes render() rebuilds: a lane's card list, and the lanes' grid where it scrolls
+// as a whole (narrow windows). Keyed by the page, the swimlane row, the lane and the box's place
+// among its kind, so a lane gets its own scroll back even when cards move between lanes.
+const LANE_SCROLLERS = ".lane-body, .board, .ncols";
+function laneScrollKeys() {
+  const seen = {};
+  return [...document.querySelectorAll(["#today-focus", "#tasks", "#needs"].map((c) => LANE_SCROLLERS.split(", ").map((x) => `${c} ${x}`).join(", ")).join(", "))]
+    .map((el) => {
+      const row = el.closest("[data-p], [data-repo], .swim-row");
+      const base = [el.closest("#today-focus, #tasks, #needs").id, row ? row.dataset.p || row.dataset.repo || "" : "",
+        (el.closest("[data-lane]") || {}).dataset?.lane || "", el.className].join("|");
+      seen[base] = (seen[base] || 0) + 1;
+      return [el, base + "|" + seen[base]];
+    });
+}
+function grabLaneScrolls() {
+  const out = {};
+  for (const [el, k] of laneScrollKeys()) if (el.scrollTop > 0) out[k] = el.scrollTop;
+  return out;
+}
+function restoreLaneScrolls(saved) {
+  for (const [el, k] of laneScrollKeys()) if (saved[k]) el.scrollTop = saved[k];
+}
+
 function renderNeeds() {
   const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
   const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
