@@ -768,13 +768,13 @@ function renderAsks() {
 
 // A task with several open asks answers them together: each answer button only picks, and one
 // Send at the bottom records them all and types a single message into the session.
-function renderAskGroup(t, asks) {
-  if (asks.length < 2) return asks.map((a) => askCard(t, a)).join("");
+function renderAskGroup(t, asks, extra = {}) {
+  if (asks.length < 2) return asks.map((a) => askCard(t, a, extra)).join("");
   const target = groupTarget(asks);
   const picked = asks.filter((a) => ui.picks[a.id]).length;
   const sending = asks.some((a) => ui.resolving.has(a.id));
   const allPush = target && asks.every((a) => wantPush(a));
-  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { group: true, sharedTarget: Boolean(target) })).join("")}
+  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { ...extra, group: true, sharedTarget: Boolean(target) })).join("")}
     <div class="askbar">
       <span class="meta">${T(`${picked} of ${asks.length} answered`, `已选 ${picked} / ${asks.length}`)}</span>
       ${target ? `<label class="push" title="${T("Type all the answers into that session as one message, so it carries on now", "把所有回答合成一条消息发给那个 session，让它马上接着干")}">
@@ -800,6 +800,7 @@ function askCard(t, a, opt = {}) {
   const sec = t.id === secId();
   const meta = opt.peek ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : sec ? `${secChip()}<span class="chip link" data-action="open-secretary">${esc(a.id)}</span>${ago(a.ts)}`
+    : opt.inTask ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
   const res = opt.peek || sec ? RESOLUTIONS.filter(([r]) => r !== "always")
     : RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []);
@@ -1289,6 +1290,16 @@ const laneCols = () => LANES.concat(ui.showDone ? ["done"] : []);
 const KIND_ICON = { goal: "◆", duty: "↻" };
 const kindIcon = (pr) => (pr && pr.kind ? `<i class="ki ${esc(pr.kind)}">${KIND_ICON[pr.kind] || ""}</i>` : "");
 
+// An ask on a card answers in one click — Yes or No, with no note, sent on to its session as
+// in Needs you; anything longer (a note, Later, a grant) is the drawer's, which "…" opens at it.
+function quickAnswer(t, a) {
+  const busy = ui.resolving.has(a.id);
+  const btn = (r, label) => `<button class="qa-b res-${r}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${busy ? "disabled" : ""}
+    title="${esc((RESOLUTIONS.find((x) => x[0] === r) || [])[2] || "")}">${label}</button>`;
+  return `<span class="qa">${btn("do", T("Yes", "可以"))}${btn("drop", T("No", "不要"))}<button class="qa-b" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}"
+    title="${T("Answer with a note, Later, a grant… — opens the task at this question", "写说明、稍后、授权……——打开任务，停在这个问题")}">…</button></span>`;
+}
+
 // A task's card on the boards. Clicking it opens the side drawer with everything; the card itself
 // is what you need to decide where to look: what it waits on you for, its next step, and one line
 // for its sessions. opt.compact (All): one line of title and of next step.
@@ -1298,12 +1309,12 @@ function kcard(t, opt = {}) {
   const star = focusIds().includes(t.id);
   const asks = openAsks(t), mine = myTodos(t);
   const rows = [
-    ...asks.map((a) => `<div class="row"><span class="q">?</span><span class="t">${esc(a.text)}</span></div>`),
+    ...asks.map((a) => `<div class="row ask-q"><span class="q">?</span><span class="t" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}" title="${T("Answer it here or with a note — opens the task", "在详情里回答，可以写说明")}">${esc(a.text)}</span>${quickAnswer(t, a)}</div>`),
     ...(t.waiting_on_me ? [`<div class="row"><span class="q">!</span><span class="t">${esc(t.waiting_on_me)}</span></div>`] : []),
     ...mine.map((x) => `<div class="row"><span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span><span class="t">${esc(x.text)}</span></div>`),
   ];
   const max = opt.compact ? 1 : 2;
-  const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
+  const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more" data-action="ask-answer" data-task="${esc(t.id)}">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
   const next = t.next && ln !== "done" ? `<div class="kc-next"><b>${ln === "blocked" ? T("Waiting on", "在等") : T("Next", "下一步")}</b>${esc(t.next)}</div>` : "";
   const flags = list(ui.flags[t.id]);
   return `<div class="kc l-${ln} ${opt.compact ? "compact" : ""} ${ln === "done" ? "done" : ""} ${ui.drawer === t.id ? "sel" : ""}" id="kc-${esc(t.id)}"
@@ -1861,7 +1872,13 @@ function renderTaskBody(t) {
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
         </div></div>`;
+  // Claude's open questions come first: they are what the task waits on you for.
+  const asks = openAsks(t);
+  const askSec = asks.length || laterAsks(t).length ? `<div class="dr-asks">
+      ${asks.length ? `<div class="sec-h"><h3>${T("Claude is asking", "Claude 在问")} <span class="meta">${asks.length}</span></h3></div>${renderAskGroup(t, asks, { inTask: true })}` : ""}
+      ${laterLine(t)}</div>` : "";
   return `<div class="task-body">
+    ${askSec}
     ${head}
     ${stillRunning(t)}
     <div class="tcols">
@@ -3864,6 +3881,14 @@ document.addEventListener("click", async (ev) => {
         toast(T("Marked handled", "已标为处理好"), false, () => act("set", { task: d.task, fields: [`waiting_on_me=${prev}`] }, T("Undone", "已撤销")));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
+    }
+    case "ask-answer": {
+      // Open the task with its questions on top, at this one, its note box ready to type in.
+      ui.drawer = d.task; ui.launchMenu = null;
+      render();
+      const box = d.id ? document.querySelector(`#drawer [data-key="${CSS.escape("note:" + d.id)}"]`) : document.querySelector("#drawer .dr-asks");
+      if (box) { box.scrollIntoView({ block: "center" }); if (box.focus) box.focus(); }
+      return;
     }
     case "open-task":
       // Only a click on the card itself opens it — not one in a box or on a label, or one that
