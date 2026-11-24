@@ -179,7 +179,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    re-injected every turn and shown on the board until you respond — an ask you skipped is
    never treated as "no".
 
-   **Status follows the asks, between `active` and `waiting-on-me` only.** A reply that opens a
+   **Status follows the asks, between `active` and `waiting-on-me`.** A reply that opens a
    new ask without a `status:` line puts an `active` task at `waiting-on-me` (so does taking back
    an answer, or the tick of an `@me` todo, with Undo). Once nothing is left on you — no open ask
    (a snoozed one is still open), no open `@me` todo and no legacy `waiting_on_me` — answering an
@@ -187,8 +187,11 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    (board, `hq todo`, `done:` / `drop:`) puts a `waiting-on-me` task back to `active`; other todos
    don't. A status written in the same reply (and applied) wins, and a reply's blocks are
    weighed together, so one that ticks the last `@me` todo and asks again just stays waiting.
-   `blocked`, `done` and `abandoned` are never changed automatically. Each move is logged on the
-   card with `(auto, <via>)`.
+   A session's new ask (no `status:` written) also moves a `blocked` task to `waiting-on-me`; a
+   new `@me` todo doesn't — the session rules ask for `status: blocked` when all that is left
+   waits on someone else, `@me` todos for afterwards included (the board's Blocked lane takes such
+   a task, asks and todos and all). `done` and `abandoned` are never changed automatically, and
+   `blocked` only by a new ask. Each move is logged on the card with `(auto, <via>)`.
 
    **Claude's open todos come along at session start.** SessionStart — for every source:
    `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
@@ -385,7 +388,12 @@ updated: 2026-11-23
 
 Headings are read in either language, or both (`## 目标 / Goal`). A section runs to the next
 Goal / Out of scope / Done when / Templates / Brief / Grants / Log heading, so other `##` headings (a brief's own
-`## Commands`) stay inside it. Two projects whose names differ only in case are refused: on
+`## Commands`) stay inside it — and inside a Brief, so do Out of scope and Templates headings
+(sections that came after briefs: a brief's own `## Templates` is not cut off). A second heading
+of a section (a Scope after a Goal) reads as more of it, and the next write of that section folds
+it into the first. Older files' `不管：…` / `Out of scope: …` lines in the goal read as the
+out-of-scope section, and move there on the next section write. A log line written to a file
+whose last section isn't its Log (`hq project check`, a rename) gets a Log heading first. Two projects whose names differ only in case are refused: on
 macOS they would be one folder.
 
 **The brief.** A session bound to a task whose project has a non-empty Brief is told, whenever
@@ -438,7 +446,8 @@ card's Goal), `--phase` (the card's `phase:`; `hq set ID phase=…` changes it) 
 
 `hq board --json` gives each project its PROJECT.md fields (`defined` says whether there is
 one; also `parent`, `phases`, `auto`, `out`, `criteria` [{i, text, done}], `templates`
-[{name, title, goal, todos}] and `templates_raw`, the section's text) and `stats`, and each task a
+[{name, title, goal, todos}] and `raw`, each section's text as written, comments and all — empty
+for one holding only the template's hints) and `stats`, and each task a
 `repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
 as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
 card's `closed` date — written when a task becomes done or abandoned — not `updated`, which any

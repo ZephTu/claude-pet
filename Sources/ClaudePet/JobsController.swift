@@ -68,6 +68,17 @@ final class JobsController {
         return (["ok": true, "id": job.id], nil)
     }
 
+    /// A project renamed: its recurring jobs (Recurring commands) now name the new one. The command
+    /// is read at each run, so the schedule (and launchd) is left as it is.
+    func retargetRecurring(from old: String, to new: String, hq: String) {
+        for var job in store.list() where job.kind == .shell {
+            guard let r = Recurring.parse(job.command), r.project == old else { continue }
+            job.command = Recurring.command(hq: hq, project: new, template: r.template)
+            job.name = "↻ \(new) · \(r.template)"
+            try? store.save(job)
+        }
+    }
+
     func setEnabled(_ id: String, _ on: Bool) async -> (Any?, String?) {
         guard var job = store.load(id) else { return (nil, L("No such job", "没有这个任务")) }
         job.enabled = on

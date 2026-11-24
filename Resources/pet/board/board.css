@@ -1526,6 +1526,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .ibox h4 + .irow { border-top: 0; }
 .irow .t { flex: 1; min-width: 0; }
 .irow .t small { display: block; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.irow .t small.warn { color: var(--red); white-space: normal; }
 .irow .icon.x { opacity: .6; }
 .recur-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 6px; border-top: 1px solid var(--line); }
 .recur-form select, .recur-form input { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 3px 5px; }

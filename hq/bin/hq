@@ -298,6 +298,8 @@ def _set_fields(path, fields):
 def append_log(path, msg, touch=True):
     with card_lock(path):
         text = open(path, encoding="utf-8").read().rstrip("\n")
+        if os.path.basename(path) == "PROJECT.md":
+            text = with_log_heading(text)
         # Local date and time to the second: a task's log often has many entries in one day.
         line = f"- {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}: {msg}"
         text += "\n" + line + "\n"
@@ -305,6 +307,18 @@ def append_log(path, msg, touch=True):
         if touch:
             set_fields(path, {})
         return line
+
+
+def with_log_heading(text):
+    """A PROJECT.md whose last section is not its Log gets one (in the file's language) before a
+    log line is added at the end — else the line would land in its Done when, Templates or Grants."""
+    lines = text.split("\n")
+    spans = project_spans(lines)
+    last = max((a, k) for k, ss in spans.items() for a, _ in ss) if spans else None
+    if last and last[1] == "" and not is_grants_heading(lines[last[0]]):
+        return text
+    zh = any(re.search(r"[\u4e00-\u9fff]", l) for l in lines if l.startswith("## "))
+    return text + "\n\n## " + ("决策记录" if zh else "Log")
 
 
 # ---------------------------------------------------------------- categories
@@ -431,7 +445,7 @@ PROJECT_KINDS = ("goal", "duty")
 PROJECT_STATUSES = ("active", "paused", "done", "abandoned")
 PROJECT_SECTIONS = {            # heading words (either language; "A / B" headings match either part)
     "goal": re.compile(r"^(?:goal|scope|目标|职责范围|职责)$", re.I),
-    "out": re.compile(r"^(?:out of scope|not|不管)$", re.I),
+    "out": re.compile(r"^(?:out of scope|不管)$", re.I),
     "done_when": re.compile(r"^(?:done when|healthy when|完成标准|健康标准)$", re.I),
     "templates": re.compile(r"^(?:templates|task templates|常见的活|模板)$", re.I),
     "brief": re.compile(r"^(?:brief|project brief|简报|项目简报)$", re.I),
@@ -448,7 +462,10 @@ PROJECT_LIST_KEYS = ("jira", "fixVersions", "phases", "auto")
 # Where a duty's work could come in by itself. Only a switch for now: nothing reads them yet.
 AUTO_SOURCES = ("qahub-ci", "github-review", "jira-filter")
 # "不管：…" / "Out of scope: …" written as a line of the goal (as older PROJECT.md files do).
-OUT_LINE_RE = re.compile(r"^\s*(?:不管|out of scope|not)\s*[:：]\s*(.+)$", re.I)
+OUT_LINE_RE = re.compile(r"^\s*(?:不管|out of scope)\s*[:：]\s*(.+)$", re.I)
+# Sections added after briefs were in use: inside a brief, a "## Templates" is the brief's own
+# heading, not the start of one of these.
+LATE_SECTIONS = ("out", "templates")
 CRIT_RE = re.compile(r"^(\s*)[-*] (?:\[([ xX])\] )?(.*\S)\s*$")
 BRIEF_CHARS = 2000              # of the brief a session is given; the rest: read PROJECT.md
 
@@ -476,36 +493,25 @@ def project_file(name):
     return os.path.join(projects_dir(), name, "PROJECT.md")
 
 
-def project_sections(body):
-    """{goal, done_when, brief: text} from a PROJECT.md body. A section runs to the next Goal /
-    Done when / Brief / Grants / Log heading; other `##` headings stay inside it. Headings inside
-    code fences don't count; template hints (HTML comments, a lone `<placeholder>` line) are dropped."""
-    out, key, fence = {}, None, False
-    for line in body.split("\n"):
-        if re.match(r"^\s*(```|~~~)", line):
-            fence = not fence
-        elif not fence and line.startswith("## "):
-            words = [w.strip() for w in line[3:].split("/")]
-            new = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
-            if new or is_grants_heading(line) or any(PROJECT_END_RE.match(w) for w in words):
-                key = new
-                if key:
-                    out.setdefault(key, [])
-                continue
-            # Any other `##` heading (a brief's "## Commands") belongs to the section it is in.
-        if key:
-            out[key].append(line)
-    clean = {}
-    for k, v in out.items():
-        t = re.sub(r"<!--.*?-->", "", "\n".join(v), flags=re.S)
-        t = re.sub(r"^[ \t]*<[^<>\n]*>[ \t]*$", "", t, flags=re.M)
-        clean[k] = re.sub(r"\n{3,}", "\n\n", t).strip()
-    return clean
+def section_key(line, key):
+    """What a `## ` line of PROJECT.md starts: a section's key, "" for a Grants or Log heading
+    (it ends the section), None for any other heading (a brief's "## Commands" stays in it).
+    `key` is the section the line is in."""
+    words = [w.strip() for w in line[3:].split("/")]
+    new = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
+    if new in LATE_SECTIONS and key == "brief":
+        new = None
+    if new:
+        return new
+    if is_grants_heading(line) or any(PROJECT_END_RE.match(w) for w in words):
+        return ""
+    return None
 
 
 def project_spans(lines):
-    """{key: (heading line, end line)} of the sections of PROJECT.md `lines`, by the rules of
-    project_sections (the end is the next Goal / Done when / … / Grants / Log heading)."""
+    """{key: [(heading line, end line), …]} of the sections of PROJECT.md `lines`, in file order
+    ("" = the Grants and Log sections). A key can have more than one span (a Goal and a Scope).
+    Headings inside code fences don't count."""
     spans, key, start, fence = {}, None, None, False
     for i, line in enumerate(lines):
         if re.match(r"^\s*(```|~~~)", line):
@@ -513,17 +519,76 @@ def project_spans(lines):
             continue
         if fence or not line.startswith("## "):
             continue
-        words = [w.strip() for w in line[3:].split("/")]
-        new = next((k for k, rx in PROJECT_SECTIONS.items() if any(rx.match(w) for w in words)), None)
-        if new or is_grants_heading(line) or any(PROJECT_END_RE.match(w) for w in words):
-            if key and key not in spans:
-                spans[key] = (start, i)
-            key, start = new, i
-            if new is None:
-                spans.setdefault("_stop", (i, i))
-    if key and key not in spans:
-        spans[key] = (start, len(lines))
+        new = section_key(line, key)
+        if new is None:
+            continue
+        if start is not None:
+            spans.setdefault(key, []).append((start, i))
+        key, start = new, i
+    if start is not None:
+        spans.setdefault(key, []).append((start, len(lines)))
     return spans
+
+
+def section_raw(lines, spans, key):
+    """A section's text as written (all of its spans, joined)."""
+    return "\n\n".join("\n".join(lines[a + 1:b]).strip("\n") for a, b in spans.get(key, [])).strip("\n")
+
+
+def clean_section(text):
+    """A section without template hints: HTML comments and a lone `<placeholder>` line (not a
+    `<https://…>` link)."""
+    t = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    t = re.sub(r"^[ \t]*<(?![^<>\n]*://)(?!mailto:)[^<>\n]*>[ \t]*$", "", t, flags=re.M)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+def project_sections(body, raw=False):
+    """{key: text} of a PROJECT.md body: cleaned (clean_section), or as written with raw=True.
+    A section runs to the next section, Grants or Log heading (project_spans)."""
+    lines = body.split("\n")
+    spans = project_spans(lines)
+    out = {k: section_raw(lines, spans, k) for k in spans if k}
+    return out if raw else {k: clean_section(v) for k, v in out.items()}
+
+
+def visible_text(line, in_comment):
+    """`line` without its HTML comment parts → (text, still inside a comment at its end)."""
+    out = ""
+    while line:
+        if in_comment:
+            j = line.find("-->")
+            if j < 0:
+                return out, True
+            line, in_comment = line[j + 3:], False
+        else:
+            j = line.find("<!--")
+            if j < 0:
+                return out + line, False
+            out, line, in_comment = out + line[:j], line[j + 4:], True
+    return out, in_comment
+
+
+def split_out_lines(text):
+    """Older files say what is out of scope as "不管：…" lines of the goal → (goal without them,
+    [what they say]). Lines inside comments stay."""
+    keep, outs, inc = [], [], False
+    for line in text.split("\n"):
+        vis, inc2 = visible_text(line, inc)
+        m = None if inc else OUT_LINE_RE.match(vis)
+        inc = inc2
+        if m:
+            outs.append(m.group(1).strip())
+        else:
+            keep.append(line)
+    return "\n".join(keep), outs
+
+
+def merge_out(out, extra):
+    """The out-of-scope text with the `extra` items it doesn't already say, one per line."""
+    have = {re.sub(r"^\s*[-*]\s+", "", l).strip() for l in out.split("\n")}
+    add = [x for x in dict.fromkeys(extra) if x not in have]
+    return "\n".join(([out.rstrip()] if out.strip() else []) + add)
 
 
 def project_criteria(text):
@@ -593,15 +658,17 @@ def load_project(name):
         meta, body = parse_frontmatter(open(path, encoding="utf-8", errors="replace").read())
     except OSError:
         return None
-    sec = project_sections(body)
+    sec, raw = project_sections(body), project_sections(body, raw=True)
     kind, status = str(meta.get("kind") or "").lower(), str(meta.get("status") or "").lower()
-    goal, out = sec.get("goal", ""), sec.get("out", "")
-    if not out:     # older files say what is out of scope as a "不管：…" line of the goal
-        lines = goal.split("\n")
-        outs = [m.group(1).strip() for m in (OUT_LINE_RE.match(l) for l in lines) if m]
-        if outs:
-            goal = "\n".join(l for l in lines if not OUT_LINE_RE.match(l)).strip()
-            out = "\n".join(outs)
+    # Older files say what is out of scope as "不管：…" lines of the goal: shown (and, on the next
+    # write, moved) as part of the out-of-scope section.
+    goal, outs = split_out_lines(sec.get("goal", ""))
+    goal, out = clean_section(goal), merge_out(sec.get("out", ""), outs)
+    raw["goal"] = split_out_lines(raw.get("goal", ""))[0]
+    raw["out"] = merge_out(raw.get("out", ""), outs)
+    # What the board's section editor starts from: the text as written, comments and all — but
+    # empty for a section holding only the template's hints.
+    raw = {k: v.strip("\n") if clean_section(v) else "" for k, v in raw.items()}
     return {"name": name, "file": path, "title": str(meta.get("title") or ""),
             "kind": kind if kind in PROJECT_KINDS else "",
             "status": status if status in PROJECT_STATUSES else "active",
@@ -611,8 +678,8 @@ def load_project(name):
             "auto": as_list(meta.get("auto")),
             "goal": goal, "out": out, "done_when": sec.get("done_when", ""),
             "criteria": project_criteria(sec.get("done_when", "")),
-            "templates": project_templates(sec.get("templates", "")), "templates_raw": sec.get("templates", ""),
-            "brief": sec.get("brief", ""), "grants": card_grants(body)}
+            "templates": project_templates(sec.get("templates", "")), 
+            "brief": sec.get("brief", ""), "raw": raw, "grants": card_grants(body)}
 
 
 def project_info(pr):
@@ -620,7 +687,7 @@ def project_info(pr):
     p = load_project(pr["name"])
     base = {"title": "", "kind": "", "status": "active", "due": "", "jira": [], "fixVersions": [],
             "updated": "", "parent": "", "phases": [], "auto": [], "goal": "", "out": "", "done_when": "",
-            "criteria": [], "templates": [], "templates_raw": "", "brief": "", "grants": [], "file": None}
+            "criteria": [], "templates": [], "raw": {}, "brief": "", "grants": [], "file": None}
     return {**base, **(p or {}), "name": pr["name"], "paths": pr.get("paths", []), "defined": bool(p)}
 
 
@@ -687,43 +754,69 @@ def check_project_parent(name, fields, cur, names):
         die(f"parent must be a duty (no duty {parent!r})")
 
 
-def write_project_section(path, key, text, kind=""):
-    """Replace a section's text (made, in the file's language, when it has none): before the
-    first later section, the Grants or the Log heading — else at the end."""
-    lines = open(path, encoding="utf-8").read().rstrip("\n").split("\n")
+def put_section(lines, key, text, kind=""):
+    """`lines` with section `key` holding `text`: its first span's text replaced (any later span of
+    the same key — a Scope after a Goal — removed), or a new section made, in the file's language,
+    before the first later section, the Grants or the Log heading — else at the end."""
     spans = project_spans(lines)
     body = [l.rstrip() for l in text.strip("\n").split("\n")] if text.strip() else []
-    if key in spans:
-        a, b = spans[key]
+    if spans.get(key):
+        (a, b), *more = spans[key]
+        gone = {i for c, e in more for i in range(c, e)}
         while b > a + 1 and not lines[b - 1].strip():
             b -= 1
-        new = lines[:a + 1] + body + lines[b:]
-    else:
-        zh = any(re.search(r"[\u4e00-\u9fff]", l) for l in lines if l.startswith("## "))
-        names = DUTY_HEALTH_HEADING if key == "done_when" and kind == "duty" else PROJECT_HEADINGS[key]
-        order = list(PROJECT_SECTIONS)
-        later = [spans[k][0] for k in order[order.index(key) + 1:] if k in spans]
-        at = min(later + ([spans["_stop"][0]] if "_stop" in spans else []) or [len(lines)])
-        block = [f"## {names[0] if zh else names[1]}"] + body + [""]
-        if at == len(lines):
-            block = [""] + block[:-1]
-        new = lines[:at] + block + lines[at:]
-    atomic_write(path, "\n".join(new) + "\n")
+        rest = [l for i, l in enumerate(lines) if i >= b and i not in gone]
+        while rest and not rest[-1].strip():
+            rest.pop()
+        return lines[:a + 1] + body + rest
+    zh = any(re.search(r"[\u4e00-\u9fff]", l) for l in lines if l.startswith("## "))
+    names = DUTY_HEALTH_HEADING if key == "done_when" and kind == "duty" else PROJECT_HEADINGS[key]
+    order = list(PROJECT_SECTIONS)
+    later = [spans[k][0][0] for k in order[order.index(key) + 1:] if spans.get(k)]
+    at = min(later + [a for a, _ in spans.get("", [])[:1]] or [len(lines)])
+    block = [f"## {names[0] if zh else names[1]}"] + body + [""]
+    if at == len(lines):
+        block = [""] + block[:-1]
+    return lines[:at] + block + lines[at:]
+
+
+def write_project_section(path, key, text, kind=""):
+    """Write one section of PROJECT.md (put_section). "不管：…" lines still in the goal move to the
+    out-of-scope section on the way — unless that is the section written: its text is the whole of
+    it (the board shows them as part of it)."""
+    lines = open(path, encoding="utf-8").read().rstrip("\n").split("\n")
+    outs = []
+    for a, b in reversed(project_spans(lines).get("goal", [])):
+        kept, found = split_out_lines("\n".join(lines[a + 1:b]))
+        if found:
+            lines[a + 1:b] = kept.split("\n")
+            outs = found + outs
+    if key == "goal":
+        text, found = split_out_lines(text)
+        outs += found
+    lines = put_section(lines, key, text, kind)
+    if outs and key != "out":
+        cur = section_raw(lines, project_spans(lines), "out")
+        lines = put_section(lines, "out", merge_out(cur, outs), kind)
+    atomic_write(path, "\n".join(lines) + "\n")
 
 
 def tick_criterion(path, n, done):
-    """Tick (or untick) the n-th criterion of Done when / Healthy when."""
+    """Tick (or untick) the n-th criterion of Done when / Healthy when — counted as
+    project_criteria counts them: bullets inside comments don't count."""
     lines = open(path, encoding="utf-8").read().split("\n")
-    span = project_spans(lines).get("done_when")
     k = 0
-    for i in range(span[0] + 1, span[1]) if span else ():
-        m = CRIT_RE.match(lines[i])
-        if m and not m.group(1):
-            k += 1
-            if k == n:
-                lines[i] = f"- [{'x' if done else ' '}] {m.group(3)}"
-                atomic_write(path, "\n".join(lines))
-                return m.group(3)
+    for a, b in project_spans(lines).get("done_when", []):
+        inc = False
+        for i in range(a + 1, b):
+            vis, inc = visible_text(lines[i], inc)
+            m = CRIT_RE.match(vis)
+            if m and not m.group(1):
+                k += 1
+                if k == n:
+                    lines[i] = re.sub(r"^[-*] (?:\[[ xX]\] )?", f"- [{'x' if done else ' '}] ", lines[i], count=1)
+                    atomic_write(path, "\n".join(lines))
+                    return m.group(3)
     die(f"no criterion #{n}")
 
 
@@ -953,7 +1046,7 @@ def cmd_project(args):
         if fields.get("kind", cur.get("kind")) == "duty" and fields.get("status", cur.get("status")) in ("done", "abandoned"):
             die("a duty is active or paused — it has no end (make it kind=goal first, if it does)")
         check_project_parent(name, fields, cur, names)
-        if fields.get("kind") == "goal" and cur.get("kind") == "duty":
+        if "kind" in fields and fields["kind"] != "duty" and cur.get("kind") == "duty":
             kids = [n for n in names if n != name and (load_project(n) or {}).get("parent") == name]
             if kids:
                 die(f"{', '.join(kids)} sit(s) under {name!r}; move them first")
@@ -1480,8 +1573,10 @@ def resolve_ask(aid, resolution, note="", via="cli", grant=None, settle=True):
 
 # Automatic status moves. A status is otherwise only what a session's hq-update, `hq set` or the
 # board wrote — and "waiting-on-me" stayed on after the user had answered everything, until the
-# session happened to write `status: active`. Only these two moves are made, between these two
-# statuses: blocked, done and abandoned are never changed by anything but an explicit status.
+# session happened to write `status: active`. Only these moves are made: waiting-on-me ↔ active,
+# and blocked → waiting-on-me when a session opens a new ask on a blocked task (its open asks and
+# @me todos don't keep it out of the board's Blocked lane, but a new question is the user's turn).
+# Done and abandoned are never changed by anything but an explicit status.
 def on_user(meta):
     """What the card has waiting on the user: open asks (a snoozed one is still open), open @me
     todos, and the legacy `waiting_on_me` field the board still counts."""
@@ -1507,16 +1602,18 @@ def settle_status(card, via):
         return True
 
 
-def await_answer(card, via):
+def await_answer(card, via, new_ask=False):
     """active → waiting-on-me: an ask was opened, or an answer or an @me todo taken back, and
-    nothing said otherwise. Checked under the lock: an ask answered in the meantime leaves the
-    task as it is."""
+    nothing said otherwise; with new_ask (a session asked something new), blocked → waiting-on-me
+    too. Checked under the lock: an ask answered in the meantime leaves the task as it is."""
     with card_lock(card):
         meta = parse_card(card)
-        if meta.get("status") != "active" or not on_user(meta):
+        old = meta.get("status")
+        if old not in (("active", "blocked") if new_ask else ("active",)) or not on_user(meta):
             return False
         _set_fields(card, {"status": "waiting-on-me"})
-        append_log(card, f"status active → waiting-on-me (auto, {via}): something is open on you", touch=False)
+        why = "a new question for you" if old == "blocked" else "something is open on you"
+        append_log(card, f"status {old} → waiting-on-me (auto, {via}): {why}", touch=False)
         return True
 
 
@@ -1586,6 +1683,9 @@ project: <an existing project's name — only to move the task to it>
    block (rule 2). A turn that did work but changed nothing worth recording: a block holding
    just `touch`. The board shows a ref's title, not its URL. A link to one build, run or comment
    goes to the task's HISTORY.md; write `ref!:` instead of `ref:` for one the card must keep.
+   When nothing left can move until someone else acts (a review, a merge, another team) — @me
+   todos for afterwards included — write `status: blocked` and say in `next:` who or what it
+   waits on; the todos stay @me todos.
 2. When you need the user to decide, confirm or answer something before you can go on, end
    your reply with one self-contained question per line in this block (tracked until answered).
    Something the user has to DO — now, or after something else ("once the PRs merge, send the
@@ -6855,7 +6955,7 @@ def _hook_main():
         # with no status written: it stops waiting once nothing is left on the user.
         if not status_said:
             if asked:
-                await_answer(card, "session")
+                await_answer(card, "session", new_ask=True)
             elif me_ticked or card in resolved:
                 settle_status(card, "session")
         for c in resolved - {card}:

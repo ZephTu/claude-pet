@@ -1344,8 +1344,10 @@ function lane(t) {
   const live = liveFor(t.id);
   if (live.some((s) => liveState(s) === "waiting")) return "you";
   if (live.some((s) => liveState(s) === "busy" || bgRunning(s))) return "run";
-  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me") return "you";
+  // Blocked (waiting on someone else) wins over its asks and @me todos: they still show on the
+  // card and in Needs you. A new ask moves it back to waiting-on-me (hq does that).
   if (t.status === "blocked") return "blocked";
+  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me") return "you";
   return "ready";
 }
 // By the day it was closed (hq stamps `closed`), not its last update: a note on a task finished
@@ -4794,6 +4796,7 @@ document.addEventListener("drop", async (ev) => {
     order.splice(at.before ? i : i + 1, 0, id);
     const before = focusIds();
     ui.board.focus.ids = order;                    // shows at once; the save follows
+    for (const l of LANES) delete ui.shown["focus:" + l];   // the pointer is still over the lane
     render();
     try { await api("focus", { action: "order", tasks: order }); }
     catch (e) {
@@ -4814,7 +4817,8 @@ document.addEventListener("drop", async (ev) => {
   if (now && now !== at.lane && isOpen(taskById(id))) {
     const lead = changed ? T(`${id}: status saved, but`, `${id}：状态已改，但`)
       : T(`${id} is already ${STATUS_SHORT[status] || status}, but`, `${id} 本来就是「${STATUS_SHORT[status] || status}」，但`);
-    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours, or a session waiting on you`, `${lead}它还有没答的问题、你的待办，或有 session 停下来等你，所以留在「等你」`)
+    toast(now === "you" && at.lane === "blocked" ? T(`${lead} a session stopped to wait on you (a permission or a question), so it stays in Needs you`, `${lead}有 session 停下来等你（授权或提问），所以留在「等你」`)
+      : now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours, or a session waiting on you`, `${lead}它还有没答的问题、你的待办，或有 session 停下来等你，所以留在「等你」`)
       : now === "run" ? T(`${lead} a session is working on it, so it stays in Running`, `${lead}有 session 在干活，所以留在「在跑」`)
       : T(`${lead} it stays in ${LANE_NAME[now]}`, `${lead}它留在「${LANE_NAME[now]}」`));
   }

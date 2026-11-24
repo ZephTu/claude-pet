@@ -267,6 +267,15 @@ ZH="$T/root/projects/zhp/PROJECT.md"; "$HQ" project add zhp --kind goal >/dev/nu
 printf -- '---\nname: zhp\nkind: goal\n---\n\n## 目标\n发布 v2。\n不管：性能测试\n\n## 简报\n用 worktree。\n' > "$ZH"
 "$HQ" project show zhp --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["goal"]=="发布 v2。" and p["out"]=="性能测试", p' && ok "a 不管： line of the goal reads as out of scope" || fail "out line"
 "$HQ" project section zhp done_when "- 团队都在用" >/dev/null && grep -q '^## 完成标准' "$ZH" && ok "a section is made in the file's language" || fail "zh heading"
+! grep -q '^不管' "$ZH" && grep -q '^## 不管' "$ZH" && "$HQ" project show zhp --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["goal"]=="发布 v2。" and p["out"]=="性能测试", p' && ok "a write moves the goal's 不管： lines into their own section" || fail "out migration"
+printf -- '<!-- - 提示 -->\n- 团队都在用\n- 文档写好\n' | "$HQ" project section zhp done_when >/dev/null
+"$HQ" project check zhp 1 >/dev/null && grep -q '^- \[x\] 团队都在用' "$ZH" && grep -q '^<!-- - 提示 -->' "$ZH" && ok "project check skips bullets inside comments" || fail "check counted a commented bullet"
+grep -q '^## 决策记录' "$ZH" && "$HQ" project show zhp --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert [c["text"] for c in p["criteria"]]==["团队都在用","文档写好"], p["criteria"]' && ok "a log line on a PROJECT.md without a Log heading gets one, not a criterion" || fail "log without heading"
+printf -- '---\nname: zhp\nkind: goal\n---\n\n## Goal\nShip v2.\n<https://example.com/v2>\n\n## Brief\nUse worktrees.\n## Templates\nOur own notes.\n\n## Scope\nAlso the docs.\n' > "$ZH"
+"$HQ" project show zhp --json | python3 -c '
+import json,sys; p=json.load(sys.stdin)
+assert p["goal"]=="Ship v2.\n<https://example.com/v2>\n\nAlso the docs." and "## Templates\nOur own notes." in p["brief"] and not p["templates"], p' && ok "a link line stays; a ## Templates inside the brief is the brief's" || fail "brief cut by Templates"
+"$HQ" project section zhp goal "Ship v2 and its docs." >/dev/null && [ "$(grep -c '^## \(Goal\|Scope\)' "$ZH")" = 1 ] && grep -q '^Our own notes.' "$ZH" && ok "writing the goal folds a second Scope heading into it" || fail "duplicate goal spans"
 "$HQ" project section ops templates "$(printf '### triage\ntitle: Triage nightly {date}\ngoal: Every red job has an owner.\n- [ ] @claude collect the failures\n- [ ] @me assign owners\n\n### bump\ntitle: Bump the CI image')" >/dev/null
 "$HQ" project show ops --json | python3 -c '
 import json,sys; t=json.load(sys.stdin)["templates"]
@@ -277,6 +286,7 @@ rc=0; "$HQ" new --project ops --template nope --no-focus 2>/dev/null || rc=$?; [
 rc=0; "$HQ" new --no-focus 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a task needs a title" || fail "new without title"
 NG="$("$HQ" new "Cut the branch" --project rel --phase Build --goal "Branch cut and announced." --no-focus | head -1)"; NC="$(ls "$T"/root/tasks/$NG-*/TASK.md)"
 grep -q '^phase: Build' "$NC" && grep -q '^Branch cut and announced.' "$NC" && "$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$NG"'"][0]; assert t["phase"]=="Build", t' && ok "hq new --phase --goal" || fail "new --phase --goal"
+rc=0; "$HQ" project set ops kind= 2>/dev/null || rc=$?; [ "$rc" = 1 ] && ok "a duty with goals under it keeps its kind" || fail "kind= with goals under it"
 "$HQ" project rename ops ops2 >/dev/null && grep -q '^parent: ops2' "$T/root/projects/rel/PROJECT.md" && ok "renaming a duty moves its goals along" || fail "reparent rename"
 "$HQ" project remove ops2 --to "" >/dev/null && "$HQ" project show rel --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["parent"]=="", "parent kept"' && ok "removing a duty leaves its goals under nothing" || fail "reparent remove"
 for x in "$TT" "$NG"; do "$HQ" set "$x" status=abandoned >/dev/null; done
@@ -1708,6 +1718,17 @@ stop sess-as "$(printf 'Next question.\n```hq-update\ndone: last one\n```\n```hq
 OT="$("$HQ" new "Other task" --no-focus | head -1)"; "$HQ" ask add "$OT" "Other?" >/dev/null; "$HQ" set "$OT" status=waiting-on-me >/dev/null
 stop sess-as "$(printf 'Answered for the other task too.\n```hq-resolved\n- %s.1 do: yes\n```' "$OT")" >/dev/null
 sed -n '/^---$/,/^---$/p' "$T"/root/tasks/$OT-*/TASK.md | grep -q '^status: active' && ok "auto status: an hq-resolved answer for another task settles that task" || fail "other task not settled"
+"$HQ" set "$AS" status=blocked >/dev/null
+stop sess-as "$(printf 'Waiting on the review.\n```hq-update\ntodo: @me merge once reviewed\n```')" >/dev/null
+[ "$(st)" = blocked ] && ok "auto status: a new @me todo leaves a blocked task blocked" || fail "blocked moved by a todo: $(st)"
+stop sess-as "$(printf 'A question.\n```hq-asks\n- Which branch?\n```')" >/dev/null
+[ "$(st)" = waiting-on-me ] && grep -q 'status blocked → waiting-on-me (auto, session): a new question for you' "$CA" \
+  && ok "auto status: a new ask on a blocked task makes it waiting-on-me, logged" || fail "blocked + ask: $(st)"
+"$HQ" set "$AS" status=blocked >/dev/null
+stop sess-as "$(printf 'Still stuck.\n```hq-asks\n- Ping them?\n```\n```hq-update\nstatus: blocked\n```')" >/dev/null
+[ "$(st)" = blocked ] && ok "auto status: an ask with status: blocked written stays blocked" || fail "said blocked lost: $(st)"
+"$HQ" ask add "$AS" "From the CLI?" >/dev/null
+[ "$(st)" = blocked ] && ok "auto status: hq ask add leaves a blocked task blocked" || fail "cli ask moved blocked: $(st)"
 "$HQ" set "$AS" status=done >/dev/null
 stop sess-as "$(printf 'One more.\n```hq-asks\n- Reopen it?\n```')" >/dev/null
 [ "$(st)" = done ] && ok "auto status: an ask on a done task leaves it done" || fail "done moved: $(st)"

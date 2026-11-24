@@ -238,6 +238,8 @@ final class BoardWindow: NSWindow {
 @MainActor
 final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static let orcaBundleID = "com.stablyai.orca"
+    /// The installed hq a recurring job runs (not the one bundled for the board's own calls).
+    static let hqBin = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/hq/bin/hq"
     /// The pet's unread finishes per session, and how the board marks one session's read.
     /// Set by the app; nil when the board is rendered on its own (`--render-board`).
     static var unreadBySession: (() -> [String: Int])?
@@ -361,7 +363,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 for k in ["kind", "title", "due", "parent"] where !str(k).isEmpty { opts.append("--\(k)=\(str(k))") }
             }
             if let to = body["to"] as? String { opts.append("--to=\(to)") }
-            return await hq(["project"] + opts + [action, "--"] + ((body["names"] as? [String]) ?? []))
+            let names = (body["names"] as? [String]) ?? []
+            let r = await hq(["project"] + opts + [action, "--"] + names)
+            // A renamed project's recurring work makes its cards under the new name.
+            if action == "rename", r.1 == nil, names.count == 2 {
+                JobsController.shared.retargetRecurring(from: names[0], to: names[1], hq: Self.hqBin)
+            }
+            return r
         case "category":
             var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
             if let to = body["to"] as? String { args.append("--to=\(to)") }
@@ -383,10 +391,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await hq(args + ["--", str("title")])
         case "recur-save":
             // A duty's recurring work: a shell job that makes a card from one of its templates.
-            let hqBin = FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/hq/bin/hq"
             let raw: [String: Any] = [
                 "id": str("id"), "name": "↻ \(str("project")) · \(str("template"))", "kind": "shell",
-                "command": Recurring.command(hq: hqBin, project: str("project"), template: str("template")),
+                "command": Recurring.command(hq: Self.hqBin, project: str("project"), template: str("template")),
                 "cwd": "~", "schedule": body["schedule"] as? [String: Any] ?? [:],
                 "enabled": body["enabled"] as? Bool ?? true, "timeoutMinutes": 5, "notify": "failure"]
             return await JobsController.shared.save(raw)

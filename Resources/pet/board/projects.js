@@ -256,10 +256,11 @@ function intake(pr) {
   const jobs = recurJobs(name);
   const open = pui.recur === name;
   const v = (k, d) => ui.drafts[`pr:${name}:${k}`] ?? d;
+  const tplNow = recurTemplate(pr);
   const freq = v("freq", "weekdays");
   const days = JT[jlang()].days;
   const form = open ? `<div class="recur-form">
-      <select data-key="pr:${esc(name)}:tpl">${tpls.map((x) => `<option value="${esc(x.name)}" ${v("tpl", tpls[0].name) === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+      <select data-key="pr:${esc(name)}:tpl">${tpls.map((x) => `<option value="${esc(x.name)}" ${tplNow === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
       <select data-key="pr:${esc(name)}:freq">${[["daily", jt("f_daily")], ["weekdays", jt("f_weekdays")], ["weekly", T("every week on", "每周")]].map(([k, w]) => `<option value="${k}" ${freq === k ? "selected" : ""}>${w}</option>`).join("")}</select>
       ${freq === "weekly" ? `<select data-key="pr:${esc(name)}:day">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<option value="${d}" ${String(v("day", "1")) === String(d) ? "selected" : ""}>${days[d]}</option>`).join("")}</select>` : ""}
       <input type="time" data-key="pr:${esc(name)}:time" value="${esc(v("time", "09:00"))}">
@@ -267,7 +268,7 @@ function intake(pr) {
       <button class="btn small ghost" data-action="p-recur" data-p="${esc(name)}">${T("Cancel", "取消")}</button></div>` : "";
   const recurBox = `<div class="ibox"><h4>${T("Recurring", "定期来活")}<span class="c">${jobs.length}</span>
       ${tpls.length && !open ? `<button class="icon pe" data-action="p-recur" data-p="${esc(name)}" title="${T("Make a task from a template on a timetable", "按时间表用模板建任务")}">＋</button>` : ""}</h4>
-    ${jobs.map((j) => `<div class="irow"><span class="t">${esc(j.recur.template)}<small>${esc(scheduleText(j.schedule))}${j.enabled && (j.next || [])[0] ? ` · ${T("next", "下次")} ${esc(jwhen(j.next[0]))}` : ""}</small></span>
+    ${jobs.map((j) => `<div class="irow"><span class="t">${esc(j.recur.template)}<small>${esc(scheduleText(j.schedule))}${j.enabled && (j.next || [])[0] ? ` · ${T("next", "下次")} ${esc(jwhen(j.next[0]))}` : ""}</small>${tpls.some((x) => x.name === j.recur.template) ? "" : `<small class="warn">${T("This common work is gone: the job will fail until it is back (or delete the job)", "这个常见的活已经不在了：在它回来之前这个定期任务会失败（或者删掉这个任务）")}</small>`}</span>
       <button class="switch ${j.enabled ? "on" : ""}" data-action="p-job-toggle" data-id="${esc(j.id)}" data-on="${j.enabled ? "" : "1"}" title="${j.enabled ? T("On — click to pause", "开着——点击暂停") : T("Paused — click to switch on", "暂停中——点击打开")}"><span></span></button>
       <button class="icon x" data-confirm="${T("Delete?", "删除？")}" data-action="p-job-del" data-id="${esc(j.id)}" title="${T("Delete this recurring job", "删掉这个定期任务")}">✕</button></div>`).join("")}
     ${form || (jobs.length ? "" : `<div class="empty">${tpls.length ? T("None. ＋ makes a task from a template on a timetable (a job on the Scheduled page).", "没有。点 ＋ 按时间表用模板建任务（在定时任务页里是一个 job）。") : T("Write a template first; a recurring job makes tasks from one.", "先写一个常见的活；定期来活就是按时用它建任务。")}</div>`)}</div>`;
@@ -280,6 +281,12 @@ function intake(pr) {
     T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"))}
     <div class="meta">${T("A ### heading per template: title: (with {date} / {week}), goal:, and - [ ] @owner todo lines.", "每个模板一个 ### 标题：title:（可用 {date} / {week}）、goal:，以及 - [ ] @owner 待办 行。")}</div></div>` : "";
   return `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}`;
+}
+
+// The template a recurring-job form is on: its draft, unless that template is gone since.
+function recurTemplate(pr) {
+  const tpls = pr.templates || [], picked = ui.drafts[`pr:${pr.name}:tpl`];
+  return tpls.some((x) => x.name === picked) ? picked : ((tpls[0] || {}).name || "");
 }
 
 function projDetail(name) {
@@ -432,6 +439,12 @@ async function submitCreate() {
   try {
     if (m.kind === "task") {
       const title = dv("nt:title").trim(), tpl = dv("nt:tpl");
+      if (tpl && !((projectByName(dv("nt:proj")) || {}).templates || []).some((x) => x.name === tpl)) {
+        delete ui.drafts["nt:tpl"];
+        saveDrafts();
+        toast(T(`The common work "${tpl}" is gone — pick again`, `常见的活"${tpl}"已经不在了，请重新选`), true);
+        return;
+      }
       if (!title && !tpl) { toast(T("Give the task a title", "给任务起个标题"), true); return; }
       const out = await api("new", { title, goal: dv("nt:goal").trim(), category: dv("nt:cat", categories().includes("other") ? "other" : categories()[0] || ""),
         workdir: dv("nt:dir").trim(), project: dv("nt:proj"), template: tpl, phase: dv("nt:phase"), focus: dv("nt:focus", true) !== false });
@@ -508,8 +521,8 @@ async function projAction(d) {
       if (editing(name, part)) { pui.edit = null; return render(); }
       pui.edit = name + "|" + part;
       if (part === "meta") for (const k of META_KEYS(pr)) ui.drafts[`pm:${name}:${k}`] = metaVal(pr, k);
-      // The section as written in PROJECT.md (the parsed criteria and templates drop details).
-      else ui.drafts[`pe:${name}:${part}`] = (part === "templates" ? pr.templates_raw : pr[part]) || "";
+      // The section as written in PROJECT.md, comments and all (the parsed one drops details).
+      else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || "";
       render();
       const el = document.querySelector(`#proj-view [data-key="${CSS.escape(part === "meta" ? `pm:${name}:title` : `pe:${name}:${part}`)}"]`);
       if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
@@ -519,13 +532,12 @@ async function projAction(d) {
     case "p-save": {
       const key = `pe:${name}:${d.part}`;
       const text = draft(key);
-      pui.edit = null;
-      delete ui.drafts[key];
-      const pr = projectByName(name) || {};
+      // The editor stays open with its text until the save went through.
       return run(async () => {
         await api("project", { action: "section", names: [name, d.part, text] });
-        // "Out of scope: …" lines written in the goal are shown as its own section; keep them as one.
-        if (d.part === "goal" && pr.out) await api("project", { action: "section", names: [name, "out", pr.out] });
+        if (pui.edit === name + "|" + d.part) pui.edit = null;
+        delete ui.drafts[key];
+        saveDrafts();
       }, T("Saved", "已保存"));
     }
     case "p-meta-save": {
@@ -535,11 +547,10 @@ async function projAction(d) {
         let v = draft(`pm:${name}:${k}`).trim();
         if (["phases", "jira", "fixVersions"].includes(k)) v = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).join(",");
         if (v !== metaVal(pr, k).split(", ").join(["phases", "jira", "fixVersions"].includes(k) ? "," : ", ")) fields.push(`${k}=${v}`);
-        delete ui.drafts[`pm:${name}:${k}`];
       }
-      pui.edit = null;
-      if (!fields.length) return render();
-      return run(() => api("project", { action: "set", names: [name, ...fields] }), T("Saved", "已保存"));
+      const close = () => { if (pui.edit === name + "|meta") pui.edit = null; clearDrafts(`pm:${name}:`); };
+      if (!fields.length) { close(); return render(); }
+      return run(async () => { await api("project", { action: "set", names: [name, ...fields] }); close(); }, T("Saved", "已保存"));
     }
     case "p-add": return addTask(name);
     case "p-done-all": pui.doneAll.has(name) ? pui.doneAll.delete(name) : pui.doneAll.add(name); return render();
@@ -566,12 +577,15 @@ async function projAction(d) {
       const v = (k, dflt) => ui.drafts[`pr:${name}:${k}`] ?? dflt;
       const [hh, mm] = String(v("time", "09:00")).split(":").map(Number);
       const kind = v("freq", "weekdays");
-      const schedule = { kind, hour: hh || 0, minute: mm || 0, days: [Number(v("day", "1"))] };
-      const template = v("tpl", ((pr.templates || [])[0] || {}).name || "");
+      // The form's Sunday is 0 (as Date#getDay); a job's days are 1–7, Sunday 7.
+      const schedule = { kind, hour: hh || 0, minute: mm || 0, days: [Number(v("day", "1")) || 7] };
+      const template = recurTemplate(pr);
       if (!template) return toast(T("Write a template first", "先写一个常见的活"), true);
-      pui.recur = null;
-      clearDrafts(`pr:${name}:`);
-      return run(() => api("recur-save", { project: name, template, schedule, enabled: true }), T("Recurring job saved — it is also on the Scheduled page", "已保存——在定时任务页里也能看到"));
+      return run(async () => {
+        await api("recur-save", { project: name, template, schedule, enabled: true });
+        if (pui.recur === name) pui.recur = null;
+        clearDrafts(`pr:${name}:`);
+      }, T("Recurring job saved — it is also on the Scheduled page", "已保存——在定时任务页里也能看到"));
     }
     case "p-job-toggle": return run(() => api("job-enable", { id: d.id, on: Boolean(d.on) }));
     case "p-job-del": return run(() => api("job-delete", { id: d.id }), T("Deleted", "已删除"));
