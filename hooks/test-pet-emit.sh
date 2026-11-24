@@ -474,16 +474,40 @@ emit PostToolUse sR /tmp/p Bash   # the prompt was answered in the terminal
 wait $pid
 check "an answer to some other ask approves nothing" "$(cat "$PET_HOME/sR.out")" ""
 
-# A multiple-choice question is answered on its card; Allow from outside would
-# hand Claude no answers, so the pet must not offer it or hold the hook.
-start=$(date +%s)
-printf '{"hook_event_name":"PermissionRequest","session_id":"sA","cwd":"/tmp/p","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"a?"},{"question":"b?"}]}}' \
-  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sA.out"
-check "a question card does not hold the hook" "$(( $(date +%s) - start < 3 ))" "1"
-check "...and answers nothing" "$(cat "$PET_HOME/sA.out")" ""
-check "...but the session is waiting" "$(field sA state)" "waiting"
-check "...on a reply, not an approval" "$(field sA waitingOn)|$(field sA askId)" "|"
-check "...and says how many questions" "$(field sA detail)" "2 questions to answer"
+# A multiple-choice question is answered on its card: the hook is held like a
+# permission's, and the picks come back as the tool's input — Allow alone would
+# hand Claude no answers.
+qjson() { /usr/bin/python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps(eval(sys.argv[2]),sort_keys=True))" "$1" "$2"; }
+printf '{"hook_event_name":"PermissionRequest","session_id":"sQA","cwd":"/tmp/p","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"a?"},{"question":"b?"}]}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sQA.out" &
+pid=$!; id="$(await_ask sQA)"
+check "a question card holds the hook under an ask" "$([ -n "$id" ] && [ -n "$(field sQA askHeldBy)" ] && echo yes)" "yes"
+check "...the session is waiting" "$(field sQA state)" "waiting"
+check "...on a reply, not an approval" "$(field sQA waitingOn)|$(field sQA askKind)" "|question"
+check "...and says how many questions" "$(field sQA detail)" "2 questions to answer"
+check "...with the questions for the board's menu" "$(qjson "$PET_HOME/sessions/sQA.json" "[q['question'] for q in d['questions']]")" '["a?", "b?"]'
+emit Notification sQA /tmp/p "" "Claude needs your input"
+check "a Notification under the same prompt keeps the ask and its menu" \
+  "$(field sQA askId)|$(field sQA askKind)|$(qjson "$PET_HOME/sessions/sQA.json" "len(d.get('questions', []))")" "$id|question|2"
+mkdir -p "$PET_HOME/decisions"
+printf '{"askId":"%s","behavior":"allow","answers":{"a?":"yes","b?":"no"}}' "$id" > "$PET_HOME/decisions/sQA.json"
+wait $pid
+check "the picks come back as the tool's answers, questions kept" \
+  "$(qjson "$PET_HOME/sQA.out" "[d['hookSpecificOutput']['decision'][k] for k in ('behavior','updatedInput')]")" \
+  '["allow", {"answers": {"a?": "yes", "b?": "no"}, "questions": [{"question": "a?"}, {"question": "b?"}]}]'
+
+# A plan is approved in its own dialog (Claude Code ignores a hook's allow for it); the board
+# sends one back as a denial carrying the user's words. Its text is kept for the board, cut.
+/usr/bin/python3 -c 'import json;print(json.dumps({"hook_event_name":"PermissionRequest","session_id":"sPL","cwd":"/tmp/p","tool_name":"ExitPlanMode","tool_input":{"plan":"# Plan\n"+"x"*40000}}))' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sPL.out" &
+pid=$!; id="$(await_ask sPL)"
+check "a plan is held under an ask, as a plan" "$([ -n "$id" ] && echo yes)|$(field sPL askKind)|$(field sPL waitingOn)" "yes|plan|"
+check "...says so in its row" "$(field sPL detail)" "a plan to approve"
+check "...and keeps its text for the board, cut to the limit" "$(qjson "$PET_HOME/sessions/sPL.json" "[d['plan'][:6], len(d['plan'])]")" '["# Plan", 40000]'
+printf '{"askId":"%s","behavior":"deny","message":"keep it smaller"}' "$id" > "$PET_HOME/decisions/sPL.json"
+wait $pid
+check "sending a plan back denies it with the user's words" \
+  "$(qjson "$PET_HOME/sPL.out" "[d['hookSpecificOutput']['decision'][k] for k in ('behavior','message')]")" '["deny", "keep it smaller"]'
 
 # ---- an editor's integrated terminal ------------------------------------------
 terminal() {  # terminal <session_id> → "kind handle"
