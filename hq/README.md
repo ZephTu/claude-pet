@@ -48,8 +48,10 @@ hq-update moved its task from open to done or abandoned (the board then applies 
 since, its `compact_boundary`'s `postTokens` plus what a request sent besides the conversation
 after the previous compaction, else the session's first reply, at most 60k) and `todos` (Claude's latest
 TodoWrite / TaskCreate list: `{text, status, active}`) and `queued` (messages waiting in Claude
-Code's queue — sent while it was busy, not taken in yet — replayed from the transcript's
-`queue-operation` lines: `[{text, ts}]`, oldest first, task notifications left out); `hq peek <sid> --tool <tool_use id>`
+Code's queue — sent while it was busy, not taken in yet — from the transcript's
+`queue-operation` lines, matched by text: an entry leaves when a `remove` or a later user entry
+holds it, or once a turn has ended and another prompt began; `[{text, ts}]`, oldest first, task
+notifications left out); `hq peek <sid> --tool <tool_use id>`
 prints one call's full input and output (an Edit's diff), `--json` for the fields.
 `hq peek <sid> --commands [--json]` lists the skills the session can run as slash commands —
 the newest `skill_listing` Claude Code wrote into the transcript plus skills added after it,

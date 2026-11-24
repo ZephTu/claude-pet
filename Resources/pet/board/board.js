@@ -2721,8 +2721,15 @@ function drawPeekLive() {
   if (!live || m.secretary) return false;
   const s = ui.sessions.find((x) => x.sessionId === m.sid) || {};
   live.innerHTML = peekStatus(m, s, peekRun(m, s)) + peekTodos(m);
-  const q = $("#modal .pqueue-slot");
-  if (q) q.innerHTML = peekQueue(m, s);
+  // The queue box, only when it changed: rewriting it resets its own scroll. It sits under the
+  // list, so the list's height changes with it — a reader at the bottom stays there.
+  const q = $("#modal .pqueue-slot"), qh = peekQueue(m, s);
+  if (q && q.dataset.h !== qh) {
+    const body = $("#modal .peek-body");
+    const atBottom = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+    q.innerHTML = qh; q.dataset.h = qh;
+    if (atBottom) body.scrollTop = body.scrollHeight;
+  }
   $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
   return true;
 }
@@ -2768,6 +2775,7 @@ function drawPeek(toBottom) {
   const blocks = msgs === null ? null : peekBlocks(m.items || msgs.map((x) => ({ kind: "msg", ...x })));
   m.keys = blocks ? blocks.map((b) => (b.kind === "group" ? `g|${b.tools[0].id}` : `${b.role}|${b.ts}|${b.text}`)) : null;
   const run = peekRun(m, s);
+  const queue = peekQueue(m, s);
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
@@ -2790,7 +2798,7 @@ function drawPeek(toBottom) {
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
-    <div class="pqueue-slot">${peekQueue(m, s)}</div>
+    <div class="pqueue-slot" data-h="${esc(queue)}">${queue}</div>
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
         placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
@@ -3390,7 +3398,8 @@ function peekTodos(m) {
 // is live and in a turn: a queue never outlives one.
 function peekQueue(m, s) {
   const q = m.queued;
-  if (!m.live || !q || !q.length || (s.state !== "busy" && s.state !== "waiting")) return "";
+  const st = liveState(s);
+  if (!m.live || !q || !q.length || (st !== "busy" && st !== "waiting")) return "";
   return `<div class="pqueue">
     <div class="pqueue-head">${T(`Queued · ${q.length} — it reads ${q.length === 1 ? "this" : "these"} when the turn ends`, `排队中 · ${q.length} 条——这一轮结束后它会读到`)}</div>
     ${q.map((x) => `<div class="pqueue-item"><span class="pqueue-text">${esc(x.text)}</span><span class="pqueue-at" data-ago="${esc(x.ts || "")}">${ago(x.ts)}</span></div>`).join("")}
