@@ -52,7 +52,7 @@ The board opens on **Focus**: the tasks you keep in view (it doesn't reset each 
 - **Needs you** — every unanswered question, your todos, and quick notes still to sort, with a count on its tab.
 - **Scheduled** — jobs on a timetable (below).
 
-Along the top: **Quick note** (jot a line, a link or a screenshot; a small model files it into the right task as a todo, a log line or a new card), a task filter, the **Secretary**, **+ New**, Settings, and the built-in **Guide**. The status bar shows sessions, open questions, todos and your quota.
+Along the top: **Quick note** (jot a line, a link or a screenshot; a small model files it into the right task as a todo, a log line or a new card — also from anywhere with ⌃⌥⌘N, once you turn it on in the pet's right-click menu → Settings), a task filter, the **Secretary**, **+ New**, Settings, and the built-in **Guide**. The status bar shows sessions, open questions, todos and your quota.
 
 ### Questions, answered in one go
 
@@ -160,6 +160,8 @@ From then on, bind each session to the task it is for:
 ```
 
 — or start sessions from a card with **New session**, already bound.
+
+The everyday loop for new work: press **⌃⌥⌘N** (turn it on in the pet's right-click menu → Settings), type a sentence and press Enter. The cat sorts it: a new card lands in Focus under its project (or the line joins the task it belongs to). Open the card, press **New session**, and the session starts bound, reads the card and reports.
 
 Your transcripts are read on your machine. The drafting is done by Claude in the session you ran `/hq-onboard` in, the same way any session sees what it reads.
 
