@@ -2936,7 +2936,7 @@ function secSide(m, st, o) {
   const sec = (k, title, n, sum, inner, extra = "") => {
     const open = sideOpen(k);
     return `<section class="ss sx-${k} ${open ? "open" : ""}">
-      <div class="ss-h" data-action="sec-side" data-sec="${k}" role="button" aria-expanded="${open}" title="${open ? T("Fold", "收起") : T("Open", "展开")}">
+      <div class="ss-h" data-action="sec-side" data-sec="${k}" role="button" tabindex="0" aria-expanded="${open}" title="${open ? T("Fold", "收起") : T("Open", "展开")}">
         <span class="ss-ic">${si(k)}</span><span class="ttl">${title}</span>${n ? `<span class="cnt">${n}</span>` : ""}
         <span class="sum">${open ? "" : sum}</span>${extra}<span class="chev">${si("chev")}</span></div>
       ${open ? `<div class="ss-b">${inner}</div>` : ""}</section>`;
@@ -2944,10 +2944,10 @@ function secSide(m, st, o) {
   // A watched line starts with its task ("盯 T-030：…"): that becomes a link to the task, the rest
   // shows two lines until clicked.
   const full = m.watchFull || (m.watchFull = new Set());
-  const watchItem = (l, i) => {
-    const mm = String(l).match(/^\s*(?:盯\s*)?(T-\d+)\s*[:：]\s*/i);
+  const watchItem = (l) => {
+    const mm = String(l).match(/^\s*(?:盯\s*)?(T-\d+)(?:\s*[:：—–-]\s*|\s+)/i);
     const id = mm ? mm[1].toUpperCase() : "";
-    return `<div class="ss-w ${full.has(l) ? "full" : ""}" data-action="sec-watch-full" data-i="${i}"><div class="tx">${id ? `<span class="tid link" data-action="sec-goto" data-task="${esc(id)}" title="${T("Open this task", "打开这个任务")}">${esc(id)}</span> ` : ""}${esc(mm ? l.slice(mm[0].length) : l)}</div></div>`;
+    return `<div class="ss-w ${full.has(l) ? "full" : ""}" data-action="sec-watch-full" data-line="${esc(l)}"><div class="tx">${id ? `<span class="tid link" data-action="sec-goto" data-task="${esc(id)}" title="${T("Open this task", "打开这个任务")}">${esc(id)}</span> ` : ""}${esc(mm ? l.slice(mm[0].length) : l)}</div></div>`;
   };
   const watch = sec("watch", T("Keeping an eye on", "替你盯着"), o.watch.length, o.watch.length ? "" : T("nothing now", "现在没有"),
     o.watch.length ? o.watch.map(watchItem).join("") : `<div class="ss-empty">${T("Nothing right now.", "现在没有。")}</div>`);
@@ -2969,10 +2969,11 @@ function secSide(m, st, o) {
   const hourly = fd.kind === "cron" && fd.cron === "0 9-19 * * 1-5";
   const mins = ac.job ? ac.everyMinutes : 5;
   const evTip = o.sch.reports === false
-    ? T("Scheduled runs use your own prompt now; turning reports on replaces it", "定时运行用的是你在定时任务里写的 prompt；开启报告会替换它")
+    ? T("Scheduled runs use the prompt you wrote in Scheduled; this switch turns evening reports on and replaces that prompt", "定时运行用的是你在定时任务里写的 prompt；打开这个开关会改成傍晚写报告，替换掉那个 prompt")
     : `${o.when}${T(", weekly on Fridays", "，周五写周报")}${o.sch.next ? T(` · next: ${o.sch.next}`, ` · 下一次：${o.sch.next}`) : ""}`;
   const autos = [
-    [o.evening, row("moon", T("Evening report", "傍晚写报告"), evTip, o.evening, `data-action="secretary-reports" data-on="${o.sch.reports === false || !o.sch.enabled ? "1" : ""}"`, "")],
+    // Scheduled runs with a prompt of the user's own: say so on the row, since its switch replaces that prompt.
+    [o.evening, row("moon", o.sch.reports === false && o.sch.enabled ? T("Runs your own prompt", "在跑你自己的 prompt") : T("Evening report", "傍晚写报告"), evTip, o.evening, `data-action="secretary-reports" data-on="${o.sch.reports === false || !o.sch.enabled ? "1" : ""}"`, "")],
     [fd.enabled, row("scan", T("Scan Zulip · Jira", "扫 Zulip · Jira"), `${hourly ? T("Weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("As set in Scheduled", "按定时任务的设置")}\n${secFeedTip()}`, fd.enabled,
       `data-action="secretary-feed" data-on="${fd.enabled ? "" : "1"}"`, runBtn("secretary-feed-now", fd, T("Scan now", "现在扫一次"))), fd.last && fd.last.failed],
     [ac.enabled, row("tick", T("Tick finished todos", "自动勾完成的待办"), `${!ac.job || ac.kind === "every" ? T(`Every ${mins} min`, `每 ${mins} 分钟`) : T("As set in Scheduled", "按定时任务的设置")}\n${secCloseTip()}`, ac.enabled,
@@ -3954,11 +3955,16 @@ document.addEventListener("click", async (ev) => {
     }
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
-    case "sec-goto": closePeek(); return revealTask(d.task);   // the secretary's window would cover the drawer
+    case "sec-goto":
+      // Checked before the window closes: a wrong id mustn't cost you the chat; its own card is this window.
+      if (!taskById(d.task)) return toast(T(`${d.task} not found`, `找不到 ${d.task}`), true);
+      if (d.task === secId()) return;
+      closePeek(); return revealTask(d.task);   // the secretary's window would cover the drawer
     case "sec-side": toggleSide(d.sec); return drawPeek(false);
     case "sec-watch-full": {
-      const l = ((ui.modal && ui.modal.sec && ui.modal.sec.state) || [])[+d.i];
-      if (l === undefined || String(window.getSelection() || "").trim()) return;
+      // By the line's text, not its place: polling may have rewritten the list since it was drawn.
+      const l = d.line;
+      if (!ui.modal || l === undefined || String(window.getSelection() || "").trim()) return;
       const f = ui.modal.watchFull || (ui.modal.watchFull = new Set());
       if (f.has(l)) f.delete(l); else f.add(l);
       return drawPeek(false);
@@ -4643,6 +4649,7 @@ document.addEventListener("keydown", async (ev) => {
   if (ev.key === "Escape" && el.tagName === "TEXTAREA" && el.dataset.session && !(ui.drafts[el.dataset.key] || "").trim()) {
     ui.msgOpen.delete(el.dataset.session); el.blur(); return render();
   }
+  if ((ev.key === "Enter" || ev.key === " ") && el.classList && el.classList.contains("ss-h")) { ev.preventDefault(); return el.click(); }   // a fold in the secretary's side column
   if (el.id === "capture" && ev.key === "Escape") { el.blur(); return; }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
   if (el.id === "capture") { ev.preventDefault(); return captureSubmit(); }   // focus stays: jot the next one
