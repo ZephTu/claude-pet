@@ -2627,14 +2627,14 @@ function drawPeek(toBottom) {
   const msgs = m.msgs;
   // Messages, with each run of tool calls between them as one block (see peekBlocks).
   const blocks = msgs === null ? null : peekBlocks(m.items || msgs.map((x) => ({ kind: "msg", ...x })));
-  m.keys = blocks ? blocks.map((b) => (b.kind === "group" ? `g|${b.tools[0].id}` : `${b.role}|${b.ts}|${b.text}`)) : null;
+  m.keys = blocks ? blocks.map((b) => (b.kind === "group" ? `g|${b.tools[0].id}` : b.kind === "event" ? `e|${b.event}|${b.ts}` : `${b.role}|${b.ts}|${b.text}`)) : null;
   const run = peekRun(m, s);
   const queue = peekQueue(m, s);
   outboxPrune(key, m);
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
-    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : `<div class="pmsg ${x.role}">
+    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : x.kind === "event" ? peekEvent(x) : `<div class="pmsg ${x.role}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
         <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
@@ -3184,6 +3184,18 @@ function peekBlocks(items) {
   }
   return out;
 }
+// Not a message but something that happened in the session: the context was compacted, or a
+// hook sent Claude's reply back (which is why the reply after it may hold only a corrected block).
+function peekEvent(x) {
+  const when = `<span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>`;
+  if (x.event === "compact") {
+    const how = x.trigger === "auto" ? T("automatically", "自动") : x.trigger === "manual" ? T("/compact", "/compact") : "";
+    const size = x.pre ? ` · ${fmtTok(x.pre)} → ${fmtTok(x.post || 0)} tokens` : "";
+    return `<div class="pmsg pevent compact" title="${T("Earlier turns were replaced by a summary; Claude goes on from it", "之前的对话换成了一份摘要，Claude 接着摘要往下做")}"><span>${T("Context compacted", "上下文已压缩")}${how ? ` (${how})` : ""}${size} · ${when}</span></div>`;
+  }
+  const first = String(x.text || "").split("\n")[0];
+  return `<div class="pmsg pevent hook" title="${esc(x.text || "")}"><span>${T(`${esc(x.hook || "A")} hook sent the reply back: `, `${esc(x.hook || "")} hook 把回复退回了：`)}${esc(first)} · ${when}</span></div>`;
+}
 // What the session is doing now, as far as Peek can tell: its state, and the call it is in.
 function peekRun(m, s) {
   const state = m.secretary ? (m.sec && m.sec.running ? "busy" : "") : m.live ? liveState(s) : "";
@@ -3266,7 +3278,8 @@ function peekStatus(m, s, run) {
   if (run.state === "busy") {
     const c = run.current;
     cls = "busy";
-    lead = c ? `${T("Running", "正在运行")} <b>${esc(c.title)}</b> <span class="plabel">${esc(c.label || "")}</span>` : T("Thinking…", "思考中…");
+    lead = s.phase === "compacting" ? T("Compacting the context…", "正在压缩上下文…")
+      : c ? `${T("Running", "正在运行")} <b>${esc(c.title)}</b> <span class="plabel">${esc(c.label || "")}</span>` : T("Thinking…", "思考中…");
   } else if (run.state === "waiting") {
     cls = "wait";
     lead = s.waitingOn ? `${T("Waiting for your OK:", "等你批准：")} <span class="plabel">${esc(s.waitingOn)}</span>` : T("Waiting for your answer in the terminal", "在终端里等你回答");

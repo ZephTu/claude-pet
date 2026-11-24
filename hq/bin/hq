@@ -5711,7 +5711,10 @@ def peek_timeline(entries):
     them, Claude's tool calls, each one {"kind": "tool", id, name, title, label, ts, status, …}.
     status: ok | error | pending (no result yet: running, or cut short) | background (launched in
     the background; becomes ok, error or stopped when its task notification arrives, or stopped
-    once TaskStop ends it) | stopped."""
+    once TaskStop ends it) | stopped.
+    Also events between them, {"kind": "event", "event": …, ts}: "compact" (the context was
+    compacted: trigger manual | auto, pre / post tokens) and "hook" (a hook sent Claude's reply
+    back: hook, text — what makes the reply after it make sense)."""
     items, tools, last_user = [], {}, None
     by_bg, stops = {}, {}   # background id → its row; a TaskStop call's id → the id it stops
     for o in entries:
@@ -5758,6 +5761,18 @@ def peek_timeline(entries):
                 stat = tool_stat(it["name"], tur)
                 if stat:
                     it["stat"] = stat
+        if o.get("type") == "system" and o.get("subtype") == "compact_boundary":
+            md = o.get("compactMetadata") or {}
+            items.append({"kind": "event", "event": "compact", "trigger": md.get("trigger") or "",
+                          "pre": md.get("preTokens"), "post": md.get("postTokens"), "ts": ts})
+            continue
+        a = o.get("attachment") if o.get("type") == "attachment" else None
+        if isinstance(a, dict) and a.get("type") == "hook_blocking_error":
+            be = a.get("blockingError")
+            text = be.get("blockingError") if isinstance(be, dict) else be
+            items.append({"kind": "event", "event": "hook", "hook": a.get("hookName") or a.get("hookEvent") or "",
+                          "text": str(text or "").strip()[:2000], "ts": ts})
+            continue
         note = notification_text(o)
         if note:
             # It names the call by its tool_use id, or only by the task's own id (an agent's
@@ -6093,6 +6108,7 @@ def live_sessions():
             "cwd": d.get("cwd"),
             "state": d.get("state"),
             "waitingOn": d.get("waitingOn"),
+            "phase": d.get("phase") or "",   # "compacting" while the context is being compacted
             "updatedAt": d.get("updatedAt"),
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),

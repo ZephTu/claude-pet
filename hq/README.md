@@ -39,11 +39,13 @@ captured automatically and sessions don't get the task rules.
 
 **Reading:** `hq sessions` / `hq peek` (and the board's Sessions column) read live sessions'
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
-`hq sessions --json` gives each one's `finished` — `{task, status, at}` once that session's own
+`hq sessions --json` gives each one's `phase` (`"compacting"` while its context is being compacted, else empty) and `finished` — `{task, status, at}` once that session's own
 hq-update moved its task from open to done or abandoned (the board then applies its
 "Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
-`{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`),
+`{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`,
+and events: `{kind:"event", event:"compact", trigger: manual|auto, pre, post, ts}` for a compaction,
+`{kind:"event", event:"hook", hook, text, ts}` for a hook that sent Claude's reply back),
 `turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply
 since, its `compact_boundary`'s `postTokens` plus what a request sent besides the conversation
 after the previous compaction, else the session's first reply, at most 60k) and `todos` (Claude's latest
