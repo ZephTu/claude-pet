@@ -2116,15 +2116,19 @@ def set_card_goal(card, text):
         atomic_write(card, "\n".join(lines))
 
 
+def task_template():
+    tpl = os.path.join(hq_root(), "templates", "TASK.md")
+    if not os.path.exists(tpl):
+        tpl = os.path.join(HOME_DIR, "template", "TASK.md")
+    return open(tpl, encoding="utf-8").read()
+
+
 def new_card(title, slug=None, category=None, project=None, lead=None, workdirs=None, focus=True):
     td = tasks_dir()
     nums = [int(m.group(1)) for d in os.listdir(td) for m in [re.match(r"T-(\d+)", d)] if m]
     tid = f"T-{(max(nums) + 1 if nums else 1):03d}"
     d = os.path.join(td, f"{tid}-{slugify(slug or title)}")
-    tpl = os.path.join(hq_root(), "templates", "TASK.md")
-    if not os.path.exists(tpl):
-        tpl = os.path.join(HOME_DIR, "template", "TASK.md")
-    text = open(tpl, encoding="utf-8").read()
+    text = task_template()
     # Categories are retired: projects and duties group tasks now. A card gets one only when asked
     # (`--category`, or carried over by `hq continue`); otherwise its template's line is dropped.
     fields = {"id": tid, "title": title}
@@ -6312,6 +6316,27 @@ def import_check(plan):
             return []
         return [flat_text(x) for x in v if x.strip()]
 
+    def text_of(where, item, key, flat=True):
+        v = item.get(key)
+        if v is None:
+            return ""
+        if key == "done_when" and isinstance(v, list) and all(isinstance(x, str) for x in v):
+            v = "\n".join("- " + re.sub(r"^\s*[-*]\s+", "", flat_text(x)) for x in v if x.strip())
+        if not isinstance(v, str):
+            problems.append(f"{where}: `{key}` is a string" + (" (or a list of criteria)" if key == "done_when" else ""))
+            return ""
+        return flat_text(v) if flat else v.strip()
+
+    def owner(path, extra):
+        """The project whose directory holds `path` (deepest wins), counting the plan's new ones."""
+        best, depth = "", -1
+        t = norm_path(path)
+        for name, roots in [(x["name"], x["paths"]) for x in load_projects()] + extra:
+            for r in map(norm_path, roots):
+                if (t == r or t.startswith(r + os.sep)) and len(r) > depth:
+                    best, depth = name, len(r)
+        return best
+
     def dirs(where, raw):
         out = []
         for d in raw:
@@ -6343,6 +6368,9 @@ def import_check(plan):
             continue
         if name in listed:
             problems.append(f"{where} already exists — leave it out of `projects` and use it by name in tasks")
+        elif os.path.exists(os.path.dirname(project_file(name))):
+            problems.append(f"{where}: {os.path.dirname(project_file(name))} is left from an earlier project — "
+                            "pick another name, or remove that folder first")
         elif same_name_project(name, listed + list(used)):
             problems.append(f"{where}: {same_name_project(name, listed + list(used))!r} already exists — "
                             "names that differ only in case would share a folder")
@@ -6351,7 +6379,7 @@ def import_check(plan):
         kind = pr.get("kind")
         if kind not in PROJECT_KINDS:
             problems.append(f"{where}: kind is goal (has an end) or duty (a standing responsibility), got {kind!r}")
-        due = flat_text(pr.get("due") or "")
+        due = text_of(where, pr, "due")
         if due:
             try:
                 dt.date.fromisoformat(due)
@@ -6359,13 +6387,13 @@ def import_check(plan):
                 problems.append(f"{where}: due is a date, YYYY-MM-DD (got {due!r})")
             if kind == "duty":
                 problems.append(f"{where}: a duty has no deadline")
-        text = {k: str(pr.get(k) or "").strip() for k in ("goal", "done_when", "brief")}
+        text = {k: text_of(where, pr, k, flat=False) for k in ("goal", "done_when", "brief")}
         for k, v in text.items():
             if v and is_placeholder(v):
                 problems.append(f"{where}: `{k}` is a placeholder, not a value")
         kinds[name] = kind
-        projects.append({"name": name, "kind": kind, "title": flat_text(pr.get("title") or "") or name,
-                         "parent": flat_text(pr.get("parent") or ""), "due": due,
+        projects.append({"name": name, "kind": kind, "title": text_of(where, pr, "title") or name,
+                         "parent": text_of(where, pr, "parent"), "due": due,
                          "paths": dirs(where, strings(where, pr, "paths")), **text})
     for pr in projects:
         parent = pr["parent"]
@@ -6395,12 +6423,14 @@ def import_check(plan):
             on_cards.setdefault(str(x)[:8], m.get("id"))
         if m.get("status") not in ("done", "abandoned"):
             open_titles.setdefault((m.get("project") or "", flat_text(m.get("title") or "").casefold()), m.get("id"))
+    plan_paths = [(x["name"], x["paths"]) for x in projects]
+    has_status = bool(STATUS_HEADING_RE.search(task_template()))
     for i, t in enumerate(raw_tasks):
         where = f"task #{i + 1}"
         if not isinstance(t, dict):
             problems.append(f"{where} is not an object")
             continue
-        title = flat_text(t.get("title") or "")
+        title = text_of(where, t, "title")
         if title:
             where = f"task {title!r}"
         else:
@@ -6408,18 +6438,18 @@ def import_check(plan):
         bad = set(t) - set(IMPORT_TASK_KEYS)
         if bad:
             problems.append(f"{where}: unknown key(s) {', '.join(sorted(bad))} (keys: {', '.join(IMPORT_TASK_KEYS)})")
-        project = flat_text(t.get("project") or "")
-        if project and project not in listed and project not in kinds:
+        project = text_of(where, t, "project")
+        if project and project not in listed and project not in kinds and project not in used:
             problems.append(f"{where}: no project {project!r} — existing ({', '.join(listed) or 'none'}) or in the plan's projects")
-        status = flat_text(t.get("status") or "active")
+        status = text_of(where, t, "status") or "active"
         if status not in STATUSES:
             problems.append(f"{where}: status must be one of {', '.join(STATUSES)} (got {status!r})")
-        dup = open_titles.get((project, title.casefold()))
-        if title and dup:
-            problems.append(f"{where}: {dup} already has this title in {project or 'no project'} — leave it out, or say what is new")
         state_lines = strings(where, t, "state")
         if any(x.startswith("#") for x in state_lines):
             problems.append(f"{where}: a state line can't be a heading")
+        if state_lines and not has_status:
+            problems.append(f"{where}: `state` needs a `## Status` / `## 当前状态` section, and the task template "
+                            "(templates/TASK.md) has none — leave state out or add the section to the template")
         sessions = []
         for sid in strings(where, t, "sessions"):
             hits = [x for x in known_ids if x == sid] or ([x for x in known_ids if x.startswith(sid)] if len(sid) >= 8 else [])
@@ -6438,14 +6468,27 @@ def import_check(plan):
                 claimed[full] = title
                 pet = pet_session(full) or {}
                 sessions.append({"id": full, "live": bool(pet) and pid_alive(pet.get("pid"))})
-        values = {"next": flat_text(t.get("next") or ""), "confidence": flat_text(t.get("confidence") or ""),
-                  "goal": str(t.get("goal") or "").strip()}
+        values = {"next": text_of(where, t, "next"), "confidence": text_of(where, t, "confidence"),
+                  "goal": text_of(where, t, "goal", flat=False)}
+        workdirs = dirs(where, strings(where, t, "workdirs"))
+        if not project:
+            # What the card will get anyway (new_card by its workdirs, a bind by the session's
+            # directory): decided here, so the preview and the title check see it.
+            for d in workdirs + [(pet_session(s["id"]) or {}).get("cwd") or "" for s in sessions if s["live"]]:
+                project = owner(d, plan_paths) if d else ""
+                if project:
+                    break
+        dup = open_titles.get((project, title.casefold()))
+        if title and dup:
+            problems.append(f"{where}: {dup} already has this title in {project or 'no project'} — leave it out, or say what is new")
+        elif title:
+            open_titles[(project, title.casefold())] = "another task in the plan"
         lists = {k: strings(where, t, k) for k in ("todos", "refs", "log")}
         for v in [title, values["next"], values["goal"]] + state_lines + sum(lists.values(), []):
             if v and is_placeholder(v):
                 problems.append(f"{where}: {v!r} is a placeholder, not a value")
         tasks.append({"title": title, "project": project, "status": status, "state": state_lines,
-                      "workdirs": dirs(where, strings(where, t, "workdirs")), "sessions": sessions,
+                      "workdirs": workdirs, "sessions": sessions,
                       **values, **lists})
     if not projects and not tasks and not problems:
         problems.append("the plan is empty")
@@ -6476,6 +6519,9 @@ def import_apply(projects, tasks):
             + [("ref", x) for x in t["refs"]] + [("log", note)] + [("log", x) for x in t["log"]]
         with card_lock(card):
             left = _apply_update(card, entries, "import")
+            if left:    # checked beforehand, so not expected: write what can be written, and say so
+                with contextlib.suppress(Exception):
+                    _apply_update(card, [e for e in entries if e[0] != "state"], "import")
         for s in t["sessions"]:
             if s["live"]:
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -6485,8 +6531,9 @@ def import_apply(projects, tasks):
             have = parse_card(card).get("sessions")
             have = have if isinstance(have, list) else []
             set_fields(card, {"sessions": have + [x for x in ended if x not in have]})
-        made_tasks.append({"id": tid, "title": t["title"], "project": t["project"], "status": t["status"],
-                           "problems": left})
+        meta = parse_card(card)
+        made_tasks.append({"id": tid, "title": t["title"], "project": meta.get("project") or "",
+                           "status": meta.get("status"), "problems": left})
     return made_projects, made_tasks
 
 
@@ -6524,7 +6571,7 @@ def cmd_import(args):
     problems, projects, tasks = import_check(plan)
     if problems or args.dry_run:
         if args.json:
-            print(json.dumps({"ok": not problems, "dry_run": True, "problems": problems,
+            print(json.dumps({"ok": not problems, "dry_run": args.dry_run, "written": False, "problems": problems,
                               "projects": projects, "tasks": tasks}, ensure_ascii=False, indent=1))
         else:
             if problems:
@@ -6534,15 +6581,20 @@ def cmd_import(args):
                 print(import_preview(projects, tasks))
         sys.exit(1 if problems else 0)
     made_projects, made_tasks = import_apply(projects, tasks)
+    failed = any(t["problems"] for t in made_tasks)
     if args.json:
-        print(json.dumps({"ok": True, "projects": made_projects, "tasks": made_tasks}, ensure_ascii=False, indent=1))
-        return
+        print(json.dumps({"ok": not failed, "dry_run": False, "written": True, "projects": made_projects,
+                          "tasks": made_tasks}, ensure_ascii=False, indent=1))
+        sys.exit(1 if failed else 0)
     if made_projects:
         print(f"created {len(made_projects)} project(s): {', '.join(made_projects)}")
     for t in made_tasks:
         print(f"{t['id']}  {t['status']:<13} {t['project'] or '-':<16} {t['title']}")
         for p in t["problems"]:
             print(f"      ! {p}")
+    if failed:
+        print("Some cards were written only in part (marked !): fix them on the board or with hq set / hq log.")
+        sys.exit(1)
 
 
 def cmd_sessions(args):

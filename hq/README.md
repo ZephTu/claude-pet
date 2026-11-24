@@ -106,8 +106,8 @@ hq import plan.json             # create it all: refused whole, problems listed,
             "sessions": ["<session id or 8+ char prefix>"], "confidence": "medium"}]}
 ```
 
-`projects` holds only new ones (also `done_when`, `brief`); a task names an existing project
-directly (also `goal`, `log`). Live sessions are bound to their tasks, ended ones recorded on the
+`projects` holds only new ones (also `done_when` — a list of criteria — and `brief`); a task names an
+existing project directly (also `goal`, `log`), or with none gets the one whose directory holds its workdir. Live sessions are bound to their tasks, ended ones recorded on the
 cards; a session already on a task, a taken name or an open card with the same title is refused.
 `hq scan --apply-projects [--only a,b]` still makes one project per repository, without a kind —
 kept for scripts; onboarding doesn't use it.

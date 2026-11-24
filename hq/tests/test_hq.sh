@@ -182,6 +182,28 @@ grep -q "^status: waiting-on-me" "$C1" && grep -q '^next: "Review the diff"' "$C
   && ok "import binds live sessions and records ended ones on the card" || fail "import sessions"
 rc=0; out="$("$HQ" import "$IP/plan.json")" || rc=$?
 [ "$rc" = 1 ] && echo "$out" | grep -q "already exists" && echo "$out" | grep -q "33334444 is already on" && ok "importing the same plan again is refused" || fail "import rerun: $out"
+cat > "$IP/review.json" <<EOF
+{"projects": [{"name": "imp-d2", "kind": "duty", "done_when": ["CI green", "no P1 open"], "paths": ["$IP/repo/sub"]}],
+ "tasks": [{"title": "Same"}, {"title": "same"}, {"title": "Odd", "next": ["a", "b"]}, {"title": "Guessed", "workdirs": ["$IP/repo/sub"]}]}
+EOF
+mkdir -p "$IP/repo/sub"
+rc=0; out="$("$HQ" import "$IP/review.json" --dry-run)" || rc=$?
+[ "$rc" = 1 ] && echo "$out" | grep -q "another task in the plan" && echo "$out" | grep -q "\`next\` is a string" \
+  && echo "$out" | grep -A1 "^  imp-d2" | grep -q "Guessed" && ok "import: duplicate titles in the plan and non-string values refused; a task's project guessed from its workdir shows in the preview" || fail "import review checks: $out"
+python3 - "$IP/review.json" <<'PY2'
+import json, sys
+p = json.load(open(sys.argv[1])); p["tasks"] = [p["tasks"][0], p["tasks"][3]]
+json.dump(p, open(sys.argv[1], "w"))
+PY2
+"$HQ" import "$IP/review.json" >/dev/null && grep -q "^- CI green" "$T/root/projects/imp-d2/PROJECT.md" && grep -q "^- no P1 open" "$T/root/projects/imp-d2/PROJECT.md" \
+  && grep -q "^project: imp-d2" "$(ls -d "$T"/root/tasks/*-guessed)/TASK.md" && ok "import: done_when as a list becomes criteria; the guessed project is the one written" || fail "import done_when list / guessed project"
+cp "$T/root/templates/TASK.md" "$IP/tpl.bak"; sed -i.x 's/^## Status$/## Where it stands/; s/^## 当前状态$/## 现状/' "$T/root/templates/TASK.md"
+rc=0; out="$("$HQ" import - --dry-run <<< '{"tasks": [{"title": "Stateful", "state": ["half done"]}]}')" || rc=$?
+cp "$IP/tpl.bak" "$T/root/templates/TASK.md"; rm -f "$T/root/templates/TASK.md.x"
+[ "$rc" = 1 ] && echo "$out" | grep -q "task template" && ok "import: state lines refused up front when the task template has no Status section" || fail "import template check: $out"
+mkdir -p "$T/root/projects/Stale"; rc=0; out="$("$HQ" import - --dry-run <<< '{"projects": [{"name": "stale", "kind": "duty"}]}')" || rc=$?
+[ "$rc" = 1 ] && echo "$out" | grep -q "left from an earlier project" && ok "import: a leftover project folder (any case) is not reused" || fail "import stale folder: $out"
+rmdir "$T/root/projects/Stale"
 rm "$HOME/.claude/pet/sessions/11112222-aaaa-bbbb-cccc-000000000001.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null || true
 rm -r "$HOME/.claude/projects/-x-imp"
 

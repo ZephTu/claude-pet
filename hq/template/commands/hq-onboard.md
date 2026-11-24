@@ -33,6 +33,6 @@ A project in HQ is a **line of work, not a folder**: a *duty* (a standing respon
 }
 ```
 
-Only `name` + `kind` (projects) and `title` (tasks) are required. `projects` holds only new ones — a task names an existing project directly. Optional on a project: `done_when` (a duty: what "running well" looks like) and `brief` (what every session on its tasks should be told). Optional on a task: `goal` and `log` (lines for its log). Import binds the live sessions to their tasks and records the ended ones on the cards, and logs on each card that it came from onboarding with its confidence.
+Only `name` + `kind` (projects) and `title` (tasks) are required. `projects` holds only new ones — a task names an existing project directly. Optional on a project: `done_when` (a list of criteria; a duty: what "running well" looks like) and `brief` (what every session on its tasks should be told). Optional on a task: `goal` and `log` (lines for its log). A task with no `project` gets the one whose directory holds its workdir (or its live session's), as the dry run shows. Import binds the live sessions to their tasks and records the ended ones on the cards, and logs on each card that it came from onboarding with its confidence.
 
 **6. Wrap up.** Reply with what was created (lines of work, tasks per line, sessions bound), what was skipped, and where to adjust: the task board (double-click the Claude Pet cat; everything is editable on Projects & duties) or by asking Claude in any session.
