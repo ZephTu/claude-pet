@@ -615,7 +615,10 @@ function render() {
   if (active && active.tagName === "SELECT") return;
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
-  const activeRegion = active && active.closest ? active.closest("#modal") : null;
+  // Which copy it was: the conversation window, the task drawer and the page can each show a box
+  // with the same key (an ask's note box is in Needs you and in the drawer).
+  const regionOf = (x) => (x.closest("#modal, #drawer") || {}).id || "";
+  const activeRegion = active && active.closest ? regionOf(active) : "";
   const taScrolls = textScrolls(document);
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
@@ -682,10 +685,9 @@ function render() {
   // a session's message box in the Sessions column shares its key with the conversation window's
   // reply box, and grabbing the first match moved the cursor to the one hidden behind the window.
   if (key && !active.isConnected) {
-    const inModal = Boolean(activeRegion && activeRegion.id === "modal");
     // …and a visible one: Today's cards stay in the DOM, hidden, while All is showing.
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
-      .find((x) => Boolean(x.closest("#modal")) === inModal && x.getClientRects().length);
+      .find((x) => regionOf(x) === activeRegion && x.getClientRects().length);
     if (el) {
       el.focus();
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
@@ -772,13 +774,13 @@ function renderAsks() {
 
 // A task with several open asks answers them together: each answer button only picks, and one
 // Send at the bottom records them all and types a single message into the session.
-function renderAskGroup(t, asks) {
-  if (asks.length < 2) return asks.map((a) => askCard(t, a)).join("");
+function renderAskGroup(t, asks, extra = {}) {
+  if (asks.length < 2) return asks.map((a) => askCard(t, a, extra)).join("");
   const target = groupTarget(asks);
   const picked = asks.filter((a) => ui.picks[a.id]).length;
   const sending = asks.some((a) => ui.resolving.has(a.id));
   const allPush = target && asks.every((a) => wantPush(a));
-  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { group: true, sharedTarget: Boolean(target) })).join("")}
+  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { ...extra, group: true, sharedTarget: Boolean(target) })).join("")}
     <div class="askbar">
       <span class="meta">${T(`${picked} of ${asks.length} answered`, `已选 ${picked} / ${asks.length}`)}</span>
       ${target ? `<label class="push" title="${T("Type all the answers into that session as one message, so it carries on now", "把所有回答合成一条消息发给那个 session，让它马上接着干")}">
@@ -804,6 +806,7 @@ function askCard(t, a, opt = {}) {
   const sec = t.id === secId();
   const meta = opt.peek ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : sec ? `${secChip()}<span class="chip link" data-action="open-secretary">${esc(a.id)}</span>${ago(a.ts)}`
+    : opt.inTask ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
   const res = opt.peek || sec ? RESOLUTIONS.filter(([r]) => r !== "always")
     : RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []);
@@ -1326,6 +1329,16 @@ const laneCols = () => LANES.concat(ui.showDone ? ["done"] : []);
 const KIND_ICON = { goal: "◆", duty: "↻" };
 const kindIcon = (pr) => (pr && pr.kind ? `<i class="ki ${esc(pr.kind)}">${KIND_ICON[pr.kind] || ""}</i>` : "");
 
+// An ask on a card answers in one click — Yes or No, with no note, sent on to its session as
+// in Needs you; anything longer (a note, Later, a grant) is the drawer's, which "…" opens at it.
+function quickAnswer(t, a) {
+  const busy = ui.resolving.has(a.id);
+  const btn = (r, label) => `<button class="qa-b res-${r}" data-action="resolve" data-quick="1" data-id="${esc(a.id)}" data-res="${r}" ${busy ? "disabled" : ""}
+    title="${esc((RESOLUTIONS.find((x) => x[0] === r) || [])[2] || "")}">${label}</button>`;
+  return `<span class="qa">${btn("do", T("Yes", "可以"))}${btn("drop", T("No", "不要"))}<button class="qa-b" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}"
+    title="${T("Answer with a note, Later, a grant… — opens the task at this question", "写说明、稍后、授权……——打开任务，停在这个问题")}">…</button></span>`;
+}
+
 // A task's card on the boards. Clicking it opens the side drawer with everything; the card itself
 // is what you need to decide where to look: what it waits on you for, its next step, and one line
 // for its sessions. opt.compact (All): one line of title and of next step.
@@ -1335,12 +1348,12 @@ function kcard(t, opt = {}) {
   const star = focusIds().includes(t.id);
   const asks = openAsks(t), mine = myTodos(t);
   const rows = [
-    ...asks.map((a) => `<div class="row"><span class="q">?</span><span class="t">${esc(a.text)}</span></div>`),
+    ...asks.map((a) => `<div class="row ask-q"><span class="q">?</span><span class="t" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}" title="${T("Answer it here or with a note — opens the task", "在详情里回答，可以写说明")}">${esc(a.text)}</span>${quickAnswer(t, a)}</div>`),
     ...(t.waiting_on_me ? [`<div class="row"><span class="q">!</span><span class="t">${esc(t.waiting_on_me)}</span></div>`] : []),
     ...mine.map((x) => `<div class="row"><span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span><span class="t">${esc(x.text)}</span></div>`),
   ];
   const max = opt.compact ? 1 : 2;
-  const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
+  const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more" data-action="ask-answer" data-task="${esc(t.id)}">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
   const next = t.next && ln !== "done" ? `<div class="kc-next"><b>${ln === "blocked" ? T("Waiting on", "在等") : T("Next", "下一步")}</b>${esc(t.next)}</div>` : "";
   const flags = list(ui.flags[t.id]);
   return `<div class="kc l-${ln} ${opt.compact ? "compact" : ""} ${ln === "done" ? "done" : ""} ${ui.drawer === t.id ? "sel" : ""}" id="kc-${esc(t.id)}"
@@ -1899,7 +1912,13 @@ function renderTaskBody(t) {
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
         </div></div>`;
+  // Claude's open questions come first: they are what the task waits on you for.
+  const asks = openAsks(t);
+  const askSec = asks.length || laterAsks(t).length ? `<div class="dr-asks">
+      ${asks.length ? `<div class="sec-h"><h3>${T("Claude is asking", "Claude 在问")} <span class="meta">${asks.length}</span></h3></div>${renderAskGroup(t, asks, { inTask: true })}` : ""}
+      ${laterLine(t)}</div>` : "";
   return `<div class="task-body">
+    ${askSec}
     ${head}
     ${stillRunning(t)}
     <div class="tcols">
@@ -2959,7 +2978,9 @@ function drawSecretary(toBottom) {
       : `<div class="pi off">${T("None yet", "还没有")}</div>`}
     <hr><button class="pi" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button></div>`;
   const MEM = { "profile.md": T("About you", "关于你"), "people.md": T("Colleagues", "同事"), "playbooks.md": T("Recurring processes", "常做的流程"), "reports.md": T("How reports are written", "报告怎么写") };
-  const mem = Object.keys(st.files || {}).filter((f) => st.files[f]);
+  // Always in this order (hq's JSON doesn't keep one); anything new after them, by name.
+  const memRank = (f) => { const i = Object.keys(MEM).indexOf(f); return i < 0 ? 99 : i; };
+  const mem = Object.keys(st.files || {}).filter((f) => st.files[f]).sort((a, b) => memRank(a) - memRank(b) || a.localeCompare(b));
   const evening = sch.reports === false
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
@@ -3745,10 +3766,26 @@ function jumpSource(el) {
   return "board";
 }
 
+// Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
+// say) is still the drawer's, and a slash-command pick hides its list on mousedown.
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch";
+let pressedIn = false;
+document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
+
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
   const el = ev.target.closest("[data-action]");
+  // The task drawer closes on a click anywhere outside it — but not one in a dialog or toast over
+  // it, one that ends a text selection, or one on a card or button that opens a drawer itself
+  // (they switch or toggle it). A target already gone was redrawn under the click: leave it.
+  if (ui.drawer && document.contains(ev.target) && !pressedIn
+      && !ev.target.closest(DRAWER_KEEPERS)
+      && !(el && ["open-task", "open-sessions", "goto", "ctx-goto", "ask-answer"].includes(el.dataset.action))
+      && !String(window.getSelection() || "").trim()) {
+    ui.drawer = null;
+    render();
+  }
   // The secretary's menus close on any click but their own button's, or the evening report's
   // or the scan's switch (you see it flip).
   if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
@@ -3775,7 +3812,8 @@ document.addEventListener("click", async (ev) => {
       // one answer per ask, even if the button is clicked again while it's being sent
       if (ui.resolving.has(d.id)) return;
       ui.resolving.add(d.id);
-      const note = answerNote(d.id);
+      // A card's one-click Yes / No sends no note: the card doesn't show the draft one.
+      const note = d.quick ? "" : answerNote(d.id);
       const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
       // Later leaves the ask open, so a half-written note and its images stay for tomorrow.
       if (d.res !== "snooze") { delete ui.drafts["note:" + d.id]; delete ui.atts["ask:" + d.id]; }
@@ -3828,9 +3866,16 @@ document.addEventListener("click", async (ev) => {
     case "do-todo": return doTodo(d.task, d.text);
     case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.add(d.id); return render();
-    case "grant-open": ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
-      { const el = document.querySelector(`[data-key="${CSS.escape("grant:" + d.id)}"]`); if (el) { el.focus(); el.select(); } }
+    case "grant-open": {
+      // The box by the button clicked: Needs you, the drawer and the conversation window can each
+      // have one. (Asked before render() replaces the button.)
+      const where = el.closest("#drawer, #modal");
+      ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
+      { const box = [...document.querySelectorAll(`[data-key="${CSS.escape("grant:" + d.id)}"]`)]
+          .find((x) => x.closest("#drawer, #modal") === where && x.getClientRects().length);
+        if (box) { box.focus(); box.select(); } }
       return;
+    }
     case "grant-cancel": ui.granting.delete(d.id); delete ui.drafts["grant:" + d.id]; return render();
     case "grant-preset": ui.drafts["grant:" + d.id] = d.text; saveDrafts(); return render();
     case "grant-preset-task": ui.drafts["addgrant:" + d.for] = d.text; saveDrafts(); return render();
@@ -3902,6 +3947,16 @@ document.addEventListener("click", async (ev) => {
         toast(T("Marked handled", "已标为处理好"), false, () => act("set", { task: d.task, fields: [`waiting_on_me=${prev}`] }, T("Undone", "已撤销")));
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
+    }
+    case "ask-answer": {
+      // Open the task with its questions on top, at this one, its note box ready to type in —
+      // unless the click ended a text selection (copying the question).
+      if (el.tagName !== "BUTTON" && String(window.getSelection() || "").trim()) return;
+      ui.drawer = d.task; ui.launchMenu = null;
+      render();
+      const box = d.id ? document.querySelector(`#drawer [data-key="${CSS.escape("note:" + d.id)}"]`) : document.querySelector("#drawer .dr-asks");
+      if (box) { box.scrollIntoView({ block: "center" }); if (box.focus) box.focus(); }
+      return;
     }
     case "open-task":
       // Only a click on the card itself opens it — not one in a box or on a label, or one that
