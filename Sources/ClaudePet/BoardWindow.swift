@@ -486,6 +486,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             NSWorkspace.shared.open(url)
             return (["ok": true], nil)
         case "openPath": return openPath(str("path"), cwd: str("cwd"))
+        // The board's reading area: a Markdown or text file shown on the board itself.
+        case "read-doc": return readDoc(str("path"), cwd: str("cwd"), since: (body["since"] as? NSNumber)?.doubleValue)
 
         // Scheduled jobs — see JobsController.
         // The secretary's chat (SecretaryController): its state, setting it up, a message, stop.
@@ -1040,6 +1042,23 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     // MARK: - Files
+
+    /// A document for the reading area (DocReader): its text, or just "unchanged" when the board
+    /// already shows the version on disk (`since`, the mtime it read).
+    private func readDoc(_ raw: String, cwd: String, since: Double?) -> (Any?, String?) {
+        switch DocReader.read(raw, cwd: cwd, since: since) {
+        case .success(.text(let path, let text, let mtime, let size)):
+            return (["path": path, "text": text, "mtime": mtime, "size": size], nil)
+        case .success(.unchanged(let path, let mtime)):
+            return (["path": path, "mtime": mtime, "unchanged": true], nil)
+        case .failure(.relativeWithoutDir):
+            return (nil, L("relative path and no working directory", "是相对路径，但没有工作目录"))
+        case .failure(.notFound(let p)): return (nil, L("not found: \(p)", "找不到：\(p)"))
+        case .failure(.notDocument(let p)): return (nil, L("not a Markdown or text file: \(p)", "不是 Markdown 或文本文件：\(p)"))
+        case .failure(.tooBig(let p)): return (nil, L("too big to show here (over 4 MB): \(p)", "太大了，这里不显示（超过 4 MB）：\(p)"))
+        case .failure(.unreadable(let p)): return (nil, L("can't read \(p)", "读不了 \(p)"))
+        }
+    }
 
     /// Opens a path mentioned in a conversation with its default app. Paths
     /// come from transcript text, so anything that could run — an app, a

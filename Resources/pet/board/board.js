@@ -99,11 +99,11 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
-  drawer: null, showDone: pref("hq-show-done", "0") === "1",
+  drawer: null, diffOpen: new Set(), showDone: pref("hq-show-done", "0") === "1",
   sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", shown: {}, hover: new Set(), heldBack: false,
   // Tasks whose open @claude todos are unfolded (folded by default).
@@ -466,11 +466,20 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // timed rebuild while a mouse button is down.
 async function refresh(force) {
   let sig = null;
+  const readNo = ++ui.readNo;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
       api("pet").catch(() => "{}"), (ui.mode === "jobs" || ui.mode === "projects") && typeof loadJobs === "function" ? loadJobs() : ""]);
+    // Reads overlap (a timer's, one after a save); an older one finishing last must not put back
+    // what a newer one has already shown.
+    if (readNo < ui.readDone) { if (force !== "timer") render(); return; }
+    ui.readDone = readNo;
     sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
+    for (const [id, p] of Object.entries(ui.statusPending)) {
+      if (p.after !== undefined && readNo > p.after) delete ui.statusPending[id];   // read after the save: hq has it
+      else { const t = taskById(id); if (t) t.status = p.status; }
+    }
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
@@ -1967,7 +1976,7 @@ function renderTaskBody(t) {
   const tools = `<div class="tools">
       <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
         title="${editNext ? T("Done editing", "改完了") : T("Edit status, project and next", "修改状态、项目和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
-      <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Open the card file", "用编辑器打开任务卡文件")}">${T("Open card", "打开任务卡")}</button>
+      <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Read the card file in the reading area", "在阅读区看任务卡文件")}">${T("Open card", "打开任务卡")}</button>
       ${isOpen(t) && t.id !== secId() ? `<button class="btn small" data-action="continue" data-task="${esc(t.id)}" data-confirm="${T("Continue?", "续？")}"
         title="${T("Continue on a new card dated today: open todos, status, next step, key links and grants come along; this card is closed and its sessions move over", "续到一张今天的新卡：未完成待办、当前状态、下一步、关键链接和授权都带过去；这张卡关闭，绑定的 session 一起换过去")}">${T("Continue today", "续到今天")}</button>` : ""}
       ${launchSplit(t)}
@@ -2139,14 +2148,32 @@ async function stopAll(list, lead = "") {
 // Resume picks them up. A task its own session finished (that session's hq-update) is handled the
 // same way, see sessionFinishes; one finished by `hq set` only gets the "still running" bar.
 const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
+// The new status shows at once; saving it (hq) and reading the board back take a few hundred ms.
+// Until a read started after the save, refreshes keep showing the pick (ui.statusPending). Saves of
+// one task run one after another, so quick re-picks land in order and the last one wins; only the
+// last pick goes on to stop its sessions or ask about them.
 async function setStatus(id, status) {
+  const seq = ui.statusSeq[id] = (ui.statusSeq[id] || 0) + 1;
+  const latest = () => ui.statusSeq[id] === seq;
   const live = isOpen({ status }) ? [] : liveFor(id);
-  try { await api("set", { task: id, fields: [`status=${status}`] }); }
-  catch (e) { toast(String(e.message || e), true); await refresh(); return false; }
+  const t = taskById(id);
+  if (t) t.status = status;
+  const pend = ui.statusPending[id] = { status };
+  render();
+  const save = (ui.statusQ[id] || Promise.resolve()).then(() => api("set", { task: id, fields: [`status=${status}`] }));
+  ui.statusQ[id] = save.catch(() => {});
+  try { await save; }
+  catch (e) {
+    toast(String(e.message || e), true);
+    if (ui.statusPending[id] === pend) { delete ui.statusPending[id]; await refresh(); }   // a newer pick is still on its way otherwise
+    return false;
+  }
+  if (ui.statusPending[id] === pend) pend.after = ui.readNo;
+  if (!latest()) return true;
   if (live.length && finishStop() === "stop") { await stopAll(live, T("Status saved; ", "状态已保存；")); return true; }
   toast(T("Status saved", "状态已保存"));
   await refresh();
-  if (live.length && finishStop() === "ask") { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
+  if (live.length && finishStop() === "ask" && latest()) { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
   return true;
 }
 // The question, in its own small window over the board. Its list is the task's sessions at the
@@ -2155,7 +2182,9 @@ function drawFinishAsk() {
   const box = $("#confirm");
   const a = ui.finishAsk;
   const live = a ? liveFor(a.task) : [];
-  if (!a || !live.length) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
+  const t = a && taskById(a.task);
+  // Nothing left to stop, or the task is open again (picked back before the save landed).
+  if (!a || !live.length || (t && isOpen(t))) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
   const word = esc(STATUS_SHORT[a.status] || a.status);
   const n = live.length;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Stop its sessions?", "停掉它的 session？")}">
@@ -2900,7 +2929,7 @@ function secRows(m, busy, doing) {
       const html = note && note.kind === "report"
         ? `<div class="report"><div class="rh">📄 <b>${report ? `${kindWord(report.kind)} · ${esc(report.date.slice(5))}` : T("Report", "报告")}</b></div>
             <div class="rb md">${markdown(parts.text, scope)}</div>
-            ${report ? `<div class="rf"><button class="lnk" data-action="open" data-path="${esc(report.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${T("Open the full report", "打开全文")}</button></div>` : ""}</div>`
+            ${report ? `<div class="rf"><button class="lnk" data-action="open" data-path="${esc(report.path)}" title="${T("Read it in the reading area; Open in editor there to edit — it learns from your edits", "在阅读区打开；要改就点那里的“用编辑器打开”——它会照你的修改调整写法")}">${T("Open the full report", "打开全文")}</button></div>` : ""}</div>`
         : `<div class="bub md">${markdown(parts.text, scope)}</div>`;
       rows.push({ side: "it", key: `a|${reply.ts}`, html, copy: { who: "it", text: parts.text } });
     }
@@ -2994,7 +3023,7 @@ function secSide(m, st, o) {
   const r0 = o.reports[0];
   const writeNow = `<button class="ss-ib" data-action="secretary-report-now" title="${T("Write one now", "让它现在写一份")}" aria-label="${T("Write one now", "让它现在写一份")}" ${o.busy || ui.sending.has(SEC) ? "disabled" : ""}>${si("pen")}</button>`;
   const reps = sec("rep", T("Reports", "报告"), 0, r0 ? `${esc(r0.date.slice(5))} ${kindWord(r0.kind)} · ${o.dayWord(r0.date)}` : T("none yet", "还没有"),
-    o.reports.length ? o.reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${o.dayWord(r.date)}</span></button>`).join("")
+    o.reports.length ? o.reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Read it in the reading area; Open in editor there to edit — it learns from your edits", "在阅读区打开；要改就点那里的“用编辑器打开”——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${o.dayWord(r.date)}</span></button>`).join("")
       : `<div class="ss-empty">${T("None yet — the pen writes one now.", "还没有——点笔让它现在写一份。")}</div>`, writeNow);
 
   // What it does by itself: one row each — icon, name, run now, switch.
@@ -3020,7 +3049,7 @@ function secSide(m, st, o) {
   const dots = `<span class="dots" title="${esc(autos.map(([on], i) => `${names[i]}: ${on ? T("on", "开") : T("off", "关")}`).join("\n"))}">${autos.map(([on, , bad]) => `<i class="${bad ? "bad" : on ? "on" : ""}"></i>`).join("")}</span>`;
   const auto = sec("auto", T("Runs by itself", "自动做的事"), 0, dots, autos.map(([, h]) => h).join(""));
 
-  const memo = o.mem.length ? sec("mem", T("What it remembers", "它记得的"), 0, "", `<div class="ss-mems">${o.mem.map((f) => `<button class="ss-mem" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${esc(T("Open it to edit", "打开编辑") + " · " + f)}">${esc(o.MEM[f] || f)}</button>`).join("")}</div>`) : "";
+  const memo = o.mem.length ? sec("mem", T("What it remembers", "它记得的"), 0, "", `<div class="ss-mems">${o.mem.map((f) => `<button class="ss-mem" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${esc(T("Read it in the reading area; Open in editor there to edit", "在阅读区打开；要改就点那里的“用编辑器打开”") + " · " + f)}">${esc(o.MEM[f] || f)}</button>`).join("")}</div>`) : "";
   return `<aside class="sec-side">${watch}${props}<div class="ss-zone">${T("Reports & settings", "报告和设置")}</div>${reps}${auto}${memo}</aside>`;
 }
 
@@ -3068,7 +3097,7 @@ function drawSecretary(toBottom) {
   const dayWord = (date) => { const n = Math.round((new Date(localDate(new Date().toISOString())) - new Date(date)) / 86400000);
     return n === 0 ? T("today", "今天") : n === 1 ? T("yesterday", "昨天") : T(`${n} days ago`, `${n} 天前`); };
   const repPop = `<div class="pop" role="menu"><div class="ph">${T("Reports", "报告")}</div>
-    ${reports.length ? reports.map((r) => `<button class="pi" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")
+    ${reports.length ? reports.map((r) => `<button class="pi" data-action="open" data-path="${esc(r.path)}" title="${T("Read it in the reading area; Open in editor there to edit — it learns from your edits", "在阅读区打开；要改就点那里的“用编辑器打开”——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")
       : `<div class="pi off">${T("None yet", "还没有")}</div>`}
     <hr><button class="pi" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button></div>`;
   const MEM = { "profile.md": T("About you", "关于你"), "people.md": T("Colleagues", "同事"), "playbooks.md": T("Recurring processes", "常做的流程"), "reports.md": T("How reports are written", "报告怎么写") };
@@ -3080,7 +3109,7 @@ function drawSecretary(toBottom) {
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
     : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
   const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}<hr><div class="ph">${T("Finished todos", "完成的待办")}</div>${secCloseItems(st, "pi")}
-    ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
+    ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Read it in the reading area; Open in editor there to edit", "在阅读区打开；要改就点那里的“用编辑器打开”")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
   const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
 
@@ -3437,6 +3466,146 @@ function hashText(s) {
   return (h >>> 0).toString(36);
 }
 
+// ------------------------------------------------------------------ reply templates
+// A fenced block whose language names a template is drawn by the board, not shown as code: the
+// writer (the secretary, any session) gives the content, the board owns the HTML. Nothing a model
+// writes is ever put on the page as HTML. ```diff / ```patch: a file change, GitHub style.
+// ```draft: a message to send, with a copy button.
+const TEMPLATES = {
+  diff: (code, key) => diffView(code, key),
+  patch: (code, key) => diffView(code, key),
+  draft: (code, key) => draftView(code, key),
+};
+
+// A unified diff (`diff --git`, `---`/`+++`, `@@` hunks; bare +/- lines work too) as one box per
+// file: its name and +/− counts, then old and new line numbers beside each line, removals red,
+// additions green, the changed words in a paired -/+ line marked. A long run of unchanged lines
+// folds to its first and last three; a click unfolds it (ui.diffOpen, by `key`).
+const DIFF_FOLD = 8, DIFF_EDGE = 3;
+function parseDiff(code) {
+  const lines = code.replace(/\n$/, "").split("\n");
+  const files = [];
+  // `left`: the lines still due in the open hunk ({o, n} from its @@ counts), null outside one
+  // or when its header gave no counts. Inside a hunk, "--- x" / "+++ y" are a removed and an
+  // added line (an SQL comment, a C ++i), not the next file's header.
+  let f = null, on = 0, nn = 0, numbered = false, left = null, inHunk = false;
+  const start = (name) => { f = { name, rows: [], add: 0, del: 0 }; files.push(f); numbered = false; inHunk = false; left = null; };
+  const strip = (p) => p.replace(/\t.*$/, "").replace(/^"(.*)"$/, "$1").replace(/^[ab]\//, "").trim();
+  const due = () => !inHunk || (left && left.o <= 0 && left.n <= 0);
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    let m;
+    // (A hunk's lines start with " ", "+" or "-": "diff --git" can't be one of them.)
+    if ((m = /^diff --git "?a\/(.+?)"? "?b\/(.+?)"?$/.exec(l))) { start(m[2]); f.git = true; continue; }
+    if (f && f.git && !f.rows.length && /^(index |new file mode|deleted file mode|old mode|new mode|similarity index|rename from|rename to|Binary files)/.test(l)) continue;
+    // A header only outside a hunk and when "+++ " follows: "--- x" alone is a removed line "-- x".
+    // In a hunk without counts, only when an @@ comes right after the pair.
+    if ((due() || (!left && /^@@/.test(lines[i + 2] || ""))) && l.startsWith("--- ") && (lines[i + 1] || "").startsWith("+++ ")) {
+      const oldName = strip(l.slice(4)), newName = strip(lines[i + 1].slice(4));
+      const name = newName === "/dev/null" ? oldName : newName;
+      if (!f || !f.git || f.rows.length) start(name); else f.name = name;
+      i++;
+      continue;
+    }
+    // A hunk header; models often leave out the numbers ("@@" or "@@ … @@"): then no line numbers.
+    if (/^@@/.test(l)) {
+      if (!f) start("");
+      m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(l);
+      numbered = Boolean(m);
+      if (m) { on = Number(m[1]); nn = Number(m[3]); left = { o: m[2] === undefined ? 1 : Number(m[2]), n: m[4] === undefined ? 1 : Number(m[4]) }; }
+      else left = null;
+      inHunk = true;
+      f.rows.push({ t: "hunk", text: l });
+      continue;
+    }
+    if (!f) start("");
+    const c = l[0], body = l.slice(1);
+    if (c === "+") { f.rows.push({ t: "add", n: numbered ? nn++ : "", text: body }); f.add++; if (left) left.n--; }
+    else if (c === "-") { f.rows.push({ t: "del", o: numbered ? on++ : "", text: body }); f.del++; if (left) left.o--; }
+    else if (c === "\\") f.rows.push({ t: "note", text: l });
+    else { f.rows.push({ t: "ctx", o: numbered ? on++ : "", n: numbered ? nn++ : "", text: c === " " ? body : l }); if (left) { left.o--; left.n--; } }
+  }
+  return files.filter((x) => x.rows.length || x.name);
+}
+// The words that changed between a removed line and the added line that replaces it: everything
+// between their common start and common end.
+function diffMark(a, b) {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  // Nothing in common: the whole line changed, and marking all of it says nothing.
+  const wrap = (x) => { const mid = x.length - p - s;
+    return (p === 0 && s === 0) || mid <= 0 ? esc(x) : esc(x.slice(0, p)) + `<mark>${esc(x.slice(p, p + mid))}</mark>` + esc(x.slice(p + mid)); };
+  return [wrap(a), wrap(b)];
+}
+function diffView(code, key) {
+  const files = parseDiff(code);
+  if (!files.length) return `<pre><code>${linkifyCode(code.replace(/\n$/, ""))}</code></pre>`;
+  return `<div class="diffv">${files.map((f, fi) => {
+    const rows = f.rows;
+    const html = rows.map((r) => (r.t === "hunk" || r.t === "note" ? null : esc(r.text)));
+    // Pair a run of removals with the run of additions right after it, line by line.
+    for (let i = 0; i < rows.length;) {
+      if (rows[i].t !== "del") { i++; continue; }
+      let d = i; while (d < rows.length && rows[d].t === "del") d++;
+      let a = d; while (a < rows.length && rows[a].t === "add") a++;
+      for (let k = 0; k < Math.min(d - i, a - d); k++) [html[i + k], html[d + k]] = diffMark(rows[i + k].text, rows[d + k].text);
+      i = a;
+    }
+    const line = (r, i) => r.t === "hunk" ? `<tr class="dv-hunk"><td class="ln" colspan="2"></td><td class="dv-c">${esc(r.text)}</td></tr>`
+      : r.t === "note" ? `<tr class="dv-note"><td class="ln" colspan="2"></td><td class="dv-c">${esc(r.text)}</td></tr>`
+      : `<tr class="dv-${r.t}"><td class="ln">${r.t === "add" ? "" : r.o}</td><td class="ln">${r.t === "del" ? "" : r.n}</td><td class="dv-c"><span class="sg">${{ add: "+", del: "−", ctx: " " }[r.t]}</span>${html[i] || " "}</td></tr>`;
+    const out = [];
+    for (let i = 0; i < rows.length;) {
+      if (rows[i].t !== "ctx") { out.push(line(rows[i], i)); i++; continue; }
+      let j = i; while (j < rows.length && rows[j].t === "ctx") j++;
+      const k = `${key}|${fi}|${i}`;
+      if (j - i > DIFF_FOLD && !ui.diffOpen.has(k)) {
+        // The file's first and last runs keep only the edge next to a change. The folded lines are
+        // there, hidden: a click shows them in place, whatever window the diff is in.
+        const head = i === 0 ? 0 : DIFF_EDGE, tail = j === rows.length ? 0 : DIFF_EDGE;
+        for (let x = i; x < i + head; x++) out.push(line(rows[x], x));
+        out.push(`<tr class="dv-fold" data-action="diff-unfold" data-key="${esc(k)}"><td class="ln" colspan="2">⋯</td><td class="dv-c">${T(`Show ${j - i - head - tail} unchanged lines`, `展开 ${j - i - head - tail} 行未改动`)}</td></tr>`);
+        for (let x = i + head; x < j - tail; x++) out.push(line(rows[x], x).replace("<tr ", '<tr hidden data-folded="1" '));
+        for (let x = j - tail; x < j; x++) out.push(line(rows[x], x));
+      } else for (let x = i; x < j; x++) out.push(line(rows[x], x));
+      i = j;
+    }
+    const total = f.add + f.del, blocks = 5;
+    const green = total ? Math.round((f.add / total) * blocks) : 0;
+    const bar = total ? `<span class="dv-bar">${"<i class=a></i>".repeat(green)}${"<i class=d></i>".repeat(blocks - green)}</span>` : "";
+    const name = f.name ? (looksLikePath(f.name) || /\//.test(f.name)
+      ? `<a href="#" class="dv-name" data-action="link" data-path="${esc(f.name)}" title="${T("Open", "打开")} ${esc(f.name)}">${esc(f.name)}</a>`
+      : `<span class="dv-name">${esc(f.name)}</span>`) : `<span class="dv-name dim">${T("Changes", "改动")}</span>`;
+    return `<div class="dv-file"><div class="dv-head">${name}<span class="dv-stat"><span class="a">+${f.add}</span> <span class="d">−${f.del}</span>${bar}</span></div>
+      <div class="dv-scroll"><table class="dv-t">${out.join("")}</table></div></div>`;
+  }).join("")}</div>`;
+}
+
+// A message to send: header lines (to / via / subject / cc, in English or Chinese) until a blank
+// line, then the message. Copy copies the message alone, as written (Markdown for Zulip and Slack).
+const DRAFT_KEYS = { to: "to", "收件人": "to", "发给": "to", via: "via", channel: "via", "渠道": "via",
+  subject: "subject", "主题": "subject", "标题": "subject", cc: "cc", "抄送": "cc" };
+function draftView(code) {
+  const lines = code.replace(/\n$/, "").split("\n");
+  const meta = {};
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const m = /^\s*([A-Za-z]+|[一-鿿]{2,3})\s*[:：]\s*(.*)$/.exec(lines[i]);
+    const k = m && Object.hasOwn(DRAFT_KEYS, m[1].toLowerCase()) ? DRAFT_KEYS[m[1].toLowerCase()] : null;
+    if (!k) break;
+    meta[k] = m[2].trim();
+  }
+  if (i && i < lines.length && !lines[i].trim()) i++;
+  const body = lines.slice(i).join("\n").replace(/^\n+|\s+$/g, "");
+  const who = [meta.to && T(`To ${meta.to}`, `发给 ${meta.to}`), meta.cc && T(`cc ${meta.cc}`, `抄送 ${meta.cc}`), meta.via].filter(Boolean);
+  return `<div class="draftv"><div class="df-head"><span class="df-ico">✉</span><b>${T("Draft", "草稿")}</b>${who.length ? `<span class="df-who">${who.map(esc).join(" · ")}</span>` : ""}
+      <button class="btn small" data-action="copy-draft" data-text="${esc(body)}" title="${T("Copy the message (without the header)", "复制消息正文（不含抬头）")}">${T("Copy", "复制")}</button></div>
+    ${meta.subject ? `<div class="df-subj">${esc(meta.subject)}</div>` : ""}
+    <div class="df-body md">${markdown(body)}</div></div>`;
+}
+
 // `scope` names the message the text is from, so a folded block's open state is that message's
 // alone: five replies ending in the same one-line `touch` update must not open together.
 function markdown(text, scope = "") {
@@ -3460,6 +3629,9 @@ function markdown(text, scope = "") {
         out.push(`<div class="hqblock ${lang} fold ${open ? "open" : ""}"><div class="hqb-t hqb-fold" data-action="hqfold" data-key="${esc(key)}" title="${T("Click to show or hide", "点击展开或收起")}"><span class="pcaret">${open ? "▾" : "▸"}</span> ${title} · ${hqSummary(lang, items)}</div>${list}</div>`);
         return;
       }
+      // Own keys only: an inherited one (`constructor`) must never stand in for a template.
+      const tpl = Object.hasOwn(TEMPLATES, lang.toLowerCase()) ? TEMPLATES[lang.toLowerCase()] : null;
+      if (tpl) { out.push(tpl(code, `${scope}|${lang}|${hashText(code)}`)); return; }
       out.push(`<pre><code>${linkifyCode(code.replace(/\n$/, ""))}</code></pre>`);
       return;
     }
@@ -3919,7 +4091,7 @@ function jumpSource(el) {
 
 // Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
 // say) is still the drawer's, and a slash-command pick hides its list on mousedown.
-const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch";
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch, #reader, #reader-pill";
 let pressedIn = false;
 document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
 
@@ -3945,6 +4117,8 @@ document.addEventListener("click", async (ev) => {
   }
   if (!el || el.tagName === "SELECT") return;
   const d = el.dataset;
+  // The reading area's own buttons (reader.js).
+  if (d.action.startsWith("rd-") && (await readerAction(d.action, d, ev))) return;
   // Removing or unbinding asks twice: the first click turns the button into a red "Unbind?" for
   // 4 s, the second does it. (WKWebView has no confirm() dialog.)
   if (d.confirm) {
@@ -4163,7 +4337,8 @@ document.addEventListener("click", async (ev) => {
                  d.behavior === "allow" ? T("Allowed", "已允许") : T("Denied", "已拒绝"));
     }
     case "unbind": return act("unbind", { session: d.session }, T("Unbound", "已解绑"));
-    case "open": return act("open", { path: d.path });
+    // Markdown and text files open in the reading area (reader.js); its "Open in editor" edits them.
+    case "open": return rdIsDoc(d.path) ? openDoc(d.path, "") : act("open", { path: d.path });
     case "send": return send(d.session);
     case "ob-retry": case "ob-edit": case "ob-drop": case "ob-ok": return outboxAct(d.action, d.session, d.id);
     case "peek":
@@ -4286,8 +4461,22 @@ document.addEventListener("click", async (ev) => {
     case "link":
       ev.preventDefault();
       if (d.url) return act2("openURL", { url: d.url });
-      if (d.path) return act2("openPath", { path: d.path, cwd: (ui.modal && ui.modal.cwd) || "" });
+      // A path in a document is relative to the document's folder; elsewhere, to the session's.
+      const inReader = Boolean(el.closest("#reader")) && rdCur();
+      const cwd = inReader ? rdDir(rdCur().path) : (ui.modal && ui.modal.cwd) || "";
+      // From a document: in place of it, unless ⌘ asks for a new tab.
+      if (d.path && rdIsDoc(d.path)) return openDoc(d.path, cwd, { inPlace: Boolean(inReader) && !ev.metaKey });
+      if (d.path) return act2("openPath", { path: d.path, cwd });
       return;
+    case "diff-unfold": {
+      // In place, like hqfold: the diff can be in any window (Peek, a plan, a job run, a document).
+      ui.diffOpen.add(d.key);
+      let r = el.nextElementSibling;
+      while (r && r.dataset.folded) { r.hidden = false; delete r.dataset.folded; r = r.nextElementSibling; }
+      el.remove();
+      return;
+    }
+    case "copy-draft": return copyText(d.text || "", T("Draft copied", "已复制草稿"));
     case "toggle-add": {
       const key = `${d.task}:${d.what}`;
       ui.adding.has(key) ? ui.adding.delete(key) : ui.adding.add(key);
@@ -4821,6 +5010,8 @@ document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.finishAsk) { ev.preventDefault(); return answerFinishAsk(null); }
   if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
+  // Reading a document (last clicked in the reading area): Esc leaves the window beside it open.
+  if (ev.key === "Escape" && rdFocused()) return;
   if (ev.key === "Escape" && ui.modal && ui.modal.pop) { ev.preventDefault(); ui.modal.pop = null; return drawPeek(false); }
   if (ev.key === "Escape" && ui.modal) { ev.preventDefault(); return closePeek(); }
   if (ev.key === "Escape" && ui.settings) { ev.preventDefault(); return closeSettings(); }
