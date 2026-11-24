@@ -1,0 +1,14 @@
+# Tooling and outputs
+.venv/
+.hyperframes/
+node_modules/
+renders/
+
+# Generated media; README.md says which script rebuilds each
+assets/bgm/*.wav
+assets/cat/*.webp
+assets/board/*.png
+assets/panel-*.png
+assets/bubble-*.png
+.thumbnails/
+.waveform-cache/

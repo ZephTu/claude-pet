@@ -1,0 +1,86 @@
+# REVIEW — third cut, storyline A 「一张卡走完一天」
+
+Length 189.0 s (3:09), 14 scenes, 1920×1080 @ 30 fps. Narration is Edge TTS zh-CN-XiaoyiNeural; the
+voice-over files set the timeline. `python3 build.py` regenerates index.html and compositions/
+from demo/narration.json and the stills in assets/.
+
+## Creative calls
+- The film runs shorter than the 165–200 s in SPEC. The voice-over came out at 2:38 at a natural pace,
+  and I did not pad it with holds.
+- Two scenes were added beyond the SPEC:
+  - s05b shows the project page (goal, completion criteria, brief);
+  - s06b shows the Needs you tab after the answers were sent.
+  Both are real product views that the story would otherwise skip.
+- The 8-terminal wall and the terminals in s06 and s07 are illustrations in Claude Code's style, not
+  product UI. The SPEC allows this.
+- The card is always T-014. Every board still is a real `--render-board` render of
+  demo/board-demo-zh.js. The data is made up, and the hq binary is stubbed with scripts/nohq/hq, so
+  real HQ data cannot appear.
+- The cat frames are the real loops. They are animated through a stepped `--f` variable, so every
+  frame is a function of time.
+- The BGM is MusicGen-small, generated locally (fetched through hf-mirror) at volume 0.12, with a
+  3 s fade-out.
+- Storylines B and C (STORYLINES.md) were not built.
+- **Second cut: s05c, the daily loop.** Added at the user's request after the first cut. It runs after
+  s05b and shows:
+  ⌃⌥⌘N → the quick-note box → Enter → the pet's bubbles → the new card T-017 in Focus (待推进) →
+  its drawer → 新 session → a terminal that reads the card.
+  - The box is drawn in HTML from QuickNotePanel.swift (size, title, hint line), because it is a
+    native panel and neither renderer captures it.
+  - The bubbles are the pet page's own, rendered through `--probe-skin` and shown at 1.2× life size so
+    they read at full view.
+  - The terminal is an illustration, like s06/s07. Its first line is the real launch prompt
+    (board.js LAUNCH_PROMPT), cut short.
+  - Nothing in the first 13 scenes changed except the click fix below.
+- **Click rings, all scenes.** The rings used `fromTo` with GSAP's default immediate render, so each
+  ring sat on screen as a small red circle from the start of its scene until its click. They now
+  render only from the click.
+- **Third cut: s08, finish notices open the task.** Also at the user's request. The old s08 (click
+  the eye icon, Peek, reply) is replaced, since the new flow ends in the same Peek. It shows:
+  the board's settings with 「在宠物上点击 session 时打开」 set to 看板上它的任务 → the board closes
+  into the cat → two finish notices stack over the cat's head → a click on one → the board opens
+  on T-014 with its drawer, the session highlighted, then its conversation → a reply typed and sent.
+  - Every still is the real board (`ui.clickTarget = "board"`, `hqReveal("T-014", …)`), and the
+    notices are the pet page's own `notify()` bubbles rendered through `--probe-skin`.
+  - The reply shot is framed at 1.45× so the box and 发送 sit above the captions.
+  - A second cursor in the same scene now uses `cursor_back`, which re-shows the one cursor instead
+    of adding a twin element with the same id.
+
+## Measured vs. looked at
+- Measured:
+  - `check` reports ok with 0 errors.
+  - Caption timing comes from the per-scene SRT that Edge TTS returns.
+  - Positions of board elements were probed from the live DOM (scratch probe), not guessed.
+  - The delivered file (renders/claude-pet-promo-v3.mp4) has its audio normalized with ffmpeg
+    loudnorm (I=-16, TP=-1.5); the video stream was copied. Measured: -15.9 LUFS, -1.5 dBFS peak.
+    (The second cut went from -19.4 to -15.9 LUFS the same way; the first cut measured -19.5 LUFS.)
+- Looked at:
+  - the snapshot review (26 beats, 12 seams, phone-size sheets) — first cut;
+  - s05c at ten beats, twice: the first pass found the keys over the box, bubbles too small to read and
+    the card's outline left over the drawer, all fixed;
+  - the s06 ask-click sequence, frame by frame;
+  - s08 at a dozen beats from setting to send, plus the s07→s08 and s08→s09 seams.
+- Not checked:
+  - Nobody has listened to the mix. Balance between narration and music, and how the SFX sound,
+    are unverified.
+  - The full-board shots are not readable at phone size. Push-ins carry those shots.
+
+## Weakest shots
+- **s07 (handoff).** The old terminal is closed about 1.6 s after the cut, so its last line
+  (「进展已写回 T-014」) is barely readable. The narration covers the meaning. With more time I
+  would open s07 on a 1 s hold.
+- **s10 (secretary report).** The caption sits over the lower half of the report bubble. A camera
+  that framed higher would fix it.
+
+## Warnings kept on purpose
+- **font_face_local_only.** PingFang is only resolved locally. This is a local render on macOS;
+  a cloud render would need Noto Sans SC in assets/fonts.
+- **text_below_floor.** The flagged text is the terminal wall and the window chrome at desktop
+  scale. It is texture, and every piece that matters is pushed in to ≥ 28 px.
+- **line_unread.**
+  - The terminals and the bubble in s07 are texture, and the narration carries them.
+  - s05c's hint line in the quick-note box is UI texture.
+  - For the end card the check is wrong: frames at 153 s and 158.25 s show the card fully, so it
+    holds about 6 s.
+- **first_frame_empty.** A false positive: frame 0 shows the terminal wall (snapshot checked).
+- **timeline_track_too_dense.** This comes from the 67 caption clips on one captions host.

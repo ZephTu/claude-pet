@@ -1,0 +1,192 @@
+{
+ "size": 480,
+ "fps": 12,
+ "clips": {
+  "awaiting-agent": {
+   "src": "assets/cat/awaiting-agent.webp",
+   "frames": 18,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "awaiting-agent_to_working": {
+   "src": "assets/cat/awaiting-agent_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "awaiting-agent@doze": {
+   "src": "assets/cat/awaiting-agent-doze.webp",
+   "frames": 45,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "compacting": {
+   "src": "assets/cat/compacting.webp",
+   "frames": 22,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "compacting_to_working": {
+   "src": "assets/cat/compacting_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "compacting@sigh": {
+   "src": "assets/cat/compacting-sigh.webp",
+   "frames": 47,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "finished": {
+   "src": "assets/cat/finished.webp",
+   "frames": 21,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "finished_to_idle": {
+   "src": "assets/cat/finished_to_idle.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "finished@dance": {
+   "src": "assets/cat/finished-dance.webp",
+   "frames": 64,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "idle": {
+   "src": "assets/cat/idle.webp",
+   "frames": 32,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "idle_to_sleeping": {
+   "src": "assets/cat/idle_to_sleeping.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "idle_to_working": {
+   "src": "assets/cat/idle_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "idle@yawn": {
+   "src": "assets/cat/idle-yawn.webp",
+   "frames": 42,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "reading": {
+   "src": "assets/cat/reading.webp",
+   "frames": 64,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "reading_to_working": {
+   "src": "assets/cat/reading_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "sleeping": {
+   "src": "assets/cat/sleeping.webp",
+   "frames": 36,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "sleeping_to_working": {
+   "src": "assets/cat/sleeping_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "urgent": {
+   "src": "assets/cat/urgent.webp",
+   "frames": 21,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "urgent@jump": {
+   "src": "assets/cat/urgent-jump.webp",
+   "frames": 63,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "waiting": {
+   "src": "assets/cat/waiting.webp",
+   "frames": 22,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "waiting_to_urgent": {
+   "src": "assets/cat/waiting_to_urgent.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "waiting_to_working": {
+   "src": "assets/cat/waiting_to_working.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "waiting@tap": {
+   "src": "assets/cat/waiting-tap.webp",
+   "frames": 63,
+   "columns": 8,
+   "kind": "fidget"
+  },
+  "working": {
+   "src": "assets/cat/working.webp",
+   "frames": 20,
+   "columns": 8,
+   "kind": "loop"
+  },
+  "working_to_awaiting-agent": {
+   "src": "assets/cat/working_to_awaiting-agent.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working_to_compacting": {
+   "src": "assets/cat/working_to_compacting.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working_to_finished": {
+   "src": "assets/cat/working_to_finished.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working_to_idle": {
+   "src": "assets/cat/working_to_idle.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working_to_reading": {
+   "src": "assets/cat/working_to_reading.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working_to_waiting": {
+   "src": "assets/cat/working_to_waiting.webp",
+   "frames": 24,
+   "columns": 8,
+   "kind": "transition"
+  },
+  "working@think": {
+   "src": "assets/cat/working-think.webp",
+   "frames": 56,
+   "columns": 8,
+   "kind": "fidget"
+  }
+ }
+}

@@ -1,0 +1,107 @@
+<template>
+  <style>
+@font-face { font-family: "PF"; font-weight: 400; src: local("PingFangSC-Regular"), local("PingFang SC"); }
+@font-face { font-family: "PF"; font-weight: 500; src: local("PingFangSC-Medium"), local("PingFang SC"); }
+@font-face { font-family: "PF"; font-weight: 600; src: local("PingFangSC-Semibold"), local("PingFang SC"); }
+#root { position: absolute; inset: 0; overflow: hidden; background: #2b2a28; font-family: "PF", sans-serif; color: #e8ebf1; }
+#root .grain { position: absolute; inset: 0; opacity: .05; background-size: 256px 256px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3'/></filter><rect width='256' height='256' filter='url(%23n)'/></svg>"); }
+#root .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+#root .win { position: absolute; border-radius: 12px; overflow: hidden; background: #1a1d24;
+  box-shadow: 0 24px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06); }
+#root .win .bar { position: absolute; left: 0; top: 0; right: 0; height: 28px; background: #23262e; }
+#root .win .bar i { position: absolute; top: 9px; width: 11px; height: 11px; border-radius: 50%; }
+#root .win .bar span { position: absolute; left: 0; right: 0; top: 6px; text-align: center; font-size: 13px; color: #8a909c; }
+#root .win img.st { position: absolute; left: 0; width: 100%; }
+#root .hl { position: absolute; border: 3px solid #f2a541; border-radius: 10px; opacity: 0; }
+#root .cover { position: absolute; background: #1a1d24; opacity: 0; }
+#root .typed { position: absolute; white-space: nowrap; color: #e8ebf1; clip-path: inset(0 100% 0 0); }
+#root .spr { position: absolute; background-repeat: no-repeat; --f: 0;
+  --i: mod(var(--f), var(--n));
+  background-position: calc(mod(var(--i), 8) * var(--s) * -1) calc(round(down, var(--i) / 8, 1) * var(--s) * -1); }
+#root .cur { position: absolute; left: 0; top: 0; width: 34px; height: 50px; opacity: 0; }
+#root .rip { position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%;
+  border: 3px solid #ef6f5a; opacity: 0; }
+#root .term { position: absolute; border-radius: 10px; overflow: hidden; background: #15171c;
+  box-shadow: 0 18px 44px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.06); }
+#root .term .tb { position: absolute; left: 0; right: 0; top: 0; height: 30px; background: #22252c; }
+#root .term .tb i { position: absolute; top: 10px; width: 11px; height: 11px; border-radius: 50%; }
+#root .term .tb span { position: absolute; left: 70px; right: 12px; top: 6px; text-align: center; font-size: 14px; color: #8a909c;
+  white-space: nowrap; overflow: hidden; }
+#root .term .tc { position: absolute; left: 0; right: 0; top: 30px; bottom: 0; overflow: hidden; padding: 12px 16px; }
+#root .term .tl { font-family: "JetBrains Mono", "PF", monospace; white-space: pre-wrap; line-height: 1.5; color: #c9ced8; }
+#root .term .tl div { min-height: 1.5em; }
+#root .tl .u { color: #f2a541; } #root .tl .t { color: #7cc4a4; } #root .tl .d { color: #8f96a3; }
+#root .tl .w { color: #ef6f5a; } #root .tl .b { color: #9db4ff; }
+#root .tl .box { border: 1.5px solid #ef6f5a; border-radius: 8px; padding: 8px 12px; margin: 6px 0; }
+#root .lab { position: absolute; left: 150px; width: 820px; opacity: 0; }
+#root .lab b { display: block; font-size: 104px; font-weight: 600; letter-spacing: -1px; color: #fff; }
+#root .lab em { display: block; font-style: normal; font-size: 46px; font-weight: 500; color: #f2a541; margin-top: 14px; }
+#root .clock { position: absolute; right: 48px; top: 26px; font-size: 30px; font-weight: 500; color: rgba(255,255,255,.78);
+  opacity: 0; letter-spacing: .5px; }
+#root .big { position: absolute; left: 0; right: 0; text-align: center; color: #fff; opacity: 0; }
+#root .bubble { position: absolute; left: 0; top: 0; padding: 14px 22px; border-radius: 18px; background: #f2a541; color: #1a1d24;
+  font-size: 26px; font-weight: 600; white-space: nowrap; opacity: 0; }
+#root .dim { position: absolute; inset: 0; background: #000; opacity: 0; }
+</style>
+  <div id="root" data-composition-id="s06" data-width="1920" data-height="1080">
+    <div class="grain"></div><div class="cam" id="s06-cam"><div class="win" id="s06-win" style="left:180px;top:42px;width:1560px;height:995.7px"><div class="bar"><i style="left:12px;background:#ef6f5a"></i><i style="left:30px;background:#f2c14e"></i><i style="left:48px;background:#7cc4a4"></i><span>HQ</span></div><img class="st" id="s06-im-drawer" src="assets/board/drawer.png" style="top:28px;opacity:1"><img class="st" id="s06-im-ask-1" src="assets/board/ask-1.png" style="top:28px;opacity:0"><img class="st" id="s06-im-ask-2" src="assets/board/ask-2.png" style="top:28px;opacity:0"><img class="st" id="s06-im-ask-3" src="assets/board/ask-3.png" style="top:28px;opacity:0"><img class="st" id="s06-im-ask-sent" src="assets/board/ask-sent.png" style="top:28px;opacity:0"><div class="hl" id="s06-hl2" style="left:836.1px;top:303.6px;width:708.7px;height:468.1px"></div><div class="cover" id="s06-ty4c" style="left:865.9px;top:427.3px;width:211.5px;height:24.5px"></div><div class="typed" id="s06-ty4" style="left:868.6px;top:429.9px;font-size:16.5px">2 次就够——5 秒预算优先</div><div id="s06-wo"></div></div><div class="spr" id="s06-cat1" style="left:1650px;top:835px;width:220px;height:220px;--s:220px;--n:20;background-image:url(assets/cat/working.webp);background-size:1760px auto;opacity:1"></div><div class="term" id="s06-term" style="left:-640px;top:250px;width:640px;height:560px;opacity:1"><div class="tb"><i style="left:12px;background:#ef6f5a"></i><i style="left:30px;background:#f2c14e"></i><i style="left:48px;background:#7cc4a4"></i><span>shop-api — 结账重试</span></div><div class="tc"><div class="tl" id="s06-term-tl" style="font-size:20px"><div class="d">⏺ 超时每次都在 4.8 秒复现。</div><div class="">⏺ 写重试之前有三件事要你定——</div><div class="">  已经放到看板上了。</div><div class=""></div><div class="d">  ⎿  等你回答…</div><div class=""></div><div class="u">&gt; 看板上的回答（T-014）：</div><div class="">  1. 可以——2 次就够，5 秒预算优先</div><div class="">  2. 可以</div><div class="">  3. 转成你的待办</div><div class=""></div><div class="">⏺ 好，按 2 次重试来写，放在开关后面。</div><div class="">✻ Working…</div></div></div></div><div class="cur" id="s06-cur"><svg viewBox="0 0 24 36" width="34" height="50"><path d="M2 2 L2 28 L8.5 22 L13 33 L17.5 31 L13 20.5 L21.5 20.5 Z" fill="#111" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="rip" id="s06-rip3" style="left:1131.9px;top:481.2px"></div><div class="rip" id="s06-rip5" style="left:1309.0px;top:475.9px"></div><div class="rip" id="s06-rip6" style="left:1309.0px;top:621.3px"></div><div class="rip" id="s06-rip7" style="left:1553.6px;top:766.7px"></div><div class="rip" id="s06-rip8" style="left:1672.6px;top:832.8px"></div><div class="bubble" id="s06-bub">3 个回答 → 结账重试</div></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.set("#s06-cam", { transformOrigin: "0 0" }, 0);
+    tl.fromTo("#s06-cat1", { "--f": 0 }, { "--f": 210, duration: 17.500, ease: "steps(210)" }, 0.0);
+    tl.set("#s06-cam", { x: 0.0, y: 0.0, scale: 1.0 }, 0);
+    tl.set("#s06-term-tl > div:nth-child(n+7)", { opacity: 0 }, 0);
+    tl.to("#s06-cam", { x: -1437.2, y: -473.22, scale: 1.75, duration: 0.6, ease: "expo.inOut" }, 0.3);
+    tl.fromTo("#s06-hl2", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, 4.461);
+    tl.to("#s06-hl2", { opacity: 0, duration: 0.25 }, 6.271);
+    tl.set("#s06-cur", { x: 1502.0338983050847, y: 400.50847457627117 }, 0);
+    tl.to("#s06-cur", { opacity: 1, duration: 0.2 }, 6.1160000000000005);
+    tl.to("#s06-cur", { x: 1131.9, y: 481.2, duration: 0.6, ease: "power2.inOut" }, 6.1160000000000005);
+    tl.fromTo("#s06-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 6.766);
+    tl.to("#s06-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 6.766);
+    tl.fromTo("#s06-ty4c", { opacity: 0 }, { opacity: 1, duration: 0.05 }, 6.916);
+    tl.fromTo("#s06-ty4", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.7, ease: "steps(14)" }, 6.916);
+    tl.set("#s06-ty4, #s06-ty4c", { opacity: 0 }, 8.266);
+    tl.to("#s06-cur", { x: 1309.0, y: 475.9, duration: 0.4, ease: "power2.inOut" }, 7.716);
+    tl.fromTo("#s06-rip5", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 8.166);
+    tl.to("#s06-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 8.166);
+    tl.to("#s06-im-ask-1", { opacity: 1, duration: 0.2, ease: "none" }, 8.266);
+    tl.set("#s06-im-drawer", { opacity: 0 }, 8.466);
+    tl.to("#s06-cur", { x: 1309.0, y: 621.3, duration: 0.35, ease: "power2.inOut" }, 8.416);
+    tl.fromTo("#s06-rip6", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 8.816);
+    tl.to("#s06-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 8.816);
+    tl.to("#s06-im-ask-2", { opacity: 1, duration: 0.2, ease: "none" }, 8.916);
+    tl.set("#s06-im-ask-1", { opacity: 0 }, 9.116);
+    tl.to("#s06-cur", { x: 1553.6, y: 766.7, duration: 0.35, ease: "power2.inOut" }, 9.016);
+    tl.fromTo("#s06-rip7", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 9.416);
+    tl.to("#s06-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 9.416);
+    tl.to("#s06-im-ask-3", { opacity: 1, duration: 0.2, ease: "none" }, 9.516);
+    tl.set("#s06-im-ask-2", { opacity: 0 }, 9.716);
+    tl.to("#s06-cur", { x: 1672.6, y: 832.8, duration: 0.6, ease: "power2.inOut" }, 9.516);
+    tl.fromTo("#s06-rip8", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 10.316);
+    tl.to("#s06-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 10.316);
+    tl.to("#s06-im-ask-sent", { opacity: 1, duration: 0.2, ease: "none" }, 10.416);
+    tl.set("#s06-im-ask-3", { opacity: 0 }, 10.616);
+    tl.to("#s06-cur", { opacity: 0, duration: 0.2 }, 10.716000000000001);
+    tl.to("#s06-cam", { x: 635.2, y: 215.2, scale: 0.58, duration: 1.0, ease: "power2.inOut" }, 10.816);
+    tl.set("#s06-bub", { x: 1581, y: 810, scale: 0.6 }, 0);
+    tl.to("#s06-bub", { opacity: 1, scale: 1.6, duration: 0.25, ease: "power3.out" }, 11.716000000000001);
+    tl.to("#s06-bub", { x: -470, duration: 1.0, ease: "power2.inOut" }, 11.916);
+    tl.to("#s06-bub", { y: 310, duration: 0.5, ease: "power2.out" }, 11.916);
+    tl.to("#s06-bub", { y: 470, duration: 0.5, ease: "power2.in" }, 12.416);
+    tl.to("#s06-bub", { opacity: 0, scale: 0.8, duration: 0.2 }, 12.916);
+    tl.to("#s06-term-tl > div:nth-child(7)", { opacity: 1, duration: 0.15 }, 13.02);
+    tl.to("#s06-term-tl > div:nth-child(8)", { opacity: 1, duration: 0.15 }, 13.20);
+    tl.to("#s06-term-tl > div:nth-child(9)", { opacity: 1, duration: 0.15 }, 13.38);
+    tl.to("#s06-term-tl > div:nth-child(10)", { opacity: 1, duration: 0.15 }, 13.56);
+    tl.to("#s06-term-tl > div:nth-child(11)", { opacity: 1, duration: 0.15 }, 13.74);
+    tl.to("#s06-term-tl > div:nth-child(12)", { opacity: 1, duration: 0.15 }, 13.92);
+    tl.to("#s06-term-tl > div:nth-child(13)", { opacity: 1, duration: 0.15 }, 14.10);
+    tl.to("#s06-term-tl > div:nth-child(5)", { opacity: 0.25, duration: 0.2 }, 12.916);
+    tl.to("#s06-cam", { x: 1424.0, y: -272.0, scale: 1.45, duration: 0.8, ease: "power2.inOut" }, 13.016000000000002);
+    tl.set({}, {}, 17.5);
+    window.__timelines["s06"] = tl;
+  </script>
+</template>
