@@ -1693,7 +1693,7 @@ hqi inbox sort --claude "$FAKE" "$NU6" >/dev/null
 { hqi inbox move --task="$UD" -- "$NU6" update 2>&1 || true; } | grep -q "nothing on $UD to change" && ! card "$UD" | grep -q "^status: done" \
   && ok "inbox move to update with no fields doesn't close the task off a guess" || fail "inbox update bare move: $(card "$UD")"
 
-# hq feed zulip: mentions and DMs from a fake Zulip, one inbox item per conversation, sorted in the
+# hq feed zulip: DMs (and mentions, when asked for) from a fake Zulip, one inbox item per conversation, sorted in the
 # feed's mode (a log line is filed, a todo waits, a skip is put away).
 "$HQ" feed | grep -q "zulip: not set up" && ok "feed without a zuliprc: not set up" || fail "feed no zuliprc"
 ZS="$T/zulip"; mkdir -p "$ZS"
@@ -1713,7 +1713,10 @@ class H(http.server.BaseHTTPRequestHandler):
         msgs = [m for m in msgs if (m["type"] == "private") if op == "dm"] if op == "dm" else [m for m in msgs if "mentioned" in m["flags"]]
         if int(q["num_before"]):
             top = float("inf") if q["anchor"] == "newest" else int(q["anchor"])
-            out = [m for m in msgs if m["id"] <= top][-int(q["num_before"]):]
+            older = [m for m in msgs if m["id"] < top or (m["id"] == top and q.get("include_anchor", "true") == "true")]
+            out = older[-int(q["num_before"]):]
+            open(os.path.join(D, "pages"), "a").write("b")
+            return self.reply(200, {"result": "success", "messages": out, "found_oldest": len(older) <= len(out)})
         else:
             out = [m for m in msgs if m["id"] > int(q["anchor"])][:int(q["num_after"])]
             inj = os.path.join(D, "inject.json")
@@ -1729,12 +1732,12 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H)
 open(os.path.join(D, "port"), "w").write(str(s.server_port))
 s.serve_forever()
 PY
-zmsg() {  # id type(dm|stream) sender_id sender_name text [mentioned]; $ZFILE: another file
+zmsg() {  # id type(dm|stream) sender_id sender_name text [mentioned]; $ZFILE: another file; $ZTS: its time
   python3 - "${ZFILE:-$ZS/messages.json}" "$@" <<'PY'
 import json, sys, time, os
 p, mid, typ, sid, name, text = sys.argv[1:7]
 ms = json.load(open(p)) if os.path.exists(p) else []
-m = {"id": int(mid), "timestamp": int(time.time()), "sender_id": int(sid), "sender_full_name": name,
+m = {"id": int(mid), "timestamp": int(os.environ.get("ZTS") or time.time()), "sender_id": int(sid), "sender_full_name": name,
      "content": text, "flags": ["mentioned"] if len(sys.argv) > 7 else []}
 if typ == "dm":
     m.update(type="private", display_recipient=[{"id": 1, "full_name": "Me"}, {"id": 7, "full_name": "Alice Wu"}])
@@ -1743,13 +1746,21 @@ else:
 ms.append(m); json.dump(ms, open(p, "w"))
 PY
 }
+# Before today: the first scan starts at midnight.
+ZTS="$(python3 -c 'import datetime as d; print(int(d.datetime.combine(d.date.today(), d.time()).timestamp()) - 60)')" zmsg 90 dm 7 "Alice Wu" "yesterday's news"
 zmsg 100 dm 7 "Alice Wu" "the 4.2.7 perf plan passed on rc3"
 zmsg 101 dm 1 "Me" "great, thanks"
 zmsg 102 stream 9 "Bob Li" "@**Me** please review the release notes" m
 python3 "$ZS/server.py" "$ZS" & ZPID=$!; trap 'kill "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
 for _ in $(seq 50); do [ -s "$ZS/port" ] && break; sleep 0.1; done
 printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
-"$HQ" feed zulip --dry-run | grep -q "3 messages, 2 conversations (dry run" && [ ! -e "$T/root/secretary/feed/state.json" ] && ok "feed --dry-run: reads, saves nothing" || fail "feed dry run"
+"$HQ" feed zulip --dry-run >"$T/out"
+grep -q "2 messages, 1 conversations (dry run" "$T/out" && ! grep -q "release notes" "$T/out" && ok "feed zulip reads direct messages only, by default" || fail "feed dm only: $(cat "$T/out")"
+! grep -q "yesterday's news" "$T/out" && ok "feed: the first scan starts at the start of today" || fail "feed first scan since midnight"
+rm -f "$ZS/pages"; HQ_ZULIP_PAGE=1 "$HQ" feed zulip --dry-run | grep -q "2 messages, 1 conversations" && [ "$(wc -c <"$ZS/pages" | tr -d ' ')" = 4 ] && ok "feed: the first scan reads back a page at a time, to the start of today" || fail "feed first scan pages: $(cat "$ZS/pages")"
+"$HQ" feed zulip --since 48 --dry-run | grep -q "yesterday's news" && ok "feed --since: the first scan looks back that many hours" || fail "feed --since"
+python3 -c 'import json,sys; p=sys.argv[1]; c=json.load(open(p)); c["feed"]={"zulip": {"mentions": True}}; json.dump(c, open(p,"w"))' "$T/root/hq.json"
+"$HQ" feed zulip --dry-run | grep -q "3 messages, 2 conversations (dry run" && [ ! -e "$T/root/secretary/feed/state.json" ] && ok "feed --dry-run: reads, saves nothing; mentions when hq.json asks for them" || fail "feed dry run"
 FJ="$("$HQ" feed zulip --no-sort --json)"
 echo "$FJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==3 and r["conversations"]==2 and len(r["items"])==2, r' && ok "feed zulip: one item per conversation" || fail "feed items"
 FA="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][0])')"; FB="$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][1])')"
@@ -1786,9 +1797,10 @@ answer '{"kind":"note","task":"'"$ITB"'","text":"Alice shared the plan","confide
 hqi inbox sort --claude "$FAKE" --json "$FD" >/dev/null
 card "$ITB" | grep -q "Alice shared the plan" && card "$ITB" | grep -q "#narrow/dm/7-Alice-Wu" && ! card "$ITB" | grep -q "example.com/plan-doc" && ok "feed sort: only the conversation link becomes a ref, not links in the messages" || fail "feed refs first line"
 printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://localhost:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
-"$HQ" feed zulip --dry-run | grep -q "^zulip: 9 messages" && ok "feed zulip: another server starts over (the cursor is per site)" || fail "feed zulip site"
+"$HQ" feed zulip --since 48 --dry-run | grep -q "^zulip: 10 messages" && ok "feed zulip: another server starts over (the cursor is per site)" || fail "feed zulip site"
 printf 'email=me@example.com\nkey=SUPERSECRET\n' > "$HOME/.zuliprc"
 "$HQ" feed zulip >"$T/out" 2>&1 || true; "$HQ" feed status --json >>"$T/out"; "$HQ" feed all >>"$T/out" 2>&1 || true
+"$HQ" feed all --dry-run >"$T/out2" 2>&1 && fail "feed all --dry-run exits 0 on a failure"; grep -q "^zulip failed: can't read" "$T/out2" && ok "feed all --dry-run says which source failed, and fails" || fail "feed all dry run failure"
 ! grep -q SUPERSECRET "$T/out" && grep -q "can't read .*zuliprc (line 1): it should be an \[api\] section" "$T/out" && tail -1 "$T/out" | grep -q "^zulip failed: can't read" && ok "feed: an unreadable zuliprc fails feed all, and no error quotes the key" || fail "zuliprc error: $(cat "$T/out")"
 printf '[api]\nemail=me@example.com\nkey=wrong\nsite=http://127.0.0.1:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
 { "$HQ" feed zulip 2>&1 || true; } | grep -q "HTTP 401 bad key" && ok "feed: a Zulip error is reported" || fail "feed error"

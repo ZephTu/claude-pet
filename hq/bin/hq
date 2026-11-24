@@ -3601,8 +3601,8 @@ def cmd_inbox(args):
 
 
 # ---------------------------------------------------------------- feed: messages from outside, into the inbox
-# `hq feed zulip` reads what reached the user on Zulip since the last scan: messages that mention
-# them and direct messages; `hq feed jira`, what changed in the Jira issues they are assignee,
+# `hq feed zulip` reads what reached the user on Zulip since the last scan: direct messages, and
+# messages that mention them when hq.json has "feed": {"zulip": {"mentions": true}}; `hq feed jira`, what changed in the Jira issues they are assignee,
 # reporter or watcher of; `hq feed all`, every source that is set up. Read only. What came in is
 # kept as it came, on this machine only, in <root>/secretary/feed/<source>/YYYY-MM-DD.jsonl; each
 # conversation (a DM, or a channel's topic) or issue that got something new from someone else
@@ -3614,11 +3614,11 @@ def cmd_inbox(args):
 FEED_SOURCES = ("zulip", "jira")
 FEED_NAMES = {"zulip": "Zulip", "jira": "Jira"}
 FEED_UNIT = {"zulip": "conversations", "jira": "issues"}
-FEED_FIRST_HOURS = 24          # the first scan looks back this far
 FEED_KEEP_DAYS = 30            # raw message files older than this are deleted
 FEED_MSG_MAX = 600             # characters of one message in an inbox item
 FEED_ITEM_MAX = 3000           # characters of an inbox item (the newest messages are kept)
-FEED_PAGE = 1000
+# Messages a request: a big page of a busy narrow is a megabyte the server sends slowly, past the timeout.
+ZULIP_PAGE = int(os.environ.get("HQ_ZULIP_PAGE") or 100)
 ZULIP_MAX_MSGS = 500           # one scan reads at most this many messages a narrow; the rest waits
 FEED_SORTERS = 4               # sorts run side by side
 FEED_SECRET_ENV = ("HQ_JIRA_TOKEN",)   # never passed on to the sorter
@@ -3634,7 +3634,8 @@ for _k in UPDATE_DEST_FIELDS:
 
 FEED_INTRO = {
     "zulip": """Each input is one conversation (a direct message, or a channel's topic) with what is \
-new in it since the last scan: messages that mention the user, and direct messages.""",
+new in it since the last scan: direct messages, and messages that mention the user when the scan \
+reads those too.""",
     "jira": """Each input is one Jira issue the user is assignee, reporter or watcher of, with what \
 changed in it since the last scan: its creation, field changes (status, assignee, …) and comments. \
 The second line says how the issue stands now and the user's role in it. An issue the user only \
@@ -3675,6 +3676,19 @@ Write text, title and reason in the messages' language. confidence: 0.9+ when th
 the task or the match is unambiguous, 0.7-0.9 when it is a clear but indirect match, below 0.7 \
 when you are guessing. Always give up to two alternatives (other plausible destinations), each a \
 complete destination (never "skip")."""
+
+
+def feed_since(since_hours):
+    """Where a first scan starts (epoch seconds): `since_hours` back, or the start of today."""
+    if since_hours is not None:
+        return time.time() - since_hours * 3600
+    return dt.datetime.combine(dt.date.today(), dt.time()).timestamp()
+
+
+def zulip_narrows():
+    """Direct messages; messages that mention the user only when asked for: channels' bots and
+    @-all notices mention everyone, often."""
+    return ["dm"] + (["mentioned"] if feed_config("zulip").get("mentions") is True else [])
 
 
 class FeedError(Exception):
@@ -3848,16 +3862,25 @@ def zulip_newest(conf, narrow):
 
 def zulip_fetch(conf, narrow, after, since, top):
     """Messages of a narrow newer than message id `after` and at most `top`; on a first scan
-    (after None), those sent since `since` (epoch seconds). Returns (messages, top): reading stops
-    after ZULIP_MAX_MSGS, and `top` comes down to the last id read, so the rest waits for the next
-    scan."""
+    (after None), those sent since `since` (epoch seconds), read back from `top` a page at a time.
+    Returns (messages, top): reading stops after ZULIP_MAX_MSGS; a later scan brings `top` down to
+    the last id read, so the rest waits for the next scan, and a first scan keeps the newest."""
     if after is None:
-        d = zulip_get(conf, "messages", anchor=top, num_before=FEED_PAGE, num_after=0,
-                      narrow=json.dumps(narrow), apply_markdown="false")
-        return [m for m in d.get("messages") or [] if m.get("timestamp", 0) >= since and m["id"] <= top], top
+        out, anchor, first = [], top, True
+        while True:
+            d = zulip_get(conf, "messages", anchor=anchor, include_anchor="true" if first else "false",
+                          num_before=ZULIP_PAGE, num_after=0, narrow=json.dumps(narrow), apply_markdown="false")
+            page = d.get("messages") or []
+            out = [m for m in page if m.get("timestamp", 0) >= since and m["id"] <= top] + out
+            if len(out) >= ZULIP_MAX_MSGS:
+                return out[-ZULIP_MAX_MSGS:], top
+            if (d.get("found_oldest") or len(page) < ZULIP_PAGE
+                    or min(m.get("timestamp", 0) for m in page) < since):
+                return out, top
+            anchor, first = min(m["id"] for m in page), False
     out, anchor = [], after
     while True:
-        d = zulip_get(conf, "messages", anchor=anchor, include_anchor="false", num_before=0, num_after=FEED_PAGE,
+        d = zulip_get(conf, "messages", anchor=anchor, include_anchor="false", num_before=0, num_after=ZULIP_PAGE,
                       narrow=json.dumps(narrow), apply_markdown="false")
         ms = [m for m in d.get("messages") or [] if m["id"] <= top]
         out += ms
@@ -3981,11 +4004,12 @@ def feed_zulip(since_hours=None, sort=True, claude=None, dry=False):
         st = feed_state()
         zs = st.get("zulip") if isinstance(st.get("zulip"), dict) else {}
         me = zulip_get(conf, "users/me").get("user_id")
-        # From the last scan on; the first scan (or one as another user or server) looks back `since_hours`.
+        # From the last scan on; the first scan (or one as another user or server) starts at the
+        # start of today, or `since_hours` back.
         same = zs.get("me") == me and zs.get("site") == conf["site"] and isinstance(zs.get("last_id"), int)
         after = zs["last_id"] if same else None
-        since = time.time() - (FEED_FIRST_HOURS if since_hours is None else since_hours) * 3600
-        narrows = [[{"operator": "is", "operand": op}] for op in ("mentioned", "dm")]
+        since = feed_since(since_hours)
+        narrows = [[{"operator": "is", "operand": op}] for op in zulip_narrows()]
         # One upper bound for both narrows, read before either: a message that comes in while the
         # first one is read is left to the next scan, not skipped by a cursor the second one moved.
         top = max((x for x in (zulip_newest(conf, n) for n in narrows) if x is not None), default=None)
@@ -4163,9 +4187,10 @@ def feed_jira(since_hours=None, sort=True, claude=None, dry=False):
         js = st.get("jira") if isinstance(st.get("jira"), dict) else {}
         me = jira_get(conf, "myself").get("accountId")
         now = time.time()
-        # From the last change seen on; the first scan (or one as another user or site) looks back.
+        # From the last change seen on; the first scan (or one as another user or site) starts at
+        # the start of today, or `since_hours` back.
         same = js.get("me") == me and js.get("site") == conf["site"] and isinstance(js.get("last_ts"), (int, float))
-        cursor = js["last_ts"] if same else now - (FEED_FIRST_HOURS if since_hours is None else since_hours) * 3600
+        cursor = js["last_ts"] if same else feed_since(since_hours)
         seen = set(js.get("seen") or []) if same else set()
         # Jira's search lags behind its writes: re-read JIRA_OVERLAP before the cursor, and drop the
         # events already seen by id. JQL compares minutes, in the Jira user's time zone: ask
@@ -4281,6 +4306,9 @@ def cmd_feed(args):
                     print("\n" + t)
             elif args.action != "all":
                 print(feed_line(r))
+        if args.action == "all" and args.dry_run:
+            for f in failed:
+                print(f)
         if args.action == "all" and not args.dry_run:
             # The job shows the last line: every source on it, e.g.
             # "zulip 3 · jira 2 → filed 1, unsorted 1, skipped 3 ($0.04)".
@@ -8308,7 +8336,7 @@ def main():
                                       "[--site URL] | all [--since HOURS] [--no-sort] [--dry-run] [--json]")
     p.add_argument("action", nargs="?", choices=["status", "zulip", "jira", "all"], default="status")
     p.add_argument("--site", help="hq feed jira: your Jira site (https://<you>.atlassian.net), remembered as hq site jira")
-    p.add_argument("--since", type=float, help="how many hours the first scan looks back (default 24)")
+    p.add_argument("--since", type=float, help="how many hours the first scan looks back (default: from the start of today)")
     p.add_argument("--no-sort", action="store_true"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--claude", help="the claude CLI to sort with (default: found on PATH)")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_feed)

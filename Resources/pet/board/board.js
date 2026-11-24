@@ -2829,8 +2829,8 @@ function secWhen(iso) {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 function secFeedTip() {
-  return T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
-    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+  return T("Zulip direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
+    "Zulip 里发给你的私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
 }
 function secCloseTip() {
   return T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",

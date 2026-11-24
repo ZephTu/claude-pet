@@ -724,15 +724,19 @@ shows the list.
 
 ### Feeds: Zulip, Jira
 
-`hq feed zulip [--since HOURS] [--no-sort] [--dry-run] [--json]` reads the @-mentions and direct
-messages that came in since the last scan (the first scan looks back `--since` hours, default 24)
-and turns each conversation — one stream topic, or one set of DM recipients — into a quick note
+`hq feed zulip [--since HOURS] [--no-sort] [--dry-run] [--json]` reads the direct messages that came
+in since the last scan — and the @-mentions too when `hq.json` has `"feed": {"zulip": {"mentions":
+true}}` (off by default: bots and channel-wide notices mention you often) — and turns each conversation — one stream topic, or one set of DM recipients — into a quick note
 with `via: "zulip"`, `conv` and `msgs` (the message ids). Read only: nothing is ever sent. It calls
 Zulip's REST API directly with the account in `$HQ_ZULIPRC`, else `"feed": {"zulip": {"zuliprc":
 PATH}}` in `hq.json`, else `~/.zuliprc`; the key is never written anywhere else, and an error about
-the file never quotes it. A conversation where only you spoke adds nothing. Both narrows are read up
-to the newest message id taken before either is read, so a message that arrives mid-scan waits for
-the next one; a scan reads at most 500 messages a narrow and leaves the rest for the next.
+the file never quotes it. A conversation where only you spoke adds nothing. The first scan (or the
+first as another account or server) starts at midnight today, local time, or `--since` hours back;
+each later one picks up after the last message id it saw. Messages are read 100 a request (a big
+page of a busy narrow is a megabyte the server sends slowly), back from the newest on a first scan.
+The narrows are read up to the newest message id taken before any is read, so a message that
+arrives mid-scan waits for the next one; a scan reads at most 500 messages a narrow and leaves the
+rest for the next (a first scan keeps the newest 500).
 
 `hq feed jira [--site URL] [--since HOURS] [--no-sort] [--dry-run] [--json]` reads what other people
 did, since the last scan, to the issues you are assignee, reporter or watcher of — created, a field
@@ -747,12 +751,13 @@ never written anywhere else, and never passed to the sorter. An issue only you c
 nothing. Jira's search lags behind its writes, so each scan re-reads the 10 minutes before the
 cursor and drops the changes it has already seen, by id. Its note starts `Jira · KEY:
 summary · <site>/browse/KEY`, then `(type · status · priority · assignee X · reporter Y · you:
-roles)`, then one `[MM-DD HH:MM] who: text` line per change (mentions of you as `@me`).
+roles)`, then one `[MM-DD HH:MM] who: text` line per change (mentions of you as `@me`). Its first
+scan, too, starts at midnight today or `--since` hours back.
 
 `hq feed all` scans every source that is set up (Zulip when a zuliprc file is there, Jira when a
 site is set), working or not, and exits 1 if any of them failed (a broken zuliprc, a wrong token, a
-scan of it already running), naming it on the last line after the others' results; with none set
-up it says so.
+scan of it already running), naming it on the last line after the others' results (with
+`--dry-run`, after what they would jot); with none set up it says so.
 
 The Zulip note's first line is `Zulip · <title> · <conversation URL>`, then one `[MM-DD HH:MM] who: text`
 line per message (yours as `me`, older lines trimmed past 3000 characters). Feed notes are sorted
