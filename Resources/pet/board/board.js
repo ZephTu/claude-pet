@@ -99,7 +99,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, statusPending: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -460,6 +460,7 @@ async function refresh(force) {
       api("pet").catch(() => "{}"), (ui.mode === "jobs" || ui.mode === "projects") && typeof loadJobs === "function" ? loadJobs() : ""]);
     sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
+    for (const [id, st] of Object.entries(ui.statusPending)) { const t = taskById(id); if (t) t.status = st; }
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
@@ -2128,10 +2129,17 @@ async function stopAll(list, lead = "") {
 // Resume picks them up. A task its own session finished (that session's hq-update) is handled the
 // same way, see sessionFinishes; one finished by `hq set` only gets the "still running" bar.
 const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
+// The new status shows at once; saving it (hq) and reading the board back take a few hundred ms.
+// Until the save lands, a timed refresh must not put the old status back (ui.statusPending).
 async function setStatus(id, status) {
   const live = isOpen({ status }) ? [] : liveFor(id);
+  const t = taskById(id);
+  if (t) t.status = status;
+  ui.statusPending[id] = status;
+  render();
   try { await api("set", { task: id, fields: [`status=${status}`] }); }
-  catch (e) { toast(String(e.message || e), true); await refresh(); return false; }
+  catch (e) { delete ui.statusPending[id]; toast(String(e.message || e), true); await refresh(); return false; }
+  finally { if (ui.statusPending[id] === status) delete ui.statusPending[id]; }
   if (live.length && finishStop() === "stop") { await stopAll(live, T("Status saved; ", "状态已保存；")); return true; }
   toast(T("Status saved", "状态已保存"));
   await refresh();
@@ -4408,7 +4416,8 @@ document.addEventListener("change", (ev) => {
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, T("Project saved", "项目已保存"));
   if (d.action === "set-phase") return act("set", { task: d.task, fields: [`phase=${el.value}`] }, T("Phase saved", "阶段已保存"));
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
-  if (d.action === "set-status") return setStatus(d.task, el.value);
+  // Blurred first: render() leaves the page alone while a dropdown has the focus.
+  if (d.action === "set-status") { el.blur(); return setStatus(d.task, el.value); }
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (d.action === "bind-session" && el.value) return act("bind", { task: el.value, session: d.session }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
   if (d.action === "show-done") { ui.showDone = el.checked; savePref("hq-show-done", el.checked ? "1" : "0"); render(); }
