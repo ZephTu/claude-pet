@@ -9,7 +9,7 @@ whether you ever answered. HQ moves that state out of the conversations and into
 | **Task card** | `tasks/T-012-slug/TASK.md`: goal, status, next step, todos, log | until the task is done |
 | **Asks ledger** | `tasks/T-012-slug/asks.jsonl`: every question Claude put to you, until you answer it | with the task |
 | **Session** | a working thread *bound* to one task; disposable | as long as you like |
-| **Lead** (optional) | an agent role (`.claude/agents/*-lead.md`) that owns a category of tasks | long-term |
+| **Lead** (optional) | an agent role (`.claude/agents/*-lead.md`) that owns a kind of tasks | long-term |
 
 A session can be closed at any time: the next one runs `/task T-012`, reads the card and
 carries on. You look at one board instead of twelve terminals.
@@ -88,7 +88,7 @@ hq scan --apply-projects --only api,web   # create the ones you want
 
 Then run `/hq-onboard` in any Claude Code session: Claude reads your recent sessions, drafts task
 cards per project, shows them and asks before creating anything, and binds live sessions to their
-tasks. The board offers the same on an empty board and under Projects → Suggest from sessions.
+tasks. The board offers the same on an empty board and under Projects & duties → Suggest from sessions.
 
 ## Daily use
 
@@ -103,7 +103,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq category list|add|rename|remove`, `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary),
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
@@ -339,7 +339,7 @@ still flagged `card over budget` by `hq status`.
 date (`2026-11-20`, `2026/11/20`, `Nov 20[, 2026]`, `2026 Nov 20`, `[2026年]11月20日`) becomes today's,
 else ` (cont. MM-DD)` is appended (`（续 MM-DD）` for a title with CJK). Goal, Status, the open todos
 as written (an open sub-todo of a closed one comes unindented; checklists in Goal/Status are not
-copied twice), Grants, refs, next, a non-active status, project, category, lead and workdirs come along; both logs point at
+copied twice), Grants, refs, next, a non-active status, project, lead and workdirs come along; both logs point at
 the other; the old card becomes `done` with `next: continued in T-new` and its Focus place goes to
 the new card. Sessions bound to the old card are rebound (their next prompt says so). Open asks
 move to the new card under new ids: the new card's `asks.jsonl` gets an `open` event with
@@ -360,6 +360,11 @@ suggest: a task with no project gets the one of its workdir when it is created o
 bound (the deepest match wins). Give directories to repos that belong to one project; leave
 shared repos out, and tasks started there stay in "No project" until sorted. `auto` sorts every
 task that has no project by its workdirs.
+
+On the board all of this is on Projects & duties: ＋ New project / ＋ New duty (with an optional
+default directory), drag a card to reorder, and on a project's page rename it (Details → Name),
+add or remove its default directories and delete it (its tasks move to another project or none
+first); the list has Assign by directory (`auto`) and Suggest from sessions (`hq scan`).
 
 What the project *is* lives in `<root>/projects/<name>/PROJECT.md` (`hq project add` writes one
 from `templates/PROJECT.md`; projects without one still work):
@@ -460,14 +465,11 @@ second. Each task also has `lastActive`: the later of its newest timed log line 
 HISTORY.md; date-only lines don't count) and `closed_at` (`closed` on older cards), else
 `updated` — what a project page's Finished list orders by, newest first, then by id.
 
-## Categories
+## Categories (retired)
 
-Each task root keeps its own category list in `hq.json` (new roots start with feature, bug,
-investigation, review, ops, docs, other). Manage it from the board's **Categories** button or
-`hq category add|rename|remove`. A category is just a label on each card: renaming rewrites
-every card that uses it; removing one that cards use requires saying where they go
-(`hq category remove X --to Y`, or `--to ''` for none), and each moved card logs the change. A
-card whose category is not in the list (e.g. hand-edited) still shows, marked "not in list".
+Projects and duties group tasks now. New cards get no `category:` line, the board neither shows
+nor edits one, and the quick-note sorter doesn't pick one. A `category:` already on a card stays
+as it is; `hq continue` carries it over.
 
 ## Resources and link rules
 
@@ -647,7 +649,7 @@ A line, a link or a screenshot jotted without stopping to file it. `hq inbox add
 [--image PATH …] [--sort]` stores it as `N-001`, `N-002` … in `<root>/inbox.json`; `hq inbox sort
 N-001` asks a cheap model where it belongs and files it there:
 
-- `task`: a new card (title, goal, and project / category when the model is sure). Its workdir is
+- `task`: a new card (title, goal, and its project when the model is sure). Its workdir is
   a path the note names, else the closest task's or project's folder (the sorter sees them in
   full), else the folder the project's tasks use most — so New session can start on it;
 - `todo`: a todo on an open task, `@me`, `@claude` or a colleague;
@@ -656,13 +658,13 @@ N-001` asks a cheap model where it belongs and files it there:
 
 Links in the note go to the task's refs. The sorter is one `claude -p --model haiku` run with
 `--json-schema`, no settings, no MCP and no tools (Read only when there are images); it sees the
-open tasks, projects, categories and the secretary's memory. A pick with confidence ≥ 0.7 is
+open tasks, projects and the secretary's memory. A pick with confidence ≥ 0.7 is
 applied at once; anything else stays `unsorted` with the guess and up to two alternatives kept for
 a one-click choice. Change the model with `"inbox": {"model": "sonnet"}` in `hq.json` or
 `HQ_INBOX_MODEL`.
 
 `hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--owner …] [--text …] [--title …]
-[--project …] [--category …] [--workdir …]` files it somewhere else: what the last place got (its
+[--project …] [--workdir …]` files it somewhere else: what the last place got (its
 todo, log line and refs; a card it created, deleted — or marked abandoned if edited since) is
 taken back out first, and the old place becomes an alternative. `hq inbox drop|restore N-001`
 deletes an unsorted note or brings it back. `hq inbox [--all] [--json]` lists the unsorted notes and

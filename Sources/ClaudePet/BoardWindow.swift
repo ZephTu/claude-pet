@@ -374,10 +374,6 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 JobsController.shared.retargetRecurring(from: names[0], to: names[1], hq: Self.hqBin)
             }
             return r
-        case "category":
-            var args = ["category", str("action")] + ((body["names"] as? [String]) ?? [])
-            if let to = body["to"] as? String { args.append("--to=\(to)") }
-            return await hq(args)
         case "ref": return await hq(["ref", str("action"), str("task"), "--", str("ref")])
         case "workdir": return await hq(["workdir", str("action"), str("task"), "--", str("path")])
         case "continue": return await hq(["continue", str("task"), "--json"])
@@ -385,9 +381,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "bind": return await hq(["bind", str("task"), "--session=\(str("session"))"])
         case "unbind": return await hq(["unbind", "--session=\(str("session"))"])
         case "new":
-            // No category picked: let hq choose its default rather than inventing one.
             var args = ["new"]
-            if !str("category").isEmpty { args.append("--category=\(str("category"))") }
             if !str("workdir").isEmpty { args.append("--workdir=\(str("workdir"))") }
             if !str("project").isEmpty { args.append("--project=\(str("project"))") }
             for k in ["goal", "template", "phase"] where !str(k).isEmpty { args.append("--\(k)=\(str(k))") }
@@ -414,7 +408,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "note-move":
             // Each field as --name=value: a text starting with "-" must not read as an option. Options
             // first and the action word after "--" (see noteAdd).
-            let fields = ["task", "owner", "text", "title", "project", "category", "workdir"]
+            let fields = ["task", "owner", "text", "title", "project", "workdir"]
                 .filter { !str($0).isEmpty }.map { "--\($0)=\(str($0))" }
             return await hq(["inbox", "--json"] + fields + ["--", "move", str("id"), str("kind")])
         case "note-drop": return await hq(["inbox", "--json", "--", "drop", str("id")])

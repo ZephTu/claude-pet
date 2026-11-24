@@ -42,10 +42,8 @@ const grantWording = (a) => ui.drafts["grant:" + a.id] ?? (a.grant || a.text);
 function grantPresets(action, attrs) {
   return `<div class="presets">${GRANT_PRESETS.map((p) => `<button class="chip link" data-action="${action}" ${attrs} data-text="${esc(p)}">${esc(p)}</button>`).join("")}</div>`;
 }
-// Categories live in <root>/hq.json and are edited from the Categories panel.
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
 const projectNames = () => projects().map((p) => p.name);
-const categories = () => (ui.board && Array.isArray(ui.board.categories) ? ui.board.categories : []);
 // Terminals the board can type into; anything else gets Jump only.
 const SENDABLE = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
 const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
@@ -101,7 +99,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), filter: "", busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -144,10 +142,10 @@ if (LANG === "zh") {
   $("#search").placeholder = "筛选任务";
   $("#capture").placeholder = "记一笔…（回车）";
   $(".capture").title = "记一句话、一个链接或粘贴一张截图；回车后自动分拣（新任务、某个任务的待办或记录、你的待办），去向在 Needs you 里看";
-  $("#search").title = "每个页面都筛选：任务按编号、标题、关联、分类、项目；问题和待办也按自己的文字。在项目与职责页，匹配的任务（包括已结束的）列在最上面";
+  $("#search").title = "每个页面都筛选：任务按编号、标题、关联、项目；问题和待办也按自己的文字。在项目与职责页，匹配的任务（包括已结束的）列在最上面";
   $("#new-task").textContent = "＋ 新建";
   $("#secretary-btn").title = "秘书：问它各个任务怎么样了、什么在等你；它的建议出现在 Needs you";
-  $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
+  $('[data-action="open-settings"]').title = "设置：session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
   $("#needs .vhead h1").textContent = "等你处理";
 }
@@ -1421,12 +1419,12 @@ function steady(key, items, cmp, idOf = (x) => x.id) {
   return out;
 }
 
-// The search box filters every tab: a task matches on its id, title, refs, category or project;
+// The search box filters every tab: a task matches on its id, title, refs or project;
 // an ask or a todo also on its own text.
 const filterText = () => ui.filter.trim().toLowerCase();
 function taskMatches(t, ...own) {
   const f = filterText();
-  return !f || [t.id, t.title, list(t.refs).join(" "), t.category, t.project || "", ...own].join(" ").toLowerCase().includes(f);
+  return !f || [t.id, t.title, list(t.refs).join(" "), t.project || "", ...own].join(" ").toLowerCase().includes(f);
 }
 // Above a filtered list: how much of it the filter shows, and a way out.
 function filterNote(shown, total) {
@@ -1576,8 +1574,7 @@ function renderDrawer() {
     const star = focusIds().includes(t.id);
     el.className = `drawer l-${ln}`;
     el.innerHTML = `<div class="dr-head"><div class="r1"><span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span>
-        ${t.project ? `<span class="chip link" data-action="project-panel" data-p="${esc(t.project)}">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}
-        ${t.category ? `<span class="meta">${esc(t.category)}</span>` : ""}<span class="spacer"></span>
+        ${t.project ? `<span class="chip link" data-action="project-panel" data-p="${esc(t.project)}">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}<span class="spacer"></span>
         ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}${close}</div>
       <h2>${esc(t.title)}</h2>
       <div class="dr-status">${DRAWER_STATUS.map(([s, w]) => `<button class="${t.status === s ? "on" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}">${w}</button>`).join("")}
@@ -1930,12 +1927,12 @@ function renderTaskBody(t) {
   const refs = mergeRefs(list(t.refs)).map(resolveRef);
   const resEdit = ui.resOpen.has(t.id);
   const dirs = list(t.workdirs);
-  // Settled things — status, project, category, directories, links — sit in the right rail as
+  // Settled things — status, project, directories, links — sit in the right rail as
   // plain text; "Edit" turns the first three into menus and opens `next` for editing.
   const editNext = adding("next") || (ui.drafts[k("next")] !== undefined && ui.drafts[k("next")] !== (t.next || ""));
   const tools = `<div class="tools">
       <button class="btn small ${editNext ? "on" : ""}" data-action="toggle-add" data-what="next" data-task="${esc(t.id)}"
-        title="${editNext ? T("Done editing", "改完了") : T("Edit status, project, category and next", "修改状态、项目、分类和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
+        title="${editNext ? T("Done editing", "改完了") : T("Edit status, project and next", "修改状态、项目和下一步")}">${editNext ? T("Done", "完成") : T("Edit", "编辑")}</button>
       <button class="btn small" data-action="open" data-path="${esc(t.path)}" title="${T("Open the card file", "用编辑器打开任务卡文件")}">${T("Open card", "打开任务卡")}</button>
       ${isOpen(t) && t.id !== secId() ? `<button class="btn small" data-action="continue" data-task="${esc(t.id)}" data-confirm="${T("Continue?", "续？")}"
         title="${T("Continue on a new card dated today: open todos, status, next step, key links and grants come along; this card is closed and its sessions move over", "续到一张今天的新卡：未完成待办、当前状态、下一步、关键链接和授权都带过去；这张卡关闭，绑定的 session 一起换过去")}">${T("Continue today", "续到今天")}</button>` : ""}
@@ -1955,11 +1952,6 @@ function renderTaskBody(t) {
           <option value="" ${t.phase ? "" : "selected"}>${T("(none)", "（不分阶段）")}</option>
           ${phasesOf(t).concat(t.phase && !phasesOf(t).includes(t.phase) ? [t.phase] : []).map((x) => `<option value="${esc(x)}" ${x === t.phase ? "selected" : ""}>${esc(x)}</option>`).join("")}
         </select></label>` : ""}
-        <label>${T("category", "分类")} <select data-action="set-category" data-task="${esc(t.id)}">
-          <option value="" ${t.category ? "" : "selected"}>${T("(none)", "（不分类）")}</option>
-          ${categories().map((c) => `<option value="${esc(c)}" ${c === t.category ? "selected" : ""}>${esc(c)}</option>`).join("")}
-          ${t.category && !categories().includes(t.category) ? `<option value="${esc(t.category)}" selected>${esc(t.category)} ${T("(not in list)", "（不在列表里）")}</option>` : ""}
-        </select></label>
         <span class="spacer"></span>${tools}
       </div>
       ${field("next", T("Next", "下一步"), T("the next concrete step", "下一个具体的步骤"))}
@@ -2032,7 +2024,6 @@ function renderTaskBody(t) {
           <dt>${T("Status", "状态")}</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
           <dt>${T("Project", "项目")}</dt><dd>${esc(t.project || "—")}</dd>
           ${t.phase ? `<dt>${T("Phase", "阶段")}</dt><dd>${esc(t.phase)}</dd>` : ""}
-          <dt>${T("Category", "分类")}</dt><dd>${esc(t.category || "—")}</dd>
           <dt>${T("Folders", "目录")}</dt><dd>${dirs.map((x) => `<span class="path" title="${esc(x)}"><span class="nm">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>${resEdit ? ` <button class="lnk x" data-action="workdir-remove" data-task="${esc(t.id)}" data-path="${esc(x)}" title="${T("Remove this folder from the task", "从任务里移除这个目录")}">✕</button>` : ""}</span>`).join("")}
             ${!dirs.length ? `<span class="faint" title="${T("Added by itself when a session is bound; New session uses the project's folder, or asks for one", "绑定 session 时会自动加上；点新 session 时用项目的目录，没有就让你选")}">${T("none yet", "还没有")}</span>` : ""}
             ${!dirs.length || resEdit ? `<button class="lnk" data-action="workdir-add" data-task="${esc(t.id)}">${T("+ Add", "+ 添加")}</button>` : ""}</dd>
@@ -2313,26 +2304,21 @@ function sessionProject(s) {
   return best;
 }
 
-// ---- Settings: one window for what used to crowd the top bar — projects, categories, and how
-// the board starts sessions. Open on any page (⚙); Esc, Done or a click outside closes it.
-const SETTINGS_TABS = [["projects", T("Projects", "项目")], ["categories", T("Categories", "分类")], ["sessions", "Sessions"]];
+// ---- Settings: how the board starts sessions and what happens around them. Projects are managed
+// on their own pages (Projects & duties). Open on any page (⚙); Esc, Done or a click outside closes it.
 function renderSettings() {
   const box = $("#settings");
   if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
-  const tab = ui.settings;
   const prev = box.querySelector(".settings-body");
-  const scroll = prev && prev.dataset.tab === tab ? prev.scrollTop : 0;
-  const body = tab === "projects" ? renderProjects() : tab === "categories" ? renderCategories() : renderSessionSettings();
-  // Keep the cursor if a box in here is being typed in (the window is rebuilt with the board).
+  const scroll = prev ? prev.scrollTop : 0;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Settings", "设置")}">
     <div class="phead"><div class="stitle">${T("Settings", "设置")}</div>
-      <span class="seg">${SETTINGS_TABS.map(([k, label]) => `<button class="${tab === k ? "on" : ""}" data-action="settings-tab" data-tab="${k}">${label}</button>`).join("")}</span>
       <span style="flex:1"></span><button class="btn small" data-action="close-settings">${T("Done", "完成")}</button></div>
-    <div class="settings-body" data-tab="${tab}">${body}</div></div>`;
+    <div class="settings-body">${renderSessionSettings()}</div></div>`;
   box.hidden = false;
   box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
 }
-function closeSettings() { ui.settings = null; ui.projRemove = {}; ui.catRemove = {}; render(); }
+function closeSettings() { ui.settings = false; render(); }
 function renderSessionSettings() {
   const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
   return `<div class="set-list">
@@ -2348,55 +2334,6 @@ function renderSessionSettings() {
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
     ${row(T("Active first", "活跃的在前"), T("On Projects & duties, projects with a live session come first, most recently active first; in every lane (Focus and a project's page), the task whose session moved last comes first. Off: your own order", "项目与职责里有 session 在跑的项目排最前，最近有动静的在前；每一列里（Focus 和项目页），session 最近有动静的任务排最上面。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
-  </div>`;
-}
-
-function renderProjects() {
-  const ps = projects();
-  const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
-  const unassigned = listed().filter((t) => !t.project).length;
-  const rows = ps.map((pr) => {
-    const n = tasks().filter((t) => t.project === pr.name).length;
-    if (ui.projRemove[pr.name]) {
-      const key = "projto:" + pr.name;
-      return `<div class="cat-row removing"><span>${T(`Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(pr.name)}</b> to`, `把 <b>${esc(pr.name)}</b> 里的 ${n} 个任务移到`)}</span>
-        <select class="bind" data-key="${esc(key)}"><option value="">${T("(no project)", "（无项目）")}</option>
-          ${ps.filter((x) => x.name !== pr.name).map((x) => `<option value="${esc(x.name)}" ${ui.drafts[key] === x.name ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
-        <button class="btn small res-drop" data-action="proj-remove-confirm" data-p="${esc(pr.name)}">${T("Move &amp; remove", "移走并删除")}</button>
-        <button class="btn small ghost" data-action="proj-remove-cancel" data-p="${esc(pr.name)}">${T("Cancel", "取消")}</button></div>`;
-    }
-    const nk = "projname:" + pr.name;
-    const dirty = ui.drafts[nk] !== undefined && ui.drafts[nk] !== pr.name;
-    return `<div class="proj-row" draggable="true" data-drag-project="${esc(pr.name)}">
-      <div class="row nowrap">
-        <span class="grip" title="${T("Drag to reorder", "拖动调整顺序")}">⠿</span>
-        <input class="note" data-key="${esc(nk)}" value="${esc(ui.drafts[nk] ?? pr.name)}" title="${T("Edit to rename (tasks are updated)", "修改即改名（任务卡会同步更新）")}">
-        ${dirty ? `<button class="btn small primary" data-action="proj-rename" data-p="${esc(pr.name)}">${T("Save", "保存")}</button>` : ""}
-        <span class="meta">${T(`${n} task${n === 1 ? "" : "s"}`, `${n} 个任务`)}</span>
-        <button class="icon" title="${T("Remove this project", "删除这个项目")}" ${tasks().some((x) => x.project === pr.name) ? "" : `data-confirm="${T("Remove?", "删除？")}"`} data-action="proj-remove" data-p="${esc(pr.name)}">✕</button>
-      </div>
-      <div class="proj-paths">${pr.paths.map((x) => `<div class="res-i"><span class="meta">${esc(x)}</span>
-          <button class="icon" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="proj-path-remove" data-p="${esc(pr.name)}" data-path="${esc(x)}">✕</button></div>`).join("")
-        || `<div class="meta">${T("No directory — tasks are only assigned by hand.", "没有目录——任务只能手动归到这里。")}</div>`}
-        ${ui.adding.has(pr.name + ":proj") ? `<div class="row nowrap"><input class="note" list="proj-dirs" data-key="${esc("projpath:" + pr.name)}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}" value="${esc(draft("projpath:" + pr.name))}">
-          <button class="btn small" data-action="proj-path-add" data-p="${esc(pr.name)}">${T("Add", "添加")}</button></div>`
-          : `<button class="btn small ghost" data-action="toggle-add" data-what="proj" data-task="${esc(pr.name)}" title="${T("Add a directory", "加一个目录")}">${T("+ directory", "+ 目录")}</button>`}</div>
-    </div>`;
-  }).join("");
-  return `<div class="card">
-    <div class="row"><b>${T("Projects", "项目")}</b><span class="meta">${T("a task's directory picks its project · drag ⠿ to reorder", "任务按目录归到项目 · 拖动 ⠿ 调整顺序")}</span>
-      <span style="flex:1"></span><button class="btn small" data-action="close-projects">${T("Done", "完成")}</button></div>
-    <datalist id="proj-dirs">${dirs.map((x) => `<option value="${esc(x)}">`).join("")}</datalist>
-    ${rows || `<div class="empty">${T("No projects yet.", "还没有项目。")}</div>`}
-    <div class="proj-row"><div class="row nowrap">
-      <input class="note" data-key="projnew" placeholder="${T("new project name", "新项目的名字")}" value="${esc(draft("projnew"))}">
-      <input class="note" list="proj-dirs" data-key="projnewpath" placeholder="${T("its directory (optional)", "它的目录（可不填）")}" value="${esc(draft("projnewpath"))}">
-      <button class="btn small primary" data-action="proj-add">${T("Add", "添加")}</button></div></div>
-    ${unassigned ? `<div class="row" style="margin-top:6px"><span class="meta">${T(`${unassigned} task(s) have no project.`, `${unassigned} 个任务没有项目。`)}</span>
-      <button class="btn small" data-action="proj-auto">${T("Assign by directory", "按目录归属")}</button></div>` : ""}
-    <div class="row" style="margin-top:8px"><button class="btn small" data-action="scan">${T("Suggest from sessions", "从 session 推荐")}</button>
-      <span class="meta">${T("finds repositories and directories your Claude Code sessions worked in", "找出你的 Claude Code session 干过活的仓库和目录")}</span></div>
-    ${renderScan()}
   </div>`;
 }
 
@@ -2427,45 +2364,6 @@ function renderOnboarding() {
   </div>`;
 }
 
-function categoryCount(name) { return tasks().filter((t) => (t.category || "") === name).length; }
-
-function renderCategories() {
-  const cats = categories();
-  const used = [...new Set(tasks().map((t) => t.category).filter((c) => c && !cats.includes(c)))];
-  const rows = cats.map((c) => {
-    const n = categoryCount(c);
-    if (ui.catRemove[c]) {
-      const key = "catto:" + c;
-      const others = cats.filter((x) => x !== c);
-      return `<div class="cat-row removing">
-        <span>${T(`Move the ${n} task${n === 1 ? "" : "s"} in <b>${esc(c)}</b> to`, `把 <b>${esc(c)}</b> 里的 ${n} 个任务移到`)}</span>
-        <select class="bind" data-key="${esc(key)}">
-          <option value="" ${!ui.drafts[key] ? "selected" : ""}>${T("(none)", "（不分类）")}</option>
-          ${others.map((x) => `<option value="${esc(x)}" ${ui.drafts[key] === x ? "selected" : ""}>${esc(x)}</option>`).join("")}
-        </select>
-        <button class="btn small res-drop" data-action="cat-remove-confirm" data-cat="${esc(c)}">${T("Move &amp; remove", "移走并删除")}</button>
-        <button class="btn small ghost" data-action="cat-remove-cancel" data-cat="${esc(c)}">${T("Cancel", "取消")}</button>
-      </div>`;
-    }
-    return `<div class="cat-row">
-      <input class="note" data-key="catname:${esc(c)}" data-enter="renamecat" data-cat="${esc(c)}" value="${esc(ui.drafts["catname:" + c] ?? c)}" title="${T("Edit and press Enter to rename (tasks are updated)", "修改后按回车改名（任务卡会同步更新）")}">
-      <span class="meta">${T(`${n} task${n === 1 ? "" : "s"}`, `${n} 个任务`)}</span>
-      <button class="btn small ghost" ${categoryCount(c) ? "" : `data-confirm="${T("Remove?", "删除？")}"`} data-action="cat-remove" data-cat="${esc(c)}" title="${T("Remove this category", "删除这个分类")}">✕</button>
-    </div>`;
-  }).join("");
-  const unlisted = used.map((c) => `<div class="cat-row"><span class="chip">${esc(c)}</span>
-      <span class="meta">${T(`on ${categoryCount(c)} card(s) but not in the list`, `${categoryCount(c)} 张任务卡在用，但不在列表里`)}</span>
-      <button class="btn small" data-action="cat-adopt" data-cat="${esc(c)}">${T("Add to list", "加进列表")}</button></div>`).join("");
-  return `<div class="card">
-    <div class="row"><b>${T("Categories", "分类")}</b><span class="meta">${T("this board's list, saved in hq.json", "这个看板的分类列表，存在 hq.json 里")}</span>
-      <span style="flex:1"></span><button class="btn small" data-action="close-cats">${T("Done", "完成")}</button></div>
-    <div class="meta" style="margin:4px 0 8px">${T(`Rename: edit a name and press Enter — every task using it is updated.
-      Removing a category that tasks use asks where to move them.`, `改名：改好名字按回车——所有用到它的任务都会更新。删除有任务在用的分类时，会先问这些任务移到哪里。`)}</div>
-    ${rows || `<div class="empty">${T("No categories yet.", "还没有分类。")}</div>`}
-    ${unlisted}
-    <div class="cat-row"><input class="note" data-key="catnew" data-enter="addcat" placeholder="${T("new category — Enter to add", "新分类——回车添加")}" value="${esc(draft("catnew"))}"></div>
-  </div>`;
-}
 
 // ------------------------------------------------------------------ peek window
 // A session's recent conversation in a large overlay: select and copy freely,
@@ -3358,7 +3256,7 @@ function drawContext() {
       ${origin}
       <section class="ctx-sec">
         <h4>${T("Task", "任务")}</h4>
-        <div class="meta">${esc(LABEL[t.status] || t.status)} · ${esc(t.category || T("no category", "未分类"))} · ${T(`updated ${t.age_days ?? "?"}d ago`, `${t.age_days ?? "?"} 天前更新`)}</div>
+        <div class="meta">${esc(LABEL[t.status] || t.status)} · ${T(`updated ${t.age_days ?? "?"}d ago`, `${t.age_days ?? "?"} 天前更新`)}</div>
         ${t.next ? `<div style="margin-top:4px">${T("Next: ", "下一步：")}${inline(t.next)}</div>` : ""}
         ${t.waiting_on_me ? `<div style="color:var(--amber)">${T("Waiting on you: ", "等你：")}${inline(t.waiting_on_me)}</div>` : ""}
       </section>
@@ -4243,48 +4141,10 @@ document.addEventListener("click", async (ev) => {
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
-    case "open-settings": ui.settings = ui.settings || "projects"; return render();
-    case "settings-tab": ui.settings = d.tab; return render();
+    case "open-settings": ui.settings = true; return render();
     case "close-settings": closeSettings(); return;
-    case "open-projects": ui.settings = "projects"; return render();
-    case "close-projects": closeSettings(); return;
-    case "proj-rename": {
-      const v = (ui.drafts["projname:" + d.p] || "").trim();
-      delete ui.drafts["projname:" + d.p];
-      if (!v || v === d.p) return render();
-      return act("project", { action: "rename", names: [d.p, v] }, T(`Renamed ${d.p} → ${v}`, `已改名 ${d.p} → ${v}`));
-    }
-    case "proj-path-remove": {
-      const pr = projects().find((x) => x.name === d.p);
-      return act("project", { action: "paths", names: [d.p, ...pr.paths.filter((x) => x !== d.path)] }, T("Directory removed", "目录已删除"));
-    }
-    case "proj-path-add": {
-      const v = (ui.drafts["projpath:" + d.p] || "").trim();
-      if (!v) return;
-      delete ui.drafts["projpath:" + d.p];
-      const pr = projects().find((x) => x.name === d.p);
-      return act("project", { action: "paths", names: [d.p, ...pr.paths, v] }, T("Directory added", "目录已添加"));
-    }
-    case "proj-remove": {
-      const n = tasks().filter((t) => t.project === d.p).length;
-      if (!n) return act("project", { action: "remove", names: [d.p] }, T(`Removed ${d.p}`, `已删除 ${d.p}`));
-      ui.projRemove[d.p] = true;
-      return render();
-    }
-    case "proj-remove-cancel": delete ui.projRemove[d.p]; return render();
-    case "proj-remove-confirm": {
-      const to = ui.drafts["projto:" + d.p] ?? "";
-      delete ui.projRemove[d.p];
-      return act("project", { action: "remove", names: [d.p], to }, T(`Removed ${d.p}; tasks moved to ${to || "(no project)"}`, `已删除 ${d.p}；任务移到了${to || "（无项目）"}`));
-    }
-    case "proj-add": {
-      const name = (ui.drafts["projnew"] || "").trim();
-      const path = (ui.drafts["projnewpath"] || "").trim();
-      if (!name) return toast(T("Give the project a name", "给项目起个名字"), true);
-      delete ui.drafts["projnew"]; delete ui.drafts["projnewpath"];
-      return act("project", { action: "add", names: [name], paths: path ? [path] : [] }, T(`Added ${name}`, `已添加 ${name}`));
-    }
-    case "scan-open": ui.settings = "projects"; // fall through to scan
+    // The first-run card's "Suggest projects": the list of Projects & duties, then the scan.
+    case "scan-open": if (ui.mode !== "projects" || ui.proj) goToProject(""); // fall through to scan
     case "scan":
       ui.scan = "loading"; ui.scanPick = new Set(); render();
       try {
@@ -4408,22 +4268,6 @@ document.addEventListener("click", async (ev) => {
       ui.stopArmed = null;
       return act("stop", { session: d.session }, T("Stopped", "已停止"));
     case "proj-auto": return act("project", { action: "auto" }, T("Tasks assigned by directory", "已按目录归属任务"));
-    case "open-cats": ui.settings = "categories"; return render();
-    case "close-cats": closeSettings(); return;
-    case "cat-remove": {
-      const n = categoryCount(d.cat);
-      if (!n) return act("category", { action: "remove", names: [d.cat] }, T(`Removed ${d.cat}`, `已删除 ${d.cat}`));
-      ui.catRemove[d.cat] = true;
-      return render();
-    }
-    case "cat-remove-cancel": delete ui.catRemove[d.cat]; return render();
-    case "cat-remove-confirm": {
-      const to = ui.drafts["catto:" + d.cat] ?? "";
-      delete ui.catRemove[d.cat];
-      delete ui.drafts["catto:" + d.cat];
-      return act("category", { action: "remove", names: [d.cat], to }, T(`Removed ${d.cat}; tasks moved to ${to || "(none)"}`, `已删除 ${d.cat}；任务移到了${to || "（不分类）"}`));
-    }
-    case "cat-adopt": return act("category", { action: "add", names: [d.cat] }, T(`Added ${d.cat}`, `已添加 ${d.cat}`));
     // The Projects & duties page and the ＋ New window (projects.js).
     default: if (d.action.startsWith("p-") && typeof projAction === "function") return projAction(d, el, ev);
   }
@@ -4442,15 +4286,14 @@ document.addEventListener("change", (ev) => {
   if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
   // Kept by the pet, which its menu shares; shows at once, the next refresh confirms it.
   if (d.action === "click-target") { ui.clickTarget = el.value; api("click-target", { value: el.value }).catch((e) => toast(String(e.message || e), true)); return render(); }
-  // A picked status / project / category shows at once; the refresh after saving confirms it.
-  if (["set-status", "set-project", "set-category", "set-phase"].includes(d.action)) {
+  // A picked status / project / phase shows at once; the refresh after saving confirms it.
+  if (["set-status", "set-project", "set-phase"].includes(d.action)) {
     ui.pointerDown = false;
     const t = taskById(d.task);
     if (t) { t[d.action.slice(4)] = el.value; render(); }
   }
   if (d.action === "set-project") return act("set", { task: d.task, fields: [`project=${el.value}`] }, T("Project saved", "项目已保存"));
   if (d.action === "set-phase") return act("set", { task: d.task, fields: [`phase=${el.value}`] }, T("Phase saved", "阶段已保存"));
-  if (d.action === "set-category") return act("set", { task: d.task, fields: [`category=${el.value}`] }, T("Category saved", "分类已保存"));
   if (el.tagName === "SELECT" && d.key) { ui.drafts[d.key] = el.value; el.blur(); return render(); }
   if (d.action === "set-status") return setStatus(d.task, el.value);
   if (d.action === "bind" && el.value) return act("bind", { task: d.task, session: el.value }, T("Bound — the session learns the task on its next message", "已绑定——session 收到下一条消息时会知道这个任务"));
@@ -4727,11 +4570,6 @@ document.addEventListener("keydown", async (ev) => {
     if (!text) return;
     delete ui.drafts[el.dataset.key];
     if (el.dataset.enter === "log") return act("log", { task: el.dataset.task, message: text }, T("Logged", "已记入日志"));
-    if (el.dataset.enter === "addcat") return act("category", { action: "add", names: [text] }, T(`Added ${text}`, `已添加 ${text}`));
-    if (el.dataset.enter === "renamecat") {
-      if (text === el.dataset.cat) return render();
-      return act("category", { action: "rename", names: [el.dataset.cat, text] }, T(`Renamed ${el.dataset.cat} → ${text}`, `已改名 ${el.dataset.cat} → ${text}`));
-    }
     if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, T("Todo added", "待办已添加"));
     if (el.dataset.enter === "addgrant") { ui.adding.delete(`${el.dataset.task}:grant`); return act("grant", { action: "add", task: el.dataset.task, text }, T("Grant added", "授权已添加")); }
     if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, T("Added", "已添加"));
@@ -4739,11 +4577,11 @@ document.addEventListener("keydown", async (ev) => {
 });
 
 
-// ---- reorder projects by dragging a card (Projects & duties) or a row (Settings → Projects).
+// ---- reorder projects by dragging a card on Projects & duties.
 // Forgiving on purpose: anywhere on the page counts — the nearest card decides the spot. A card
 // moves among the cards of its own kind (projects among projects, duties among duties); left or
-// right of the nearest card in the grid, above or below the nearest row in Settings.
-function dropZone(ev) { return ev.target.closest && ev.target.closest("#proj-view.list, #settings .settings-body"); }
+// right of the nearest card in the grid.
+function dropZone(ev) { return ev.target.closest && ev.target.closest("#proj-view.list"); }
 function clearDropMarks() { document.querySelectorAll(".drop-before,.drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after")); }
 function nearestTarget(zone, x, y) {
   let best = null, dist = Infinity;
@@ -4753,7 +4591,7 @@ function nearestTarget(zone, x, y) {
     if (!r.height) continue;
     const mx = r.left + r.width / 2, my = r.top + r.height / 2;
     const d = Math.hypot(x - mx, y - my);
-    if (d < dist) { dist = d; best = { el, before: el.classList.contains("pcard") ? x < mx : y < my }; }
+    if (d < dist) { dist = d; best = { el, before: x < mx }; }
   }
   return best;
 }

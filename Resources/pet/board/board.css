@@ -238,9 +238,6 @@ select.bind { background: var(--bg); border: 1px solid var(--line); border-radiu
 
 .send.disabled > * { pointer-events: none; }   /* let the hover reach the wrapper's tooltip */
 .send.disabled textarea { opacity: .45; }
-.cat-row { display: flex; gap: 8px; align-items: center; margin: 5px 0; flex-wrap: wrap; }
-.cat-row .note { max-width: 220px; }
-.cat-row.removing { background: var(--panel-2); border-radius: 8px; padding: 6px 8px; }
 .clickable { cursor: pointer; }
 .clickable:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
 .ctx-title { font-size: 15px; margin-top: 3px; white-space: pre-wrap; }
@@ -305,8 +302,7 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .caret.open svg { transform: rotate(90deg); }
 .group-title.proj:hover .caret { color: var(--text); background: var(--panel-2); }
 .grip { margin-left: auto; color: var(--faint); cursor: grab; font-size: 14px; padding: 0 4px; opacity: 0; }
-.group-title.proj:hover .grip, .proj-row .grip { opacity: 1; }
-.proj-row .grip { margin-left: 0; }
+.group-title.proj:hover .grip { opacity: 1; }
 .dragging { opacity: .45; }
 .task.flash, .fcard.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
 /* The session the pet sent you to, on its task's card (window.hqReveal). */
@@ -345,9 +341,6 @@ select.place { max-width: 100px; }
 .stag.waiting-on-me { color: var(--amber); }
 .stag.blocked { color: var(--red); }
 .stag.active { color: var(--teal); }
-.proj-row { border-bottom: 1px solid var(--line); padding: 8px 0; }
-.proj-row:last-of-type { border-bottom: 0; }
-.proj-paths { margin: 4px 0 0 4px; }
 /* task body */
 .row.nowrap { flex-wrap: nowrap; }
 .row.nowrap input { flex: 1; min-width: 0; }
@@ -366,10 +359,6 @@ select.place { max-width: 100px; }
 .btn.on { border-color: var(--accent); }
 .res { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; margin-top: 8px; }
 .res-g { margin-bottom: 8px; }
-.res-i { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-.res-i a { color: var(--blue); text-decoration: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.res-i a:hover { color: var(--text); text-decoration: underline; }
-.res-i span { flex: 1; color: var(--dim); }
 .icon { font-size: 12px; }
 /* peek window */
 #modal { position: fixed; inset: 0; background: var(--scrim); z-index: 20; display: flex;
@@ -592,7 +581,7 @@ select.place { max-width: 100px; }
 .bsess.past .btn { white-space: nowrap; }
 .bsess.past .meta { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* task details, compact: status / project / category on one line, directories on one line */
+/* task details, compact: status / project / phase on one line, directories on one line */
 .metarow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 6px 0 4px; }
 .metarow label { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11.5px; }
 .metarow select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
@@ -622,7 +611,7 @@ select.place { max-width: 100px; }
 #quota { gap: 10px; }
 #search { min-width: 80px; }
 
-/* status / project / category as plain text until "✎ Edit" */
+/* status / project / phase as plain text until "✎ Edit" */
 .metarow .kv { color: var(--faint); font-size: 11.5px; white-space: nowrap; }
 .metarow .kv b { color: var(--dim); font-weight: 500; margin-left: 3px; }
 
@@ -702,8 +691,6 @@ main { height: calc(100% - 46px - 30px); }
   border-bottom: 1px solid var(--line); }
 .set-row:last-child { border-bottom: 0; }
 .set-row .meta { margin-top: 2px; max-width: 520px; }
-/* the Projects / Categories panels' own Done: the Settings window has one */
-.settings-body [data-action="close-projects"], .settings-body [data-action="close-cats"] { display: none; }
 
 /* toasts sit above the status bar */
 #toast { bottom: 44px; }
@@ -1521,6 +1508,14 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .pkv .v { min-width: 0; overflow-wrap: anywhere; }
 .pmeta-form .field { grid-template-columns: 72px 1fr; }
 .pmeta-form .field input, .pmeta-form .field select { width: 100%; box-sizing: border-box; min-width: 0; }
+.pdir { display: flex; gap: 6px; align-items: center; padding: 2px 0; }
+.pdir code { flex: 1; min-width: 0; }
+.pdir .icon.x { opacity: .7; flex: none; }   /* only shown while ✎ is on: no need to hover */
+.pdir-add { margin-top: 6px; }
+.pdir-add .note { flex: 1; min-width: 0; }
+.premove .row { margin-top: 6px; align-items: center; gap: 6px; }
+.premove select { min-width: 0; max-width: 150px; }
+.premove > .btn { color: var(--faint); }
 .pd-main { overflow-y: auto; padding: 12px 18px 24px; min-width: 0; }
 .pd-main .board { padding: 0; overflow: visible; min-height: 220px; }
 .pd-main .lane-body { overflow: visible; }

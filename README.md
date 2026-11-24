@@ -46,7 +46,7 @@ With a dozen sessions open across several repos, the hard part stops being the w
 
 <img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view, each with its open questions, todos and sessions; their sessions on the right">
 
-The board has three pages, two columns each. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **All** is every task and every session; **Needs you** gathers every unanswered question and your todos, with a count on its tab. A fourth tab, **Scheduled**, runs jobs on a timetable (see below). The status bar at the bottom shows counts and your quota; projects, categories and how sessions start live under ⚙ Settings.
+The board has three task pages. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **Projects & duties** is every project and duty, each with a page of its tasks, goal, criteria and settings; **Needs you** gathers every unanswered question and your todos, with a count on its tab. A fourth tab, **Scheduled**, runs jobs on a timetable (see below). The status bar at the bottom shows counts and your quota; how sessions start lives under ⚙ Settings.
 
 ### Questions, answered in one go
 

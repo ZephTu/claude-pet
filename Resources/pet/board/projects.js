@@ -21,7 +21,7 @@
 ui.proj = pref("hq-proj", "");
 // Which part of a project's page is being edited ("<name>|<part>"), and whose recurring-job form
 // is open.
-const pui = { edit: null, recur: null, doneAll: new Set(), closedOpen: false, busy: false };
+const pui = { edit: null, recur: null, doneAll: new Set(), closedOpen: false, busy: false, removing: null };
 
 const AUTO_SOURCES = [
   ["qahub-ci", T("QA Hub CI failures", "QA Hub 的 CI 失败"), T("a failed CI job of yours becomes a task", "你的 CI job 失败了就建一个任务")],
@@ -41,7 +41,7 @@ function goToProject(name) {
   ui.proj = name || ""; savePref("hq-proj", ui.proj);
   ui.drawer = null;
   if (ui.modal) closePeek();
-  pui.edit = null; pui.recur = null;
+  pui.edit = null; pui.recur = null; pui.removing = null;
   refresh(true);
 }
 window.hqShowProject = goToProject;
@@ -148,9 +148,11 @@ function projList() {
   const sec = (icon, kind, title, sub, n) => `<div class="sec-h k-${kind}">${icon ? `<i class="ki ${kind}">${icon}</i>` : ""}${title}<span class="c">${n}</span><span class="sub">${sub}</span></div>`;
   let html = `<div class="vhead"><h1>${T("Projects & duties", "项目与职责")}</h1>
       <span class="meta">${T(`${goals.length} projects · ${duties.length} duties`, `${goals.length} 个项目 · ${duties.length} 个职责`)}</span><span class="spacer"></span>
+      <button class="btn small ghost" data-action="scan" title="${T("Find the repositories and directories your Claude Code sessions worked in, and pick which become projects", "找出你的 Claude Code session 干过活的仓库和目录，挑出哪些成为项目")}">${T("Suggest from sessions", "从 session 推荐")}</button>
       <button class="btn small" data-action="p-create" data-k="goal">${T("＋ New project", "＋ 新项目")}</button>
       <button class="btn small" data-action="p-create" data-k="duty">${T("＋ New duty", "＋ 新职责")}</button></div>`;
-  if (!listed().length) html += renderOnboarding();
+  html += renderScan();
+  if (!listed().length && !ui.scan) html += renderOnboarding();
   if (f) html += taskHits();
   // While filtering, a section shows only when something in it matches.
   if (!f || goals.length) html += sec("◆", "goal", T("Projects", "项目"), T("have an end — a goal, done-when, tasks under them", "有终点——目标、完成标准、下面挂任务"), goals.length) +
@@ -164,7 +166,10 @@ function projList() {
         <button class="btn small" data-action="p-kind" data-p="${esc(p.name)}" data-k="goal">${T("◆ It's a project", "◆ 设为项目")}</button>
         <button class="btn small" data-action="p-kind" data-p="${esc(p.name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div>`).join("")}</div>`;
   }
-  if (!f) html += `<div class="sec-h">${T("Not in a project", "未归属")}<span class="sub">${T("one-off tasks", "零散任务")}</span></div>
+  // Tasks (open or closed) in no project, while some project has a directory they could match.
+  const byDir = listed().some((t) => !t.project) && all.some((p) => (p.paths || []).length);
+  if (!f) html += `<div class="sec-h">${T("Not in a project", "未归属")}<span class="sub">${T("one-off tasks", "零散任务")}</span>
+      ${byDir ? `<span class="spacer"></span><button class="btn small ghost" data-action="proj-auto" title="${T("Put each task with no project into the project whose default directory holds its workdir", "把没有项目的任务，按它的工作目录归到默认目录包含它的项目里")}">${T("Assign by directory", "按目录归属")}</button>` : ""}</div>
     <div class="plist"><div class="prow link" data-action="p-open" data-p="(none)"><span class="nm">${T(`${loose.length} open task${loose.length === 1 ? "" : "s"} in no project`, `${loose.length} 个进行中的任务没有归属`)}</span><span class="spacer"></span><span class="meta">${T("Open ›", "打开 ›")}</span></div>
       ${cardTasks("(none)", loose)}</div>`;
   if (closed.length) {
@@ -217,8 +222,9 @@ function criteriaHTML(pr) {
   return crit.map((c) => `<div class="crit"><span class="box ${c.done ? "done" : ""}" data-action="p-check" data-p="${esc(pr.name)}" data-i="${c.i}" data-done="${c.done ? "" : "1"}"
       title="${c.done ? T("Ticked — click to untick", "已达成——点击取消") : T("Tick it when it holds", "达成了就勾上")}">${c.done ? "✓" : ""}</span><span class="${c.done ? "dim" : ""}">${esc(c.text)}</span></div>`).join("");
 }
-const META_KEYS = (pr) => pr.kind === "duty" ? ["title", "jira"] : ["title", "due", "parent", "phases", "jira", "fixVersions"];
-const META_LABEL = { title: T("Title", "标题"), due: T("Due", "截止"), parent: T("Under duty", "归在职责下"), phases: T("Phases", "阶段"), jira: "Jira", fixVersions: "Fix versions" };
+// A project that is only listed in hq.json (no PROJECT.md kind yet) has just its name to edit.
+const META_KEYS = (pr) => !pr.kind ? ["name"] : pr.kind === "duty" ? ["name", "title", "jira"] : ["name", "title", "due", "parent", "phases", "jira", "fixVersions"];
+const META_LABEL = { name: T("Name", "名字"), title: T("Title", "标题"), due: T("Due", "截止"), parent: T("Under duty", "归在职责下"), phases: T("Phases", "阶段"), jira: "Jira", fixVersions: "Fix versions" };
 const metaVal = (pr, k) => (Array.isArray(pr[k]) ? pr[k].join(", ") : pr[k] || "");
 function metaHTML(pr) {
   const name = pr.name;
@@ -229,6 +235,7 @@ function metaHTML(pr) {
       ? `<select data-key="pm:${esc(name)}:parent"><option value="">${T("(none)", "（不归）")}</option>${duties.map((d) => `<option value="${esc(d.name)}" ${v("parent") === d.name ? "selected" : ""}>↻ ${esc(projLabel(d, d.name))}</option>`).join("")}</select>`
       : `<input data-key="pm:${esc(name)}:${k}" ${k === "due" ? `type="date"` : ""} value="${esc(v(k))}" placeholder="${k === "phases" ? T("Design, Build, Ship", "设计, 开发, 上线") : k === "jira" ? "PROJ-123, PROJ-456" : ""}">`;
     return `<div class="pmeta-form">${META_KEYS(pr).map((k) => `<div class="field"><label>${META_LABEL[k]}</label>${inp(k)}</div>`).join("")}
+      <div class="meta">${T("Name: also its folder; renaming moves its tasks and recurring work along", "名字：也是它的文件夹名；改名后它的任务和定期任务会跟着改")}</div>
       ${pr.kind === "goal" ? `<div class="meta">${T("Phases: comma separated, in order; tasks pick one", "阶段：逗号隔开，按先后；任务从中选一个")}</div>` : ""}
       <div class="row pe-acts"><span class="spacer"></span><button class="btn small ghost" data-action="p-cancel">${T("Cancel", "取消")}</button>
         <button class="btn small primary" data-action="p-meta-save" data-p="${esc(name)}">${T("Save", "保存")}</button></div></div>`;
@@ -236,6 +243,7 @@ function metaHTML(pr) {
   const refs = (vals) => vals.map((v) => { const r = resolveRef(v); return r.url
     ? `<a href="#" class="ref chip" data-action="link" data-url="${esc(r.url)}" title="${esc(r.url)}">${esc(v)}</a>` : `<span class="chip">${esc(v)}</span>`; }).join(" ");
   const rows = [];
+  if (!pr.kind) return `<div class="pkv"><div><span class="k">${META_LABEL.name}</span><span class="v">${esc(name)}</span></div></div>`;
   if (pr.kind === "goal") {
     rows.push([META_LABEL.due, pr.due ? (projectClosed(pr) ? esc(pr.due) : dueText(pr.due)) : "—"]);
     rows.push([META_LABEL.parent, pr.parent ? `<span class="link" data-action="p-open" data-p="${esc(pr.parent)}">↻ ${esc(ptitle(pr.parent))}</span>` : "—"]);
@@ -248,11 +256,13 @@ function metaHTML(pr) {
 
 function projAside(pr) {
   const name = pr.name, duty = pr.kind === "duty";
+  const details = `<section class="pi-sec"><h4>${T("Details", "详情")}${editBtn(name, "meta")}</h4>${metaHTML(pr)}</section>`;
   if (!pr.defined || !pr.kind) {
     return `<section class="pi-sec"><h4>${T("Not set up yet", "还没定类型")}</h4>
       <p class="dim">${T("Say what this is, and it gets a PROJECT.md with a goal, criteria and a brief to fill in.", "先说它是什么，就会有一份 PROJECT.md，可以填目标、标准和简报。")}</p>
       <div class="row"><button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="goal">${T("◆ It's a project", "◆ 设为项目")}</button>
-        <button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div></section>`;
+        <button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div></section>`
+      + details + dirsSec(pr) + removeSec(pr);
   }
   const grants = (pr.grants || []).length
     ? `<div class="grants">${pr.grants.map((g) => `<div class="grant"><span class="t">${esc(g.text)}</span>
@@ -263,12 +273,44 @@ function projAside(pr) {
       duty ? T("What this duty covers", "这个职责管什么") : T("What this project is for", "这个项目要做成什么")),
     infoSec(name, "out", T("Out of scope", "不管"), mdOr(pr.out, T("Nothing said.", "没写。")), T("What it leaves to others", "哪些事不归它")),
     infoSec(name, "done_when", duty ? T("Healthy when", "健康标准") : T("Done when", "完成标准"), criteriaHTML(pr), T("- one criterion per line", "- 一行一条")),
-    `<section class="pi-sec"><h4>${T("Details", "详情")}${editBtn(name, "meta")}</h4>${metaHTML(pr)}</section>`,
+    details,
     infoSec(name, "brief", T("Brief — given to every session on its tasks", "简报——交给它每个任务的 session"), mdOr(pr.brief, T("Empty: sessions are told nothing about this project.", "空的：session 不会收到这个项目的任何说明。")),
       T("Repos, branches, rules every session here should know", "仓库、分支、每个 session 都该知道的规矩")),
     `<section class="pi-sec"><h4>${T("Grants — hold for every task in it", "授权——对它的每个任务都有效")}</h4>${grants}</section>`,
-    (pr.paths || []).length ? `<section class="pi-sec"><h4>${T("Default directories", "默认目录")}</h4><div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>${pr.paths.map((x) => `<div><code>${esc(x)}</code></div>`).join("")}</section>` : "",
+    dirsSec(pr),
+    removeSec(pr),
   ].join("");
+}
+
+// Its default directories: a task started in one, with no project yet, joins it. ✎ to add or remove.
+function dirsSec(pr) {
+  const name = pr.name, on = editing(name, "dirs"), paths = pr.paths || [];
+  const rows = paths.map((x) => `<div class="pdir"><code>${esc(x)}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
+  const add = on ? `<div class="row nowrap pdir-add"><input class="note" list="pdir-list" data-key="${esc("pdir:" + name)}" data-pdir="${esc(name)}" value="${esc(draft("pdir:" + name))}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}">${dirList("pdir-list")}
+      <button class="btn small" data-action="p-dir-add" data-p="${esc(name)}">${T("Add", "添加")}</button></div>` : "";
+  return `<section class="pi-sec"><h4>${T("Default directories", "默认目录")}${editBtn(name, "dirs")}</h4>
+    <div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>
+    ${rows || (on ? "" : `<div class="empty">${T("None — tasks only join it by hand.", "没有——任务只能手动归到这里。")}</div>`)}${add}</section>`;
+}
+
+// Deleting it: its tasks (open and closed) move to another project or to none first; PROJECT.md is
+// put aside under projects/.removed, never deleted.
+function removeSec(pr) {
+  const name = pr.name, n = tasks().filter((t) => t.project === name).length;
+  const what = pr.kind === "duty" ? T("duty", "职责") : T("project", "项目");
+  const kept = pr.defined ? T(" Its PROJECT.md is kept in projects/.removed.", "它的 PROJECT.md 会挪到 projects/.removed 里留着。") : "";
+  if (pui.removing === name && n) {
+    const key = "pto:" + name;
+    const others = projects().filter((x) => x.name !== name && (!projectClosed(x) || x.name === draft(key)));
+    return `<section class="pi-sec premove"><h4>${T(`Delete this ${what}`, `删除这个${what}`)}</h4>
+      <div class="row nowrap"><span>${T(`Move its ${n} task${n === 1 ? "" : "s"} to`, `把它的 ${n} 个任务移到`)}</span>
+        <select data-key="${esc(key)}"><option value="">${T("(no project)", "（不归项目）")}</option>${others.map((x) => `<option value="${esc(x.name)}" ${draft(key) === x.name ? "selected" : ""}>${x.kind ? KIND_ICON[x.kind] + " " : ""}${esc(projLabel(x, x.name))}</option>`).join("")}</select></div>
+      <div class="meta">${T("Closed tasks move too.", "已结束的任务也一起移。")}${kept}</div>
+      <div class="row"><span class="spacer"></span><button class="btn small ghost" data-action="p-remove-cancel">${T("Cancel", "取消")}</button>
+        <button class="btn small res-drop" data-action="p-remove-confirm" data-p="${esc(name)}">${T("Move &amp; delete", "移走并删除")}</button></div></section>`;
+  }
+  return `<section class="pi-sec premove"><button class="btn small ghost" data-action="p-remove" data-p="${esc(name)}" ${n ? "" : `data-confirm="${T("Delete?", "删除？")}"`}
+    title="${T(n ? "Asks where its tasks go first." : "It has no tasks.", n ? "会先问它的任务移到哪里。" : "它没有任务。")}${esc(kept)}">${T(`Delete this ${what}…`, `删除这个${what}…`)}</button></section>`;
 }
 
 // A quick-add line: Enter makes a task in this project (and phase).
@@ -278,7 +320,7 @@ function addLine(name, phases) {
   return `<div class="addline"><input class="note" data-key="pa:${esc(name)}" data-padd="${esc(name)}" value="${esc(draft("pa:" + name))}"
       placeholder="${name === "(none)" ? T("Add a task in no project… (Enter)", "加一个不归属的任务…（回车）") : T("Add a task here… (Enter)", "在这里加一个任务…（回车）")}">${ph}
     <button class="btn small" data-action="p-add" data-p="${esc(name)}">${T("Add", "添加")}</button>
-    <button class="btn small ghost" data-action="p-create" data-k="task" data-p="${esc(name === "(none)" ? "" : name)}" title="${T("With a goal, a category, a session…", "带目标、分类、session……")}">${T("More…", "更多…")}</button></div>`;
+    <button class="btn small ghost" data-action="p-create" data-k="task" data-p="${esc(name === "(none)" ? "" : name)}" title="${T("With a goal, a workdir, a session…", "带目标、工作目录、session……")}">${T("More…", "更多…")}</button></div>`;
 }
 
 function board4(items) {
@@ -423,6 +465,9 @@ function openCreate(kind, project) {
 }
 window.hqNew = openCreate;
 const dv = (k, d = "") => ui.drafts[k] ?? d;
+// Directories to offer in a path box: where live sessions run and where tasks were worked on.
+const knownDirs = () => [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
+const dirList = (id) => `<datalist id="${id}">${knownDirs().map((d) => `<option value="${esc(d)}">`).join("")}</datalist>`;
 const fld = (label, body, hint, small) => `<div class="f"><div class="fl">${label}${small ? `<small>${small}</small>` : ""}</div>${body}${hint ? `<div class="fh">${hint}</div>` : ""}</div>`;
 const tin = (key, ph, extra = "") => `<input class="note" data-key="${key}" value="${esc(dv(key))}" placeholder="${esc(ph || "")}" ${extra}>`;
 const tarea = (key, ph, rows = 3) => `<textarea class="grow" data-key="${key}" rows="${rows}" placeholder="${esc(ph || "")}">${esc(dv(key))}</textarea>`;
@@ -433,26 +478,24 @@ function projectPicker(key, value, opt = {}) {
   return `<select data-key="${key}">${opt.none}${group(T("Projects", "项目"), all.filter((p) => p.kind === "goal" && open(p)))}${group(T("Duties", "职责"), all.filter((p) => p.kind === "duty" && open(p)))}${group(T("Not set up", "未定类型"), all.filter((p) => !p.kind && open(p)))}</select>`;
 }
 function createTask() {
-  const cats = categories();
   const proj = dv("nt:proj");
   const pr = proj ? projectByName(proj) : null;
   const tpls = pr && pr.kind === "duty" ? pr.templates || [] : [];
   const phases = pr && pr.kind === "goal" ? pr.phases || [] : [];
-  const dirs = [...new Set(ui.sessions.map((s) => s.cwd).concat(...tasks().map((t) => list(t.workdirs))).filter(Boolean))].sort();
-  const cat = dv("nt:cat", cats.includes("other") ? "other" : cats[0] || "");
   const left = fld(T("Title", "标题"), tin("nt:title", T("What is this task?", "这个任务是做什么的？"), "data-first data-csubmit"))
     + fld(T("Goal", "目标"), tarea("nt:goal", T("What done looks like — goes into the card's Goal", "做成什么样——写进任务卡的「目标」"), 4), "", T("optional", "可不填"))
     + fld(T("Belongs to", "归属"), projectPicker("nt:proj", proj, { none: `<option value="">${T("(by workdir, else none)", "（按工作目录，没有就不归属）")}</option>` }))
     + (phases.length ? fld(T("Phase", "阶段"), `<select data-key="nt:phase"><option value="">${T("(none)", "（不分阶段）")}</option>${phases.map((p) => `<option value="${esc(p)}" ${dv("nt:phase") === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>`) : "")
     + (tpls.length ? fld(T("Start from common work", "从常见的活开始"), `<div class="pickp">${tpls.map((x) => `<button class="${dv("nt:tpl") === x.name ? "on" : ""}" data-action="p-pick-tpl" data-t="${esc(x.name)}">${esc(x.name)}</button>`).join("")}</div>`,
       T("Fills the title and goal; its todos come along", "填好标题和目标，带上它的待办")) : "");
-  const right = fld(T("Category", "分类"), `<select data-key="nt:cat"><option value="" ${cat ? "" : "selected"}>${T("(none)", "（不分类）")}</option>${cats.map((c) => `<option value="${esc(c)}" ${c === cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`)
-    + fld(T("Workdir", "工作目录"), tin("nt:dir", T("optional — a path; binding a session adds its directory", "可不填——一个路径；绑定 session 会加上它的目录"), `list="nt-dirs"`) + `<datalist id="nt-dirs">${dirs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist>`)
+  const right = fld(T("Workdir", "工作目录"), tin("nt:dir", T("optional — a path; binding a session adds its directory", "可不填——一个路径；绑定 session 会加上它的目录"), `list="nt-dirs"`) + dirList("nt-dirs"))
     + fld(T("Bind a session", "绑定 session"), `<select data-key="nt:session"><option value="">—</option>${ui.sessions.filter((s) => !s.task).map((s) => `<option value="${esc(s.sessionId)}" ${s.sessionId === dv("nt:session") ? "selected" : ""}>${esc(s.title || s.project)}</option>`).join("")}</select>`,
       T("A live session with no task yet", "还没绑任务的、正在运行的 session"))
     + `<label class="toggle cm-check"><input type="checkbox" data-key="nt:focus" ${dv("nt:focus", true) ? "checked" : ""}> ${T("Add it to Focus", "加进 Focus")}</label>`;
   return [left, right];
 }
+const dirField = (p) => fld(T("Default directory", "默认目录"), tin(p + "dir", T("a repo or folder its work happens in", "在哪个仓库或目录里干它的活"), `list="${p}dirs"`) + dirList(p + "dirs"),
+  T("A new task started there, with no project yet, joins this one", "在这个目录里新建、还没有项目的任务，默认归到这里"), T("optional", "可不填"));
 function createProject(kind) {
   const p = kind === "goal" ? "ng:" : "nd:";
   const duties = projects().filter((x) => x.defined && x.kind === "duty" && !projectClosed(x));
@@ -467,13 +510,15 @@ function createProject(kind) {
       + (duties.length ? fld(T("Under a duty", "归在职责下"), `<select data-key="ng:parent"><option value="">${T("(none)", "（不归）")}</option>${duties.map((d) => `<option value="${esc(d.name)}" ${dv("ng:parent") === d.name ? "selected" : ""}>↻ ${esc(projLabel(d, d.name))}</option>`).join("")}</select>`, T("A project that is part of something you look after", "属于你长期负责的某件事的项目")) : "")
       + fld(T("Phases", "阶段"), tin("ng:phases", T("Design, Build, Ship", "设计, 开发, 上线")), T("Comma separated, in order — or leave it", "逗号隔开、按先后——不分就不填"), T("optional", "可不填"))
       + fld(T("Brief", "简报"), tarea("ng:brief", T("Given to every session on its tasks: repos, branches, rules", "交给它每个任务的 session：仓库、分支、规矩"), 3), "", T("optional", "可不填"))
+      + dirField("ng:")
       + fld(T("First tasks", "先建的任务"), tarea("ng:subs", T("One per line", "一行一个"), 3), "", T("one per line", "一行一个"))];
   }
   return [name
     + fld(T("Scope", "职责范围"), tarea("nd:goal", T("What this duty covers", "这个职责管什么")))
     + fld(T("Out of scope", "不管"), tarea("nd:out", T("What it leaves to others", "哪些事不归它"), 2), "", T("optional", "可不填"))
     + fld(T("Healthy when", "健康标准"), tarea("nd:crit", T("One per line", "一行一条"), 3), "", T("one per line", "一行一条"))
-    + fld(T("Brief", "简报"), tarea("nd:brief", T("Given to every session on its tasks", "交给它每个任务的 session"), 3), "", T("optional", "可不填")),
+    + fld(T("Brief", "简报"), tarea("nd:brief", T("Given to every session on its tasks", "交给它每个任务的 session"), 3), "", T("optional", "可不填"))
+    + dirField("nd:"),
   fld(T("Common work", "常见的活"), tarea("nd:tpl", T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"), 7),
     T("A ### heading per kind of task; its page then has a ＋ for each, and can make them on a timetable", "每类活一个 ### 标题；它的页面上每类都有一个「＋ 建」，也能按时间表自动建"), T("optional", "可不填"))
     + fld(T("Comes in by itself", "自动来活"), AUTO_SOURCES.map(([k, label, what]) => `<label class="toggle cm-check" title="${esc(what)}"><input type="checkbox" data-key="nd:auto:${k}" ${dv("nd:auto:" + k, false) ? "checked" : ""}> ${esc(label)}</label>`).join(""),
@@ -513,8 +558,7 @@ async function submitCreate() {
         return;
       }
       if (!title && !tpl) { toast(T("Give the task a title", "给任务起个标题"), true); return; }
-      const out = await api("new", { title, goal: dv("nt:goal").trim(), category: dv("nt:cat", categories().includes("other") ? "other" : categories()[0] || ""),
-        workdir: dv("nt:dir").trim(), project: dv("nt:proj"), template: tpl, phase: dv("nt:phase"), focus: dv("nt:focus", true) !== false });
+      const out = await api("new", { title, goal: dv("nt:goal").trim(), workdir: dv("nt:dir").trim(), project: dv("nt:proj"), template: tpl, phase: dv("nt:phase"), focus: dv("nt:focus", true) !== false });
       const id = String(out).split("\n")[0].trim();
       const sid = dv("nt:session");
       if (sid) await api("bind", { task: id, session: sid });
@@ -529,7 +573,8 @@ async function submitCreate() {
     let name = dv(p + "name").trim();
     if (!name) name = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     if (!name) { toast(T("Give it a name", "起个名字"), true); return; }
-    await api("project", { action: "add", kind: m.kind, title, due: m.kind === "goal" ? dv("ng:due") : "", parent: m.kind === "goal" ? dv("ng:parent") : "", names: [name] });
+    const dir = dv(p + "dir").trim();
+    await api("project", { action: "add", kind: m.kind, title, due: m.kind === "goal" ? dv("ng:due") : "", parent: m.kind === "goal" ? dv("ng:parent") : "", paths: dir ? [dir] : [], names: [name] });
     // The rest one by one: the project exists now, so a failure below leaves it to finish on its page.
     const crit = lines(dv(p + "crit")).map((x) => "- " + x).join("\n");
     const secs = [["goal", dv(p + "goal")], ["out", dv(p + "out")], ["done_when", crit], ["brief", dv(p + "brief")]];
@@ -587,6 +632,12 @@ async function projAction(d) {
       const part = d.part;
       if (editing(name, part)) { pui.edit = null; return render(); }
       pui.edit = name + "|" + part;
+      if (part === "dirs") {
+        render();
+        const el = document.querySelector(`#proj-view [data-key="${CSS.escape("pdir:" + name)}"]`);
+        if (el) el.focus();
+        return;
+      }
       if (part === "meta") for (const k of META_KEYS(pr)) ui.drafts[`pm:${name}:${k}`] = metaVal(pr, k);
       // The section as written in PROJECT.md, comments and all (the parsed one drops details).
       else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || "";
@@ -610,14 +661,44 @@ async function projAction(d) {
     case "p-meta-save": {
       const pr = projectByName(name) || {};
       const fields = [];
+      const rename = draft(`pm:${name}:name`).trim();
       for (const k of META_KEYS(pr)) {
+        if (k === "name") continue;
         let v = draft(`pm:${name}:${k}`).trim();
         if (["phases", "jira", "fixVersions"].includes(k)) v = v.split(/[,，]/).map((x) => x.trim()).filter(Boolean).join(",");
         if (v !== metaVal(pr, k).split(", ").join(["phases", "jira", "fixVersions"].includes(k) ? "," : ", ")) fields.push(`${k}=${v}`);
       }
       const close = () => { if (pui.edit === name + "|meta") pui.edit = null; clearDrafts(`pm:${name}:`); };
-      if (!fields.length) { close(); return render(); }
-      return run(async () => { await api("project", { action: "set", names: [name, ...fields] }); close(); }, T("Saved", "已保存"));
+      const renaming = rename && rename !== name;
+      if (!fields.length && !renaming) { close(); return render(); }
+      // Fields first, under the old name; then the rename, which moves the folder and the tasks.
+      return run(async () => {
+        if (fields.length) await api("project", { action: "set", names: [name, ...fields] });
+        if (renaming) {
+          await api("project", { action: "rename", names: [name, rename] });
+          ui.proj = rename; savePref("hq-proj", rename);
+        }
+        close();
+      }, renaming ? T(`Renamed ${name} → ${rename}`, `已改名 ${name} → ${rename}`) : T("Saved", "已保存"));
+    }
+    case "p-dir-add": return addDir(name);
+    case "p-dir-remove": {
+      const pr = projectByName(name) || { paths: [] };
+      return run(() => api("project", { action: "paths", names: [name, ...pr.paths.filter((x) => x !== d.path)] }), T("Directory removed", "目录已删除"));
+    }
+    case "p-remove": {
+      if (tasks().some((t) => t.project === name)) { pui.removing = name; return render(); }
+      return run(async () => { await api("project", { action: "remove", names: [name] }); goToProject(""); }, T(`Deleted ${name}`, `已删除 ${name}`));
+    }
+    case "p-remove-cancel": pui.removing = null; return render();
+    case "p-remove-confirm": {
+      const to = draft("pto:" + name);
+      return run(async () => {
+        await api("project", { action: "remove", names: [name], to });
+        pui.removing = null;
+        delete ui.drafts["pto:" + name];
+        goToProject("");
+      }, T(`Deleted ${name}; its tasks moved to ${to || "(no project)"}`, `已删除 ${name}；任务移到了${to || "（不归项目）"}`));
     }
     case "p-add": return addTask(name);
     case "p-done-all": pui.doneAll.has(name) ? pui.doneAll.delete(name) : pui.doneAll.add(name); return render();
@@ -658,6 +739,19 @@ async function projAction(d) {
     case "p-job-del": return run(() => api("job-delete", { id: d.id }), T("Deleted", "已删除"));
   }
 }
+async function addDir(name) {
+  const key = "pdir:" + name;
+  const v = draft(key).trim();
+  if (!v) return;
+  const pr = projectByName(name) || { paths: [] };
+  try {
+    await api("project", { action: "paths", names: [name, ...pr.paths, v] });
+    delete ui.drafts[key];
+    saveDrafts();
+    toast(T("Directory added", "目录已添加"));
+  } catch (e) { toast(String(e.message || e), true); }
+  refresh(true);
+}
 async function addTask(name) {
   const key = "pa:" + name;
   const title = draft(key).trim();
@@ -676,6 +770,7 @@ document.addEventListener("keydown", (ev) => {
   const el = ev.target;
   if (ev.key !== "Enter" || ev.shiftKey || ev.isComposing || ui.composing || ev.keyCode === 229) return;
   if (el.dataset && el.dataset.padd !== undefined && el.tagName === "INPUT") { ev.preventDefault(); return addTask(el.dataset.padd); }
+  if (el.dataset && el.dataset.pdir !== undefined && el.tagName === "INPUT") { ev.preventDefault(); return addDir(el.dataset.pdir); }
   // In the ＋ New window: Enter in the task's title, or ⌘Enter anywhere, creates.
   if (ui.modal && ui.modal.type === "create" && el.closest && el.closest("#modal")
       && ((el.dataset && el.dataset.csubmit !== undefined) || ev.metaKey)) { ev.preventDefault(); submitCreate(); }
