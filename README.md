@@ -42,33 +42,55 @@ The cat's posture is the state of all your sessions together — asleep when eve
 
 With a dozen sessions open across several repos, the hard part stops being the work. It is remembering what each session was for, what it asked you, and whether you ever answered. The Task Board (HQ) moves that out of the conversations and into **task cards**: one per piece of work, with a status, a next step, todos and a log. A session bound to a task reads the card before it starts and writes progress back, so the card — not any one conversation — is the record.
 
-**Double-click the cat** to open it (or right-click → **Task Board…**).
+**Double-click the cat** to open it (or right-click → **Task Board…**). Already have weeks of Claude Code sessions? [Onboarding](#onboarding-start-from-the-sessions-you-already-have) turns them into a board for you.
 
-<img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view, each with its open questions, todos and sessions; their sessions on the right">
+<img src="docs/images/board-today.png" width="900" alt="The Focus page: the tasks you keep in view in four columns — Needs you, Running, Ready, Blocked — each card with its open questions, your todos, its next step and its session">
 
-The board has three task pages. **Focus** shows only the tasks you keep in view — it doesn't reset each day — each with everything it needs from you: its open questions, your todos, and the sessions working on it. **Projects & duties** is every project and duty, each with a page of its tasks, goal, criteria and settings; **Needs you** gathers every unanswered question and your todos, with a count on its tab. A fourth tab, **Scheduled**, runs jobs on a timetable (see below). The status bar at the bottom shows counts and your quota; how sessions start lives under ⚙ Settings.
+The board opens on **Focus**: the tasks you keep in view (it doesn't reset each day), in four columns — *Needs you*, *Running*, *Ready*, *Blocked* — each card with its open questions, your todos, its next step and its sessions. The other tabs:
+
+- **Projects & duties** — every line of work, each with a page (below).
+- **Needs you** — every unanswered question, your todos, and quick notes still to sort, with a count on its tab.
+- **Scheduled** — jobs on a timetable (below).
+
+Along the top: **Quick note** (jot a line, a link or a screenshot; a small model files it into the right task as a todo, a log line or a new card), a task filter, the **Secretary**, **+ New**, Settings, and the built-in **Guide**. The status bar shows sessions, open questions, todos and your quota.
 
 ### Questions, answered in one go
 
-A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer each with **Yes** (go ahead, or as suggested — or write your own answer in the note, several lines and screenshots welcome), **No**, **To todo** when it is really something you will do yourself, or **Later**: the question stays, out of sight until tomorrow, and the session is told you'll answer later. When a task has several, pick an answer for each and send them together as one message:
+A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer them on the card, in **Needs you**, or in the task itself:
 
-<img src="docs/images/board-asks.gif" width="700" alt="Three questions from one session: an answer is picked for each, with a note on the first and the third turned into a todo, then all three are sent at once">
+- **Yes** — go ahead, or as suggested. Write your own answer in the note if you like (several lines, screenshots welcome).
+- **Yes, always** — yes, and a standing grant: the task's sessions stop asking for that kind of step.
+- **No**.
+- **To todo** — it is really something you will do yourself.
+- **Later** — the question stays, out of sight until tomorrow, and the session is told you'll answer later.
+
+Pick an answer for each, then send them together as one message:
+
+<img src="docs/images/board-asks.gif" width="560" alt="Three questions from one session in the task's drawer: an answer is picked for each, with a note on the first and the third turned into a todo, then all three are sent at once and the new todo appears">
 
 The answer goes straight into the session that asked (Orca, iTerm2, Terminal, or a background session between turns), or reaches it at the start of its next turn. With several sessions on one task, only the one that asked is told.
 
-### Every task and every session
+### A task, opened
 
-<img src="docs/images/board-all.png" width="900" alt="The All page: tasks grouped by project on the left, every live session on the right">
+<img src="docs/images/board-task.png" width="900" alt="A task opened in the drawer: its next step with Continue today and New session, the live session with peek, jump, stop and unbind, an earlier session with Resume, and the todos">
 
-**All** is the whole board: tasks by project or by status on the left, every live session on the right — with the same status dots as the cat's list, its context use, and a **new** tag on a finished turn you haven't looked at.
+Click a card and the task opens beside the board:
 
-<img src="docs/images/board-task.png" width="900" alt="A task opened: its status line, todos with a Do it button on Claude's, the live session, an earlier session with Resume, and the log">
-
-Open a task for the rest of its card:
-
+- **Next** — the next step. **New session** starts Claude in the task's folder, bound to the task from its first prompt. **Continue today** carries a long-running task on in a fresh card.
+- **Sessions** — the live one, with 👁 to read it, ↗ to jump to its terminal, ■ to stop it and × to unbind it. **Earlier sessions** can be picked up with **↻ Resume**.
 - **Todos** — `@me` for you, `@claude` for a session. **▶ Do it** hands a Claude todo to the task's session, or starts one to do it.
-- **Sessions** — bind a live one, start a new one in the task's directory, or **↻ Resume** an earlier one where it left off.
-- **Log** — decisions and findings, timestamped to the second; sessions read it.
+- **Grants** and **Log** — what sessions may do without asking, and the decisions and findings, timestamped to the second.
+
+### Projects and duties
+
+<img src="docs/images/board-project.png" width="900" alt="A project page: goal, out of scope, done-when criteria with one ticked, due date, the brief given to every session, and the project's tasks in columns">
+
+A project is a line of work, not a folder:
+
+- a **duty** — a standing responsibility, like CI or code review;
+- a **goal** — it ends, maybe on a due date, and can sit under a duty.
+
+Each one has a page: its goal, what is out of scope, the criteria that say it's done (or, for a duty, healthy), phases, and a **brief** — the rules every session on its tasks is given, like "one PR per task" or "never touch production config". Its tasks sit in the same four columns as Focus.
 
 ### Talk to a session from the board
 
@@ -76,11 +98,19 @@ Open a task for the rest of its card:
 
 👁 opens a session's recent conversation; reply from the box at the bottom (paste or drop images too). It arrives exactly as if you had typed it in the terminal — queued if the session is busy.
 
+### The secretary
+
+<img src="docs/images/board-secretary.png" width="900" alt="The secretary's window: an evening report listing what moved, what is stuck and what waits on you; on the right, what it keeps an eye on and the jobs it runs by itself">
+
+The **Secretary** is one Claude session for the whole board. Ask it "what is waiting on me?" or "why is T-015 stuck?". It writes an evening report on a schedule, keeps an eye on what has stalled, and can tick todos that are clearly finished. It proposes changes to the board rather than making them, and its memory (who's who, how you like reports) is plain files you can edit.
+
 ### Scheduled jobs
 
-The **Scheduled** tab runs a Claude prompt (`claude -p`, skills and MCP tools included) or a shell command on a timetable — every N minutes, daily, weekdays, some days, or cron — and shows every job with its recent runs, the next run, and each run's reply, steps and log. Jobs run under launchd, so they run with the pet closed; a failure gets a notice from the cat. Each job picks a new session every run (keeping only the newest few) or one session it keeps continuing. The tab is in English and Chinese.
+<img src="docs/images/board-jobs.png" width="900" alt="The Scheduled tab: three jobs with their timetable, next run, recent runs and Run now">
 
-**And the small things:** drafts you were typing survive a restart; removing or unbinding anything takes two clicks; the board has a built-in **Guide** in English and Chinese.
+The **Scheduled** tab runs a Claude prompt (`claude -p`, skills and MCP tools included) or a shell command on a timetable — every N minutes, daily, weekdays, some days, or cron. It shows every job with its recent runs and the next run; each run's reply, steps and log open with a click. Jobs run under launchd, so they run with the pet closed, and a failure gets a notice from the cat. A job either starts a new session every run (keeping only the newest few) or keeps continuing one session.
+
+**And the small things:** drafts you were typing survive a restart; removing or unbinding anything takes two clicks; the whole board, its guide included, is in English and Chinese.
 
 HQ is optional and installed after the pet — see [hq/README.md](hq/README.md) for how it works, the `hq` CLI and the card format.
 
@@ -106,10 +136,38 @@ hq/uninstall.sh             # HQ's hooks and commands removed; your task cards a
 ./scripts/package.sh        # a tarball with a prebuilt binary and a one-click installer, to send to someone
 ```
 
+## Onboarding: start from the sessions you already have
+
+If you have used Claude Code for a while, your work is already on disk: every session's transcript is under `~/.claude/projects`. You don't need to type the board in by hand — let Claude draft it from those transcripts.
+
+1. **Install the pet and HQ** (above), with HQ's hooks, so bound sessions get the task rules.
+2. **In any Claude Code session, run `/hq-onboard`** — or `/hq-onboard 30` to look back 30 days instead of 60. Until you have projects, the board's **Projects & duties** page shows *Start from the sessions you already have*, with a button that copies the command.
+3. **Claude reads your recent sessions** and drafts the board:
+   - the **lines of work** — which are duties and which are goals; one repository often holds several, and some work spans repositories;
+   - a **task card for each piece of work**, with a status, the next step, open todos (yours as `@me`), related PRs and tickets, and the sessions that worked on it;
+   - a **confidence** for each card, because statuses are inferred from the conversations.
+4. **You review the plan.** Nothing is written until you confirm. Rename, merge, move tasks between projects, or drop anything — personal and throwaway folders are common.
+5. **It creates the board**: projects, task cards, and bindings. Live sessions get their task's rules with their next message. Ended sessions are listed on their cards, so **↻ Resume** brings one back where it stopped. Each card's log says it came from onboarding and how sure Claude was; check the low-confidence ones first.
+
+Then open the board (double-click the cat) and adjust anything on **Projects & duties**. Running `/hq-onboard` again later is safe: it skips the projects and tasks that already exist and the sessions already bound.
+
+From then on, bind each session to the task it is for:
+
+```text
+/task T-012               in a session: bind it to T-012 and pick up from its card
+/task Rerun perf baseline create a new card and bind to it
+/board                    open questions, your todos and every open task, in the terminal
+```
+
+— or start sessions from a card with **New session**, already bound.
+
+Your transcripts are read on your machine. The drafting is done by Claude in the session you ran `/hq-onboard` in, the same way any session sees what it reads.
+
 ## More
 
 - [docs/pet.md](docs/pet.md) — the pet in full
 - [hq/README.md](hq/README.md) — the Task Board: how it works, the `hq` CLI, the card format
+- [promo/](promo/README.md) — the 2:38 demo film (Chinese narration) and how it is built
 - [docs/development.md](docs/development.md) — tests, debugging hooks, and three things to know before changing anything
 
 ## License
