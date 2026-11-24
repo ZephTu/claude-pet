@@ -1460,7 +1460,7 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .ptask > i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--lc); align-self: center; }
 .ptask .tid { flex: none; font: 600 11px var(--round); }
 .ptask .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ptask.more { color: var(--faint); cursor: inherit; }
+.ptask.more { color: var(--faint); }
 .ptask.more:hover { background: none; color: var(--dim); }
 .plist .ptasks { padding: 4px 12px 0; }
 /* The tasks the search box matches, above the projects. */

@@ -70,15 +70,19 @@ const bigProg = (p) => (p.n ? `<div class="bigprog" title="${esc(p.what)}"><span
 
 // ------------------------------------------------------------------ the list
 // The tasks a card names: waiting on you, then running — up to CARD_TASKS, then "+N more" (a click
-// there opens the project). The other lanes are only counted.
+// there opens the project). The other lanes are only counted. The order holds while the pointer
+// is over the list (steady()), so a refresh doesn't move the line you are about to click.
 const CARD_TASKS = 4;
-function cardTasks(open) {
-  const pick = ["you", "run"].flatMap((l) => open.filter((t) => lane(t) === l).sort((a, b) => laneOrder(a, b)));
+const CARD_LANES = ["you", "run"];
+function cardTasks(name, open) {
+  const key = `plist:t:${name}`;
+  const pick = steady(key, open.filter((t) => CARD_LANES.includes(lane(t))),
+    (a, b, was) => CARD_LANES.indexOf(lane(a)) - CARD_LANES.indexOf(lane(b)) || laneOrder(a, b, was));
   if (!pick.length) return "";
   const shown = pick.slice(0, CARD_TASKS), more = pick.length - shown.length;
-  return `<div class="ptasks">${shown.map((t) => { const l = lane(t);
+  return `<div class="ptasks" data-okey="${esc(key)}">${shown.map((t) => { const l = lane(t);
     return `<div class="ptask l-${l}" data-action="open-task" data-task="${esc(t.id)}" title="${esc(LANE_NAME[l])} · ${esc(t.title)}"><i></i><span class="tid" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="t">${esc(t.title)}</span></div>`; }).join("")}
-    ${more ? `<div class="ptask more">${T(`+${more} more`, `还有 ${more} 个`)}</div>` : ""}</div>`;
+    ${more ? `<div class="ptask more" data-action="p-open" data-p="${esc(name)}">${T(`+${more} more`, `还有 ${more} 个`)}</div>` : ""}</div>`;
 }
 // When a session last did something in the project, as "● 3m ago".
 function actTag(name) {
@@ -123,7 +127,7 @@ function projCard(pr, underParent) {
       <span class="st s-${esc(pr.status || "active")}">${PSTATUS_LABEL[pr.status] || esc(pr.status || "")}</span></div>
     ${pr.goal ? `<div class="pg">${esc(pr.goal.replace(/\s+/g, " "))}</div>` : `<div class="pg none">${pr.kind === "duty" ? T("No scope written yet", "还没写职责范围") : T("No goal written yet", "还没写目标")}</div>`}
     ${pr.kind === "goal" ? bigProg(progress(pr)) : ""}
-    ${open.length ? laneBar(n) + laneNums(n) + cardTasks(open) : `<div class="lcs"><span class="lc none">${T("No open tasks", "没有进行中的任务")}</span></div>`}
+    ${open.length ? laneBar(n) + laneNums(n) + cardTasks(pr.name, open) : `<div class="lcs"><span class="lc none">${T("No open tasks", "没有进行中的任务")}</span></div>`}
     ${kv.length ? `<div class="kv">${kv.join("")}</div>` : ""}
     ${tpls.length ? `<div class="tplchips">${tpls.map((x) => `<button class="tplchip" data-action="p-tpl-new" data-p="${esc(pr.name)}" data-t="${esc(x.name)}" title="${T("Make a task from this template now", "用这个模板马上建一个任务")}${x.title ? ": " + esc(x.title) : ""}">＋ ${esc(x.name)}</button>`).join("")}</div>` : ""}
   </div>`;
@@ -162,7 +166,7 @@ function projList() {
   }
   if (!f) html += `<div class="sec-h">${T("Not in a project", "未归属")}<span class="sub">${T("one-off tasks", "零散任务")}</span></div>
     <div class="plist"><div class="prow link" data-action="p-open" data-p="(none)"><span class="nm">${T(`${loose.length} open task${loose.length === 1 ? "" : "s"} in no project`, `${loose.length} 个进行中的任务没有归属`)}</span><span class="spacer"></span><span class="meta">${T("Open ›", "打开 ›")}</span></div>
-      ${cardTasks(loose)}</div>`;
+      ${cardTasks("(none)", loose)}</div>`;
   if (closed.length) {
     html += `<div class="sec-h fold ${pui.closedOpen ? "open" : ""}" data-action="p-closed">${T("Finished", "已结束")}<span class="c">${closed.length}</span><span class="sub">${pui.closedOpen ? T("click to fold", "点击收起") : T("click to show", "点击展开")}</span></div>
       ${pui.closedOpen ? `<div class="pgrid">${closed.map((x) => projCard(x)).join("")}</div>` : ""}`;
@@ -170,13 +174,15 @@ function projList() {
   return html;
 }
 
-// While the search box filters: every task it matches, open ones first (newest first), then the
-// closed ones — older and abandoned too — so any task can be found by its id or title.
+// While the search box filters: every task it matches, open ones first, then the closed ones —
+// older and abandoned too — so any task can be found by its id or title. Each part last active
+// first (hq's lastActive, as the Finished list orders), then the higher id.
 const HITS_MAX = 30;
 function taskHits() {
-  const when = (t) => String(t.closed || t.updated || "");
+  const at = (t) => String(t.lastActive || t.closed || t.updated || "");
+  const when = (t) => at(t).slice(0, 10);
   const hits = listed().filter((t) => taskMatches(t))
-    .sort((a, b) => isOpen(b) - isOpen(a) || when(b).localeCompare(when(a)));
+    .sort((a, b) => isOpen(b) - isOpen(a) || at(b).localeCompare(at(a)) || String(b.id).localeCompare(String(a.id), undefined, { numeric: true }));
   const head = `<div class="sec-h">${T("Matching tasks", "匹配的任务")}<span class="c">${hits.length}</span><span class="sub">${T("closed ones too", "包括已结束的")}</span></div>`;
   if (!hits.length) return head + `<div class="empty hits-none">${T("No task matches.", "没有匹配的任务。")}</div>`;
   const shown = hits.slice(0, HITS_MAX);

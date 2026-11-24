@@ -91,10 +91,18 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 
 function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
 function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
+// All, the page of every task, is gone: whoever had it open lands on the Projects & duties list.
+function startMode() {
+  const m = pref("hq-mode", "today");
+  if (m !== "all") return m;
+  savePref("hq-mode", "projects");
+  savePref("hq-proj", "");
+  return "projects";
+}
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
   drafts: {}, hqOpen: new Set(), filter: "", busy: false, catsOpen: false, catRemove: {}, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, projRemove: {}, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
-  mode: pref("hq-mode", "today"),
+  mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
   drawer: null, showDone: pref("hq-show-done", "0") === "1",
@@ -766,9 +774,7 @@ function render() {
   drawSecretaryButton();
   // Four pages: Focus (the tasks you keep in view), Projects & duties (projects.js: every project,
   // with what is running and waiting on you in each), Needs you (every unanswered ask and your
-  // todos) with its count on the tab, and Scheduled (jobs.js). All, the page of every task, is
-  // gone: whoever had it open lands on Projects & duties.
-  if (ui.mode === "all") ui.mode = "projects";
+  // todos) with its count on the tab, and Scheduled (jobs.js).
   if (!["today", "projects", "needs", "jobs"].includes(ui.mode)) ui.mode = "today";
   const need = needCount();
   // Each tab carries its count; only Needs you's is lit, because only it asks something of you.
@@ -4784,7 +4790,10 @@ document.addEventListener("drop", (ev) => {
   const i = order.indexOf(at.name);
   if (i < 0) return;
   order.splice(at.before ? i : i + 1, 0, moving);
-  // The pointer is still over the cards: show the new order anyway.
+  // Show the new order right away: the render at dragend would otherwise draw the old one, and
+  // steady() would hold it (the pointer is still over the cards) when the saved order comes back.
+  const rank = new Map(order.map((n, k) => [n, k]));
+  projects().sort((a, b) => (rank.has(a.name) ? rank.get(a.name) : order.length) - (rank.has(b.name) ? rank.get(b.name) : order.length));
   for (const k of Object.keys(ui.shown)) if (k.startsWith("plist:")) delete ui.shown[k];
   act("project", { action: "order", names: order },
     ui.activeFirst ? T("Order saved — projects with live sessions still come first (Active first)", "顺序已保存——有 session 在跑的项目仍然排最前（活跃的在前）") : T("Order saved", "顺序已保存"));
