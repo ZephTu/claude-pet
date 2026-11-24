@@ -686,8 +686,8 @@ todo's text names:
 
 A link counts only when the todo is about finishing it — merge / review / approve / 合并 / 审 for a
 PR; close / resolve / fix / verify / follow up / 关闭 / 解决 / 修复 / 验证 / 跟进 for an issue;
-wait / watch / 等 / 盯 / 跑完 for a build — and the todo has no step after it (then, afterwards,
-然后, 之后 …). The todo is `done` when every link is: the PR merged, the issue's status category is
+wait / watch / 等 / 盯 / 跑完 for a build — and the todo has no step after it (then, after, afterwards,
+然后, 之后, 以后, `…后：` …). The todo is `done` when every link is: the PR merged, the issue's status category is
 `done`, the build's result is `SUCCESS`; `drop` when a PR among them was closed unmerged. A running
 or failed build, an open PR or issue, or a link that couldn't be looked up leaves it open; a link
 that doesn't exist (404: `UTF-8` reads like a key) doesn't count. Each close is the usual tick

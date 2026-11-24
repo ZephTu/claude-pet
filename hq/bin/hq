@@ -6466,7 +6466,7 @@ def cmd_garden(args):
 #
 # A link counts only when the todo is about what finishing it means — merging or reviewing the PR,
 # closing or fixing the issue, waiting for the build (AUTOCLOSE_VERBS) — and the todo has no step
-# after it ("merge #101, then reinstall"; AUTOCLOSE_AFTER): "comment the result on PR #9" or
+# after it ("merge #101, then reinstall", "#101 合并后：重装"; AUTOCLOSE_AFTER): "comment the result on PR #9" or
 # "delete the cluster of #9's runs" are not done because #9 merged.
 #
 # What a todo names: a GitHub PR link, or `#123` — a Jenkins build of that number among the card's
@@ -6487,7 +6487,7 @@ AUTOCLOSE_VERBS = {
     "jira": re.compile(r"\b(?:close|resolve|fix|verify|follow[ -]?up)\b|关闭|关掉|关单|解决|修复|验证|跟进", re.I),
     "jenkins": re.compile(r"\b(?:wait|watch|finish(?:es|ed)?)\b|等|盯|跑完", re.I),
 }
-AUTOCLOSE_AFTER = re.compile(r"\bthen\b|\bafterwards\b|然后|之后|随后|完了再|后再", re.I)
+AUTOCLOSE_AFTER = re.compile(r"\bthen\b|\bafter(?:wards)?\b|然后|之后|以后|随后|完了再|后再|后[：:，,]", re.I)
 
 
 def autoclose_path():
@@ -6684,7 +6684,7 @@ def autoclose_jenkins(conf, x):
         if e.code == 404:           # the build is gone (kept builds rotate out)
             return {"outcome": "none", "why": f"{x['name']} not found", "final": True}
         raise
-    name = d.get("fullDisplayName") or x["name"]
+    name = x["name"]        # "job #12": fullDisplayName can run to several lines
     if d.get("building") or not d.get("result"):
         return {"outcome": "open", "why": f"{name} running", "final": False}
     if d["result"] == "SUCCESS":

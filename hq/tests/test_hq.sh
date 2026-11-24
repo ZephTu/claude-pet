@@ -1920,7 +1920,7 @@ A1="$("$HQ" new "Autoclose me" --no-focus | head -1)"
 "$HQ" ref add "$A1" "https://github.com/o/r/pull/6" >/dev/null; "$HQ" ref add "$A1" "$AS/job/release_test/21/" >/dev/null
 for t in "@me review and merge https://github.com/o/r/pull/5/files" "@claude review #6" "@me 跟进 QA-9 里的问题" \
          "@me verify QA-10 (UTF-8 too)" "@me 等 $AS/job/release_test/12/console 跑完" "@me wait for $AS/job/release_test/13/" \
-         "@me 合并 #7，等 $AS/job/release_test/14/ 跑完" "@me no link here" "@me merge #5, then reinstall" \
+         "@me 合并 #7，等 $AS/job/release_test/14/ 跑完" "@me no link here" "@me merge #5, then reinstall" "@claude #5 合并后：重装" \
          "@me comment the result on https://github.com/o/r/pull/5" "@me watch #21"; do "$HQ" addtodo "$A1" "$t" >/dev/null; done
 "$HQ" set "$A1" status=waiting-on-me >/dev/null
 CARD="$(ls "$T"/root/tasks/"$A1"-*/TASK.md)"; cp "$CARD" "$AC/before"
@@ -1936,7 +1936,7 @@ acq autoclose | tail -1 | grep -q "^8 todos with links → closed 4, dropped 1$"
 grep -q "\[x\] @me review and merge" "$CARD" && grep -q "\[-\] @claude review #6" "$CARD" && grep -q "\[x\] @me 跟进 QA-9" "$CARD" \
   && grep -q "\[ \] @me verify QA-10" "$CARD" && grep -q "\[ \] @me wait for" "$CARD" && grep -q "\[ \] @me no link here" "$CARD" \
   && ok "autoclose ticks and drops on the card; the rest stay open" || fail "autoclose card"
-grep -q "\[ \] @me merge #5, then reinstall" "$CARD" && grep -q "\[ \] @me comment the result on" "$CARD" \
+grep -q "\[ \] @me merge #5, then reinstall" "$CARD" && grep -q "\[ \] @claude #5 合并后：重装" "$CARD" && grep -q "\[ \] @me comment the result on" "$CARD" \
   && ok "autoclose leaves a todo with a step after the merge, or not about merging, open" || fail "autoclose verbs"
 grep -q "auto-closed todo #1 (PR o/r#5 merged): review and merge .* — reopen it on the board or with hq todo $A1 1 open" "$CARD" \
   && grep -q "auto-dropped todo #2 (PR o/r#6 closed unmerged)" "$CARD" && grep -q "todo #1 → done (auto: PR o/r#5 merged)" "$(dirname "$CARD")/HISTORY.md" \
