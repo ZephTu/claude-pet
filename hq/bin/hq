@@ -280,6 +280,9 @@ def _set_fields(path, fields):
         old = re.search(r"^status:[ \t]*(\S*)", fm, re.M)
         if not old or old.group(1) != fields["status"]:
             fields["closed"] = today()
+            # The moment too, for ordering finished tasks (last_active); `closed` stays a date
+            # for everything that reads it as one.
+            fields["closed_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for k, v in fields.items():
         if isinstance(v, list):
             val = json.dumps(v, ensure_ascii=False)
@@ -1852,6 +1855,7 @@ def cmd_board(args):
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],
                             "todos": [todo_fields(x) for x in (TODO_RE.match(i.split("\n", 1)[0]) for i in h["Todos"]) if x]}
             d["historyInfo"] = history_info(m["path"])
+            d["lastActive"] = last_active(m, h)
             out.append(d)
         cfg = load_json(root_config_path(), {})
         links = cfg.get("links", []) if isinstance(cfg, dict) else []
@@ -6248,6 +6252,21 @@ def card_log(body, n=3):
         if x and not re.match(r"todo #\d+ → ", x.group(2)):
             out.append({"at": x.group(1), "text": x.group(2)})
     return out[-n:]
+
+
+def last_active(meta, history):
+    """When the task last moved, to the second: its newest timed log line (on the card or moved to
+    HISTORY.md) or when it was closed (`closed_at`; `closed`, a date, on cards closed before that
+    was kept), whichever is later; else its `updated` date. What the board's Finished list orders
+    by. Log lines with a date alone (hq-onboard writes one) don't count: they would put a card
+    onboarded today above one that really moved today."""
+    m = LOG_HEADING_RE.search(meta.get("body", "") + "\n")
+    lines = (m.group(1) if m else "").splitlines() + [x.split("\n", 1)[0] for x in history.get("Log", [])]
+    stamps = [x.group(1).replace("T", " ") for x in (LOG_ENTRY_RE.match(l.strip()) for l in lines)
+              if x and len(x.group(1)) > 10]
+    closed = meta.get("closed_at") or meta.get("closed")
+    stamps += [str(closed)] if closed else []
+    return max(stamps) if stamps else str(meta.get("updated") or "")
 
 
 def card_state_lines(body):
