@@ -2732,7 +2732,8 @@ def save_inbox(items, last=None):
     cutoff = time.time() - INBOX_KEEP_DAYS * 86400
     # By the last change, not by when it was jotted: an old note filed or dropped today must stay
     # long enough to be moved or restored.
-    keep = [x for x in items if x.get("state") in ("unsorted", "sorting") or
+    # A scanned message the sorter would skip waits unsorted, but ages out like a dropped one.
+    keep = [x for x in items if (x.get("state") in ("unsorted", "sorting") and not x.get("skip")) or
             max(ts_seconds(x.get(k)) or 0 for k in ("at", "sorted_at", "moved_at")) >= cutoff]
     atomic_write(inbox_path(), json.dumps({"last": last, "items": keep}, ensure_ascii=False, indent=1) + "\n")
 
@@ -3430,7 +3431,7 @@ def inbox_sort(nid, claude=None):
     def start(x):
         if x.get("state") not in ("unsorted", "sorting"):
             die(f"{x['id']} is already {x['state']}")
-        x.update(state="sorting", sort_started=now_iso(), error=None)
+        x.update(state="sorting", sort_started=now_iso(), error=None, skip=False)
     item = inbox_update(nid, start)
     exe = find_claude(claude)
     try:
@@ -3537,6 +3538,9 @@ def inbox_view(items=None, everything=False):
         st = inbox_state(x)
         if not everything and st == "dropped" and x.get("skipped"):
             continue        # messages the sorter found nothing in: `hq inbox --all` shows them
+        if not everything and st == "unsorted" and x.get("skip") and \
+                (ts_seconds(x.get("sorted_at") or x.get("at")) or 0) < cut:
+            continue        # a likely skip nobody looked at in two days: `hq inbox --all` still has it
         if everything or st in ("unsorted", "sorting") or (ts_seconds(x.get("moved_at") or x.get("sorted_at") or x.get("at")) or 0) >= cut:
             out.append(dict({k: v for k, v in x.items() if k != "undo"}, state=st,
                             task=(x.get("undo") or {}).get("task")))
@@ -3684,17 +3688,21 @@ def feed_since(since_hours):
     return dt.datetime.combine(dt.date.today(), dt.time()).timestamp()
 
 
-def zulip_bots(conf, ids):
+def zulip_bots(conf, ids, known):
     """Which of these user ids are bots (QA bots, integrations). Unless hq.json asks for them
     ("feed": {"zulip": {"bots": true}}), their messages aren't read. One the realm can't look up
-    is a system bot (Notification Bot and the like)."""
+    is a system bot (Notification Bot and the like). `known`: {"<id>": is_bot} from earlier scans,
+    added to; a lookup that fails otherwise (a timeout, a 5xx) counts as a person this time."""
     def bot(i):
+        if str(i) in known:
+            return known[str(i)]
         try:
-            return bool(zulip_get(conf, f"users/{i}").get("user", {}).get("is_bot"))
+            known[str(i)] = bool(zulip_get(conf, f"users/{i}").get("user", {}).get("is_bot"))
         except FeedError as e:
-            if e.code in (400, 404):
-                return True
-            raise
+            if e.code not in (400, 404):
+                return False
+            known[str(i)] = True
+        return known[str(i)]
     return {i for i in ids if bot(i)}
 
 
@@ -3991,12 +3999,46 @@ def feed_sort_all(ids, claude):
         return [x for x in ex.map(one, ids) if x]
 
 
+FEED_KEY = {"zulip": "conv", "jira": "issue"}
+FEED_HEAD = {"zulip": 1, "jira": 2}     # lines before the messages or changes: the newest replace them
+
+
+def feed_add(source, text, extra):
+    """Adds a conversation's or issue's news as an inbox item; one still waiting unsorted for the
+    same conversation or issue takes it instead (the lines appended, the guess sorted again), so a
+    busy conversation is one item, not one a scan. Returns the item's id."""
+    key = FEED_KEY[source]
+    with inbox_lock():
+        items = load_inbox()
+        x = next((x for x in items if x.get("via") == source and x.get(key) and x.get(key) == extra.get(key)
+                  and inbox_state(x) == "unsorted"), None)
+        if x:
+            n = FEED_HEAD[source]
+            old, new = str(x.get("text") or "").split("\n"), text.split("\n")
+            body = [ln for ln in old[n:] if not re.match(r"^\(… \d+ earlier\)$", ln)] + new[n:]
+            gone = sum(int(m.group(1)) for ln in old[n:] for m in [re.match(r"^\(… (\d+) earlier\)$", ln)] if m)
+            while len(body) > 1 and sum(len(ln) + 1 for ln in new[:n] + body) > FEED_ITEM_MAX:
+                body.pop(0)
+                gone += 1
+            x["text"] = "\n".join(new[:n] + ([f"(… {gone} earlier)"] if gone else []) + body)
+            if source == "zulip":
+                x["msgs"] = list(x.get("msgs") or []) + list(extra.get("msgs") or [])
+            else:
+                x["events"] = (x.get("events") or 0) + (extra.get("events") or 0)
+            for k in ("dest", "alts", "reason", "confidence", "error"):
+                x.pop(k, None)
+            x.update(skip=False, updated_at=now_iso())
+            save_inbox(items)
+            return x["id"]
+    return inbox_add(text, via=source, extra=extra)["id"]
+
+
 def feed_file(source, raw, entries, cursor, sort, claude):
     """The common end of a scan: keeps the raw records, adds one inbox item per entry (text,
     extra), moves the cursor (merged into state[source]) and sorts the items. Returns the counts."""
     if raw:
         feed_keep_raw(source, raw)
-    ids = [inbox_add(t, via=source, extra=extra)["id"] for t, extra in entries]
+    ids = [feed_add(source, t, extra) for t, extra in entries]
     # The cursor moves before sorting: a sort that fails leaves an unsorted item, not a second copy.
     update_feed_state(source, lambda prev: dict(prev, **cursor, last_scan=now_iso(), last={"items": ids}))
     sorted_items = feed_sort_all(ids, claude) if sort and ids else []
@@ -4032,8 +4074,9 @@ def feed_zulip(since_hours=None, sort=True, claude=None, dry=False):
             top = min(t for _, t in got)
             msgs = {m["id"]: m for ms, _ in got for m in ms if m["id"] <= top}
         msgs = sorted(msgs.values(), key=lambda m: m["id"])
+        known = zs.get("users") if zs.get("site") == conf["site"] and isinstance(zs.get("users"), dict) else {}
         if feed_config("zulip").get("bots") is not True:
-            bots = zulip_bots(conf, {m["sender_id"] for m in msgs if m.get("sender_id") != me})
+            bots = zulip_bots(conf, {m.get("sender_id") for m in msgs if m.get("sender_id") not in (None, me)}, known)
             msgs = [m for m in msgs if m.get("sender_id") not in bots]
         # Conversations with something from someone else; the user's own lines are only context.
         convs = [c for c in zulip_conversations(conf, msgs, me) if any(m.get("sender_id") != me for m in c["msgs"])]
@@ -4042,7 +4085,7 @@ def feed_zulip(since_hours=None, sort=True, claude=None, dry=False):
             return {"source": "zulip", "messages": len(msgs), "conversations": len(convs), "texts": texts, "dry": True}
         last = max(x for x in (top, after) if x is not None) if (top, after) != (None, None) else None
         r = feed_file("zulip", msgs, [(t, {"conv": c["key"], "msgs": [m["id"] for m in c["msgs"]]}) for c, t in zip(convs, texts)],
-                      {"me": me, "site": conf["site"], "last_id": last}, sort, claude)
+                      {"me": me, "site": conf["site"], "last_id": last, "users": known}, sort, claude)
     return feed_record("zulip", dict(r, source="zulip", messages=len(msgs), conversations=len(convs)))
 
 

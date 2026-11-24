@@ -1710,8 +1710,11 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.reply(200, {"result": "success", "user_id": 1})
         if u.path.startswith("/api/v1/users/"):
             uid = int(u.path.rsplit("/", 1)[1])
+            open(os.path.join(D, "lookups"), "a").write(f"{uid}\n")
             if uid == 66:
                 return self.reply(400, {"result": "error", "msg": "No such user"})
+            if uid == 77:
+                return self.reply(500, {"result": "error", "msg": "busy"})
             return self.reply(200, {"result": "success", "user": {"user_id": uid, "is_bot": uid == 50}})
         msgs = sorted(json.load(open(os.path.join(D, "messages.json"))), key=lambda m: m["id"])
         op = json.loads(q["narrow"])[0]["operand"]
@@ -1784,6 +1787,7 @@ assert t[0].startswith("Zulip · DM with Alice Wu · http://127.0.0.1:") and "#n
 assert t[1].endswith("Alice Wu: the 4.2.7 perf plan passed on rc3") and t[2].endswith("me: great, thanks"), t' && ok "feed item: conversation link, who said what, own lines as context" || fail "feed item text"
 ls "$T"/root/secretary/feed/zulip/*.jsonl >/dev/null && [ "$(cat "$T"/root/secretary/feed/zulip/*.jsonl | wc -l | tr -d ' ')" = 3 ] && ok "feed keeps the raw messages locally" || fail "feed raw"
 ! grep -q secret "$T/root/secretary/feed/state.json" && ok "feed state holds no key" || fail "key in state"
+python3 -c 'import json,sys; u=json.load(open(sys.argv[1]))["zulip"]["users"]; assert u["50"] is True and u["66"] is True and u["7"] is False, u' "$T/root/secretary/feed/state.json" && ok "feed zulip remembers who is a bot" || fail "bot cache"
 answer '{"kind":"note","task":"'"$ITA"'","text":"Alice on Zulip: 4.2.7 perf plan passed on rc3","confidence":0.9,"reason":"r","alternatives":[]}'
 hqi inbox sort --claude "$FAKE" --json "$FA" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and x["dest"]["kind"]=="note" and not x["skip"], x' && ! card "$ITA" | grep -q "Alice on Zulip: 4.2.7 perf plan" && grep -q "reached the user on Zulip" "$FAKE_DIR/args" && ok "feed sort: even a confident log line waits for a click, with the feed's prompt" || fail "feed note"
 hqi inbox move --json --task="$ITA" -- "$FA" note >/dev/null && card "$ITA" | grep -q "Alice on Zulip: 4.2.7 perf plan" && card "$ITA" | grep -q "#narrow/dm/7-Alice-Wu" && ok "feed: taking the guess files it, the conversation link as a ref" || fail "feed ref"
@@ -1795,6 +1799,7 @@ zmsg 104 dm 1 "Me" "sure"
 answer '{"kind":"skip","confidence":0.9,"reason":"chit-chat","alternatives":[]}'
 FC="$("$HQ" feed zulip --claude "$FAKE" --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==2 and r["skipped"]==1, r; print(r["items"][0])')" && ok "feed zulip sorts what it adds; a likely skip is counted" || fail "feed sort run"
 hqi inbox --json | python3 -c 'import json,sys; x=[n for n in json.load(sys.stdin)["items"] if n["id"]=="'"$FC"'"][0]; assert x["state"]=="unsorted" and x["skip"], x' && ok "a likely skip still waits on the board, marked skip" || fail "skip waits"
+hqi inbox drop -- "$FC" >/dev/null && hqi inbox restore --json -- "$FC" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="unsorted" and x["skip"], x' && ok "a dropped likely skip can be restored, folded as before" || fail "skip restore"
 hqi inbox move --json --task="$ITA" -- "$FC" note | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and not x["skip"], x' && ok "a likely skip can still be filed" || fail "skip filed"
 zmsg 105 dm 1 "Me" "one more thing"
 [ "$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["messages"], len(r["items"]))')" = "1 0" ] && ok "feed: a conversation with only your own new lines adds nothing" || fail "feed own only"
@@ -1804,11 +1809,19 @@ ZFILE="$ZS/inject.json" zmsg 107 stream 9 "Bob Li" "@**Me** one more" m
 ZFILE="$ZS/inject.json" zmsg 108 dm 7 "Alice Wu" "the plan is at https://example.com/plan-doc"
 [ "$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["messages"])')" = 1 ] && [ ! -e "$ZS/inject.json" ] && ok "feed zulip: messages that come in mid-scan are left out" || fail "feed zulip mid-scan"
 FD="$("$HQ" feed zulip --no-sort --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["messages"]==2 and len(r["items"])==2, r; print(r["items"][1])')" && ok "feed zulip: …and come with the next scan, from both narrows" || fail "feed zulip next scan"
+[ "$(echo "$FJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"][1])')" = "$FB" ] && hqi inbox --json | python3 -c '
+import json,sys
+x={n["id"]:n for n in json.load(sys.stdin)["items"]}
+b=x["'"$FB"'"]; d=x["'"$FD"'"]
+assert "release notes" in b["text"] and "one more" in b["text"] and b["msgs"]==[102,107] and not b.get("dest"), b
+assert "ping" in d["text"] and "plan-doc" in d["text"] and d["msgs"]==[106,108] and d["text"].count("Zulip · DM with Alice Wu")==1, d' && ok "feed: news for a conversation still waiting joins its item, the guess cleared" || fail "feed merge"
 answer '{"kind":"note","task":"'"$ITB"'","text":"Alice shared the plan","confidence":0.9,"reason":"r","alternatives":[]}'
 hqi inbox sort --claude "$FAKE" --json "$FD" >/dev/null; hqi inbox move --json --task="$ITB" -- "$FD" note >/dev/null
 card "$ITB" | grep -q "Alice shared the plan" && card "$ITB" | grep -q "#narrow/dm/7-Alice-Wu" && ! card "$ITB" | grep -q "example.com/plan-doc" && ok "feed sort: only the conversation link becomes a ref, not links in the messages" || fail "feed refs first line"
 printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://localhost:%s\n' "$(cat "$ZS/port")" > "$HOME/.zuliprc"
 "$HQ" feed zulip --since 48 --dry-run | grep -q "^zulip: 10 messages" && ok "feed zulip: another server starts over (the cursor is per site)" || fail "feed zulip site"
+zmsg 109 dm 77 "Flaky Lookup" "hello there"
+"$HQ" feed zulip --since 48 --dry-run | grep -q "hello there" && ok "feed zulip: a sender whose lookup fails is read, the scan goes on" || fail "feed lookup error"
 printf 'email=me@example.com\nkey=SUPERSECRET\n' > "$HOME/.zuliprc"
 "$HQ" feed zulip >"$T/out" 2>&1 || true; "$HQ" feed status --json >>"$T/out"; "$HQ" feed all >>"$T/out" 2>&1 || true
 "$HQ" feed all --dry-run >"$T/out2" 2>&1 && fail "feed all --dry-run exits 0 on a failure"; grep -q "^zulip failed: can't read" "$T/out2" && ok "feed all --dry-run says which source failed, and fails" || fail "feed all dry run failure"

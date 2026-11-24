@@ -1195,7 +1195,6 @@ function renderNeeds() {
 const notes = () => (ui.board && ui.board.inbox) || [];
 // A scanned message the sorter would skip waits too, folded away, and isn't counted as to sort.
 const unsortedNotes = () => notes().filter((x) => x.state === "unsorted" && !x.skip);
-const skipNotes = () => notes().filter((x) => x.state === "unsorted" && x.skip);
 function destLabel(d) {
   if (!d || d.kind === "unsorted") return T("unsorted", "未分拣");
   if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
@@ -1291,7 +1290,8 @@ function renderNotes() {
       const feed = ["zulip", "jira"].includes(x.via);
       // Not "not sure": it waits because it came from outside, whatever the confidence.
       if (feed && !x.error) meta = x.skip ? `${T("Likely nothing for you", "看着不用管")}${x.reason ? ` · ${esc(x.reason)}` : ""}` : esc(x.reason || "");
-      chips = noteGuesses(x).map((g, i) => feed && i === 0 && !x.skip ? destChip(x, g, "take", `${T("Take", "采纳")} → ${destLabel(g)}`) : destChip(x, g)).join("") +
+      // Take is the model's own pick, never an alternative standing in for a pick that failed.
+      chips = noteGuesses(x).map((g, i) => feed && i === 0 && g === x.dest && !x.skip && !x.error ? destChip(x, g, "take", `${T("Take", "采纳")} → ${destLabel(g)}`) : destChip(x, g)).join("") +
         `<button class="chip link ghost" data-action="note-change" data-id="${esc(x.id)}">${isOpen ? T("Fewer", "收起") : T("Somewhere else…", "放别处…")}</button>`;
       side = feed ? `<button class="btn small" title="${T("Drop it (you can restore it)", "不要了（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">${T("Drop", "不要")}</button>`
         : `<button class="icon x" title="${T("Delete (you can restore it)", "删掉（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">✕</button>`;
@@ -1320,8 +1320,8 @@ function renderNotes() {
     </div>`;
   };
   // What the sorter would skip, folded under the list: one click shows them.
-  const skipBox = skips.length ? `<button class="chip link ghost skips" data-action="note-skips">${ui.showSkips ? "▾" : "▸"} ${T(`${skips.length} likely nothing for you`, `${skips.length} 条看着不用管`)}</button>
-    ${ui.showSkips ? `<div class="inbox-list notes">${skips.map(row).join("")}</div>` : ""}` : "";
+  const skipBox = skips.length ? `<button class="chip link ghost skips" data-action="note-skips">${ui.showSkips || f ? "▾" : "▸"} ${T(`${skips.length} likely nothing for you`, `${skips.length} 条看着不用管`)}</button>
+    ${ui.showSkips || f ? `<div class="inbox-list notes">${skips.map(row).join("")}</div>` : ""}` : "";
   return `<div class="group-title">${T("Quick notes", "记下的")} ${open ? `<span class="n hot">${open}</span>` : ""}<span class="meta">${T("unsorted, and the last two days", "未分拣的，和最近两天的")}</span></div>${filterNote(shown.length, all.length)}<div class="inbox-list notes">${items.map(row).join("")}</div>${skipBox}`;
 }
 // Moves a note; the toast's Undo puts it back where it was.

@@ -767,7 +767,13 @@ with a feed prompt that treats the messages as data, never instructions, and add
 nothing is filed by itself, however confident: every note stays unsorted with the pick and its
 alternatives as guesses, for the user to take one (`hq inbox move`, or the board's **Take →**
 button) or drop it; a `skip` pick sets `skip: true` on the unsorted note, which the board folds
-under the list and leaves out of its counts (a move clears it). Up to 4 notes are sorted at once. A filed feed note's refs come
+under the list and leaves out of its counts (a move clears it); `hq inbox` stops listing one after
+48 hours (`--all` still does) and it is deleted after 30 days, like a dropped note. News for a
+conversation or issue whose note still waits unsorted joins that note instead of adding another:
+its lines are appended (the header lines replaced by the newest), `msgs` or `events` grow, and the
+old guess is cleared for a new sort. Zulip's bot verdicts are kept in `state.json` (`users`), so
+each sender is looked up once; a lookup that fails other than with 400/404 counts the sender as a
+person for that scan. Up to 4 notes are sorted at once. A filed feed note's refs come
 from its first line only (the conversation or issue link), never from links inside the messages.
 
 State lives in `<root>/secretary/feed/`: `state.json` holds, per source, the cursor (Zulip's
