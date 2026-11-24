@@ -372,7 +372,7 @@ function drawPrompt() {
     foot = `<div class="prompt-foot">
       <textarea class="grow" rows="2" data-key="${esc(planFeedbackKey(m))}" placeholder="${T("What to change — sent back, and it keeps planning", "要改什么——发回给它，它继续规划")}">${esc(fb)}</textarea>
       <div class="row-btns">
-        <button class="btn small" data-action="plan-feedback" ${m.busy || !fb.trim() ? "disabled" : ""}>${T("Keep planning", "继续规划")}</button>
+        <button class="btn small" data-action="plan-feedback" title="${T("Send it back (⌘Enter)", "发回去（⌘回车）")}" ${m.busy || !fb.trim() ? "disabled" : ""}>${T("Keep planning", "继续规划")}</button>
         <button class="btn small primary" data-action="plan-approve" ${m.busy ? "disabled" : ""} title="${T("Presses Enter in its terminal: the dialog's first option, “Yes”, and it starts", "在它的终端里按回车：选对话框的第一项「Yes」，开始执行")}">${T("Approve", "批准")}</button>
       </div></div>`;
   } else {
@@ -2018,7 +2018,7 @@ function renderTaskBody(t) {
 
         ${secHead(T("Log", "日志"), t, "log", T("Add a note — the task's memory; bound sessions read it", "加一条备注——任务的记忆；绑定的 session 会读它"), logs.length || null)}
         ${adding("log") ? `<div class="addbox"><textarea class="note logbox" data-key="${k("log")}" placeholder="${T("A decision, a finding, a note for whoever picks this up next", "一个决定、一个发现、给下一个接手者的备注")}">${esc(draft(k("log")))}</textarea>
-            <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}">${T("Save note", "保存备注")}</button></div></div>` : ""}
+            <div class="row" style="justify-content:flex-end"><button class="btn small primary" data-action="add-log" data-task="${esc(t.id)}" title="${T("Save (⌘Enter)", "保存（⌘回车）")}">${T("Save note", "保存备注")}</button></div></div>` : ""}
         ${showLogs.length ? `<ol class="logs">${logHtml}</ol>` : `<div class="empty">${T("Nothing logged yet.", "还没有日志。")}</div>`}
         ${logs.length > 3 ? `<button class="btn small ghost more" data-action="log-all" data-task="${esc(t.id)}">${ui.logAll.has(t.id) ? T("Show latest 3", "只看最近 3 条") : T(`Show all ${logs.length}`, `显示全部 ${logs.length} 条`)}</button>` : ""}
       </div>
@@ -2991,7 +2991,7 @@ function drawSecretary(toBottom) {
   const quick = busy || st.waking ? "" : `<div class="quick">${QUICK.map(([label, fill]) => `<button class="chipq" data-action="sec-quick" ${fill ? `data-fill="${esc(fill)}"` : `data-text="${esc(label)}"`}>${esc(label)}</button>`).join("")}</div>`;
   const sendBtn = busy
     ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>`
-    : `<button class="sendc" data-action="send" data-session="${SEC}" ${ui.sending.has(SEC) || st.waking ? "disabled" : ""} title="${T("Send (Enter)", "发送（回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
+    : `<button class="sendc" data-action="send" data-session="${SEC}" ${ui.sending.has(SEC) || st.waking ? "disabled" : ""} title="${T("Send (⌘Enter)", "发送（⌘回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
 
   box.innerHTML = `<div class="panel sec-chat" role="dialog" aria-label="${T("Secretary", "秘书")}">
     <div class="c-head">
@@ -3556,7 +3556,7 @@ const isBusy = (sid) => liveState(ui.sessions.find((x) => x.sessionId === sid)) 
 // so a second click can't type the same message into the session again.
 function sendButton(sid, enabled) {
   const inFlight = ui.sending.has(sid);
-  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? T("Sending…", "发送中…") : T("Send", "发送")}</button>`;
+  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" title="${T("Send (⌘Enter)", "发送（⌘回车）")}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? T("Sending…", "发送中…") : T("Send", "发送")}</button>`;
 }
 
 async function send(sid) {
@@ -4551,6 +4551,14 @@ document.addEventListener("selectionchange", () => {
 // Follow the box when its column or the conversation scrolls.
 document.addEventListener("scroll", (ev) => { if (ev.target.id !== "slash") slashPlace(); }, true);
 
+// The button ⌘Enter presses for a text box, or null when it has none.
+function submitButtonOf(el) {
+  const near = (wrap, action) => (el.closest(wrap) || { querySelector: () => null }).querySelector(`[data-action="${action}"]`);
+  if (el.dataset.session) return el.parentElement.querySelector('[data-action="send"]');   // busy secretary: its Stop, not this
+  if (el.closest(".prompt-foot")) return near(".prompt-foot", "plan-feedback");
+  if (el.classList.contains("logbox")) return near(".addbox", "add-log");
+  return null;
+}
 document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.finishAsk) { ev.preventDefault(); return answerFinishAsk(null); }
@@ -4565,7 +4573,14 @@ document.addEventListener("keydown", async (ev) => {
   if (el.id === "capture" && ev.key === "Escape") { el.blur(); return; }
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
   if (el.id === "capture") { ev.preventDefault(); return captureSubmit(); }   // focus stays: jot the next one
-  if (el.tagName === "TEXTAREA" && el.dataset.session) return;   // Enter is a new line; only Send sends
+  // ⌘Enter (or Ctrl+Enter) presses the box's own button: Send under a message box (a session's,
+  // Peek's, the secretary's), Keep planning under a plan, Save note under the log. Enter alone
+  // stays a new line there. Not an ask's note: it has two answers, and no one is the obvious one.
+  if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && el.tagName === "TEXTAREA" && !ui.composing && ev.keyCode !== 229) {
+    const btn = submitButtonOf(el);
+    if (btn) { ev.preventDefault(); if (!btn.disabled) btn.click(); return; }
+  }
+  if (el.tagName === "TEXTAREA" && el.dataset.session) return;   // Enter is a new line; only Send (or ⌘Enter) sends
   if (el.dataset.field) { ev.preventDefault(); return; }   // fields save with their Save button
   if (el.dataset.enter) {
     ev.preventDefault();
