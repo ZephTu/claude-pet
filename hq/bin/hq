@@ -3450,14 +3450,13 @@ def inbox_sort(nid, claude=None):
     conf = ans.get("confidence") if isinstance(ans.get("confidence"), (int, float)) else 0
     fields = {"dest": pick, "alts": alts[:INBOX_MAX_ALTS], "reason": _flat(ans.get("reason"), 300), "confidence": conf,
               "by": inbox_model(), "cost": cost, "sorted_at": now_iso()}
-    feed = item.get("via") in FEED_SOURCES
-    if feed and ans.get("kind") == "skip" and conf >= INBOX_CONFIDENT:
-        # Nothing for the board: put away, out of the board's list, but restorable.
-        return inbox_update(nid, lambda x: x.update(fields, state="dropped", skipped=True)
+    if item.get("via") in FEED_SOURCES:
+        # Messages from outside are never filed by themselves: the guess waits for the user's click
+        # (take it, or drop the note). "skip" too: the board folds those away.
+        skip = ans.get("kind") == "skip"
+        return inbox_update(nid, lambda x: x.update(fields, state="unsorted", skip=skip)
                             if x.get("state") == "sorting" else None)
-    # Messages from outside go on their own only as a log line; anything that would give the user
-    # work (a todo, a task) waits for a click.
-    if pick and conf >= INBOX_CONFIDENT and (not feed or pick["kind"] == "note"):
+    if pick and conf >= INBOX_CONFIDENT:
         with inbox_lock():
             items = load_inbox()
             x = inbox_item(items, nid)
@@ -3510,7 +3509,7 @@ def inbox_move(nid, want):
             # Taking the note back would remove the very card it is being filed on.
             die(f"{u.get('task')} was made from {x['id']} — edit that card, or move the note to unsorted first")
         left = inbox_undo(u) if x.get("state") == "sorted" else ""
-        x.update(undo=None, error=None)
+        x.update(undo=None, error=None, skip=False)
         if d:
             # Where it was stays one click away: the old place joins the alternatives.
             alts = []
@@ -3607,8 +3606,8 @@ def cmd_inbox(args):
 # kept as it came, on this machine only, in <root>/secretary/feed/<source>/YYYY-MM-DD.jsonl; each
 # conversation (a DM, or a channel's topic) or issue that got something new from someone else
 # becomes one inbox item (via "zulip" / "jira") for the sorter, which in this mode may also answer
-# "skip". A confident log line is filed at once; a todo or a new task waits in the inbox as a
-# guess, one click from filed; a skip is put away (dropped, hidden; `hq inbox --all`).
+# "skip". Nothing is filed by itself: each item waits unsorted with the sorter's guess one click
+# away, or marked "skip" (folded away on the board) — the user takes the guess or drops the item.
 # <root>/secretary/feed/state.json: {"zulip": {"last_id", "me", "last_scan", "last"},
 #                                    "jira": {"last_ts", "me", "site", "last_scan", "last"}}.
 FEED_SOURCES = ("zulip", "jira")
@@ -3683,6 +3682,20 @@ def feed_since(since_hours):
     if since_hours is not None:
         return time.time() - since_hours * 3600
     return dt.datetime.combine(dt.date.today(), dt.time()).timestamp()
+
+
+def zulip_bots(conf, ids):
+    """Which of these user ids are bots (QA bots, integrations). Unless hq.json asks for them
+    ("feed": {"zulip": {"bots": true}}), their messages aren't read. One the realm can't look up
+    is a system bot (Notification Bot and the like)."""
+    def bot(i):
+        try:
+            return bool(zulip_get(conf, f"users/{i}").get("user", {}).get("is_bot"))
+        except FeedError as e:
+            if e.code in (400, 404):
+                return True
+            raise
+    return {i for i in ids if bot(i)}
 
 
 def zulip_narrows():
@@ -3838,7 +3851,7 @@ def zulip_get(conf, path, **params):
             msg = json.load(e).get("msg") or e.reason
         except ValueError:
             msg = e.reason
-        raise FeedError(f"Zulip {path}: HTTP {e.code} {msg}")
+        raise FeedError(f"Zulip {path}: HTTP {e.code} {msg}", code=e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise FeedError(f"Zulip {path}: {getattr(e, 'reason', e)}")
     if d.get("result") != "success":
@@ -3987,7 +4000,7 @@ def feed_file(source, raw, entries, cursor, sort, claude):
     # The cursor moves before sorting: a sort that fails leaves an unsorted item, not a second copy.
     update_feed_state(source, lambda prev: dict(prev, **cursor, last_scan=now_iso(), last={"items": ids}))
     sorted_items = feed_sort_all(ids, claude) if sort and ids else []
-    counts = collections.Counter("skipped" if x.get("skipped") else x.get("state") for x in sorted_items)
+    counts = collections.Counter("skipped" if x.get("skip") else x.get("state") for x in sorted_items)
     return {"items": ids, "filed": counts.get("sorted", 0), "unsorted": counts.get("unsorted", 0),
             "skipped": counts.get("skipped", 0), "cost": round(sum(x.get("cost") or 0 for x in sorted_items), 4)}
 
@@ -4019,6 +4032,9 @@ def feed_zulip(since_hours=None, sort=True, claude=None, dry=False):
             top = min(t for _, t in got)
             msgs = {m["id"]: m for ms, _ in got for m in ms if m["id"] <= top}
         msgs = sorted(msgs.values(), key=lambda m: m["id"])
+        if feed_config("zulip").get("bots") is not True:
+            bots = zulip_bots(conf, {m["sender_id"] for m in msgs if m.get("sender_id") != me})
+            msgs = [m for m in msgs if m.get("sender_id") not in bots]
         # Conversations with something from someone else; the user's own lines are only context.
         convs = [c for c in zulip_conversations(conf, msgs, me) if any(m.get("sender_id") != me for m in c["msgs"])]
         texts = [zulip_item_text(c, me) for c in convs]
@@ -4258,7 +4274,7 @@ def feed_line(r):
     head = f"{r['source']}: {r['messages']} messages, {r['conversations']} conversations" if r["source"] == "zulip" \
         else f"{r['source']}: {r['conversations']} issues"
     if "filed" in r and r.get("sorted", True):
-        head += f" → filed {r['filed']}, unsorted {r['unsorted']}, skipped {r['skipped']}"
+        head += f" → to review {r['unsorted']}, likely skip {r['skipped']}"
     return head + (f" (${r['cost']})" if r.get("cost") else "")
 
 
@@ -4274,8 +4290,8 @@ def cmd_feed(args):
                  else f"{last.get('conversations', 0)} {FEED_UNIT[src]}")
             print(f"{src}: " + (f"not set up — {s['error']}" if s.get("error") else
                                 f"last scan {s.get('last_scan') or 'never'}" +
-                                (f": {n} → filed {last.get('filed', 0)}, unsorted {last.get('unsorted', 0)},"
-                                 f" skipped {last.get('skipped', 0)}" if last else "")))
+                                (f": {n} → to review {last.get('unsorted', 0)}, likely skip {last.get('skipped', 0)}"
+                                 if last else "")))
         return
     if args.site:
         if args.action != "jira":
@@ -4311,11 +4327,11 @@ def cmd_feed(args):
                 print(f)
         if args.action == "all" and not args.dry_run:
             # The job shows the last line: every source on it, e.g.
-            # "zulip 3 · jira 2 → filed 1, unsorted 1, skipped 3 ($0.04)".
+            # "zulip 3 · jira 2 → to review 2, likely skip 3 ($0.04)".
             n = lambda k: sum(r.get(k) or 0 for r in results)
             line = " · ".join(f"{r['source']} {r['conversations']}" for r in results)
             if results and not args.no_sort:
-                line += f" → filed {n('filed')}, unsorted {n('unsorted')}, skipped {n('skipped')}"
+                line += f" → to review {n('unsorted')}, likely skip {n('skipped')}"
             if n("cost"):
                 line += f" (${round(n('cost'), 4)})"
             print(" · ".join(([line] if results else []) + failed))

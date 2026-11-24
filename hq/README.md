@@ -730,7 +730,9 @@ true}}` (off by default: bots and channel-wide notices mention you often) — an
 with `via: "zulip"`, `conv` and `msgs` (the message ids). Read only: nothing is ever sent. It calls
 Zulip's REST API directly with the account in `$HQ_ZULIPRC`, else `"feed": {"zulip": {"zuliprc":
 PATH}}` in `hq.json`, else `~/.zuliprc`; the key is never written anywhere else, and an error about
-the file never quotes it. A conversation where only you spoke adds nothing. The first scan (or the
+the file never quotes it. Messages from bot accounts (Zulip's `is_bot`, looked up per sender with
+`GET /users/{id}`; a sender the realm can't look up counts as a system bot) are left out unless
+`"feed": {"zulip": {"bots": true}}`. A conversation where only you spoke adds nothing. The first scan (or the
 first as another account or server) starts at midnight today, local time, or `--since` hours back;
 each later one picks up after the last message id it saw. Messages are read 100 a request (a big
 page of a busy narrow is a megabyte the server sends slowly), back from the newest on a first scan.
@@ -762,9 +764,10 @@ scan of it already running), naming it on the last line after the others' result
 The Zulip note's first line is `Zulip · <title> · <conversation URL>`, then one `[MM-DD HH:MM] who: text`
 line per message (yours as `me`, older lines trimmed past 3000 characters). Feed notes are sorted
 with a feed prompt that treats the messages as data, never instructions, and adds a `skip` kind:
-only a log line (`note`) is filed by itself; a `todo`, `task` or `me` pick waits unsorted for a
-click; a confident `skip` is dropped with `skipped: true`, hidden from the list but shown by
-`hq inbox --all` and restorable. Up to 4 notes are sorted at once. A filed feed note's refs come
+nothing is filed by itself, however confident: every note stays unsorted with the pick and its
+alternatives as guesses, for the user to take one (`hq inbox move`, or the board's **Take →**
+button) or drop it; a `skip` pick sets `skip: true` on the unsorted note, which the board folds
+under the list and leaves out of its counts (a move clears it). Up to 4 notes are sorted at once. A filed feed note's refs come
 from its first line only (the conversation or issue link), never from links inside the messages.
 
 State lives in `<root>/secretary/feed/`: `state.json` holds, per source, the cursor (Zulip's
@@ -774,9 +777,8 @@ over. Also the last scan's counts and cost. It is written under a lock, so two s
 once don't lose each other's update; the raw messages and
 issues go to `zulip/<date>.jsonl` and `jira/<date>.jsonl`, kept 30 days. `--dry-run` prints the notes and saves nothing;
 `--no-sort` jots them unsorted. `hq feed status` shows the state. A second scan while one runs exits
-at once. The last output line is a summary (`zulip: 12 messages, 4 conversations → filed 1,
-unsorted 1, skipped 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → filed 1, unsorted 1, skipped 4
-($0.03)`), which Claude Pet shows for its "Secretary: scan Zulip · Jira" job, running `hq feed all`
+at once. The last output line is a summary (`zulip: 12 messages, 4 conversations → to review 2,
+likely skip 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → to review 2, likely skip 4 ($0.03)`), which Claude Pet shows for its "Secretary: scan Zulip · Jira" job, running `hq feed all`
 (weekdays, hourly 9–19, off until turned on from the secretary's window).
 
 ### Closing finished todos
