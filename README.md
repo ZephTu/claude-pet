@@ -94,6 +94,21 @@ hq/install.sh --root ~/claude-hq                  # optional: the Task Board; li
 hq/install.sh --root ~/claude-hq --no-hooks       # the board and CLI only, settings.json untouched
 ```
 
+### Install with Claude
+
+Open Claude Code anywhere and paste:
+
+> Install Claude Pet and its Task Board from https://github.com/ZephTu/claude-pet — follow "Install with Claude" in its README — then set the board up from my existing sessions.
+
+**For Claude, doing that install** — in this order, and ask the user wherever it says so:
+
+1. **Check** macOS 14+ (`sw_vers -productVersion`), a Swift toolchain (`swift --version`; if missing, the user runs `xcode-select --install` — a system dialog — and tells you when it is done), `python3`, and that `~/.claude` exists. Stop and say what is missing.
+2. **Clone** `main` to a folder the user is fine keeping (it is what gets built; e.g. `~/claude-pet`), and install from that checkout only — never a branch, never `--force`.
+3. **Ask** where the task cards should live (suggest `~/claude-hq`). Run `hq/install.sh --root <that folder>` without `--yes`: outside a terminal it prints every change it would make (`settings.json` hooks, slash commands, folders) and stops. Show the user that list and ask before going on. If they don't want HQ's hooks, add `--no-hooks`.
+4. **Install** the pet with `./scripts/install.sh` (it builds, wires its hooks — `settings.json` is backed up first — and starts the cat), then HQ with `hq/install.sh --root <folder> --yes`.
+5. **Onboard**: read `~/.claude/commands/hq-onboard.md` and follow it (the `/hq-onboard` command was just added, so this session may not know it yet). It asks the user before creating anything.
+6. **Finish** by telling the user: double-click the cat to open the board (or right-click → Task Board…); hooks act only in sessions started from now on, so restart the ones that should be tracked; Claude Code keeps transcripts for about 30 days by default (`cleanupPeriodDays`), so older work won't show up.
+
 **The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
 
 **`scripts/install.sh` installs the checkout it runs in**, so it first fetches `origin/main` (giving up after 20 seconds and using the last fetched copy) and checks that the checkout contains all of it. If not — a feature branch cut before a fix merged — it lists the missing commits and stops; run from an interactive terminal it asks first. `--force` (or `CLAUDE_PET_INSTALL_ANYWAY=1`) installs anyway. Otherwise the installed pet would quietly lose fixes that are already merged.
