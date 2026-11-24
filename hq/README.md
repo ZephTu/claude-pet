@@ -638,8 +638,7 @@ did, since the last scan, to the issues you are assignee, reporter or watcher of
 changed (`field: old → new`; a long field such as the description only as `field changed`), a
 comment added or edited — and turns each issue into a quick note with `via: "jira"`, `issue` (the
 key) and `events`. It calls Jira's REST API (v2, `search/jql` with `updated >= -Nm`) with Basic auth:
-the site from `$HQ_JIRA_SITE`, else `"feed": {"jira": {"site": URL}}` in `hq.json` (which `--site`
-writes); the token from `$HQ_JIRA_TOKEN`, else the login keychain, service `hq-jira` (or
+the site from `hq site jira` (see below; `--site` sets it too); the token from `$HQ_JIRA_TOKEN`, else the login keychain, service `hq-jira` (or
 `"keychain"` in the same object), whose account is the email (or `$HQ_JIRA_EMAIL`, or `"email"`).
 Store it with `security add-generic-password -U -s hq-jira -a <email> -w "$(pbpaste)"`: the
 interactive `-w` prompt cuts input at 128 characters, shorter than an Atlassian token. The token is
@@ -674,6 +673,54 @@ unsorted 1, skipped 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → filed 1, unsor
 ($0.03)`), which Claude Pet shows for its "Secretary: scan Zulip · Jira" job, running `hq feed all`
 (weekdays, hourly 9–19, off until turned on from the secretary's window).
 
+### Closing finished todos
+
+`hq autoclose [--dry-run] [-v] [--json]` ticks the open todos of open cards (active, blocked,
+waiting-on-me; any owner) whose PR, Jira issue or Jenkins build is finished, reading only what the
+todo's text names:
+
+- a GitHub PR link, or `#123`: a Jenkins build of that number among the card's refs and
+  `HISTORY.md` links (when the todo waits for a build and has no PR verb), else the PR of that number among its refs,
+  else in the one repository its refs' PRs are in (with none, its workdirs' GitHub `origin`);
+- a Jira key (`ABC-123`) or `/browse/` link on the Jira site; a build link on the Jenkins site.
+
+A link counts only when the todo is about finishing it — merge / review / approve / 合并 / 合入 /
+审阅 / 审核 / 评审 for a PR; close / resolve / fix / verify / follow up / 关闭 / 解决 / 修复 / 验证 /
+跟进 for an issue; wait / watch / finish / 等待 / 等着 / 盯 / 跑完 / `等…跑完|结束|完成` for a build
+(English words with ASCII edges, so `先merge #7` counts; a bare 等 does not: it is also "etc.") — and
+the todo has no step after it: then, after, `and` (not "and merge"), 然后, 之后, 以后, 再, 并 (not
+并合并), `;`, `…后：`, or a part after a comma naming no link, `#n` or key. Missing a step closes a
+todo with work left, so these err towards leaving it. The todo is `done` when every link is: the
+PR merged, the issue's status category is `done`, the build's result is `SUCCESS`; `drop` when a PR
+among them has been closed unmerged for an hour (`closedAt`; a PR closed to rerun CI is reopened
+within that). A running
+or failed build, an open PR or issue, or a link that couldn't be looked up leaves it open; a link
+that doesn't exist (404: `UTF-8` reads like a key) doesn't count. Each close is the usual tick
+(`todo #3 → done (auto: PR o/r#12 merged): …` in HISTORY.md) plus a card log line
+(`auto-closed todo #3 (PR o/r#12 merged): … — reopen it on the board or with hq todo T-012 3 open
+--text '…'`, numbered after the tick, which may move older closed todos off the card; `--text` finds
+it if the number moves later; one the budget sent to HISTORY.md at once says so);
+an @me todo settles waiting-on-me as `hq todo` does. A todo it closed that is open again (the user
+reopened it) is never closed again: its entry is refreshed every run while it stays open.
+
+PRs are looked up with `gh pr view`; Jira with `GET /rest/api/2/issue/KEY?fields=status` (the same
+credentials as `hq feed jira`); Jenkins with `GET <build>/api/json?tree=building,result,…` and Basic
+auth, sent only to a URL under the site, scheme included: the user and API token from `$HQ_JENKINS_USER` / `$HQ_JENKINS_TOKEN`, else the login keychain,
+service `hq-jenkins`, whose account is the user (`security add-generic-password -U -s hq-jenkins -a
+<user> -w "$(pbpaste)"`). A kind whose site isn't set is not looked up; a source that fails (no
+token, HTTP 401, unreachable; for PRs, `gh auth status` failing when some PR couldn't be read) is
+named on the last line and the exit code is 1, the rest still run. One run at a time (a lock;
+a second exits). State is `<root>/secretary/autoclose.json`: `closed` (`"<task> <todo text>"` → when and why,
+kept 90 days), `final` (merged PRs, finished builds: not looked up again; issues, closed PRs and 404s
+are asked every run, since a wrong site or account says 404 too) and `last`. The last output line is `N todos with links → closed X[, dropped Y][ · <source>:
+<error>]`, which Claude Pet shows for its "Secretary: close finished todos" job running
+`hq autoclose` every 5 minutes (off until turned on from the secretary's window; it never notifies).
+
+`hq site [jira|jenkins [URL | -]]` shows or sets this machine's sites, kept in
+`~/.claude/hq/config.json` as `"sites": {"jira": URL, "jenkins": URL}` — not in the task root's
+`hq.json`, which may be shared (`-` clears one). `$HQ_JIRA_SITE` / `$HQ_JENKINS_SITE` win; a Jira
+site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still read last.
+
 ## Files
 
 ```
@@ -695,7 +742,7 @@ unsorted 1, skipped 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → filed 1, unsor
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point
-├── config.json               {"root": "<root>"}
+├── config.json               {"root": "<root>", "sites": {"jira": URL, "jenkins": URL}}
 └── state/sessions.json       session id → bound task, delivery cursor, turn start, finished
 ```
 
