@@ -131,7 +131,7 @@ if (LANG === "zh") {
   $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
   $("#all .vhead h1").textContent = "所有任务";
-  $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前";
+  $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前；每一列里 session 最近有动静的任务排最上面";
   $("#activefirst-cb").nextSibling.nodeValue = " 活跃的在前";
   $("#show-closed").nextSibling.nodeValue = " 最近完成";
   $("#needs .vhead h1").textContent = "等你处理";
@@ -1266,6 +1266,13 @@ function compareTasks(a, b) {
   return taskRank(b) - taskRank(a) || openAsks(b).length - openAsks(a).length ||
     String(b.updated).localeCompare(String(a.updated)) || String(a.id).localeCompare(String(b.id));
 }
+// When its live sessions last did something (0: none) — what Active first orders a lane by.
+const taskActivity = (t) => Math.max(0, ...liveFor(t.id).map((s) => Date.parse(s.updatedAt) || 0));
+// The cards in a lane: with Active first on, the task whose session moved last comes first (All;
+// in Focus too, over the order you added them in); the rest as before.
+function laneOrder(a, b) {
+  return ui.activeFirst ? taskActivity(b) - taskActivity(a) || compareTasks(a, b) : compareTasks(a, b);
+}
 
 // The search box filters every tab: a task matches on its id, title, refs, category or project;
 // an ask or a todo also on its own text.
@@ -1399,7 +1406,7 @@ function renderTasks() {
   let html = filterNote(visible.length, pool.length) +
     `<div class="swim-cols" ${grid}>${cols.map((l) => laneHead(l, visible.filter((t) => lanes[t.id] === l).length)).join("")}</div>`;
   const row = ({ key, head, group, shut, closed, empty }) => `<div class="swim-row ${shut ? "fold" : ""}">${head}
-    ${shut ? "" : empty ? empty : `<div class="swim-grid" ${grid}>${cols.map((l) => `<div class="cell l-${l}" data-lane="${l}">${group.filter((t) => lanes[t.id] === l).sort(compareTasks).map((t) => kcard(t, { compact: true, noProject: ui.groupBy === "project" })).join("")}</div>`).join("")}</div>`}</div>`;
+    ${shut ? "" : empty ? empty : `<div class="swim-grid" ${grid}>${cols.map((l) => `<div class="cell l-${l}" data-lane="${l}">${group.filter((t) => lanes[t.id] === l).sort(laneOrder).map((t) => kcard(t, { compact: true, noProject: ui.groupBy === "project" })).join("")}</div>`).join("")}</div>`}</div>`;
   const pills = (group) => {
     const you = group.filter((t) => lanes[t.id] === "you").length, run = group.filter((t) => lanes[t.id] === "run").length;
     return `${you ? `<span class="lpill you" title="${T("Tasks waiting on you", "在等你的任务")}">${T(`${you} on you`, `${you} 等你`)}</span>` : ""}${run ? `<span class="lpill run" title="${T("Tasks with a session working", "有 session 在干活的任务")}">${T(`${run} running`, `${run} 在跑`)}</span>` : ""}`;
@@ -1535,6 +1542,7 @@ function renderToday() {
       <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`;
   const by = Object.fromEntries(LANES.concat("done").map((l) => [l, []]));
   for (const t of shown) by[lane(t)].push(t);
+  if (ui.activeFirst) for (const l of LANES) by[l].sort((a, b) => taskActivity(b) - taskActivity(a));   // stable: ties keep yours
   // Done: what was finished lately, Focus or not (a finished task leaves Focus by itself).
   by.done = listed().filter((t) => recentDone(t) && taskMatches(t) && !shown.includes(t)).concat(by.done)
     .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -2273,7 +2281,7 @@ function renderSessionSettings() {
       `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
-    ${row(T("Active first", "活跃的在前"), T("In All, project rows with a live session come first, most recently active first. Off: your own order", "All 里有 session 在跑的项目行排最前，最近有动静的在前。不勾：按你自己的顺序"),
+    ${row(T("Active first", "活跃的在前"), T("In All, project rows with a live session come first, most recently active first; in every lane (All and Focus), the task whose session moved last comes first. Off: your own order", "All 里有 session 在跑的项目行排最前，最近有动静的在前；每一列里（All 和 Focus），session 最近有动静的任务排最上面。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
   </div>`;
 }
