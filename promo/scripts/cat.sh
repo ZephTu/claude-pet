@@ -13,7 +13,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 sed 's/^let size = 240$/let size = 480/' "$ROOT/scripts/skin-frames.swift" > "$TMP/cat-hires.swift"
 grep -q '^let size = 480$' "$TMP/cat-hires.swift" || { echo "skin-frames.swift no longer has 'let size = 240'" >&2; exit 1; }
 swiftc -O "$TMP/cat-hires.swift" -o "$TMP/cat-hires"
-"$TMP/cat-hires" cat "$ART/cat/videos" "$ART/cat/sheets" "$TMP/out"
+# skin-frames also rewrites <sheetDir>/../anchors, so give it a copy of the sheets: nothing in $ART changes.
+mkdir -p "$TMP/art" && cp -R "$ART/cat/sheets" "$TMP/art/sheets"
+"$TMP/cat-hires" cat "$ART/cat/videos" "$TMP/art/sheets" "$TMP/out"
 mkdir -p "$PROMO/assets/cat"
 "$PROMO/.venv/bin/python" - "$TMP/out" "$PROMO/assets/cat" <<'PY'
 import json, sys

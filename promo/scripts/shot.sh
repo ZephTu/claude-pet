@@ -13,5 +13,5 @@ PRE=""
 DEMO="$(cat "$PROMO/demo/board-demo-zh.js")"
 HQ_BIN="$PROMO/scripts/nohq/hq" CLAUDE_PET_LANG=zh "$ROOT/.build/debug/ClaudePet" --render-board "$1" "$PRE
 $DEMO
-$2
+${2:-}
 'ok'"

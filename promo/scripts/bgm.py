@@ -1,8 +1,9 @@
 # Local background music: one ~28 s MusicGen-small clip, crossfade-looped to the film's length.
 # usage: .venv/bin/python scripts/bgm.py <seconds> <out.wav>
-import sys, numpy as np, torch, soundfile as sf
+import os, sys, numpy as np, torch, soundfile as sf
 from transformers import AutoProcessor, MusicgenForConditionalGeneration
 target, out = float(sys.argv[1]), sys.argv[2]
+os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 dev = "mps" if torch.backends.mps.is_available() else "cpu"
 proc = AutoProcessor.from_pretrained("facebook/musicgen-small")
 model = MusicgenForConditionalGeneration.from_pretrained("facebook/musicgen-small").to(dev)

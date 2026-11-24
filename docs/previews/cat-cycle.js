@@ -9,7 +9,7 @@
 // Capture, from the repo root:
 //
 //   ./scripts/build-app.sh
-//   ./.build/out/Products/Release/ClaudePet --probe-film index.html \
+//   CLAUDE_PET_LANG=en ./.build/out/Products/Release/ClaudePet --probe-film index.html \
 //       /tmp/frames 130 9 "$(cat docs/previews/cat-cycle.js)"
 //   swiftc -O -o /tmp/make-gif scripts/make-gif.swift
 //   /tmp/make-gif /tmp/frames docs/images/cat.gif 500 210 460 320 0.111 0.5

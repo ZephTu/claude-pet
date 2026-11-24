@@ -5,21 +5,25 @@ A 2:38 Chinese-narrated demo of Claude Pet and HQ, made with [HyperFrames](https
 `SPEC.md`, the alternatives that were not built are in `STORYLINES.md`, and the last review is in `REVIEW.md`.
 
 All the data on screen is made up: `demo/board-demo-zh.js` (the board) and `demo/panel-zh.js` (the session
-list). Board stills render with a stub `hq` (`scripts/nohq/hq`), so your own HQ never leaks into a frame.
+list). Board stills render with a stub `hq` (`scripts/nohq/hq`), and the demo replaces the board's data,
+drafts, picks and outbox before the shutter. A few calls still run for real while the page loads (`claude agents`,
+the pet's own settings) but the demo overwrites what they return, so none of your HQ reaches a frame. Some view
+prefs (show done, grouping) are read from the debug app's WebKit store, so stills can differ between machines.
 
 ## Rebuild
 
-Generated media is not in git. Rebuild it once, in this order, from the repo root after `swift build`:
+Generated media is not in git, except `assets/cat/clips.json` (which `build.py` reads, and `cat.sh` rewrites)
+and the voice-over. Rebuild it once, in this order, from the repo root after `swift build`:
 
 | Output | Command | Needs |
 | --- | --- | --- |
 | `assets/board/*.png` | `promo/scripts/shots-all.sh` | `.build/debug/ClaudePet` |
 | `assets/panel-*.png` | `promo/scripts/panel.sh` | `.build/debug/ClaudePet` |
-| `assets/cat/*.webp`, `clips.json` | `ART=<checkout>/art promo/scripts/cat.sh` | the cat source videos (`art/` is not in git) |
+| `assets/cat/*.webp`, `clips.json` | `ART=<checkout>/art promo/scripts/cat.sh` | the cat source videos (`art/` is not in git; nothing in it is written) |
 | `assets/bgm/track.wav` | `promo/.venv/bin/python promo/scripts/bgm.py 200 promo/assets/bgm/track.wav` | MusicGen-small (set `HF_ENDPOINT=https://hf-mirror.com` if huggingface.co is unreachable) |
 | `assets/vo/*.mp3`, `*.srt` (committed) | `promo/.venv/bin/python promo/scripts/vo.py` | network: the text goes to Microsoft Edge TTS |
 
-The venv: `uv venv promo/.venv && uv pip install --python promo/.venv/bin/python edge-tts pillow numpy soundfile torch transformers`.
+Also needs `ffmpeg`/`ffprobe` on PATH (`build.py` reads the voice-over durations). The venv: `uv venv promo/.venv && uv pip install --python promo/.venv/bin/python edge-tts pillow numpy soundfile torch transformers`.
 
 Then, in `promo/`:
 

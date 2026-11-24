@@ -1,6 +1,6 @@
 // 宣传片用的看板演示数据：一家虚构的网店，全是编的，不碰任何真实任务或 session。
-// 由 promo/scripts/shots.sh 通过 `ClaudePet --render-board` 注入（CLAUDE_PET_LANG=zh）。
-// 基于 docs/previews/board-demo.js，加了定时任务和秘书。
+// 由 promo/scripts/shot.sh 通过 `ClaudePet --render-board` 注入（CLAUDE_PET_LANG=zh）。
+// 它的英文孪生是 docs/previews/board-demo.js（README 截图用），两边改动要保持一致。
 (() => {
   // 固定时钟：调用方可在本脚本前设 window.DEMO_NOW（毫秒），让画面上的时间对上故事。
   if (window.DEMO_NOW) {
@@ -201,7 +201,7 @@
   ui.proj = "";
   ui.board = board; ui.sessions = sessions; ui.dots = dots; ui.unread = { [S.dark]: 1 };
   ui.usage = { five_hour: { used: 34, resets_at: later(131) }, seven_day: { used: 58, resets_at: later(60 * 24 * 3 + 300) } };
-  ui.drafts = {}; ui.atts = {}; ui.picks = {}; ui.expanded = new Set(); ui.adding = new Set(); ui.history = {};
+  ui.drafts = {}; ui.atts = {}; ui.picks = {}; ui.outbox = {}; ui.expanded = new Set(); ui.adding = new Set(); ui.history = {};
   ui.groupBy = "project"; ui.activeFirst = true; ui.collapsed = new Set();
   ui.secGlance = { busy: false, lastAt: ago(2) };
   ui.mode = "today";
