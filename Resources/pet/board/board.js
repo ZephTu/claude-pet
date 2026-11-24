@@ -1284,15 +1284,18 @@ function filterNote(shown, total) {
 
 // ------------------------------------------------------------------ lanes
 // Focus and All are boards of four columns, worked out from what the card and its sessions say —
-// never stored: an open ask, your todo or a session stopped on you puts a task in Needs you; else
-// a working session puts it in Running; else Blocked is its status; the rest is Ready to push on.
+// never stored: a session stopped on you (a prompt to answer) puts a task in Needs you; else a
+// session working or something it started still running in the background puts it in Running —
+// its asks and todos still show on the card, and it is nothing you can pick up yet; else an open
+// ask, your todo or status waiting-on-me puts it in Needs you; else Blocked is its status; the
+// rest is Ready to push on.
 // Dragging a card into another column sets the status that belongs there (Running is the
 // sessions' to decide). Recently done is a fifth, optional column.
 const LANES = ["you", "run", "ready", "blocked"];
 const LANE_NAME = { you: T("Needs you", "等你"), run: T("Running", "在跑"), ready: T("Ready", "待推进"), blocked: T("Blocked", "卡住"), done: T("Recently done", "最近完成") };
 const LANE_HINT = {
   you: T("A question or a todo of yours, or a session waiting on you", "有问题等你答、有你的待办，或 session 停下来等你"),
-  run: T("A session is working on it", "有 session 正在干活"),
+  run: T("A session is working on it, or something it started runs in the background", "有 session 在干活，或它起的东西还在后台跑"),
   ready: T("Nothing running — start or resume a session", "没在跑——开一个或接上 session"),
   blocked: T("Waiting on someone or something else", "在等别人或别的事"),
   done: T("Finished in the last 3 days", "3 天内完成的"),
@@ -1303,9 +1306,9 @@ const myTodos = (t) => t.todos.filter((x) => x.state === "open" && x.owner === "
 function lane(t) {
   if (!isOpen(t)) return "done";
   const live = liveFor(t.id);
-  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me" ||
-    live.some((s) => liveState(s) === "waiting")) return "you";
+  if (live.some((s) => liveState(s) === "waiting")) return "you";
   if (live.some((s) => liveState(s) === "busy" || bgRunning(s))) return "run";
+  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me") return "you";
   if (t.status === "blocked") return "blocked";
   return "ready";
 }
@@ -4804,7 +4807,7 @@ document.addEventListener("drop", async (ev) => {
   if (now && now !== at.lane && isOpen(taskById(id))) {
     const lead = changed ? T(`${id}: status saved, but`, `${id}：状态已改，但`)
       : T(`${id} is already ${STATUS_SHORT[status] || status}, but`, `${id} 本来就是「${STATUS_SHORT[status] || status}」，但`);
-    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours`, `${lead}它还有没答的问题或你的待办，所以留在「等你」`)
+    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours, or a session waiting on you`, `${lead}它还有没答的问题、你的待办，或有 session 停下来等你，所以留在「等你」`)
       : now === "run" ? T(`${lead} a session is working on it, so it stays in Running`, `${lead}有 session 在干活，所以留在「在跑」`)
       : T(`${lead} it stays in ${LANE_NAME[now]}`, `${lead}它留在「${LANE_NAME[now]}」`));
   }
