@@ -1284,9 +1284,34 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         case "task": return L("new task “\(d["title"] as? String ?? "")”", "新任务「\(d["title"] as? String ?? "")」")
         case "todo": return "\(task) " + L("todo", "待办") + " @\(d["owner"] as? String ?? "me")"
         case "note": return "\(task) " + L("log", "记录")
+        case "update": return "\(task) " + L("update", "更新") + updateDetail(d)
         default: return L("your todo", "我的待办")
         }
     }
+
+    /// What an update changes beyond its log line, as board.js updateDetail says it.
+    static func updateDetail(_ d: [String: Any]) -> String {
+        var bits: [String] = []
+        if let s = d["status"] as? String, !s.isEmpty {
+            bits.append("→ " + (statusWord[s].map { L($0.0, $0.1) } ?? s))
+        }
+        if let n = d["next"] as? String, !n.isEmpty { bits.append(L("next", "下一步")) }
+        if let st = d["state"] as? String, !st.isEmpty { bits.append(L("state", "状态说明")) }
+        if let done = d["done"] as? [String], !done.isEmpty {
+            if done.count == 1 {
+                // The todo itself, without its owner, shortened as the board does.
+                var t = done[0].replacingOccurrences(of: #"^@\S+\s+"#, with: "", options: .regularExpression)
+                if t.count > 24 { t = String(t.prefix(23)) + "…" }
+                bits.append("✓ \(t)")
+            } else {
+                bits.append(L("✓ \(done.count) todos", "勾掉 \(done.count) 条待办"))
+            }
+        }
+        return bits.isEmpty ? "" : " · " + bits.joined(separator: " · ")
+    }
+    private static let statusWord: [String: (String, String)] = [
+        "active": ("active", "进行中"), "blocked": ("blocked", "卡住"), "waiting-on-me": ("waiting on me", "等我"),
+        "done": ("done", "完成"), "abandoned": ("abandoned", "放弃")]
 
     /// Go to whatever has been waiting longest. Every outcome says what
     /// happened — a shortcut that does nothing visible is one the user stops

@@ -30,3 +30,6 @@ a { color: var(--accent); }
   .toc { position: static; flex-direction: row; flex-wrap: wrap; }
   .content table.cmds td:first-child { white-space: normal; }
 }
+
+/* A table whose first column is a short name: keep it on one line. */
+.first-nowrap td:first-child { white-space: nowrap; }

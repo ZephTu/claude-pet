@@ -141,7 +141,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
 if (LANG === "zh") {
   $("#search").placeholder = "筛选任务";
   $("#capture").placeholder = "记一笔…（回车）";
-  $(".capture").title = "记一句话、一个链接或粘贴一张截图；回车后自动分拣（新任务、某个任务的待办或记录、你的待办），去向在 Needs you 里看";
+  $(".capture").title = "记一句话、一个链接或粘贴一张截图；回车后自动分拣（新任务、某个任务的待办或记录、更新某个任务、你的待办），去向在 Needs you 里看";
   $("#search").title = "每个页面都筛选：任务按编号、标题、关联、项目；问题和待办也按自己的文字。在项目与职责页，匹配的任务（包括已结束的）列在最上面";
   $("#new-task").textContent = "＋ 新建";
   $("#secretary-btn").title = "秘书：问它各个任务怎么样了、什么在等你；它的建议出现在 Needs you";
@@ -1179,20 +1179,38 @@ function destLabel(d) {
   if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
   if (d.kind === "todo") return `${d.task} ${T("todo", "待办")} @${d.owner || "me"}`;
   if (d.kind === "note") return `${d.task} ${T("log", "记录")}`;
+  if (d.kind === "update") return `${d.task} ${T("update", "更新")}${updateDetail(d)}`;
   return T("your todo", "我的待办");
 }
+const STATUS_WORD = { active: T("active", "进行中"), blocked: T("blocked", "卡住"), "waiting-on-me": T("waiting on me", "等我"), done: T("done", "完成"), abandoned: T("abandoned", "放弃") };
+// What an update changes beyond its log line — so its buttons (close the task, tick this todo or
+// that one) read apart. A single todo is named; AppMain.updateDetail says it the same way.
+function updateDetail(d) {
+  const done = d.done || [];
+  const short = (t) => { t = String(t).replace(/^@\S+\s+/, ""); return t.length > 24 ? t.slice(0, 23) + "…" : t; };
+  return [d.status ? `→ ${STATUS_WORD[d.status] || d.status}` : "", d.next ? T("next", "下一步") : "", d.state ? T("state", "状态说明") : "",
+    done.length === 1 ? `✓ ${short(done[0])}` : done.length ? T(`✓ ${done.length} todos`, `勾掉 ${done.length} 条待办`) : ""]
+    .filter(Boolean).map((b) => " · " + b).join("");
+}
+// The full change, for a sorted update's row and a button's tooltip.
+function updateText(d) {
+  return [d.status ? `${T("Status", "状态")} → ${STATUS_WORD[d.status] || d.status}` : "", d.next ? `${T("Next", "下一步")}: ${d.next}` : "",
+    d.state ? `${T("State", "状态说明")}: ${String(d.state).replace(/\n/g, " / ")}` : "", ...(d.done || []).map((t) => `✓ ${t}`)].filter(Boolean).join("\n");
+}
+const destKey = (d) => d.kind === "update" ? JSON.stringify([d.task, d.status || "", d.next || "", d.state || "", d.done || []])
+  : [d.kind, d.task || "", d.kind === "task" ? d.title : ""].join("|");
 // Where a note could go: the model's pick and its alternatives, each once.
 function noteGuesses(x) {
   const seen = new Set(), out = [];
   for (const d of [x.dest, ...(x.alts || [])]) {
     if (!d || !d.kind) continue;
-    const k = [d.kind, d.task || "", d.kind === "task" ? d.title : ""].join("|");
+    const k = destKey(d);
     if (!seen.has(k)) { seen.add(k); out.push(d); }
   }
   return out;
 }
 function destChip(x, d, extra = "") {
-  return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.text || d.title || "")}">${esc(destLabel(d))}</button>`;
+  return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.kind === "update" ? [updateText(d), d.text].filter(Boolean).join("\n") : d.text || d.title || "")}">${esc(destLabel(d))}</button>`;
 }
 // A title for "New task" when the model didn't offer one: the note's first line.
 function noteTitle(x) {
@@ -1251,10 +1269,15 @@ function renderNotes() {
     } else {
       const tid = x.task || (d && d.task);
       const where = d && d.kind === "task" ? T("new task", "新任务") : d && d.kind === "todo" ? `${T("todo", "待办")} @${esc(d.owner || "me")}`
-        : d && d.kind === "note" ? T("log", "记录") : T("your todo", "我的待办");
+        : d && d.kind === "note" ? T("log", "记录") : d && d.kind === "update" ? T("update", "更新") : T("your todo", "我的待办");
       meta = `→ ${tid ? `<span class="tid link" data-action="goto" data-task="${esc(tid)}">${esc(tid)}</span> ` : ""}${where}: ${esc(d ? d.text || d.title || "" : "")}` +
-        `<span class="by">${x.by === "user" ? T(" · moved by you", " · 你改的") : ""}</span>`;
-      chips = isOpen ? noteGuesses(x).filter((g) => !(g.kind === d.kind && (g.task || "") === (d.task || ""))).map((g) => destChip(x, g)).join("") : "";
+        `<span class="by">${x.by === "user" ? T(" · moved by you", " · 你改的") : ""}</span>` +
+        (d && d.kind === "update" ? `<div class="upd">${esc(updateText(d)).replace(/\n/g, "<br>")}</div>` : "");
+      // The other places — always shown when one of them only adds to this one (closing the task,
+      // ticking a todo it wasn't sure of): those are buttons waiting for a click, not guesses.
+      const others = noteGuesses(x).filter((g) => destKey(g) !== destKey(d) && (g.kind === "update" || !(g.kind === d.kind && (g.task || "") === (d.task || ""))));
+      const waiting = others.filter((g) => g.kind === "update" && g.task === d.task);
+      chips = (isOpen ? others : waiting).map((g) => destChip(x, g)).join("");
       side = `<button class="btn small ${isOpen ? "" : "ghost"}" data-action="note-change" data-id="${esc(x.id)}" title="${T("Put it somewhere else", "放到别处")}">${T("Move", "改")}</button>`;
     }
     return `<div class="qnote it ${x.state}">
