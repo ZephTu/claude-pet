@@ -100,6 +100,50 @@ enum IdleTabTests {
         t.check("a session waiting on a prompt is not typed into",
                 BoardSend.refuses(state: .waiting) && !BoardSend.refuses(state: .busy)
                     && !BoardSend.refuses(state: .idle) && !BoardSend.refuses(state: nil))
+        t.check("Esc goes only to a session mid-turn",
+                BoardSend.mayInterrupt(state: .busy) && !BoardSend.mayInterrupt(state: .waiting)
+                    && !BoardSend.mayInterrupt(state: .idle) && !BoardSend.mayInterrupt(state: nil)
+                    && !BoardSend.mayInterrupt(state: .busy, quiet: true))
+        t.check("…and not once Claude Code itself says the turn is over (a second Esc would open its rewind menu)",
+                !BoardSend.mayInterrupt(state: .busy, claudeStatus: "idle")
+                    && BoardSend.mayInterrupt(state: .busy, claudeStatus: "busy"))
+        let escScript = TerminalTarget.iTermKeyScript(uuid: "ABCD-1234", key: .escape)
+        t.check("iTerm2's Esc is one ESC byte with no newline, to the session named",
+                escScript.contains("write text (character id 27) newline no") && escScript.contains("\"ABCD-1234\"")
+                    && !escScript.contains("character id 13"))
+        t.check("…and its Enter one CR byte",
+                TerminalTarget.iTermKeyScript(uuid: "A", key: .enter).contains("write text (character id 13) newline no"))
+        t.check("the keys are the ESC and CR bytes",
+                BoardPrompt.Key.escape.text.unicodeScalars.map(\.value) == [27]
+                    && BoardPrompt.Key.enter.text.unicodeScalars.map(\.value) == [13])
+        t.check("a plan's feedback tells Claude to keep planning, with the user's words",
+                BoardPrompt.planFeedback("  use sqlite \n").hasSuffix("Their feedback:\n\nuse sqlite")
+                    && BoardPrompt.planFeedback("x").contains("call ExitPlanMode again"))
+        let dotQ: [String: Any] = ["promptAsk": "a1", "askKind": "question"]
+        t.check("an answer goes only to the prompt the dots still show, of the same kind",
+                BoardPrompt.matches(dot: dotQ, ask: "a1", kind: "question")
+                    && !BoardPrompt.matches(dot: dotQ, ask: "a2", kind: "question")
+                    && !BoardPrompt.matches(dot: dotQ, ask: "a1", kind: "plan")
+                    && !BoardPrompt.matches(dot: nil, ask: "a1", kind: "question")
+                    && !BoardPrompt.matches(dot: ["askKind": "question"], ask: "", kind: "question"))
+        func held(_ kind: String) -> SessionState? {
+            SessionState.decode(from: Data("""
+                {"sessionId":"s1","project":"x","tool":"","detail":"","state":"waiting","cwd":"/x","askId":"k1","askKind":"\(kind)",
+                 "waitingOn":"Bash: ls","since":"2026-11-24T00:00:00Z","updatedAt":"2026-11-24T00:00:00Z"}
+                """.utf8))
+        }
+        let permFields = held("").map(BoardPrompt.dotFields(of:)) ?? [:]
+        let planFields = held("plan").map(BoardPrompt.dotFields(of:)) ?? [:]
+        t.check("a held permission reaches the board as askId, for Allow / Deny",
+                permFields["askId"] as? String == "k1" && permFields["approveText"] as? String == "Bash: ls"
+                    && permFields["promptAsk"] == nil)
+        t.check("a held plan or question never carries askId — Allow on a plan does nothing",
+                planFields["askId"] == nil && planFields["approveText"] == nil
+                    && planFields["promptAsk"] as? String == "k1" && planFields["askKind"] as? String == "plan"
+                    && held("question").map(BoardPrompt.dotFields(of:))?["askId"] == nil)
+        t.check("/model alone opens a menu; with a name it doesn't",
+                BoardSend.opensMenu("/model") && BoardSend.opensMenu(" /Model ")
+                    && !BoardSend.opensMenu("/model opus") && !BoardSend.opensMenu("/compact"))
         let run = IdleTab.terminalRunScript(tty: "/dev/ttys002", line: "cd '/x' && claude", focus: false)
         t.check("running a line without focus does not activate Terminal",
                 run.contains("do script") && !run.contains("activate"))

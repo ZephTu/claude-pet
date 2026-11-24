@@ -244,6 +244,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// What the pet's list draws each session's dot from — the board draws the same dot.
     static var petDots: (() -> [String: [String: Any]])?
     static var onSeen: ((String) -> Void)?
+    /// Plans (by askId) the board has pressed Enter on — see approvePlan.
+    private static var approvedPlans = Set<String>()
     /// A session's conversation was just opened in Peek. The jump log notes how long before a
     /// jump that was — see JumpLog.
     static var onPeek: ((String) -> Void)?
@@ -255,6 +257,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// PermissionDecision. The askId comes from the pet's own dots, so a click can only answer the
     /// prompt that was on screen; one that has since gone away approves nothing.
     static var onDecide: ((String, String, PermissionDecision.Behavior) -> Void)?
+    /// Answers a question or a plan the pet is holding open: session id, then the answer.
+    static var onReply: ((String, PermissionDecision.Answer) -> Void)?
 
     func userContentController(
         _ userContentController: WKUserContentController,
@@ -377,6 +381,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                bg: str("bg"), skip: body["skip"] as? Bool ?? false)
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
+        case "interrupt": return await interrupt(session: str("session"))
         case "saveImage": return saveImage(dataURL: str("data"))
         case "note-add":
             return await Self.noteAdd(text: str("text"), images: body["images"] as? [String] ?? [], via: "board")
@@ -423,6 +428,20 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             }
             decide(str("session"), str("ask"), behavior)
             return (["ok": true], nil)
+        case "prompt": return Self.prompt(session: str("session"))
+        case "answer-question":
+            let answers = (body["answers"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+                .filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            guard !answers.isEmpty else { return (nil, L("pick an answer first", "先选一个回答")) }
+            return reply(session: str("session"), ask: str("ask"), kind: "question",
+                         PermissionDecision.Answer(askId: str("ask"), behavior: .allow, answers: answers))
+        case "plan-feedback":
+            let text = str("text").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return (nil, L("say what to change first", "先写下要改什么")) }
+            return reply(session: str("session"), ask: str("ask"), kind: "plan",
+                         PermissionDecision.Answer(askId: str("ask"), behavior: .deny,
+                                                   message: BoardPrompt.planFeedback(text)))
+        case "plan-approve": return await approvePlan(session: str("session"), ask: str("ask"))
         case "jump":
             let origin = TerminalJump.Origin(session: str("session"), source: str("from").isEmpty ? "board" : str("from"),
                                              view: str("view"))
@@ -1090,6 +1109,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                       skip: Bool = false) async -> (Any?, String?) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, L("empty message", "消息是空的")) }
+        // `/model` alone opens a menu in the terminal that the board can't see or answer.
+        if BoardSend.opensMenu(text) {
+            return (nil, L("give it a model: /model opus, /model sonnet, … — alone it opens a menu in the terminal",
+                           "要带上模型名：/model opus、/model sonnet……——不带参数会在终端里打开一个菜单"))
+        }
         guard let t = terminal(of: session) else {
             if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
@@ -1164,6 +1188,110 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
+    /// Presses Esc in the session's terminal, as the user would to interrupt a turn. Only while
+    /// it is mid-turn (`BoardSend.mayInterrupt`), and only in a terminal that can take a lone key
+    /// (`press`); Terminal.app is left to Jump.
+    private func interrupt(session: String) async -> (Any?, String?) {
+        guard let t = terminal(of: session) else {
+            return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
+        }
+        guard let pid = Self.sessionRunning(session)
+        else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        let quiet = Self.sessionDoc(session).map { StateAggregator.isQuiet($0, now: Date()) } ?? false
+        guard BoardSend.mayInterrupt(state: Self.currentState(session),
+                                     claudeStatus: ClaudeSessionStatus.read(pid: pid, sessionId: session)?.status,
+                                     quiet: quiet) else {
+            return (nil, L("it is not in a turn — nothing to interrupt", "它不在一轮里——没有可中断的"))
+        }
+        return await press(.escape, in: t) ?? (nil, L("interrupting a session in \(t.kind) is not supported — Jump and press Esc there",
+                                                      "还不支持中断 \(t.kind) 里的 session——跳过去在那里按 Esc"))
+    }
+
+    /// Presses one key in the terminal: Orca writes the lone byte to the PTY as is (no --enter),
+    /// iTerm2 writes it with no newline. Nil for a terminal that can't take a lone key —
+    /// Terminal.app's `do script` always adds a line ending of its own.
+    private func press(_ key: BoardPrompt.Key, in t: Terminal) async -> (Any?, String?)? {
+        switch t.kind {
+        case "orca":
+            guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
+                return (nil, L("Orca is not installed", "没有安装 Orca"))
+            }
+            let cli = app.appending(path: "Contents/Resources/bin/orca").path
+            let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", key.text, "--json"])
+            return r.status == 0 ? (["ok": true], nil)
+                                 : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
+        case "iterm2":
+            let uuid = TerminalTarget.iTermUUID(from: t.handle)
+            guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
+            let r = await Self.run("/usr/bin/osascript", ["-e", TerminalTarget.iTermKeyScript(uuid: uuid, key: key)])
+            guard r.status == 0, r.out.contains("ok") else {
+                return (nil, r.out.contains("notfound") ? L("iTerm2 session not found", "找不到 iTerm2 session") :
+                        "iTerm2: " + (r.err.isEmpty ? r.out : r.err).prefix(200))
+            }
+            return (["ok": true], nil)
+        default:
+            return nil
+        }
+    }
+
+    /// Is the Claude Code process the pet recorded still this session? An Enter or an Esc in a
+    /// tab whose session has ended goes to the shell, or to whatever runs there now.
+    private static func sessionRunning(_ session: String) -> Int32? {
+        guard let pid = recordedPid(session), ProcessProbe.isClaude(pid: pid),
+              SessionControl.processIsSession(session, sessionsFile: try? Data(contentsOf:
+                  FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")),
+                                              arguments: ProcessProbe.arguments(pid: pid))
+        else { return nil }
+        return pid
+    }
+
+    /// The question menu or plan the session has up, for the board to show: only while a
+    /// pet-emit holds it open, so what the board draws can still be answered.
+    private static func prompt(session: String) -> (Any?, String?) {
+        guard !session.isEmpty, !session.contains("/"),
+              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                  .appending(path: ".claude/pet/sessions/\(session).json")),
+              let s = SessionState.decode(from: data), !s.askKind.isEmpty, s.askAnswerable(now: Date()),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return (nil, L("it isn't waiting on a question or a plan any more", "它已经不在等回答问题或批准计划了")) }
+        var out: [String: Any] = ["kind": s.askKind, "ask": s.askId]
+        if let plan = obj["plan"] as? String { out["plan"] = plan }
+        if let questions = obj["questions"] { out["questions"] = questions }
+        return (out, nil)
+    }
+
+    /// Hands a question's picks or a plan's feedback to the pet-emit holding that prompt.
+    private func reply(session: String, ask: String, kind: String, _ answer: PermissionDecision.Answer) -> (Any?, String?) {
+        guard let send = Self.onReply else { return (nil, L("answer it in the terminal", "请到终端里回应")) }
+        guard BoardPrompt.matches(dot: Self.petDots?()[session], ask: ask, kind: kind) else {
+            return (nil, L("that prompt is no longer waiting here — answer it in the terminal", "这个请求已经不在这里等了 — 请到终端里回应"))
+        }
+        send(session, answer)
+        Self.onSeen?(session)
+        return (["ok": true], nil)
+    }
+
+    /// Approves the plan the session has up: Enter in its terminal, which picks the dialog's
+    /// first option. A hook can't do it — Claude Code ignores "allow" for ExitPlanMode.
+    private func approvePlan(session: String, ask: String) async -> (Any?, String?) {
+        guard BoardPrompt.matches(dot: Self.petDots?()[session], ask: ask, kind: "plan") else {
+            return (nil, L("that plan is no longer waiting here — look in its terminal", "这个计划已经不在这里等了 — 去它的终端里看看"))
+        }
+        guard let t = terminal(of: session) else {
+            return (nil, L("no terminal to press Enter in — Attach and approve it there", "没有可以按回车的终端 — 用 Attach 打开后在那里批准"))
+        }
+        guard Self.sessionRunning(session) != nil else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        // One Enter per plan: until the next hook clears the prompt from the dots, a second
+        // Approve would press Enter again in whatever the session shows next.
+        guard !Self.approvedPlans.contains(ask) else {
+            return (nil, L("already approved — Enter was pressed in its terminal", "已经批准过了——终端里按过回车"))
+        }
+        let r = await press(.enter, in: t) ?? (nil, L("approving in \(t.kind) is not supported — Jump and approve it there",
+                                                     "还不支持在 \(t.kind) 里批准——跳过去在那里批准"))
+        if r.1 == nil { Self.approvedPlans.insert(ask); Self.onSeen?(session) }
+        return r
+    }
+
     /// The Claude Code process the pet recorded for the session, if it recorded one.
     private static func recordedPid(_ session: String) -> Int32? {
         let file = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet/sessions/\(session).json")
@@ -1188,12 +1316,17 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// After a send, busy with no new prompt means the message went into Claude Code's queue
     /// behind a turn the board did not know had started.
     private static func currentState(_ session: String) -> SessionActivity? {
-        guard !session.isEmpty, !session.contains("/"),
-              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
-                  .appending(path: ".claude/pet/sessions/\(session).json")),
-              let s = SessionState.decode(from: data) else { return nil }
+        guard let s = sessionDoc(session) else { return nil }
         if StateAggregator.wasApproved(s) { return .busy }
         return (StateAggregator.waitEnded(s) ?? s).state
+    }
+
+    /// The pet's record of the session, as pet-emit last wrote it.
+    private static func sessionDoc(_ session: String) -> SessionState? {
+        guard !session.isEmpty, !session.contains("/"),
+              let data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
+                  .appending(path: ".claude/pet/sessions/\(session).json")) else { return nil }
+        return SessionState.decode(from: data)
     }
 
     /// When the session last took a prompt, per the pet's record — changes when a message lands.

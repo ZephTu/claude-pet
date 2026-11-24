@@ -21,10 +21,18 @@ public enum PermissionDecision {
     public struct Answer: Sendable, Equatable {
         public let askId: String
         public let behavior: Behavior
+        /// A denial's words to Claude, instead of `denyMessage` — a plan sent back with the
+        /// user's feedback.
+        public let message: String
+        /// An AskUserQuestion answered: question text → the label picked (several joined
+        /// with ", ", or the user's own words). Handed back as the tool's `answers`.
+        public let answers: [String: String]
 
-        public init(askId: String, behavior: Behavior) {
+        public init(askId: String, behavior: Behavior, message: String = "", answers: [String: String] = [:]) {
             self.askId = askId
             self.behavior = behavior
+            self.message = message
+            self.answers = answers
         }
     }
 
@@ -44,24 +52,43 @@ public enum PermissionDecision {
     }
 
     public static func encode(_ answer: Answer) -> Data {
-        let doc = ["askId": answer.askId, "behavior": answer.behavior.rawValue]
-        return (try? JSONSerialization.data(withJSONObject: doc)) ?? Data()
+        var doc: [String: Any] = ["askId": answer.askId, "behavior": answer.behavior.rawValue]
+        if !answer.message.isEmpty { doc["message"] = answer.message }
+        if !answer.answers.isEmpty { doc["answers"] = answer.answers }
+        return (try? JSONSerialization.data(withJSONObject: doc, options: .sortedKeys)) ?? Data()
     }
 
     public static func decode(_ data: Data) -> Answer? {
         guard
             let raw = try? JSONSerialization.jsonObject(with: data),
-            let d = raw as? [String: String],
-            let askId = d["askId"], !askId.isEmpty,
-            let behavior = d["behavior"].flatMap(Behavior.init(rawValue:))
+            let d = raw as? [String: Any],
+            let askId = d["askId"] as? String, !askId.isEmpty,
+            let behavior = (d["behavior"] as? String).flatMap(Behavior.init(rawValue:))
         else { return nil }
-        return Answer(askId: askId, behavior: behavior)
+        return Answer(askId: askId, behavior: behavior, message: d["message"] as? String ?? "",
+                      answers: d["answers"] as? [String: String] ?? [:])
     }
 
     /// The hook output Claude Code reads a PermissionRequest decision from.
     public static func hookOutput(_ behavior: Behavior) -> Data {
-        var decision: [String: Any] = ["behavior": behavior.rawValue]
-        if behavior == .deny { decision["message"] = denyMessage }
+        hookOutput(Answer(askId: "", behavior: behavior), toolInput: [:])
+    }
+
+    /// The hook output for `answer`. An allow with answers hands the tool its input back with
+    /// the answers added — how AskUserQuestion takes picks made outside the terminal (measured
+    /// 2026-11-24: the session got the pick). A denial says the user's words, or `denyMessage`.
+    public static func hookOutput(_ answer: Answer, toolInput: [String: Any]) -> Data {
+        var decision: [String: Any] = ["behavior": answer.behavior.rawValue]
+        switch answer.behavior {
+        case .deny:
+            decision["message"] = answer.message.isEmpty ? denyMessage : answer.message
+        case .allow:
+            if !answer.answers.isEmpty {
+                var input = toolInput
+                input["answers"] = answer.answers
+                decision["updatedInput"] = input
+            }
+        }
         let doc: [String: Any] = [
             "hookSpecificOutput": [
                 "hookEventName": "PermissionRequest",
