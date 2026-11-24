@@ -15,6 +15,26 @@ public enum BoardSend {
         }))
     }
 
+    /// Orca's `terminal send --json` receipt for an agent prompt lists the stages it has seen:
+    /// `input_accepted`, then `turn_started`. True when there is such a receipt and it stops short
+    /// of a turn (typed, but not shown to have gone in — `--wait-submit` timing out still exits
+    /// 0). False for anything else: an older Orca without receipts, or output that isn't JSON.
+    public static func orcaTurnUnproven(_ output: String) -> Bool {
+        guard let data = output.data(using: .utf8), let root = try? JSONSerialization.jsonObject(with: data) else { return false }
+        func receipt(_ v: Any) -> [String: Any]? {
+            if let d = v as? [String: Any] {
+                if d["stages"] is [String] { return d }
+                for x in d.values { if let r = receipt(x) { return r } }
+            } else if let a = v as? [Any] {
+                for x in a { if let r = receipt(x) { return r } }
+            }
+            return nil
+        }
+        guard let r = receipt(root), let stages = r["stages"] as? [String] else { return false }
+        if let provider = r["provider"] as? String, provider == "old-host" || provider == "unsupported" { return false }
+        return !stages.contains("turn_started")
+    }
+
     /// Does typing this text start a turn the board can watch for? A slash command runs inside
     /// Claude Code and a `!` line runs in its shell mode; neither submits a prompt, so the
     /// pet's `lastPromptAt` would never move and waiting for it would only report a false error.

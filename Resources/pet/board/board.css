@@ -383,6 +383,11 @@ select.place { max-width: 100px; }
 .pmsg.user .md { color: var(--accent); }
 /* Peek activity: tool-call rows between the messages, the live status line, Claude's todos. */
 .pmsg.ptools { padding: 6px 0; }
+/* Something that happened between messages: a compaction (a rule across), a hook's send-back. */
+.pmsg.pevent { padding: 8px 0; display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--faint); }
+.pmsg.pevent::before, .pmsg.pevent::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
+.pmsg.pevent > span { max-width: 80%; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pmsg.pevent.hook > span { color: var(--amber); }
 .ptool, .pgroup, .ptodo-head { display: flex; align-items: baseline; gap: 8px; padding: 3px 6px; border-radius: 6px;
   font-size: 12px; color: var(--dim); cursor: pointer; min-width: 0; }
 .ptool:hover, .pgroup:hover, .ptodo-head:hover { background: var(--panel-2); }
@@ -433,6 +438,27 @@ select.place { max-width: 100px; }
 .pqueue-item { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; font-size: 12.5px; }
 .pqueue-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pqueue-at { color: var(--faint); font-size: 11px; white-space: nowrap; }
+/* The outbox: what you sent, on its way (see send in board.js). Right-aligned like your own
+   messages; red when it didn't go out, amber when it may not have gone in. */
+.outbox { margin: 6px 16px; flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.session .outbox, .bsess .outbox { margin: 6px 0 0; align-items: stretch; }
+.ob-item { max-width: 85%; padding: 6px 10px; border-radius: 10px; border: 1px dashed var(--line); background: var(--panel-2); font-size: 12.5px; }
+.session .ob-item, .bsess .ob-item { max-width: none; }
+.ob-item.sent { border-style: solid; opacity: .75; }
+.ob-item.failed { border: 1px solid var(--red); background: var(--wash-red); }
+.ob-item.unsure { border: 1px solid var(--amber); background: var(--wash-amber, var(--panel-2)); }
+.ob-item.held { opacity: .6; }
+.ob-text { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.ob-img { margin-left: 6px; color: var(--dim); font-size: 11.5px; }
+.ob-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; font-size: 11.5px; color: var(--dim); }
+.ob-item.failed .ob-state { color: var(--red); font-weight: 600; }
+.ob-item.unsure .ob-state { color: var(--amber); font-weight: 600; }
+.ob-err { color: var(--dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.ob-btns { display: inline-flex; gap: 4px; margin-left: auto; }
+.ob-spin { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: dot-turn .8s linear infinite; vertical-align: -1px; }
+.ob-mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--red); }
+.ob-mark.unsure { background: var(--amber); }
+@media (prefers-reduced-motion: reduce) { .ob-spin { animation: none; } }
 .md { line-height: 1.6; font-size: 13px; overflow-wrap: anywhere; }
 .md p { margin: 6px 0; }
 .md h4 { margin: 12px 0 4px; font-size: 13.5px; }

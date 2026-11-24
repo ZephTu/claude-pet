@@ -641,6 +641,29 @@ assert [(t["text"],t["status"]) for t in d["todos"]]==[("Write parser","in_progr
 assert all(i["kind"]=="msg" for i in d["items"]), d["items"]
 ' && ok "peek --meta: a finished turn's length, and the todo list TaskCreate / TaskUpdate built" || fail "peek --meta finished turn / Task todos"
 
+# Events between the messages: a compaction (its summary is not a message), and a Stop hook that
+# sent the reply back (the reply after it holds only the corrected block).
+ESID=feedface-4444-2222-3333-444455557777
+printf '%s\n' \
+  '{"type":"user","message":{"content":"go"},"timestamp":"2026-01-01T00:00:00Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]},"timestamp":"2026-01-01T00:00:01Z"}' \
+  '{"type":"attachment","attachment":{"type":"hook_blocking_error","hookName":"Stop","blockingError":{"blockingError":"HQ: block NOT applied\nfix it","command":"hq hook"}},"timestamp":"2026-01-01T00:00:02Z"}' \
+  '{"type":"user","isMeta":true,"message":{"content":"Stop hook feedback:\nHQ: block NOT applied"},"timestamp":"2026-01-01T00:00:02Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"fixed block"}]},"timestamp":"2026-01-01T00:00:03Z"}' \
+  '{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"auto","preTokens":200000,"postTokens":15000},"timestamp":"2026-01-01T00:00:05Z"}' \
+  '{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"content":"This session is being continued"},"timestamp":"2026-01-01T00:00:05Z"}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"carrying on"}]},"timestamp":"2026-01-01T00:00:06Z"}' \
+  > "$HOME/.claude/projects/-tmp-repo/$ESID.jsonl"
+"$HQ" peek "$ESID" --json --meta | python3 -c '
+import json,sys; d=json.load(sys.stdin)
+got=[(i["kind"], i.get("event") or i.get("text")) for i in d["items"]]
+assert got==[("msg","go"),("msg","done"),("event","hook"),("msg","fixed block"),("event","compact"),("msg","carrying on")], got
+h,c=d["items"][2],d["items"][4]
+assert h["hook"]=="Stop" and h["text"].startswith("HQ: block NOT applied"), h
+assert c["trigger"]=="auto" and c["pre"]==200000 and c["post"]==15000, c
+assert [m["text"] for m in d["messages"]]==["go","done","fixed block","carrying on"], d["messages"]
+' && ok "peek --meta: a compaction and a hook's send-back are events between the messages" || fail "peek --meta compact / hook events"
+
 # Claude Code's queue, from its queue-operation lines, matched by text: an entry leaves when a
 # remove or a user entry (prompt, queued_command, meta) holds its text — not by replaying dequeues
 # as a FIFO, which one stale entry (here: an empty enqueue, a notification queued twice) would
