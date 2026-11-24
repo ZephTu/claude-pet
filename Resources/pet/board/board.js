@@ -1193,7 +1193,8 @@ function renderNeeds() {
 // pet's shortcut (⌃⌥⌘N). A cheap model files it — a new task, a todo or a log line on a task, or
 // your own todo — and what it isn't sure of waits here. Every note can be moved with a click.
 const notes = () => (ui.board && ui.board.inbox) || [];
-const unsortedNotes = () => notes().filter((x) => x.state === "unsorted");
+// A scanned message the sorter would skip waits too, folded away, and isn't counted as to sort.
+const unsortedNotes = () => notes().filter((x) => x.state === "unsorted" && !x.skip);
 function destLabel(d) {
   if (!d || d.kind === "unsorted") return T("unsorted", "未分拣");
   if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
@@ -1229,8 +1230,8 @@ function noteGuesses(x) {
   }
   return out;
 }
-function destChip(x, d, extra = "") {
-  return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.kind === "update" ? [updateText(d), d.text].filter(Boolean).join("\n") : d.text || d.title || "")}">${esc(destLabel(d))}</button>`;
+function destChip(x, d, extra = "", label = destLabel(d)) {
+  return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.kind === "update" ? [updateText(d), d.text].filter(Boolean).join("\n") : d.text || d.title || "")}">${esc(label)}</button>`;
 }
 // A title for "New task" when the model didn't offer one: the note's first line.
 function noteTitle(x) {
@@ -1243,7 +1244,9 @@ function renderNotes() {
   const all = notes();
   if (!all.length) return "";
   const f = filterText();
-  const items = all.filter((x) => !f || [x.text, x.dest && (x.dest.text || x.dest.title), x.task].join(" ").toLowerCase().includes(f));
+  const shown = all.filter((x) => !f || [x.text, x.dest && (x.dest.text || x.dest.title), x.task].join(" ").toLowerCase().includes(f));
+  const items = shown.filter((x) => !(x.state === "unsorted" && x.skip));
+  const skips = shown.filter((x) => x.state === "unsorted" && x.skip);
   const open = unsortedNotes().length;
   const picker = (x) => {
     const k = "note-pick:" + x.id;
@@ -1283,9 +1286,15 @@ function renderNotes() {
     } else if (x.state === "unsorted") {
       meta = x.error ? `<span class="bad">${T("Couldn't sort", "没分拣成")}: ${esc(x.error)}</span>`
         : x.reason ? `${T("Not sure", "没把握")} · ${esc(x.reason)}` : (x.by === "user" ? T("moved back here", "改回了未分拣") : "");
-      chips = noteGuesses(x).map((g) => destChip(x, g)).join("") +
+      // A scanned message is never filed by itself: its best guess is the button that takes it.
+      const feed = ["zulip", "jira"].includes(x.via);
+      // Not "not sure": it waits because it came from outside, whatever the confidence.
+      if (feed && !x.error) meta = x.skip ? `${T("Likely nothing for you", "看着不用管")}${x.reason ? ` · ${esc(x.reason)}` : ""}` : esc(x.reason || "");
+      // Take is the model's own pick, never an alternative standing in for a pick that failed.
+      chips = noteGuesses(x).map((g, i) => feed && i === 0 && g === x.dest && !x.skip && !x.error ? destChip(x, g, "take", `${T("Take", "采纳")} → ${destLabel(g)}`) : destChip(x, g)).join("") +
         `<button class="chip link ghost" data-action="note-change" data-id="${esc(x.id)}">${isOpen ? T("Fewer", "收起") : T("Somewhere else…", "放别处…")}</button>`;
-      side = `<button class="icon x" title="${T("Delete (you can restore it)", "删掉（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">✕</button>`;
+      side = feed ? `<button class="btn small" title="${T("Drop it (you can restore it)", "不要了（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">${T("Drop", "不要")}</button>`
+        : `<button class="icon x" title="${T("Delete (you can restore it)", "删掉（可以恢复）")}" data-action="note-drop" data-id="${esc(x.id)}">✕</button>`;
     } else {
       const tid = x.task || (d && d.task);
       const where = d && d.kind === "task" ? T("new task", "新任务") : d && d.kind === "todo" ? `${T("todo", "待办")} @${esc(d.owner || "me")}`
@@ -1310,7 +1319,10 @@ function renderNotes() {
       ${side}
     </div>`;
   };
-  return `<div class="group-title">${T("Quick notes", "记下的")} ${open ? `<span class="n hot">${open}</span>` : ""}<span class="meta">${T("unsorted, and the last two days", "未分拣的，和最近两天的")}</span></div>${filterNote(items.length, all.length)}<div class="inbox-list notes">${items.map(row).join("")}</div>`;
+  // What the sorter would skip, folded under the list: one click shows them.
+  const skipBox = skips.length ? `<button class="chip link ghost skips" data-action="note-skips">${ui.showSkips || f ? "▾" : "▸"} ${T(`${skips.length} likely nothing for you`, `${skips.length} 条看着不用管`)}</button>
+    ${ui.showSkips || f ? `<div class="inbox-list notes">${skips.map(row).join("")}</div>` : ""}` : "";
+  return `<div class="group-title">${T("Quick notes", "记下的")} ${open ? `<span class="n hot">${open}</span>` : ""}<span class="meta">${T("unsorted, and the last two days", "未分拣的，和最近两天的")}</span></div>${filterNote(shown.length, all.length)}<div class="inbox-list notes">${items.map(row).join("")}</div>${skipBox}`;
 }
 // Moves a note; the toast's Undo puts it back where it was.
 async function noteMove(id, dest, quiet) {
@@ -2829,8 +2841,8 @@ function secWhen(iso) {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
 function secFeedTip() {
-  return T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
-    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+  return T("Zulip direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. Each waits under Quick notes with the model's guess: Take files it, Drop deletes it; what looks like nothing for you is folded away.",
+    "Zulip 里发给你的私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。每条都留在记下的里，带着模型的猜测：点采纳才放进去，不要就删掉；看着不用管的折叠起来。");
 }
 function secCloseTip() {
   return T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",
@@ -4320,6 +4332,7 @@ document.addEventListener("click", async (ev) => {
       return;
     }
     case "note-change": ui.noteOpen.has(d.id) ? ui.noteOpen.delete(d.id) : ui.noteOpen.add(d.id); return render();
+    case "note-skips": ui.showSkips = !ui.showSkips; return render();
     case "note-drop": return act("note-drop", { id: d.id }, T("Deleted — Restore brings it back", "已删掉——点恢复可以找回"));
     case "note-restore": return act("note-restore", { id: d.id }, T("Restored", "已恢复"));
     case "jump": return act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
