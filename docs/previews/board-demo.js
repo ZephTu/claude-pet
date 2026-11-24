@@ -15,7 +15,7 @@
   const ask = (id, text, session, min) => ({ type: "open", id, task: id.replace(/\.\d+$/, ""), text, session, ts: ago(min), state: "open" });
   const tasks = [
     {
-      id: "T-014", title: "Checkout: retry when the payment gateway times out", category: "feature", status: "active",
+      id: "T-014", title: "Checkout: retry when the payment gateway times out", status: "active",
       project: "shop-api", workdirs: ["/Users/demo/code/shop-api"], refs: ["shop-api#212"], sessions: ["1f0c2a51", "5d0a2b43"],
       next: "Add the retry with backoff behind a flag, then load-test it on staging",
       todos: [todo(1, "done", "claude", "Reproduce the 504 from the gateway sandbox", 300), todo(2, "done", "claude", "Write a failing test for the timeout", 240),
@@ -29,7 +29,7 @@
       age_days: 2,
     },
     {
-      id: "T-016", title: "Dashboard: dark mode polish", category: "feature", status: "active", project: "web-app",
+      id: "T-016", title: "Dashboard: dark mode polish", status: "active", project: "web-app",
       workdirs: ["/Users/demo/code/web-app"], refs: [], sessions: ["2a7d9e10"],
       next: "Fix chart colours in dark mode, then screenshots for the design review",
       todos: [todo(1, "done", "claude", "Swap hard-coded greys for theme tokens", 200), todo(2, "open", "claude", "Chart palette: pass contrast checks in dark mode", 90),
@@ -37,25 +37,25 @@
       asks: [], body: "## Log\n- 2026-11-20 09:12:44: 31 hard-coded colours replaced with tokens\n", age_days: 4,
     },
     {
-      id: "T-015", title: "Move CI to the new runners", category: "ops", status: "blocked", project: "infra",
+      id: "T-015", title: "Move CI to the new runners", status: "blocked", project: "infra",
       workdirs: ["/Users/demo/code/infra"], refs: [], sessions: ["3b8e0f21"],
       next: "Waiting on the runner image with Node 22 — then switch the main pipeline",
       todos: [todo(1, "open", "me", "Ask platform team for the Node 22 runner image", 1500), todo(2, "open", "claude", "Switch the lint + unit jobs first", 400)],
       asks: [], body: "## Log\n- 2026-11-18 14:20:09: Lint job green on the new runners\n", age_days: 6,
     },
     {
-      id: "T-012", title: "Search: index product variants", category: "feature", status: "active", project: "shop-api",
+      id: "T-012", title: "Search: index product variants", status: "active", project: "shop-api",
       workdirs: ["/Users/demo/code/shop-api"], refs: [], sessions: [], next: "Backfill the index for the 40k existing variants",
       todos: [todo(1, "open", "claude", "Backfill job, batches of 500", 2000)], asks: [], body: "", age_days: 9,
     },
     {
-      id: "T-011", title: "Fix flaky login test", category: "bug", status: "waiting-on-me", project: "web-app",
+      id: "T-011", title: "Fix flaky login test", status: "waiting-on-me", project: "web-app",
       workdirs: ["/Users/demo/code/web-app"], refs: [], sessions: [], next: "", waiting_on_me: "Decide: quarantine the test or fix the race this week?",
       todos: [], asks: [], body: "", age_days: 3,
     },
   ];
   const board = {
-    root: "/Users/demo/hq", categories: ["feature", "bug", "ops", "docs"],
+    root: "/Users/demo/hq",
     projects: [{ name: "shop-api", paths: ["/Users/demo/code/shop-api"] }, { name: "web-app", paths: ["/Users/demo/code/web-app"] }, { name: "infra", paths: ["/Users/demo/code/infra"] }],
     links: [], focus: { today: new Date().toISOString().slice(0, 10), ids: ["T-014", "T-016", "T-015"], last_day: null, carry: [] }, tasks,
   };

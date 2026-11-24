@@ -32,6 +32,11 @@ grep -q hq "$H2/.claude/settings.json" && fail "--no-hooks touched settings" || 
 out="$("$HQ" new "Benchmark vs Neo4j" --category benchmark --workdir "$T")"
 TID="$(echo "$out" | head -1)"; [ "$TID" = "T-001" ] && ok "new task gets T-001"
 "$HQ" new "Second" >/dev/null && [ -d "$T/root/tasks/T-002-second" ] && ok "ids increment"
+# Categories are retired: a card gets one only when asked, and the list grows only then.
+grep -q "^category: benchmark" "$T"/root/tasks/T-001-*/TASK.md && ok "--category still sets one" || fail "--category"
+! grep -q "^category:" "$T"/root/tasks/T-002-second/TASK.md && ok "a new card has no category by default" || fail "default category"
+grep -q '^title: "Second"' "$T"/root/tasks/T-002-second/TASK.md && grep -q "^status: active" "$T"/root/tasks/T-002-second/TASK.md && ok "the rest of the frontmatter is intact" || fail "frontmatter after dropping category"
+"$HQ" board --json | python3 -c 'import json,sys; assert "categories" not in json.load(sys.stdin)' && ok "board --json has no categories" || fail "board json categories"
 
 [ -z "$(hook '{"session_id":"s-unbound","hook_event_name":"SessionStart"}')" ] && ok "unbound session: hook is silent"
 
@@ -1278,7 +1283,7 @@ echo "# mine" > "$T/root/secretary/people.md"; rm "$T/root/secretary/playbooks.m
 [ "$(cat "$T/root/secretary/people.md")" = "# mine" ] && [ -f "$T/root/secretary/playbooks.md" ] && [ "$(ls -d "$T"/root/tasks/"$STID"-* | wc -l | tr -d ' ')" = 1 ] && ok "secretary init again: adds what is missing, keeps the rest, one card" || fail "secretary init idempotent"
 "$HQ" board --json | python3 -c 'import json,sys; s=json.load(sys.stdin)["secretary"]; assert s=="'"$STID"'", s' && ok "board --json names the secretary's card" || fail "board json secretary"
 "$HQ" secretary | grep -q "^task:   $STID" && ok "secretary prints its files" || fail "secretary text"
-grep -q '^category: other' "$T"/root/tasks/"$STID"-*/TASK.md && ok "secretary's card gets the default category" || fail "secretary category"
+! grep -q '^category:' "$T"/root/tasks/"$STID"-*/TASK.md && ok "secretary's card has no category" || fail "secretary category"
 "$HQ" bind "$STID" --session=sec-sess >/dev/null
 "$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["sessions"]==["sec-sess"], d' && ok "secretary lists the sessions bound to its card" || fail "secretary sessions"
 "$HQ" unbind --session sec-sess >/dev/null

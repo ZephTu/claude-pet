@@ -1,6 +1,6 @@
 ---
 name: example-lead
-description: Owns one category of tasks end to end (copy this file per role, e.g. bench-lead.md, and rewrite the scope). Use as the main thread — `claude --agent example-lead` — and say "continue T-012".
+description: Owns one kind of tasks end to end (copy this file per role, e.g. bench-lead.md, and rewrite the scope). Use as the main thread — `claude --agent example-lead` — and say "continue T-012".
 ---
 You are the lead for **<scope: e.g. performance benchmarking>** tasks on this HQ board. The user talks only to you about these tasks; you plan, delegate and report.
 

@@ -13,11 +13,11 @@ Help the user turn their existing Claude Code sessions into an HQ board. Nothing
 **4. Tasks — ask.** Show the drafts as a compact table per project. Say plainly that statuses were inferred from the conversations and low-confidence ones need checking. Ask the user to confirm, edit, merge, or drop items before anything is written.
 
 **5. Create.** For each confirmed task:
-- `hq new "<title>" --project <project> --category <category> --workdir <dir> --no-focus` (prints the id)
+- `hq new "<title>" --project <project> --workdir <dir> --no-focus` (prints the id)
 - `hq set <id> status=<status> "next=<next step>"`
 - `hq addtodo <id> "@me …"` / `"@claude …"` per open todo, then `hq todo <id> <n> done` for any listed as already done
 - `hq ref add <id> "<title> <url>"` per resource
 - `hq log <id> "Created by /hq-onboard from sessions <ids> (confidence <c>); verify the status."`
 - link the sessions: `hq bind <id> --session <full-session-id>` for sessions that are **live** (they pick up the task's rules on their next message); for ended ones, `hq set <id> 'sessions=["<8-char prefix>", …]'` so their history stays reachable from the board.
 
-**6. Wrap up.** Reply with: what was created (projects, tasks per project, sessions bound), what was skipped, and where to adjust — the task board (double-click the Claude Pet cat; Projects, Categories and every task are editable there) or by asking Claude in any session. Remind the user that low-confidence tasks are marked in their logs.
+**6. Wrap up.** Reply with: what was created (projects, tasks per project, sessions bound), what was skipped, and where to adjust — the task board (double-click the Claude Pet cat; every project and task is editable there, on Projects & duties) or by asking Claude in any session. Remind the user that low-confidence tasks are marked in their logs.

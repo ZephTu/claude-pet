@@ -1,14 +1,5 @@
 {
  "projects": [],
- "categories": [
-  "feature",
-  "bug",
-  "investigation",
-  "review",
-  "ops",
-  "docs",
-  "other"
- ],
  "links": [],
  "process_links": []
 }

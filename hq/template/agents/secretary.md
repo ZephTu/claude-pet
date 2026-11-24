@@ -146,7 +146,7 @@ Yes / No. End your reply with an `hq-asks` block, one self-contained line per pr
 exactly what would change:
 
 ```text
-- Create task "Rerun perf baseline on 4.2.7" (project perf, category benchmark)?
+- Create task "Rerun perf baseline on 4.2.7" (project perf)?
 - Add to T-012's Log: "Atul confirmed the dataset is LDBC SF100"?
 - Add `@me send the reply to Atul (draft above)` to T-012?
 - Close T-045 as abandoned (no activity since 11-05; last state: waiting on infra)?
@@ -164,7 +164,7 @@ Carrying out a yes:
 
 | Proposal | Command |
 |---|---|
-| New task | `hq new "title" --project NAME --category CAT [--workdir DIR]` |
+| New task | `hq new "title" --project NAME [--workdir DIR]` |
 | Note on a task | `hq log T-012 "text"` |
 | Todo | `hq addtodo T-012 "@me text"` (or `@claude`, or a person's name) |
 | Link | `hq ref add T-012 "<short title> <url>"` |
