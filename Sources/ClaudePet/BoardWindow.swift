@@ -1189,7 +1189,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
                                          "--enter", "--json"] + (queue ? [] : ["--wait-submit", "5"]))
-            if r.status == 0 { return (["ok": true, "queued": queue, "detail": r.out], nil) }
+            if r.status == 0 {
+                // Typed, but Orca saw no turn start within the 5 s: queued behind a turn it is in,
+                // or the Return didn't submit. Only the outbox asks; the others go on as sent.
+                if outbox, !queue, BoardSend.orcaTurnUnproven(r.out) {
+                    if Self.currentState(session) == .busy { return (["ok": true, "queued": true], nil) }
+                    return unsure(L("typed into its Orca terminal, but no turn started — check it and press Return there", "已经输入到它的 Orca 终端，但没有开始新一轮 — 去那里看看，在那里按回车"))
+                }
+                return (["ok": true, "queued": queue, "detail": r.out], nil)
+            }
             let msg = "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description
             // An ambiguous transport failure (Orca offers a --retry-request for it): it may have
             // gone in, so not "not sent".

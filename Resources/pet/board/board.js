@@ -214,7 +214,7 @@ let outboxSeq = 0;   // the outbox's item ids (see send)
     for (const [sid, list] of Object.entries(d.outbox || {})) {
       const left = (Array.isArray(list) ? list : []).filter((x) => x && x.state !== "sent" && Date.now() - (x.at || 0) < 7 * 86400000).map((x) => Object.assign(x, {
         id: ++outboxSeq,
-        state: x.state === "sending" || x.state === "unsure" ? "unsure" : "failed",
+        state: sid !== "secretary" && (x.state === "sending" || x.state === "unsure") ? "unsure" : "failed",
         err: x.err || T("The board restarted before it was sent", "还没发出去看板就重启了") }));
       if (left.length) ui.outbox[sid] = left;
     }
@@ -3646,7 +3646,8 @@ const isBusy = (sid) => liveState(ui.sessions.find((x) => x.sessionId === sid)) 
 // the ones after it until you deal with it: they must not overtake it.
 
 const OB_SENT_MS = 8000;          // a delivered one stays this long unless the conversation shows it first
-const OB_TURN_MS = 15000;         // after a send that started a turn, the next ones queue behind it
+const OB_TURN_MS = 15000;         // Orca: after a send that started a turn, the next ones queue behind it
+const OB_STUCK_MS = 45000;        // no answer from the terminal by then: maybe sent
 const obList = (sid) => ui.outbox[sid] || [];
 const obTrouble = (sid) => obList(sid).find((x) => x.state === "failed" || x.state === "unsure");
 const obNorm = (x) => String(x || "").replace(/\s+/g, " ").trim();
@@ -3656,7 +3657,8 @@ function outboxSave() {
 function outboxChanged(sid, toBottom) {
   outboxSave();
   render();
-  if (ui.modal && ui.modal.type === "peek" && (ui.modal.sid === sid || (sid === SEC && ui.modal.secretary))) drawPeek(Boolean(toBottom));
+  // Not under a scrolling hand or a selection: those wait (redrawPeek), unless it is your own send.
+  if (ui.modal && ui.modal.type === "peek" && (ui.modal.sid === sid || (sid === SEC && ui.modal.secretary))) toBottom ? drawPeek(true) : redrawPeek(ui.modal);
 }
 // Delivered ones go once the conversation shows them (its last messages, or Claude Code's queue).
 function outboxPrune(sid, m) {
@@ -3689,6 +3691,8 @@ async function send(sid) {
 // in the box stays as it is.
 function sendSecretary(preset) {
   if (!preset) return send(SEC);
+  // A double click: the same question once.
+  if (obList(SEC).some((x) => x.preset && x.text === preset && (x.state === "wait" || x.state === "sending"))) return;
   outboxAdd(SEC, { text: preset, atts: [], message: preset, preset: true });
 }
 
@@ -3708,8 +3712,14 @@ async function pumpOutbox(sid) {
   try {
     if (!s) throw new Error(T("that session is not running any more", "这个 session 已经不在运行了"));
     if (onPrompt(s)) throw new Error(ON_PROMPT());
-    const queued = isBusy(sid) || (!bg && Date.now() - (ui.obTurn[sid] || 0) < OB_TURN_MS);
-    const r = await apiObj("send", { session: sid, text: head.message, queue: queued, outbox: true, ...sendExtra(s) });
+    // Terminal and iTerm2 find a busy session themselves after typing (and only then check that a
+    // turn started); Orca without the queue flag waits up to 5 s for a turn first.
+    const orca = s.terminal && s.terminal.kind === "orca";
+    const queued = isBusy(sid) || (orca && Date.now() - (ui.obTurn[sid] || 0) < OB_TURN_MS);
+    // A terminal that never answers (a hung osascript, a permission prompt) must not hold this
+    // session's messages forever: by then it is "maybe sent", for you to check.
+    const r = await Promise.race([apiObj("send", { session: sid, text: head.message, queue: queued, outbox: true, ...sendExtra(s) }),
+      new Promise((ok) => setTimeout(() => ok({ unsure: true, error: T("no answer from its terminal", "它的终端一直没有回应") }), OB_STUCK_MS))]);
     if (r.unsure) { head.state = "unsure"; head.err = r.error || ""; }
     else {
       head.state = "sent"; head.sentAt = Date.now(); head.queued = Boolean(r.queued || queued);
@@ -3763,12 +3773,15 @@ function outboxAct(action, sid, id) {
   if (action === "ob-retry") { x.state = "wait"; x.err = ""; }
   else if (action === "ob-ok") drop();
   else if (action === "ob-edit") {
-    drop();
-    if (!x.preset) {
-      const key = "msg:" + sid, cur = (ui.drafts[key] || "").trim();
-      ui.drafts[key] = cur ? `${x.text}\n${cur}` : x.text;
-      if (x.atts && x.atts.length) ui.atts[sid] = [...x.atts, ...(ui.atts[sid] || [])];
-    }
+    // The ones waiting behind it come back too, after it: left here they would go out before it.
+    const back = [x, ...list.slice(list.indexOf(x) + 1).filter((y) => y.state === "wait")];
+    ui.outbox[sid] = list.filter((y) => !back.includes(y));
+    if (!ui.outbox[sid].length) delete ui.outbox[sid];
+    const key = "msg:" + sid, cur = (ui.drafts[key] || "").trim();
+    ui.drafts[key] = [...back.map((y) => y.text), cur].filter(Boolean).join("\n\n");
+    const atts = back.flatMap((y) => y.atts || []);
+    if (atts.length) ui.atts[sid] = [...atts, ...(ui.atts[sid] || [])];
+    if (back.length > 1) toast(T(`Back in the box, with the ${back.length - 1} after it (in order)`, `已放回输入框，后面 ${back.length - 1} 条也一起放回（顺序不变）`));
     // To its conversation window, where the box is (a drawer's session row has none).
     const here = ui.modal && ui.modal.type === "peek" && (sid === SEC ? ui.modal.secretary : ui.modal.sid === sid);
     if (!here) { outboxSave(); render(); pumpOutbox(sid); return sid === SEC ? openSecretary() : openPeek(sid); }
@@ -3795,9 +3808,11 @@ function outboxHtml(sid) {
     const word = { wait: waitWord, sending: T("Sending…", "发送中…"), sent: x.queued ? T("Delivered — queued until its turn ends", "已送达，排队等这一轮结束") : T("Delivered", "已送达"),
                    failed: T("Not sent", "没发出去"), unsure: T("May not have gone in — check its terminal", "可能没提交——去终端看一眼") }[x.state];
     const b = (action, label, title) => `<button class="btn small ${action === "ob-retry" ? "" : "ghost"}" data-action="${action}" data-session="${esc(sid)}" data-id="${x.id}"${title ? ` title="${esc(title)}"` : ""}>${label}</button>`;
-    const btns = x.state === "failed" ? b("ob-retry", T("Send again", "重发")) + (x.preset ? "" : b("ob-edit", T("Edit", "放回输入框"), T("Put it back in the box to change it", "放回输入框里改"))) + b("ob-drop", T("Drop", "删除"))
-      : x.state === "unsure" ? `<button class="btn small" data-action="jump" data-session="${esc(sid)}">${T("Jump", "跳转")}</button>` + b("ob-ok", T("It arrived", "已收到"), T("It is there: take it off this list", "终端里有：从这里拿掉"))
-        + b("ob-retry", T("Send again", "重发"), T("Only if it is not in the terminal — otherwise it gets it twice", "只在终端里没有时才重发——否则它会收到两遍")) + (x.preset ? "" : b("ob-edit", T("Edit", "放回输入框")))
+    const edit = b("ob-edit", T("Edit", "放回输入框"), T("Put it back in the box to change it (with the ones waiting after it)", "放回输入框里改（后面等着的也一起放回）"));
+    const btns = x.state === "failed" ? b("ob-retry", T("Send again", "重发")) + edit + b("ob-drop", T("Drop", "删除"))
+      : x.state === "unsure" ? (sid === SEC ? "" : `<button class="btn small" data-action="jump" data-session="${esc(sid)}">${T("Jump", "跳转")}</button>`) + b("ob-ok", T("It arrived", "已收到"), T("It is there: take it off this list", "终端里有：从这里拿掉"))
+        + b("ob-retry", T("Send again", "重发"), T("Only if it is not in the terminal — otherwise it gets it twice", "只在终端里没有时才重发——否则它会收到两遍")) + edit
+      : x.state === "wait" ? edit + b("ob-drop", T("Drop", "删除"))
       : "";
     const imgs = x.atts && x.atts.length ? `<span class="ob-img">${T(`+${x.atts.length} image${x.atts.length === 1 ? "" : "s"}`, `+${x.atts.length} 张图片`)}</span>` : "";
     return `<div class="ob-item ${x.state}${held && x.state === "wait" ? " held" : ""}">

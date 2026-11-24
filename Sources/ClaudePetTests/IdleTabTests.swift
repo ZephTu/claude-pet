@@ -83,6 +83,14 @@ enum IdleTabTests {
         t.check("typeable: ESC, ^C, ^D, NUL, BEL and DEL are removed",
                 BoardSend.typeable("a\u{1B}[201~b\u{03}\u{04}\u{00}\u{07}c\u{7F}d") == "a[201~bcd")
         t.check("typeable: a tab is kept", BoardSend.typeable("a\tb") == "a\tb")
+        t.check("orca receipt: input accepted only is unproven",
+                BoardSend.orcaTurnUnproven(#"{"ok":true,"result":{"send":{"prompt":{"requestId":"r1","stages":["input_accepted"],"provider":"claude"}}}}"#))
+        t.check("orca receipt: a started turn is proven",
+                !BoardSend.orcaTurnUnproven(#"{"result":{"send":{"prompt":{"stages":["input_accepted","turn_started"]}}}}"#))
+        t.check("orca receipt: an old host has nothing to go on",
+                !BoardSend.orcaTurnUnproven(#"{"result":{"send":{"prompt":{"stages":["input_accepted"],"provider":"old-host"}}}}"#))
+        t.check("orca receipt: no receipt or no JSON is not unproven",
+                !BoardSend.orcaTurnUnproven(#"{"ok":true}"#) && !BoardSend.orcaTurnUnproven("sent"))
         t.check("typeable: ordinary and non-ASCII text is untouched",
                 BoardSend.typeable("Fix it — 改一下 \"now\" 🙂") == "Fix it — 改一下 \"now\" 🙂")
         t.check("typeable: a message of nothing but control characters is empty",
