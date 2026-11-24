@@ -99,7 +99,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -201,12 +201,23 @@ const isOpen = (t) => ["waiting-on-me", "blocked", "active"].includes(t.status);
 // ---- drafts survive the pet quitting: what you typed, the images you added and the answers you
 // picked are kept in localStorage (per machine), and put back when the board loads.
 const DRAFTS_KEY = "hq-drafts-v1";
+let outboxSeq = 0;   // the outbox's item ids (see send)
 (function restoreDrafts() {
   try {
     const d = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}");
     Object.assign(ui.drafts, d.drafts || {});
     Object.assign(ui.atts, d.atts || {});
     Object.assign(ui.picks, d.picks || {});
+    // Messages that were still in the outbox when the pet quit: never sent by themselves now (it
+    // may be much later), but kept for you to send again or take back (for a week). One that was
+    // on its way may have gone in.
+    for (const [sid, list] of Object.entries(d.outbox || {})) {
+      const left = (Array.isArray(list) ? list : []).filter((x) => x && x.state !== "sent" && Date.now() - (x.at || 0) < 7 * 86400000).map((x) => Object.assign(x, {
+        id: ++outboxSeq,
+        state: x.state === "sending" || x.state === "unsure" ? "unsure" : "failed",
+        err: x.err || T("The board restarted before it was sent", "还没发出去看板就重启了") }));
+      if (left.length) ui.outbox[sid] = left;
+    }
   } catch (e) { /* nothing kept, or storage off */ }
 })();
 function saveDrafts() {
@@ -214,7 +225,7 @@ function saveDrafts() {
   saveDrafts.t = setTimeout(() => {
     const drafts = Object.fromEntries(Object.entries(ui.drafts).filter(([, v]) => v !== "" && v != null));
     const atts = Object.fromEntries(Object.entries(ui.atts).filter(([, v]) => v && v.length));
-    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts, atts, picks: ui.picks })); } catch (e) { /* full or off */ }
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts, atts, picks: ui.picks, outbox: ui.outbox })); } catch (e) { /* full or off */ }
   }, 300);
 }
 // Drop what belonged to asks that are no longer open (answered elsewhere, or reopened then closed).
@@ -227,7 +238,7 @@ function pruneDrafts() {
   for (const id of Object.keys(ui.picks)) if (gone(id)) delete ui.picks[id];
 }
 window.addEventListener("pagehide", () => { clearTimeout(saveDrafts.t); saveDrafts.t = null; try {
-  localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts: ui.drafts, atts: ui.atts, picks: ui.picks })); } catch (e) { /* */ } });
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify({ drafts: ui.drafts, atts: ui.atts, picks: ui.picks, outbox: ui.outbox })); } catch (e) { /* */ } });
 
 // Open asks you are to answer now; ones put off with "Later" stay open but out of sight until
 // they come back (snoozed_until, local time), and pendingAsks counts both.
@@ -1556,7 +1567,7 @@ function kcardSessions(t, opt) {
   const line = st === "busy" && last ? last : st === "waiting" ? statusWord(s) : `${statusWord(s)} · ${ago(s.updatedAt)}`;
   return `<div class="kc-sess${s.sessionId === ui.hlSession ? " hl" : ""}"><span class="stack">${sorted.slice(0, 3).map(dot).join("")}</span>
     ${live.length > 1 ? `<span class="cnt">${live.length}</span>` : ""}
-    <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${newTag(s.sessionId)}${esc(line)}</span>
+    <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${live.map((x) => outboxMark(x.sessionId)).join("")}${newTag(s.sessionId)}${esc(line)}</span>
     <button class="go peekb" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek its conversation", "Peek 它的对话")}">${ICON.peek}</button></div>`;
 }
 
@@ -1988,9 +1999,9 @@ function renderTaskBody(t) {
     </div>`;
   const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">
         ${dot(s)}
-        <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
+        <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${outboxMark(s.sessionId)}${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
-          ${plainText(s.lastText) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}</div>
+          ${plainText(s.lastText) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
           ${s.background
@@ -2245,7 +2256,7 @@ function renderSessionList(items, plain) {
       ${dot(s)}
       <div class="body">
         <div class="shead">
-          <div class="stitle" title="${esc(title)}">${newTag(sid)}${esc(t ? title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title : title)}</div>
+          <div class="stitle" title="${esc(title)}">${outboxMark(sid)}${newTag(sid)}${esc(t ? title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title : title)}</div>
           <span class="stime">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
         </div>
         <div class="shead">
@@ -2267,6 +2278,7 @@ function renderSessionList(items, plain) {
             placeholder="${prompt ? ON_PROMPT() : busy ? T("Busy — it will queue · paste or drop images", "正忙——会排队 · 可粘贴或拖入图片") : T("Message · paste or drop images", "消息 · 可粘贴或拖入图片")}">${esc(draft("msg:" + sid))}</textarea>
           ${sendButton(sid, !prompt)}
         </div>${prompt ? `<div class="onprompt">${ON_PROMPT()}</div>` : ""}${attachStrip(sid)}` : ""}
+        ${outboxHtml(sid)}
       </div>
     </div>`;
   };
@@ -2589,6 +2601,7 @@ function drawPeek(toBottom) {
   m.keys = blocks ? blocks.map((b) => (b.kind === "group" ? `g|${b.tools[0].id}` : `${b.role}|${b.ts}|${b.text}`)) : null;
   const run = peekRun(m, s);
   const queue = peekQueue(m, s);
+  outboxPrune(key, m);
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
@@ -2612,6 +2625,7 @@ function drawPeek(toBottom) {
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
     <div class="pqueue-slot" data-h="${esc(queue)}">${queue}</div>
+    ${outboxHtml(key)}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
         placeholder="${prompt ? ON_PROMPT() : canSend ? T("Reply to this session — paste or drop images too", "回复这个 session——也可以粘贴或拖入图片") : noSend}">${esc(keepDraft ?? draft("msg:" + key))}</textarea>
@@ -3082,9 +3096,9 @@ function drawSecretary(toBottom) {
   const QUICK = [[T("What is waiting on me?", "有什么在等我？")], [T("What looks stuck?", "哪些看着卡住了？")], [T("What happened today?", "今天做了什么？")],
                  [T("Draft a message", "帮我起草消息"), T("Draft a message to ", "帮我起草一条消息，发给 ")]];
   const quick = busy || st.waking ? "" : `<div class="quick">${QUICK.map(([label, fill]) => `<button class="chipq" data-action="sec-quick" ${fill ? `data-fill="${esc(fill)}"` : `data-text="${esc(label)}"`}>${esc(label)}</button>`).join("")}</div>`;
-  const sendBtn = busy
-    ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>`
-    : `<button class="sendc" data-action="send" data-session="${SEC}" ${ui.sending.has(SEC) || st.waking ? "disabled" : ""} title="${T("Send (⌘Enter)", "发送（⌘回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
+  // While it replies, what you send waits in the outbox and goes when it is done.
+  const sendBtn = (busy ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>` : "")
+    + `<button class="sendc" data-action="send" data-session="${SEC}" title="${busy || st.waking ? T("Send — it reads it when this reply is done (⌘Enter)", "发送——它回完这一条就会读到（⌘回车）") : T("Send (⌘Enter)", "发送（⌘回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
 
   const sideTop = (box.querySelector(".sec-side") || {}).scrollTop || 0;   // redrawn below: keep its place
   box.innerHTML = `<div class="panel sec-chat" role="dialog" aria-label="${T("Secretary", "秘书")}">
@@ -3100,6 +3114,7 @@ function drawSecretary(toBottom) {
     <div class="sec-wrap"><div class="sec-main">
     ${watchHtml}
     <div class="peek-body c-body">${body}</div>
+    ${outboxHtml(SEC)}
     <div class="c-foot">${quick}
       <div class="inrow"><textarea class="grow" rows="1" data-key="${key}" data-session="${SEC}" placeholder="${T("Message your secretary — paste or drop images too", "跟秘书说点什么——也可以粘贴或拖入图片")}">${esc(keepDraft ?? draft(key))}</textarea>${sendBtn}</div>
       ${attachStrip(SEC)}
@@ -3116,32 +3131,6 @@ function drawSecretary(toBottom) {
   restoreTextScrolls(box, taScrolls);
   peekScrollPut(box, m, scroll, toBottom);
 }
-// preset: a message of the window's own ("Write one now", a quick question); the draft in the
-// box stays as it is.
-async function sendSecretary(preset) {
-  if (ui.sending.has(SEC)) return;
-  if (ui.modal && ui.modal.secretary && ui.modal.sec && ui.modal.sec.running) {
-    return toast(T("It is still replying — wait for it, or stop it", "它还在回复——等它说完，或者先让它停下"), true);
-  }
-  const key = "msg:" + SEC;
-  const text = preset || (ui.drafts[key] || "").trim();
-  const images = preset ? [] : ui.atts[SEC] || [];
-  if (!text && !images.length) return;
-  const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
-  ui.sending.add(SEC);
-  if (ui.modal && ui.modal.secretary) drawPeek(true);
-  try {
-    await api("secretary-send", { text: message });
-    if (!preset) { delete ui.drafts[key]; delete ui.atts[SEC]; }
-    if (ui.modal && ui.modal.secretary && ui.modal.sec) { ui.modal.sec.running = true; ui.modal.sentMsg = { text: message, at: Date.now() }; }
-  } catch (e) {
-    toast(String(e.message || e), true);
-  } finally {
-    ui.sending.delete(SEC);
-  }
-  if (ui.modal && ui.modal.secretary) { drawPeek(true); refreshPeek(); }
-}
-
 // ------------------------------------------------------------------ peek activity
 // Between the messages, Claude's tool calls: one line each, a run of them folded to its newest
 // line, a click on a line opens its input and output (fetched then: the list the board polls
@@ -3648,42 +3637,185 @@ document.addEventListener("drop", (ev) => {
 // A busy session queues what it is sent; there is no new turn to wait for.
 const isBusy = (sid) => liveState(ui.sessions.find((x) => x.sessionId === sid)) === "busy";
 
-// While a message is on its way (Orca waits up to 5 s to see it submitted) the button is locked,
-// so a second click can't type the same message into the session again.
-function sendButton(sid, enabled) {
-  const inFlight = ui.sending.has(sid);
-  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" title="${T("Send (⌘Enter)", "发送（⌘回车）")}" ${enabled && !inFlight ? "" : "disabled"}>${inFlight ? T("Sending…", "发送中…") : T("Send", "发送")}</button>`;
+// ---- the outbox: a message you send shows at once, under its conversation, and goes out in the
+// background, so you can send and move on. One at a time per session: two typed into one terminal
+// at once would mix. ui.outbox: sid → [{ id, text, atts, message, preset, state, err, at, sentAt }],
+// state "wait" | "sending" | "sent" (delivered; shown until the conversation has it) | "failed"
+// (not sent: safe to send again) | "unsure" (typed in, but no turn was seen to start: sending
+// again could deliver it twice, so it is never retried by itself). A failed or unsure one holds
+// the ones after it until you deal with it: they must not overtake it.
+
+const OB_SENT_MS = 8000;          // a delivered one stays this long unless the conversation shows it first
+const OB_TURN_MS = 15000;         // after a send that started a turn, the next ones queue behind it
+const obList = (sid) => ui.outbox[sid] || [];
+const obTrouble = (sid) => obList(sid).find((x) => x.state === "failed" || x.state === "unsure");
+const obNorm = (x) => String(x || "").replace(/\s+/g, " ").trim();
+function outboxSave() {
+  saveDrafts();
+}
+function outboxChanged(sid, toBottom) {
+  outboxSave();
+  render();
+  if (ui.modal && ui.modal.type === "peek" && (ui.modal.sid === sid || (sid === SEC && ui.modal.secretary))) drawPeek(Boolean(toBottom));
+}
+// Delivered ones go once the conversation shows them (its last messages, or Claude Code's queue).
+function outboxPrune(sid, m) {
+  const list = ui.outbox[sid];
+  if (!list) return;
+  const seen = m ? [...(m.msgs || []).filter((x) => x.role === "user").slice(-6), ...(m.queued || [])].map((x) => obNorm(x.text)) : [];
+  const keep = list.filter((x) => x.state !== "sent" || (Date.now() - x.sentAt < OB_SENT_MS
+    && !(x.text && seen.some((t) => t.includes(obNorm(x.text).slice(0, 80))))));
+  if (keep.length) ui.outbox[sid] = keep; else delete ui.outbox[sid];
+}
+function outboxAdd(sid, item) {
+  (ui.outbox[sid] = ui.outbox[sid] || []).push(Object.assign({ id: ++outboxSeq, state: "wait", at: Date.now() }, item));
+  outboxChanged(sid, true);
+  pumpOutbox(sid);
 }
 
 async function send(sid) {
-  if (sid === SEC) return sendSecretary();
-  if (ui.sending.has(sid)) return;
   const key = "msg:" + sid;
   const text = (ui.drafts[key] || "").trim();
   const images = ui.atts[sid] || [];
   if (!text && !images.length) return;
-  const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
   // The button is disabled for such a session; this catches a click from a board seconds old.
-  if (onPrompt(ui.sessions.find((x) => x.sessionId === sid))) return toast(ON_PROMPT(), true);
-  const queued = isBusy(sid);
-  ui.sending.add(sid);
-  render();
-  // Sending from the conversation window: follow the message down to the bottom.
-  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(true);
+  if (sid !== SEC && onPrompt(ui.sessions.find((x) => x.sessionId === sid))) return toast(ON_PROMPT(), true);
+  const message = [text, ...images.map((a) => a.path)].filter(Boolean).join("\n");
+  delete ui.drafts[key];
+  delete ui.atts[sid];
+  outboxAdd(sid, { text, atts: images, message });
+}
+// preset: a message of the secretary window's own ("Write one now", a quick question); the draft
+// in the box stays as it is.
+function sendSecretary(preset) {
+  if (!preset) return send(SEC);
+  outboxAdd(SEC, { text: preset, atts: [], message: preset, preset: true });
+}
+
+async function pumpOutbox(sid) {
+  const list = ui.outbox[sid];
+  if (!list || list.some((x) => x.state === "sending")) return;
+  const head = list.find((x) => x.state !== "sent");
+  if (!head || head.state !== "wait") return;
+  clearTimeout(ui.obTimer[sid]);
+  if (sid === SEC) return pumpSecretary(head);
+  const s = ui.sessions.find((x) => x.sessionId === sid);
+  // A background session takes a message only between turns: wait for this one to end.
+  const bg = s && sendExtra(s).bg;
+  if (bg && (isBusy(sid) || Date.now() - (ui.obTurn[sid] || 0) < 5000)) { ui.obTimer[sid] = setTimeout(() => pumpOutbox(sid), 3000); return; }
+  head.state = "sending";
+  outboxChanged(sid);
   try {
-    await api("send", { session: sid, text: message, queue: queued, ...sendExtra(ui.sessions.find((x) => x.sessionId === sid)) });
-    delete ui.drafts[key];
-    delete ui.atts[sid];
-    const withImgs = images.length ? T(` with ${images.length} image${images.length === 1 ? "" : "s"}`, `（带 ${images.length} 张图片）`) : "";
-    toast(queued ? T(`Delivered${withImgs} — queued until the session finishes its turn`, `已送达${withImgs}——排队等 session 这一轮结束`) : T(`Sent${withImgs}`, `已发送${withImgs}`));
+    if (!s) throw new Error(T("that session is not running any more", "这个 session 已经不在运行了"));
+    if (onPrompt(s)) throw new Error(ON_PROMPT());
+    const queued = isBusy(sid) || (!bg && Date.now() - (ui.obTurn[sid] || 0) < OB_TURN_MS);
+    const r = await apiObj("send", { session: sid, text: head.message, queue: queued, outbox: true, ...sendExtra(s) });
+    if (r.unsure) { head.state = "unsure"; head.err = r.error || ""; }
+    else {
+      head.state = "sent"; head.sentAt = Date.now(); head.queued = Boolean(r.queued || queued);
+      if (!head.queued) ui.obTurn[sid] = Date.now();
+      setTimeout(() => { outboxPrune(sid, ui.modal && ui.modal.sid === sid ? ui.modal : null); outboxChanged(sid); }, OB_SENT_MS + 100);
+      setTimeout(refresh, 1200);
+    }
   } catch (e) {
-    toast(String(e.message || e), true);
-  } finally {
-    ui.sending.delete(sid);
+    head.state = "failed"; head.err = String(e.message || e);
   }
-  setTimeout(refresh, 1200);
-  render();
-  if (ui.modal && ui.modal.type === "peek" && ui.modal.sid === sid) drawPeek(false);
+  if (head.state !== "sent") toast(head.state === "unsure" ? T(`Maybe not sent: ${head.err}`, `可能没发出去：${head.err}`) : T(`Not sent: ${head.err}`, `没发出去：${head.err}`), true);
+  outboxChanged(sid);
+  pumpOutbox(sid);
+}
+// The secretary answers one message at a time: what you send while it replies waits here and goes
+// when it is done.
+async function pumpSecretary(head) {
+  const free = async () => { try { const st = await apiObj("secretary"); return !(st.running || st.waking); } catch (e) { return true; } };
+  const later = () => { ui.obTimer[SEC] = setTimeout(() => pumpOutbox(SEC), 2000); };
+  if (!(await free())) return later();
+  // (Dropped or put back while it waited: not this one any more.)
+  if (!obList(SEC).includes(head) || head.state !== "wait" || obList(SEC).some((x) => x.state === "sending")) return;
+  head.state = "sending";
+  ui.sending.add(SEC);
+  outboxChanged(SEC, true);
+  try {
+    await api("secretary-send", { text: head.message });
+    ui.outbox[SEC] = obList(SEC).filter((x) => x !== head);
+    if (!ui.outbox[SEC].length) delete ui.outbox[SEC];
+    if (ui.modal && ui.modal.secretary && ui.modal.sec) { ui.modal.sec.running = true; ui.modal.sentMsg = { text: head.message, at: Date.now() }; }
+  } catch (e) {
+    // A run that started in the meantime (the evening report): wait for it instead.
+    if (!(await free())) { head.state = "wait"; ui.sending.delete(SEC); outboxChanged(SEC); return later(); }
+    head.state = "failed"; head.err = String(e.message || e);
+    toast(T(`Not sent: ${head.err}`, `没发出去：${head.err}`), true);
+  } finally {
+    ui.sending.delete(SEC);
+  }
+  outboxChanged(SEC, true);
+  if (ui.modal && ui.modal.secretary) refreshPeek();
+  later();   // the next one, once this reply is done
+}
+
+// Its buttons: send again, put it back in the box to change it, drop it, or (unsure) say it did
+// arrive.
+function outboxAct(action, sid, id) {
+  const list = obList(sid);
+  const x = list.find((y) => String(y.id) === String(id));
+  if (!x) return;
+  const drop = () => { ui.outbox[sid] = obList(sid).filter((y) => y !== x); if (!ui.outbox[sid].length) delete ui.outbox[sid]; };
+  if (action === "ob-retry") { x.state = "wait"; x.err = ""; }
+  else if (action === "ob-ok") drop();
+  else if (action === "ob-edit") {
+    drop();
+    if (!x.preset) {
+      const key = "msg:" + sid, cur = (ui.drafts[key] || "").trim();
+      ui.drafts[key] = cur ? `${x.text}\n${cur}` : x.text;
+      if (x.atts && x.atts.length) ui.atts[sid] = [...x.atts, ...(ui.atts[sid] || [])];
+    }
+    // To its conversation window, where the box is (a drawer's session row has none).
+    const here = ui.modal && ui.modal.type === "peek" && (sid === SEC ? ui.modal.secretary : ui.modal.sid === sid);
+    if (!here) { outboxSave(); render(); pumpOutbox(sid); return sid === SEC ? openSecretary() : openPeek(sid); }
+  } else if (action === "ob-drop") {
+    const i = list.indexOf(x);
+    drop();
+    toast(T("Message dropped", "已删除这条消息"), false, () => {
+      const l = ui.outbox[sid] = ui.outbox[sid] || [];
+      l.splice(Math.min(i, l.length), 0, x);
+      outboxChanged(sid);
+    });
+  }
+  outboxChanged(sid);
+  pumpOutbox(sid);
+}
+
+function outboxHtml(sid) {
+  const list = obList(sid);
+  if (!list.length) return "";
+  let held = false;
+  return `<div class="outbox">${list.map((x) => {
+    const waitWord = held ? T("Waits for the one above", "等上一条处理完") : sid === SEC ? T("Sends when it is done replying", "它回完就发") : T("Waiting to send", "等待发送");
+    if (x.state === "failed" || x.state === "unsure") held = true;
+    const word = { wait: waitWord, sending: T("Sending…", "发送中…"), sent: x.queued ? T("Delivered — queued until its turn ends", "已送达，排队等这一轮结束") : T("Delivered", "已送达"),
+                   failed: T("Not sent", "没发出去"), unsure: T("May not have gone in — check its terminal", "可能没提交——去终端看一眼") }[x.state];
+    const b = (action, label, title) => `<button class="btn small ${action === "ob-retry" ? "" : "ghost"}" data-action="${action}" data-session="${esc(sid)}" data-id="${x.id}"${title ? ` title="${esc(title)}"` : ""}>${label}</button>`;
+    const btns = x.state === "failed" ? b("ob-retry", T("Send again", "重发")) + (x.preset ? "" : b("ob-edit", T("Edit", "放回输入框"), T("Put it back in the box to change it", "放回输入框里改"))) + b("ob-drop", T("Drop", "删除"))
+      : x.state === "unsure" ? `<button class="btn small" data-action="jump" data-session="${esc(sid)}">${T("Jump", "跳转")}</button>` + b("ob-ok", T("It arrived", "已收到"), T("It is there: take it off this list", "终端里有：从这里拿掉"))
+        + b("ob-retry", T("Send again", "重发"), T("Only if it is not in the terminal — otherwise it gets it twice", "只在终端里没有时才重发——否则它会收到两遍")) + (x.preset ? "" : b("ob-edit", T("Edit", "放回输入框")))
+      : "";
+    const imgs = x.atts && x.atts.length ? `<span class="ob-img">${T(`+${x.atts.length} image${x.atts.length === 1 ? "" : "s"}`, `+${x.atts.length} 张图片`)}</span>` : "";
+    return `<div class="ob-item ${x.state}${held && x.state === "wait" ? " held" : ""}">
+      <div class="ob-text">${esc(x.text)}${imgs}</div>
+      <div class="ob-foot"><span class="ob-state">${x.state === "sending" ? '<span class="ob-spin"></span>' : ""}${word}</span>${x.err ? `<span class="ob-err" title="${esc(x.err)}">${esc(x.err)}</span>` : ""}${btns ? `<span class="ob-btns">${btns}</span>` : ""}</div>
+    </div>`;
+  }).join("")}</div>`;
+}
+// A red (not sent) or amber (maybe not sent) mark on the session's row, so it is seen after the
+// window it was sent from has closed.
+function outboxMark(sid) {
+  const x = obTrouble(sid);
+  if (!x) return "";
+  return `<span class="ob-mark ${x.state}" title="${esc(x.state === "failed" ? T("A message you sent didn't go out", "你发的一条消息没发出去") : T("A message you sent may not have gone in", "你发的一条消息可能没提交"))}"></span>`;
+}
+
+function sendButton(sid, enabled) {
+  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" title="${T("Send (⌘Enter)", "发送（⌘回车）")}" ${enabled ? "" : "disabled"}>${T("Send", "发送")}</button>`;
 }
 
 async function saveField(el) {
@@ -4018,6 +4150,7 @@ document.addEventListener("click", async (ev) => {
     case "unbind": return act("unbind", { session: d.session }, T("Unbound", "已解绑"));
     case "open": return act("open", { path: d.path });
     case "send": return send(d.session);
+    case "ob-retry": case "ob-edit": case "ob-drop": case "ob-ok": return outboxAct(d.action, d.session, d.id);
     case "peek":
       // A session line or its last words: selecting text there to copy it is not a click.
       if (el.tagName !== "BUTTON" && String(window.getSelection() || "").trim()) return;
@@ -4664,7 +4797,7 @@ document.addEventListener("scroll", (ev) => { if (ev.target.id !== "slash") slas
 // The button ⌘Enter presses for a text box, or null when it has none.
 function submitButtonOf(el) {
   const near = (wrap, action) => (el.closest(wrap) || { querySelector: () => null }).querySelector(`[data-action="${action}"]`);
-  if (el.dataset.session) return el.parentElement.querySelector('[data-action="send"]');   // busy secretary: its Stop, not this
+  if (el.dataset.session) return el.parentElement.querySelector('[data-action="send"]');   // never a busy secretary's Stop
   if (el.closest(".prompt-foot")) return near(".prompt-foot", "plan-feedback");
   if (el.classList.contains("logbox")) return near(".addbox", "add-log");
   return null;

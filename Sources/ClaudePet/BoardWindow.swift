@@ -397,7 +397,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return await JobsController.shared.save(raw)
         case "send":
             let r = await send(session: str("session"), text: str("text"), queue: body["queue"] as? Bool ?? false,
-                               bg: str("bg"), skip: body["skip"] as? Bool ?? false)
+                               bg: str("bg"), skip: body["skip"] as? Bool ?? false, outbox: body["outbox"] as? Bool ?? false)
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
         case "interrupt": return await interrupt(session: str("session"))
@@ -1128,8 +1128,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Claude it is indistinguishable from the user typing it.
     /// `queue`: the session is busy, so the message waits in Claude Code's queue until the turn
     /// ends — no turn will start within seconds, so don't sit watching for one.
+    /// `outbox`: the board's send queue is asking. It must tell "not sent" (an error: safe to send
+    /// again) from "typed in, but no turn was seen to start" (sending again could deliver it
+    /// twice), so the second comes back as a result marked `unsure` instead of an error.
     private func send(session: String, text: String, queue: Bool = false, bg: String = "",
-                      skip: Bool = false) async -> (Any?, String?) {
+                      skip: Bool = false, outbox: Bool = false) async -> (Any?, String?) {
+        func unsure(_ msg: String) -> (Any?, String?) { outbox ? (["ok": false, "unsure": true, "error": msg], nil) : (nil, msg) }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return (nil, L("empty message", "消息是空的")) }
         // `/model` alone opens a menu in the terminal that the board can't see or answer.
@@ -1177,7 +1181,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !BoardSend.startsTurn(typed) { return (["ok": true], nil) }
             if await Self.turnStarted(session, since: before) { return (["ok": true], nil) }
             if Self.currentState(session) == .busy { return (["ok": true, "queued": true], nil) }
-            return (nil, L("typed into its Terminal tab, but no turn started — check the tab and press Return there", "已经输入到它的 Terminal 标签页，但没有开始新一轮 — 去那个标签页看看，在那里按回车"))
+            return unsure(L("typed into its Terminal tab, but no turn started — check the tab and press Return there", "已经输入到它的 Terminal 标签页，但没有开始新一轮 — 去那个标签页看看，在那里按回车"))
         case "orca":
             guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.orcaBundleID) else {
                 return (nil, L("Orca is not installed", "没有安装 Orca"))
@@ -1185,8 +1189,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let cli = app.appending(path: "Contents/Resources/bin/orca").path
             let r = await Self.run(cli, ["terminal", "send", "--terminal", t.handle, "--text", text,
                                          "--enter", "--json"] + (queue ? [] : ["--wait-submit", "5"]))
-            return r.status == 0 ? (["ok": true, "queued": queue, "detail": r.out], nil)
-                                 : (nil, "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description)
+            if r.status == 0 { return (["ok": true, "queued": queue, "detail": r.out], nil) }
+            let msg = "orca: \(r.err.isEmpty ? r.out : r.err)".prefix(300).description
+            // An ambiguous transport failure (Orca offers a --retry-request for it): it may have
+            // gone in, so not "not sent".
+            return (r.err + r.out).contains("retry-request") ? unsure(msg) : (nil, msg)
         case "iterm2":
             let uuid = TerminalTarget.iTermUUID(from: t.handle)
             guard TerminalTarget.isSafeITermUUID(uuid) else { return (nil, L("unexpected iTerm2 session id", "iTerm2 session id 不对劲")) }
@@ -1205,7 +1212,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if !BoardSend.startsTurn(typed) { return (["ok": true], nil) }
             if await Self.turnStarted(session, since: before) { return (["ok": true], nil) }
             if Self.currentState(session) == .busy { return (["ok": true, "queued": true], nil) }
-            return (nil, L("typed into its iTerm2 session, but no turn started — check it and press Return there", "已经输入到它的 iTerm2 session，但没有开始新一轮 — 去那里看看，在那里按回车"))
+            return unsure(L("typed into its iTerm2 session, but no turn started — check it and press Return there", "已经输入到它的 iTerm2 session，但没有开始新一轮 — 去那里看看，在那里按回车"))
         default:
             return (nil, L("sending to \(t.kind) terminals is not supported yet — use Jump", "还不支持给 \(t.kind) 终端发消息 — 请用跳转"))
         }
