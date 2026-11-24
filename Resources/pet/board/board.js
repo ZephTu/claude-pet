@@ -622,9 +622,9 @@ function render() {
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
     scrolls[p.dataset.sid] = p.scrollHeight - p.scrollTop - p.clientHeight < 8 ? "bottom" : p.scrollTop;
   });
-  // So are the lanes of Focus, All and Needs you: each keeps its own scroll, or a refresh
-  // every few seconds would throw a long lane back to its top.
-  const laneScrolls = grabLaneScrolls();
+  // So are Focus's lanes: each keeps its own scroll, or a refresh every few seconds would throw a
+  // long lane back to its top.
+  grabLaneScrolls();
 
   renderCounts();
   drawSecretaryButton();
@@ -673,10 +673,10 @@ function render() {
     const v = scrolls[p.dataset.sid];
     p.scrollTop = v === undefined || v === "bottom" ? p.scrollHeight : v;
   });
-  restoreLaneScrolls(laneScrolls);
   paintTaskIds();
   paintArmed();
   fitAllGrow();
+  restoreLaneScrolls();   // after the text boxes have their height back
   // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
   // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
   // a session's message box in the Sessions column shares its key with the conversation window's
@@ -992,32 +992,31 @@ function renderMyTodos() {
     </div>`).join("") + `</div>`;
 }
 
-// Needs you: three columns — what Claude asks, what you are to do, what you jotted down — under a
-// line of totals.
-// The scrolling boxes render() rebuilds: a lane's card list, and the lanes' grid where it scrolls
-// as a whole (narrow windows). Keyed by the page, the swimlane row, the lane and the box's place
-// among its kind, so a lane gets its own scroll back even when cards move between lanes.
-const LANE_SCROLLERS = ".lane-body, .board, .ncols";
+// The scrolling boxes render() rebuilds — only Focus has them (All scrolls as a whole in #tasks,
+// and Needs you's columns are drawn once): a lane's card list, the lanes' grid where it scrolls
+// as a whole (narrow windows), and the new-task form. Keyed by the lane and the box's place among
+// its kind, so a lane gets its own scroll back even when cards move between lanes. Kept across
+// renders in ui.laneScroll, so coming back to Focus from another tab finds them where they were.
+const LANE_SCROLLERS = ".lane-body, .board, .nt-wrap";
 function laneScrollKeys() {
   const seen = {};
-  return [...document.querySelectorAll(["#today-focus", "#tasks", "#needs"].map((c) => LANE_SCROLLERS.split(", ").map((x) => `${c} ${x}`).join(", ")).join(", "))]
+  return [...document.querySelectorAll(LANE_SCROLLERS.split(", ").map((x) => `#today-focus ${x}`).join(", "))]
     .map((el) => {
-      const row = el.closest("[data-p], [data-repo], .swim-row");
-      const base = [el.closest("#today-focus, #tasks, #needs").id, row ? row.dataset.p || row.dataset.repo || "" : "",
-        (el.closest("[data-lane]") || {}).dataset?.lane || "", el.className].join("|");
+      const base = [(el.closest("[data-lane]") || {}).dataset?.lane || "", el.className].join("|");
       seen[base] = (seen[base] || 0) + 1;
       return [el, base + "|" + seen[base]];
     });
 }
 function grabLaneScrolls() {
-  const out = {};
-  for (const [el, k] of laneScrollKeys()) if (el.scrollTop > 0) out[k] = el.scrollTop;
-  return out;
+  ui.laneScroll = ui.laneScroll || {};
+  for (const [el, k] of laneScrollKeys()) ui.laneScroll[k] = el.scrollTop;
 }
-function restoreLaneScrolls(saved) {
-  for (const [el, k] of laneScrollKeys()) if (saved[k]) el.scrollTop = saved[k];
+function restoreLaneScrolls() {
+  for (const [el, k] of laneScrollKeys()) if (ui.laneScroll[k]) el.scrollTop = ui.laneScroll[k];
 }
 
+// Needs you: three columns — what Claude asks, what you are to do, what you jotted down — under a
+// line of totals.
 function renderNeeds() {
   const asks = tasks().reduce((n, t) => n + openAsks(t).length, 0);
   const later = tasks().reduce((n, t) => n + laterAsks(t).length, 0);
