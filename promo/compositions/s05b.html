@@ -55,13 +55,13 @@
     tl.set("#s05b-cur", { x: 973.2203389830509, y: 466.6101694915254 }, 0);
     tl.to("#s05b-cur", { opacity: 1, duration: 0.2 }, 0.0);
     tl.to("#s05b-cur", { x: 453.7, y: 104.4, duration: 0.6, ease: "power2.inOut" }, 0.1);
-    tl.fromTo("#s05b-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 0.75);
+    tl.fromTo("#s05b-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 0.75);
     tl.to("#s05b-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 0.75);
     tl.to("#s05b-im-projects", { opacity: 1, duration: 0.2, ease: "none" }, 0.85);
     tl.set("#s05b-im-drawer-bottom", { opacity: 0 }, 1.05);
     tl.to("#s05b-cam", { x: -106.12, y: -136.58, scale: 1.45, duration: 0.5, ease: "expo.inOut" }, 1.139);
     tl.to("#s05b-cur", { x: 801.4, y: 281.5, duration: 0.6, ease: "power2.inOut" }, 2.407);
-    tl.fromTo("#s05b-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 3.107);
+    tl.fromTo("#s05b-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 3.107);
     tl.to("#s05b-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 3.107);
     tl.to("#s05b-im-project", { opacity: 1, duration: 0.2, ease: "none" }, 3.2070000000000003);
     tl.set("#s05b-im-projects", { opacity: 0 }, 3.407);

@@ -60,7 +60,7 @@
     tl.set("#s07-cur", { x: 1300, y: 700 }, 0);
     tl.to("#s07-cur", { opacity: 1, duration: 0.2 }, 0.0);
     tl.to("#s07-cur", { x: 432.0, y: 186.0, duration: 0.7, ease: "power2.inOut" }, 0.42300000000000004);
-    tl.fromTo("#s07-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 1.223);
+    tl.fromTo("#s07-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 1.223);
     tl.to("#s07-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 1.223);
     tl.to("#s07-old", { opacity: 0, scale: 0.92, duration: 0.3, ease: "power2.in" }, 1.3230000000000002);
     tl.to("#s07-cur", { opacity: 0, duration: 0.2 }, 1.5230000000000001);

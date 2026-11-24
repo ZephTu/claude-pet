@@ -63,9 +63,9 @@
     tl.set("#s04-cur", { x: 1760.0, y: 956.0 }, 0);
     tl.to("#s04-cur", { opacity: 1, duration: 0.2 }, 0.0);
     tl.to("#s04-cur", { x: 1750.0, y: 961.0, duration: 0.5, ease: "power2.inOut" }, 5.452);
-    tl.fromTo("#s04-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 6.152);
+    tl.fromTo("#s04-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 6.152);
     tl.to("#s04-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 6.152);
-    tl.fromTo("#s04-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 6.332);
+    tl.fromTo("#s04-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 6.332);
     tl.to("#s04-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 6.332);
     tl.set("#s04-win", { opacity: 0, scale: 0.06, transformOrigin: "1580px 914px" }, 0);
     tl.to("#s04-win", { opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 6.452);

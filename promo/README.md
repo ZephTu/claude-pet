@@ -1,11 +1,13 @@
 # Claude Pet promo film
 
-A 2:38 Chinese-narrated demo of Claude Pet and HQ, made with [HyperFrames](https://hyperframes.heygen.com)
-(HTML rendered to video). It follows one task card, T-014, through a day. The story and shot list are in
+A 2:59 Chinese-narrated demo of Claude Pet and HQ, made with [HyperFrames](https://hyperframes.heygen.com)
+(HTML rendered to video). It follows one task card, T-014, through a day, and shows a
+new one, T-017, filed from a quick note (⌃⌥⌘N) and started with New session. The story and shot list are in
 `SPEC.md`, the alternatives that were not built are in `STORYLINES.md`, and the last review is in `REVIEW.md`.
 
 All the data on screen is made up: `demo/board-demo-zh.js` (the board) and `demo/panel-zh.js` (the session
-list). Board stills render with a stub `hq` (`scripts/nohq/hq`), and the demo replaces the board's data,
+list). The quick-note box is a native panel the renderers can't capture, so `build.py` draws it from
+`QuickNotePanel.swift`'s size and wording; the pet's bubbles under it are real renders. Board stills render with a stub `hq` (`scripts/nohq/hq`), and the demo replaces the board's data,
 drafts, picks and outbox before the shutter. A few calls still run for real while the page loads (`claude agents`,
 the pet's own settings) but the demo overwrites what they return, so none of your HQ reaches a frame. Some view
 prefs (show done, grouping) are read from the debug app's WebKit store, so stills can differ between machines.
@@ -18,10 +20,10 @@ and the voice-over. Rebuild it once, in this order, from the repo root after `sw
 | Output | Command | Needs |
 | --- | --- | --- |
 | `assets/board/*.png` | `promo/scripts/shots-all.sh` | `.build/debug/ClaudePet` |
-| `assets/panel-*.png` | `promo/scripts/panel.sh` | `.build/debug/ClaudePet` |
+| `assets/panel-*.png`, `assets/bubble-*.png` | `promo/scripts/panel.sh` | `.build/debug/ClaudePet`, the venv (crops the bubbles) |
 | `assets/cat/*.webp`, `clips.json` | `ART=<checkout>/art promo/scripts/cat.sh` | the cat source videos (`art/` is not in git; nothing in it is written) |
 | `assets/bgm/track.wav` | `promo/.venv/bin/python promo/scripts/bgm.py 200 promo/assets/bgm/track.wav` | MusicGen-small (set `HF_ENDPOINT=https://hf-mirror.com` if huggingface.co is unreachable) |
-| `assets/vo/*.mp3`, `*.srt` (committed) | `promo/.venv/bin/python promo/scripts/vo.py` | network: the text goes to Microsoft Edge TTS |
+| `assets/vo/*.mp3`, `*.srt` (committed) | `promo/.venv/bin/python promo/scripts/vo.py [scene ...]` | network: the text goes to Microsoft Edge TTS |
 
 Also needs `ffmpeg`/`ffprobe` on PATH (`build.py` reads the voice-over durations). The venv: `uv venv promo/.venv && uv pip install --python promo/.venv/bin/python edge-tts pillow numpy soundfile torch transformers`.
 

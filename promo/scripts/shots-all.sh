@@ -42,4 +42,8 @@ NOW="${D1}T10:07:00" "$S" "$OUT/projects.png" 'ui.mode = "projects"; render();' 
 NOW="${D1}T10:07:00" "$S" "$OUT/needs-after.png" "$ANSWERED ui.mode = \"needs\"; ui.drawer = null; render();" & PIDS+=($!)
 NOW="${D1}T10:07:00" "$S" "$OUT/project.png"  'ui.mode = "projects"; goToProject("shop-api"); render();' & PIDS+=($!)
 waitall
+# A quick note became task T-017, and its drawer.
+NOW="${D1}T10:09:00" QN=1 "$S" "$OUT/qn-focus.png"  'render();' & PIDS+=($!)
+NOW="${D1}T10:09:00" QN=1 "$S" "$OUT/qn-drawer.png" 'render(); setTimeout(() => openDrawer("T-017"), 200);' & PIDS+=($!)
+waitall
 ls -la "$OUT"

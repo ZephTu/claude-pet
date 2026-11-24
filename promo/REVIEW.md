@@ -1,6 +1,6 @@
-# REVIEW — first cut, storyline A 「一张卡走完一天」
+# REVIEW — second cut, storyline A 「一张卡走完一天」
 
-Length 158.5 s (2:38), 13 scenes, 1920×1080 @ 30 fps. Narration is Edge TTS zh-CN-XiaoyiNeural; the
+Length 179.0 s (2:59), 14 scenes, 1920×1080 @ 30 fps. Narration is Edge TTS zh-CN-XiaoyiNeural; the
 voice-over files set the timeline. `python3 build.py` regenerates index.html and compositions/
 from demo/narration.json and the stills in assets/.
 
@@ -21,16 +21,33 @@ from demo/narration.json and the stills in assets/.
 - The BGM is MusicGen-small, generated locally (fetched through hf-mirror) at volume 0.12, with a
   3 s fade-out.
 - Storylines B and C (STORYLINES.md) were not built.
+- **Second cut: s05c, the daily loop.** Added at the user's request after the first cut. It runs after
+  s05b and shows:
+  ⌃⌥⌘N → the quick-note box → Enter → the pet's bubbles → the new card T-017 in Focus (待推进) →
+  its drawer → 新 session → a terminal that reads the card.
+  - The box is drawn in HTML from QuickNotePanel.swift (size, title, hint line), because it is a
+    native panel and neither renderer captures it.
+  - The bubbles are the pet page's own, rendered through `--probe-skin` and shown at 1.2× life size so
+    they read at full view.
+  - The terminal is an illustration, like s06/s07. Its first line is the real launch prompt
+    (board.js LAUNCH_PROMPT), cut short.
+  - Nothing in the first 13 scenes changed except the click fix below.
+- **Click rings, all scenes.** The rings used `fromTo` with GSAP's default immediate render, so each
+  ring sat on screen as a small red circle from the start of its scene until its click. They now
+  render only from the click.
 
 ## Measured vs. looked at
 - Measured:
   - `check` reports ok with 0 errors.
   - Caption timing comes from the per-scene SRT that Edge TTS returns.
   - Positions of board elements were probed from the live DOM (scratch probe), not guessed.
-  - The render's mix came out at -19.5 LUFS with a -4.4 dBTP peak and no clipping. The delivered file
-    has its audio normalized to -15.9 LUFS with ffmpeg loudnorm; the video stream was copied.
+  - The second cut's mix came out at -19.4 LUFS. The delivered file (renders/claude-pet-promo-v2.mp4)
+    has its audio normalized to -15.9 LUFS, -1.5 dBFS peak, with ffmpeg loudnorm; the video stream was
+    copied. (The first cut measured -19.5 LUFS and a -4.4 dBTP peak.)
 - Looked at:
-  - the snapshot review (26 beats, 12 seams, phone-size sheets);
+  - the snapshot review (26 beats, 12 seams, phone-size sheets) — first cut;
+  - s05c at ten beats, twice: the first pass found the keys over the box, bubbles too small to read and
+    the card's outline left over the drawer, all fixed;
   - the s06 ask-click sequence, frame by frame.
 - Not checked:
   - Nobody has listened to the mix. Balance between narration and music, and how the SFX sound,
@@ -51,7 +68,8 @@ from demo/narration.json and the stills in assets/.
   scale. It is texture, and every piece that matters is pushed in to ≥ 28 px.
 - **line_unread.**
   - The terminals and the bubble in s07 are texture, and the narration carries them.
+  - s05c's hint line in the quick-note box is UI texture.
   - For the end card the check is wrong: frames at 153 s and 158.25 s show the card fully, so it
     holds about 6 s.
 - **first_frame_empty.** A false positive: frame 0 shows the terminal wall (snapshot checked).
-- **timeline_track_too_dense.** This comes from the 54 caption clips on one captions host.
+- **timeline_track_too_dense.** This comes from the 62 caption clips on one captions host.

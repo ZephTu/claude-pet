@@ -219,8 +219,9 @@ class Scene:
     def click(self, t, sfx=True):
         x, y = self.cur_pos
         i = self.uid("rip")
+        # immediateRender off: a fromTo would otherwise paint the ring at its start values from 0 s
         self.cam_html.append(f'<div class="rip" id="{i}" style="left:{x:.1f}px;top:{y:.1f}px"></div>')
-        self.t(f'tl.fromTo("#{i}", {{ scale: 0.3, opacity: 0.95 }}, {{ scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }}, {t});')
+        self.t(f'tl.fromTo("#{i}", {{ scale: 0.3, opacity: 0.95 }}, {{ scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }}, {t});')
         self.t(f'tl.to("#{self.id}-cur", {{ scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }}, {t});')
         if sfx:
             self.sfx.append((t, "click", 0.55, None))
@@ -483,6 +484,96 @@ def s05b():
     return sc
 
 
+# The quick-note box (QuickNotePanel.swift: 520x132 pt, titled 记一笔, top quarter of the screen),
+# drawn at the board's scale; native, so --render-board can't take it.
+QN_W, QN_H = 520 * K, 132 * K
+QN_X, QN_Y = 960 - QN_W / 2, 196
+QN_TEXT = "订单导出成 CSV 中文全是乱码，客户在催，今天修掉"
+BUB = 2.4   # the pet's bubbles (assets/bubble-*.png, 2x) shown larger than life, to read at full view
+
+
+def s05c():
+    sc = board_scene("s05c", 20.5, 0.5, ["focus", "qn-focus", "qn-drawer"])
+    # ⌃⌥⌘N: the keys, then the box
+    t_k = sc.at("按快捷键", -0.1)
+    keys = "".join(f'<span style="display:inline-block;min-width:118px;height:118px;margin:0 10px;padding:0 22px;border-radius:22px;'
+                   f'background:#f4f5f7;color:#1a1d24;font-size:64px;font-weight:600;line-height:112px;'
+                   f'box-shadow:0 8px 0 #9aa0ab,0 18px 40px rgba(0,0,0,.45)">{k}</span>' for k in ["⌃", "⌥", "⌘", "N"])
+    sc.over_html.append(f'<div class="big" id="s05c-keys" style="top:690px">{keys}</div>')
+    sc.t(f'tl.fromTo("#s05c-keys", {{ opacity: 0, y: 30 }}, {{ opacity: 1, y: 0, duration: 0.3, ease: "back.out(2)" }}, {t_k});')
+    sc.t(f'tl.to("#s05c-keys", {{ opacity: 0, duration: 0.25 }}, {t_k + 1.3});')
+    for j in range(4):
+        sc.sfx.append((t_k + 0.05 + j * 0.07, "click", 0.3, None))
+    f = K   # panel points -> desktop px
+    sc.cam_html.append(
+        f'<div id="s05c-qn" style="position:absolute;left:{QN_X:.1f}px;top:{QN_Y}px;width:{QN_W:.1f}px;height:{QN_H:.1f}px;opacity:0;'
+        f'border-radius:{12 * f:.1f}px;background:#2c2d31;box-shadow:0 30px 70px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.14)">'
+        f'<i style="position:absolute;left:{8 * f:.1f}px;top:{8 * f:.1f}px;width:{12 * f:.1f}px;height:{12 * f:.1f}px;border-radius:50%;background:#ef6f5a"></i>'
+        f'<i style="position:absolute;left:{28 * f:.1f}px;top:{8 * f:.1f}px;width:{12 * f:.1f}px;height:{12 * f:.1f}px;border-radius:50%;background:#55575d"></i>'
+        f'<i style="position:absolute;left:{48 * f:.1f}px;top:{8 * f:.1f}px;width:{12 * f:.1f}px;height:{12 * f:.1f}px;border-radius:50%;background:#55575d"></i>'
+        f'<div style="position:absolute;left:0;right:0;top:{6 * f:.1f}px;text-align:center;font-size:{13 * f:.1f}px;font-weight:600;color:#b8bcc4">记一笔</div>'
+        f'<div class="typed" id="s05c-qtext" style="left:{14 * f:.1f}px;top:{38 * f:.1f}px;font-size:{15 * f:.1f}px">{esc(QN_TEXT)}</div>'
+        f'<div style="position:absolute;left:{14 * f:.1f}px;top:{106 * f:.1f}px;font-size:{11 * f:.1f}px;color:#8d919a;white-space:nowrap">'
+        f'回车记下 · Shift+回车换行 · 可以粘贴截图 · Esc 关闭</div></div>')
+    t_p = t_k + 0.45
+    sc.t(f'tl.fromTo("#s05c-qn", {{ opacity: 0, scale: 0.96 }}, {{ opacity: 1, scale: 1, duration: 0.25, ease: "power3.out" }}, {t_p});')
+    sc.cam(t_p, 960, QN_Y + QN_H / 2 + 40, 1.75, dur=0.7)
+    t_ty = max(sc.at("写一句", -0.3), t_p + 0.6)
+    n = len(QN_TEXT)
+    sc.t(f'tl.fromTo("#s05c-qtext", {{ clipPath: "inset(0 100% 0 0)" }}, {{ clipPath: "inset(0 0% 0 0)", duration: 1.6, ease: "steps({n})" }}, {t_ty});')
+    sc.sfx.append((t_ty, "typing", 0.35, 1.5))
+    # Enter: the box closes, the pet says it is sorting, then where the note went
+    t_en = t_ty + 2.0
+    sc.sfx.append((t_en, "click", 0.5, None))
+    sc.t(f'tl.to("#s05c-qn", {{ opacity: 0, scale: 0.97, duration: 0.2, ease: "power2.in" }}, {t_en});')
+    sc.cam(t_en + 0.1, 960, 540, 1.0, dur=0.8, ease="power2.inOut")
+    for name, w, h in [("sorting", 254, 63), ("filed", 296, 98)]:
+        bw, bh = w / 2 * BUB, h / 2 * BUB
+        sc.cam_html.append(f'<img id="s05c-b-{name}" src="assets/bubble-{name}.png" style="position:absolute;left:{min(CATC[0] - bw / 2, 1860 - bw):.1f}px;'
+                           f'top:{CAT[1] + 18 - bh:.1f}px;width:{bw:.1f}px;height:{bh:.1f}px;opacity:0">')
+    t_b1 = t_en + 0.35
+    sc.t(f'tl.fromTo("#s05c-b-sorting", {{ opacity: 0, y: 10 }}, {{ opacity: 1, y: 0, duration: 0.25, ease: "power3.out" }}, {t_b1});')
+    sc.sfx.append((t_b1, "pop", 0.35, None))
+    t_b2 = max(sc.at("建好一张卡", -0.4), t_b1 + 1.6)
+    sc.t(f'tl.set("#s05c-b-sorting", {{ opacity: 0 }}, {t_b2});')
+    sc.t(f'tl.fromTo("#s05c-b-filed", {{ opacity: 0, y: 10 }}, {{ opacity: 1, y: 0, duration: 0.25, ease: "power3.out" }}, {t_b2});')
+    sc.show(t_b2 + 0.1, "qn-focus", dur=0.3)
+    sc.sfx.append((t_b2 + 0.1, "chime", 0.3, None))
+    sc.highlight(t_b2 + 0.4, 606, 175, 257, 92, out=sc.at("点开它", 0.45))
+    # open the card, then New session
+    t_c = sc.at("点开它", 0.35)
+    sc.cursor(1500, 640, t_c - 1.0)
+    sc.move(t_c - 0.9, bx(735), by(205), dur=0.8)
+    sc.click(t_c)
+    sc.t(f'tl.to("#s05c-b-filed", {{ opacity: 0, duration: 0.3 }}, {t_c + 0.2});')
+    sc.show(t_c + 0.1, "qn-drawer")
+    sc.cam(t_c + 0.2, bx(880), by(250), 1.85, dur=0.6)
+    t_ns = max(sc.at("按新 session", 0.6), t_c + 1.4)
+    sc.move(t_ns - 0.7, bx(893), by(235), dur=0.55)
+    sc.click(t_ns)
+    sc.cursor_out(t_ns + 0.3)
+    # the session opens in a terminal, bound to the card, and reads it
+    tid = term(sc, 600, 200, 1160, 640, "shop-api — T-017 订单导出 CSV 中文乱码", [
+        ("u", "> This session works on HQ task T-017: 订单导出 CSV 中文乱码. Read the task card, then reply in three short lines…"),
+        ("", ""), ("", "⏺ Read(~/hq/tasks/T-017-订单导出-csv-中文乱码/TASK.md)"), ("d", "  ⎿  Read 21 lines"), ("", ""),
+        ("", "⏺ 状态：刚从快速记录建的卡，还没开始。"), ("", "  下一步：复现乱码——先看订单导出写 CSV 用的编码。"),
+        ("", "  等你的：没有，你说开始就动手。")], size=24, eid="s05c-term")
+    sc.t(f'tl.set("#{tid}", {{ opacity: 0 }}, 0);')
+    sc.t(f'tl.set("#{tid}-tl > div", {{ opacity: 0 }}, 0);')
+    t_t = t_ns + 0.35
+    sc.t(f'tl.fromTo("#{tid}", {{ opacity: 0, x: 80 }}, {{ opacity: 1, x: 0, duration: 0.45, ease: "power3.out" }}, {t_t});')
+    sc.sfx.append((t_t, "whoosh-short", 0.4, None))
+    sc.cam(t_t, 1180, 520, 1.0, dur=0.6, ease="power2.inOut")
+    sc.t(f'tl.to("#{tid}-tl > div:nth-child(1)", {{ opacity: 1, duration: 0.12 }}, {t_t + 0.3});')
+    t_r = max(sc.at("绑在这张卡上", 0.6), t_t + 1.0)
+    for k in (3, 4):
+        sc.t(f'tl.to("#{tid}-tl > div:nth-child({k})", {{ opacity: 1, duration: 0.12 }}, {t_r + (k - 3) * 0.35:.2f});')
+    t_a = max(sc.at("再向你汇报", -0.4), t_r + 0.9)
+    for k in (6, 7, 8):
+        sc.t(f'tl.to("#{tid}-tl > div:nth-child({k})", {{ opacity: 1, duration: 0.12 }}, {t_a + (k - 6) * 0.4:.2f});')
+    return sc
+
+
 def s06():
     sc = board_scene("s06", 17.5, 0.5, ["drawer", "ask-1", "ask-2", "ask-3", "ask-sent"])
     # the session that asked, off to the left of the board: it gets the answers
@@ -715,7 +806,7 @@ def caption_text(s):
 # ------------------------------------------------------------------ assembly
 def main():
     (HERE / "compositions").mkdir(exist_ok=True)
-    scenes = [s01(), s02(), s03(), s04(), s05(), s05b(), s06(), s06b(), s07(), s08(), s09(), s10(), s11()]
+    scenes = [s01(), s02(), s03(), s04(), s05(), s05b(), s05c(), s06(), s06b(), s07(), s08(), s09(), s10(), s11()]
     start = 0.0
     hosts, audio, caps = [], [], []
     for sc in scenes:

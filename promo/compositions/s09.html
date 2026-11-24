@@ -55,7 +55,7 @@
     tl.set("#s09-cur", { x: 1105.4237288135594, y: 598.8135593220339 }, 0);
     tl.to("#s09-cur", { opacity: 1, duration: 0.2 }, 0.0);
     tl.to("#s09-cur", { x: 724.7, y: 104.4, duration: 0.6, ease: "power2.inOut" }, 0.1);
-    tl.fromTo("#s09-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 0.75);
+    tl.fromTo("#s09-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 0.75);
     tl.to("#s09-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 0.75);
     tl.to("#s09-im-jobs", { opacity: 1, duration: 0.2, ease: "none" }, 0.85);
     tl.set("#s09-im-day2-focus", { opacity: 0 }, 1.05);
@@ -66,7 +66,7 @@
     tl.set("#s09-cur", { x: 1105.4237288135594, y: 466.6101694915254 }, 0);
     tl.to("#s09-cur", { opacity: 1, duration: 0.2 }, 6.596);
     tl.to("#s09-cur", { x: 981.2, y: 288.1, duration: 0.6, ease: "power2.inOut" }, 6.596);
-    tl.fromTo("#s09-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 7.296);
+    tl.fromTo("#s09-rip3", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 7.296);
     tl.to("#s09-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 7.296);
     tl.to("#s09-im-jobs-run", { opacity: 1, duration: 0.2, ease: "none" }, 7.396);
     tl.set("#s09-im-jobs", { opacity: 0 }, 7.596);

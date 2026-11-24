@@ -55,7 +55,7 @@
     tl.set("#s06b-cur", { x: 1105.4237288135594, y: 598.8135593220339 }, 0);
     tl.to("#s06b-cur", { opacity: 1, duration: 0.2 }, 0.0);
     tl.to("#s06b-cur", { x: 597.8, y: 104.4, duration: 0.6, ease: "power2.inOut" }, 0.1);
-    tl.fromTo("#s06b-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out" }, 0.75);
+    tl.fromTo("#s06b-rip2", { scale: 0.3, opacity: 0.95 }, { scale: 1.5, opacity: 0, duration: 0.45, ease: "power2.out", immediateRender: false }, 0.75);
     tl.to("#s06b-cur", { scale: 0.85, duration: 0.06, yoyo: true, repeat: 1, transformOrigin: "0 0" }, 0.75);
     tl.to("#s06b-im-needs-after", { opacity: 1, duration: 0.2, ease: "none" }, 0.85);
     tl.set("#s06b-im-ask-sent", { opacity: 0 }, 1.05);

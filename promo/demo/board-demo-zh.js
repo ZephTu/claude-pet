@@ -180,6 +180,20 @@
     dots[S.next] = { state: "idle", replied: true, context: 21 };
   }
 
+  // 快速记录（只在宣传片里用，英文孪生里没有）：⌃⌥⌘N 记下的一句话被分拣成新任务 T-017，
+  // 和 `hq inbox` 的 task 去向一样——放进项目、加进 Focus、目标写进卡、日志记一笔来源。
+  if (window.DEMO_QN) {
+    const t = {
+      id: "T-017", title: "订单导出 CSV 中文乱码", status: "active", project: "shop-api",
+      workdirs: ["/Users/demo/code/shop-api"], refs: [], sessions: [], next: "", todos: [], asks: [],
+      body: "## 目标\n订单导出成 CSV 时中文是乱码，客户在催，今天修掉。\n\n## 决策记录\n- " + new Date().toISOString().slice(0, 10)
+        + " " + new Date(Date.now() - 60000).toTimeString().slice(0, 8) + ": Created from quick note N-031\n",
+      age_days: 0,
+    };
+    tasks.push(t);
+    board.focus.ids.push("T-017");
+  }
+
   // 把看板和 hq、宠物断开：所有调用都从演示数据里回答，什么都不写。
   window.api = async (op, a) => {
     if (op === "jobs") return JSON.stringify(jobs);
