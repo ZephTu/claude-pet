@@ -2777,16 +2777,23 @@ function secWhen(iso) {
   if (d.toDateString() === now.toDateString()) return hm;
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${hm}`;
 }
+function secFeedTip() {
+  return T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
+    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+}
+function secCloseTip() {
+  return T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",
+    "待办写的是合并或 review 某个 PR 的，PR 合并后勾掉（没合并就关了的标成不做）；写的是关闭、修复、跟进某个 Jira 单子的，单子完成后勾掉；写的是等某个 Jenkins 构建的，构建成功后勾掉。后面还跟着别的步骤的（“合并 #12，然后重装”）不动，你重新打开的也不动。每次勾选都在任务的 Log 里记一行。");
+}
 // The scan (`hq feed all`, a job of its own): Zulip mentions and DMs, and Jira issue updates, go to
 // the quick notes and are sorted there. Its switch, "scan now" and how the last scan went, as rows of
-// class `cls`: "pi" in the ⋯ menu, "ss-row" in the side column.
+// class `cls` for the ⋯ menu (the side column draws its own, in secSide).
 function secFeedItems(st, cls) {
   const f = st.feed || {};
   const hourly = f.kind === "cron" && f.cron === "0 9-19 * * 1-5";
   const when = hourly ? T("weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("as set in Scheduled", "按定时任务的设置");
   const last = f.last;
-  const tip = T("Zulip @-mentions and direct messages, and Jira issues you are assignee, reporter or watcher of: one quick note per conversation or issue. A log line for a task is filed, a todo or a new task waits for your click, the rest is put away.",
-    "Zulip 里 @ 你的消息和私信，以及你是经办人、报告人或关注者的 Jira 单子：每个会话或单子记一条。属于某个任务的记进 Log，待办和新任务等你点一下，其余的收起。");
+  const tip = secFeedTip();
   return `<button class="${cls}" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
     <button class="${cls}" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
@@ -2797,8 +2804,7 @@ function secCloseItems(st, cls) {
   const mins = f.job ? f.everyMinutes : 5;     // not made yet: it will run every 5 minutes
   const every = !f.job || f.kind === "every" ? T(`every ${mins} min`, `每 ${mins} 分钟`) : T("as set in Scheduled", "按定时任务的设置");
   const last = f.last;
-  const tip = T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",
-    "待办写的是合并或 review 某个 PR 的，PR 合并后勾掉（没合并就关了的标成不做）；写的是关闭、修复、跟进某个 Jira 单子的，单子完成后勾掉；写的是等某个 Jenkins 构建的，构建成功后勾掉。后面还跟着别的步骤的（“合并 #12，然后重装”）不动，你重新打开的也不动。每次勾选都在任务的 Log 里记一行。");
+  const tip = secCloseTip();
   return `<button class="${cls}" data-action="secretary-autoclose" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Tick finished todos", "自动勾选完成的待办")}</span><span class="meta">${every}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
     <button class="${cls}" data-action="secretary-autoclose-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Checking…", "检查中…") : T("Check now", "现在查一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
@@ -2900,6 +2906,86 @@ function secRows(m, busy, doing) {
   return rows;
 }
 
+// The side column (wide windows only), in two layers. On top what wants your eyes: what it keeps
+// an eye on and the proposals waiting on your answer (gone when there are none), open by default.
+// Below, folded to one line each until opened: its reports, what it does by itself (the evening
+// report, the Zulip · Jira scan, ticking finished todos: a switch and a run-now each, the details
+// in their tooltips) and the files it remembers. A section's fold is kept per machine.
+const SIDE_OPEN = { watch: true, asks: true, rep: false, auto: false, mem: false };
+function sideFolds() { try { const o = JSON.parse(pref("secSide", "{}")); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; } }
+function sideOpen(k) { const v = sideFolds()[k]; return typeof v === "boolean" ? v : SIDE_OPEN[k]; }
+function toggleSide(k) { const o = sideFolds(); o[k] = !sideOpen(k); savePref("secSide", JSON.stringify(o)); }
+const SI = {
+  watch: '<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>',
+  asks: '<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/><path d="M8 5.5v2M8 9h0"/>',
+  rep: '<path d="M4 1.5h5L12.5 5v9.5H4z"/><path d="M9 1.5V5h3.5M6.3 8.3h4M6.3 10.8h4"/>',
+  auto: '<path d="M9 1.5 3.5 9h4l-1 5.5L12.5 7h-4z"/>',
+  mem: '<path d="M2.5 3.2c2-.8 3.8-.8 5.5.5 1.7-1.3 3.5-1.3 5.5-.5v9.8c-2-.8-3.8-.8-5.5.5-1.7-1.3-3.5-1.3-5.5-.5z"/><path d="M8 3.7v10"/>',
+  moon: '<path d="M13 9.6A5.5 5.5 0 0 1 6.4 3a5.5 5.5 0 1 0 6.6 6.6z"/>',
+  scan: '<path d="M2 9.5 4 3.5h8l2 6V13H2z"/><path d="M2 9.5h3.5l1 1.5h3l1-1.5H14"/>',
+  tick: '<rect x="2" y="2" width="12" height="12" rx="3"/><path d="M5 8.2 7.2 10.4 11 5.8"/>',
+  run: '<path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12.5 1.8v3h-3"/>',
+  pen: '<path d="M10.5 2.5l3 3-8 8h-3v-3z"/>',
+  chev: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+};
+const si = (k) => `<svg viewBox="0 0 16 16" aria-hidden="true">${SI[k]}</svg>`;
+function secSide(m, st, o) {
+  const card = secId() && taskById(secId());
+  const asks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
+  const sideRes = RESOLUTIONS.filter(([r]) => r === "do" || r === "drop");
+  const sec = (k, title, n, sum, inner, extra = "") => {
+    const open = sideOpen(k);
+    return `<section class="ss sx-${k} ${open ? "open" : ""}">
+      <div class="ss-h" data-action="sec-side" data-sec="${k}" role="button" aria-expanded="${open}" title="${open ? T("Fold", "收起") : T("Open", "展开")}">
+        <span class="ss-ic">${si(k)}</span><span class="ttl">${title}</span>${n ? `<span class="cnt">${n}</span>` : ""}
+        <span class="sum">${open ? "" : sum}</span>${extra}<span class="chev">${si("chev")}</span></div>
+      ${open ? `<div class="ss-b">${inner}</div>` : ""}</section>`;
+  };
+  // A watched line starts with its task ("盯 T-030：…"): that becomes a link to the task, the rest
+  // shows two lines until clicked.
+  const full = m.watchFull || (m.watchFull = new Set());
+  const watchItem = (l, i) => {
+    const mm = String(l).match(/^\s*(?:盯\s*)?(T-\d+)\s*[:：]\s*/i);
+    const id = mm ? mm[1].toUpperCase() : "";
+    return `<div class="ss-w ${full.has(l) ? "full" : ""}" data-action="sec-watch-full" data-i="${i}"><div class="tx">${id ? `<span class="tid link" data-action="sec-goto" data-task="${esc(id)}" title="${T("Open this task", "打开这个任务")}">${esc(id)}</span> ` : ""}${esc(mm ? l.slice(mm[0].length) : l)}</div></div>`;
+  };
+  const watch = sec("watch", T("Keeping an eye on", "替你盯着"), o.watch.length, o.watch.length ? "" : T("nothing now", "现在没有"),
+    o.watch.length ? o.watch.map(watchItem).join("") : `<div class="ss-empty">${T("Nothing right now.", "现在没有。")}</div>`);
+  const props = asks.length ? sec("asks", T("Waiting on your answer", "待回应"), asks.length, "", asks.map((a) => `<div class="ss-prop"><div class="t">${esc(askKey(a.text))}</div>
+      <div class="acts">${sideRes.map(([r, label, tip]) => `<button class="pb ${r === "do" ? "yes" : ""}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${ui.resolving.has(a.id) ? "disabled" : ""}>${label}</button>`).join("")}</div></div>`).join("")) : "";
+
+  const r0 = o.reports[0];
+  const writeNow = `<button class="ss-ib" data-action="secretary-report-now" title="${T("Write one now", "让它现在写一份")}" aria-label="${T("Write one now", "让它现在写一份")}" ${o.busy || ui.sending.has(SEC) ? "disabled" : ""}>${si("pen")}</button>`;
+  const reps = sec("rep", T("Reports", "报告"), 0, r0 ? `${esc(r0.date.slice(5))} ${kindWord(r0.kind)} · ${o.dayWord(r0.date)}` : T("none yet", "还没有"),
+    o.reports.length ? o.reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${o.dayWord(r.date)}</span></button>`).join("")
+      : `<div class="ss-empty">${T("None yet — the pen writes one now.", "还没有——点笔让它现在写一份。")}</div>`, writeNow);
+
+  // What it does by itself: one row each — icon, name, run now, switch.
+  const fd = st.feed || {}, ac = st.autoclose || {};
+  const lastLine = (f) => f.last ? `\n${T("Last", "上次")} ${ago(f.last.at)}${f.last.summary ? ` · ${f.last.summary}` : ""}` : "";
+  const runBtn = (action, f, label) => `<button class="ss-ib ${f.running ? "spin" : ""} ${f.last && f.last.failed ? "bad" : ""}" data-action="${action}" ${f.running ? "disabled" : ""}
+      title="${esc((f.running ? T("Running…", "正在跑…") : label) + lastLine(f))}" aria-label="${esc(label)}">${si("run")}</button>`;
+  const row = (icon, label, tip, on, attrs, run) => `<div class="ss-auto"><span class="ai">${si(icon)}</span><span class="lbl" title="${esc(tip)}">${label}</span>${run || `<span class="ss-ib ghost"></span>`}<button class="switch ${on ? "on" : ""}" ${attrs} title="${esc(tip)}" aria-pressed="${on}" aria-label="${esc(label)}"><span></span></button></div>`;
+  const hourly = fd.kind === "cron" && fd.cron === "0 9-19 * * 1-5";
+  const mins = ac.job ? ac.everyMinutes : 5;
+  const evTip = o.sch.reports === false
+    ? T("Scheduled runs use your own prompt now; turning reports on replaces it", "定时运行用的是你在定时任务里写的 prompt；开启报告会替换它")
+    : `${o.when}${T(", weekly on Fridays", "，周五写周报")}${o.sch.next ? T(` · next: ${o.sch.next}`, ` · 下一次：${o.sch.next}`) : ""}`;
+  const autos = [
+    [o.evening, row("moon", T("Evening report", "傍晚写报告"), evTip, o.evening, `data-action="secretary-reports" data-on="${o.sch.reports === false || !o.sch.enabled ? "1" : ""}"`, "")],
+    [fd.enabled, row("scan", T("Scan Zulip · Jira", "扫 Zulip · Jira"), `${hourly ? T("Weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("As set in Scheduled", "按定时任务的设置")}\n${secFeedTip()}`, fd.enabled,
+      `data-action="secretary-feed" data-on="${fd.enabled ? "" : "1"}"`, runBtn("secretary-feed-now", fd, T("Scan now", "现在扫一次"))), fd.last && fd.last.failed],
+    [ac.enabled, row("tick", T("Tick finished todos", "自动勾完成的待办"), `${!ac.job || ac.kind === "every" ? T(`Every ${mins} min`, `每 ${mins} 分钟`) : T("As set in Scheduled", "按定时任务的设置")}\n${secCloseTip()}`, ac.enabled,
+      `data-action="secretary-autoclose" data-on="${ac.enabled ? "" : "1"}"`, runBtn("secretary-autoclose-now", ac, T("Check now", "现在查一次"))), ac.last && ac.last.failed],
+  ];
+  const names = [T("Evening report", "傍晚写报告"), T("Scan Zulip · Jira", "扫 Zulip · Jira"), T("Tick finished todos", "自动勾完成的待办")];
+  const dots = `<span class="dots" title="${esc(autos.map(([on], i) => `${names[i]}: ${on ? T("on", "开") : T("off", "关")}`).join("\n"))}">${autos.map(([on, , bad]) => `<i class="${bad ? "bad" : on ? "on" : ""}"></i>`).join("")}</span>`;
+  const auto = sec("auto", T("Runs by itself", "自动做的事"), 0, dots, autos.map(([, h]) => h).join(""));
+
+  const memo = o.mem.length ? sec("mem", T("What it remembers", "它记得的"), 0, "", `<div class="ss-mems">${o.mem.map((f) => `<button class="ss-mem" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${esc(T("Open it to edit", "打开编辑") + " · " + f)}">${esc(o.MEM[f] || f)}</button>`).join("")}</div>`) : "";
+  return `<aside class="sec-side">${watch}${props}<div class="ss-zone">${T("Reports & settings", "报告和设置")}</div>${reps}${auto}${memo}</aside>`;
+}
+
 // The window. Same data as Peek (the session's transcript, its card, its job), drawn as a chat.
 function drawSecretary(toBottom) {
   const m = ui.modal, st = m.sec || {};
@@ -2965,24 +3051,7 @@ function drawSecretary(toBottom) {
       <div class="watch-h" data-action="sec-watch"><span class="eye">◉</span><span>${T(`Keeping an eye on ${watch.length} thing${watch.length === 1 ? "" : "s"}`, `替你盯着 ${watch.length} 件事`)}${m.watchOpen ? "" : ` · ${esc(watch[0])}`}</span><span class="car">${m.watchOpen ? "▴" : "▾"}</span></div>
       ${m.watchOpen ? `<ul>${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>` : "";
 
-  // The side column (wide windows only): what it watches, proposals still open, its reports,
-  // the Zulip · Jira scan and the files it remembers — the same things the menus above hold, in view.
-  const card = secId() && taskById(secId());
-  const secAsks = (card ? card.asks || [] : []).filter((a) => a.state === "open" && !isLater(a));
-  const sideRes = RESOLUTIONS.filter(([r]) => r === "do" || r === "drop");
-  const sideSec = (title, n, inner) => `<section class="ss"><div class="ss-h">${title}${n ? `<span class="meta">${n}</span>` : ""}</div>${inner}</section>`;
-  const sideHtml = `<aside class="sec-side">
-    ${sideSec(T("Keeping an eye on", "替你盯着"), watch.length, watch.length ? `<ul class="ss-watch">${watch.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : `<div class="ss-empty">${T("Nothing right now.", "现在没有。")}</div>`)}
-    ${sideSec(T("Waiting on your answer", "待回应建议"), secAsks.length, secAsks.length ? secAsks.map((a) => `<div class="ss-prop"><div class="t">${esc(askKey(a.text))}</div>
-        <div class="acts">${sideRes.map(([r, label, tip]) => `<button class="pb ${r === "do" ? "yes" : ""}" title="${esc(tip)}" data-action="resolve" data-id="${esc(a.id)}" data-res="${r}" ${ui.resolving.has(a.id) ? "disabled" : ""}>${label}</button>`).join("")}</div></div>`).join("")
-      : `<div class="ss-empty">${T("No proposal waiting.", "没有等你回应的建议。")}</div>`)}
-    ${sideSec(T("Reports", "报告"), reports.length, `${reports.slice(0, 6).map((r) => `<button class="ss-row" data-action="open" data-path="${esc(r.path)}" title="${T("Open it to edit — it learns from your edits", "打开编辑——它会照你的修改调整写法")}">${esc(r.date.slice(5))} ${kindWord(r.kind)}<span class="meta">${dayWord(r.date)}</span></button>`).join("")}
-      ${evening.replace('class="pi"', 'class="ss-row"')}
-      <button class="ss-row ss-act" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button>`)}
-    ${sideSec("Zulip · Jira", 0, secFeedItems(st, "ss-row"))}
-    ${sideSec(T("Finished todos", "完成的待办"), 0, secCloseItems(st, "ss-row"))}
-    ${mem.length ? sideSec(T("What it remembers", "它记得的"), 0, mem.map((f) => `<button class="ss-row" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")) : ""}
-  </aside>`;
+  const sideHtml = secSide(m, st, { watch, reports, sch, when, mem, MEM, busy, evening: sch.reports !== false && sch.enabled, dayWord });
 
   const key = "msg:" + SEC;
   const keepDraft = box.querySelector(".c-foot textarea") ? null : draft(key);
@@ -2993,6 +3062,7 @@ function drawSecretary(toBottom) {
     ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>`
     : `<button class="sendc" data-action="send" data-session="${SEC}" ${ui.sending.has(SEC) || st.waking ? "disabled" : ""} title="${T("Send (Enter)", "发送（回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
 
+  const sideTop = (box.querySelector(".sec-side") || {}).scrollTop || 0;   // redrawn below: keep its place
   box.innerHTML = `<div class="panel sec-chat" role="dialog" aria-label="${T("Secretary", "秘书")}">
     <div class="c-head">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
@@ -3013,6 +3083,8 @@ function drawSecretary(toBottom) {
   </div>`;
   box.hidden = false;
   fitAllGrow(box);
+  const side = box.querySelector(".sec-side");
+  if (side) side.scrollTop = sideTop;
   if (typing) {
     const ta = [...box.querySelectorAll("textarea")].find((x) => x.dataset.key === typing[2]);
     if (ta) { ta.focus(); ta.setSelectionRange(typing[0], typing[1]); }
@@ -3882,6 +3954,15 @@ document.addEventListener("click", async (ev) => {
     }
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
+    case "sec-goto": closePeek(); return revealTask(d.task);   // the secretary's window would cover the drawer
+    case "sec-side": toggleSide(d.sec); return drawPeek(false);
+    case "sec-watch-full": {
+      const l = ((ui.modal && ui.modal.sec && ui.modal.sec.state) || [])[+d.i];
+      if (l === undefined || String(window.getSelection() || "").trim()) return;
+      const f = ui.modal.watchFull || (ui.modal.watchFull = new Set());
+      if (f.has(l)) f.delete(l); else f.add(l);
+      return drawPeek(false);
+    }
     case "note-move": return noteMove(d.id, JSON.parse(d.dest));
     case "note-to-task": {
       // What the picker shows, preselected or chosen.

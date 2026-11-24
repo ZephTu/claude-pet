@@ -1376,28 +1376,65 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 #modal .panel.sec-chat { width: min(1120px, 100%); }
 .sec-chat .sec-wrap { flex: 1; min-height: 0; display: flex; }
 .sec-chat .sec-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.sec-side { width: 300px; flex: none; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 6px 0 16px; font-size: 12.5px; }
-.sec-side .ss { padding: 10px 14px 4px; }
-.sec-side .ss + .ss { border-top: 1px solid var(--line); }
-.sec-side .ss-h { display: flex; align-items: baseline; gap: 6px; font: 650 12.5px/1.3 var(--round); color: var(--dim); margin-bottom: 6px; }
-.sec-side .ss-empty { color: var(--faint); padding: 2px 0 6px; }
-.sec-side .ss-watch { margin: 0 0 6px; padding-left: 16px; display: grid; gap: 4px; color: var(--text); line-height: 1.5; }
-.sec-side .ss-watch li::marker { color: var(--accent); }
-.sec-side .ss-prop { background: var(--wash-amber); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+.sec-side { width: 300px; flex: none; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; overflow-x: hidden;
+  padding: 10px 10px 16px; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; }
+.sec-side svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* Each section a card: an icon, its name, a count, a one-line summary while folded, a chevron. */
+.sec-side .ss { flex: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.sec-side .ss-h { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 9px; cursor: pointer; user-select: none; font: 650 12.5px/1.3 var(--round); color: var(--text); border-radius: 10px; }
+.sec-side .ss-h:hover .chev { color: var(--text); }
+.sec-side .ss-ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; color: var(--ic); background: var(--icw); }
+.sec-side .sx-watch { --ic: var(--teal); --icw: var(--wash-teal); }
+.sec-side .sx-asks { --ic: var(--amber); --icw: var(--wash-amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.sec-side .sx-rep { --ic: var(--blue); --icw: var(--wash-blue); }
+.sec-side .sx-auto { --ic: var(--violet); --icw: color-mix(in srgb, var(--violet) 16%, transparent); }
+.sec-side .sx-mem { --ic: var(--accent); --icw: color-mix(in srgb, var(--accent) 16%, transparent); }
+.sec-side .ss-h .ttl { white-space: nowrap; }
+.sec-side .ss-h .cnt { font: 600 11px/1 var(--round); color: var(--dim); background: var(--line); border-radius: 9px; padding: 3px 6px; }
+.sec-side .sx-asks .ss-h .cnt { color: var(--on-accent); background: var(--amber); }
+.sec-side .ss-h .sum { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: 400 11.5px/1.3 var(--round); }
+.sec-side .ss-h .chev { color: var(--faint); display: grid; place-items: center; transition: transform .15s; }
+.sec-side .ss-h .chev svg { width: 12px; height: 12px; }
+.sec-side .ss.open .ss-h .chev { transform: rotate(90deg); }
+.sec-side .ss-b { padding: 0 10px 10px; }
+.sec-side .ss-zone { margin: 6px 2px -2px; font: 600 11px/1.2 var(--round); color: var(--faint); letter-spacing: .04em; }
+.sec-side .ss-empty { color: var(--faint); padding: 2px 0; }
+/* What it watches: a small card each, its task a link, two lines until clicked. */
+.sec-side .ss-w { background: var(--panel); border-radius: 7px; padding: 6px 8px; line-height: 1.45; color: var(--text); cursor: pointer; overflow-wrap: anywhere; }
+.sec-side .ss-w .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sec-side .ss-w + .ss-w { margin-top: 5px; }
+.sec-side .ss-w.full .tx { display: block; }
+.sec-side .ss-w .tid { color: var(--teal); background: var(--wash-teal); border-radius: 5px; padding: 0 5px; font-size: 11px; }
+.sec-side .ss-w .tid:hover { text-decoration: underline; }
+.sec-side .ss-prop { background: var(--wash-amber); border-radius: 8px; padding: 8px 10px; }
+.sec-side .ss-prop + .ss-prop { margin-top: 6px; }
 .sec-side .ss-prop .t { line-height: 1.5; overflow-wrap: anywhere; }
 .sec-side .ss-prop .acts { display: flex; gap: 6px; margin-top: 6px; }
 .sec-side .ss-prop .pb { padding: 2px 10px; }
 .sec-side .ss-row { display: flex; width: calc(100% + 12px); margin: 0 -6px; align-items: center; gap: 8px; padding: 5px 6px; border: 0; border-radius: 7px;
   background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.sec-side .ss-row:hover:not(:disabled) { background: var(--panel-2); }
-.sec-side .ss-row:disabled { color: var(--faint); cursor: default; }
+.sec-side .ss-row:hover:not(:disabled) { background: var(--panel-3); }
 .sec-side .ss-row .meta { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
-.sec-side .ss-row .lbl { white-space: nowrap; }
-.sec-side .ss-row .meta + .switch { margin-left: 0; }
-.sec-side .ss-row .switch { margin-left: auto; pointer-events: none; flex: none; }
-.sec-side .ss-act { color: var(--accent); }
-.sec-side .ss-row .meta.one { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.sec-side .ss-row .meta.bad { color: var(--red); }
+/* A small icon button: write a report now, run a job now. A red dot: its last run failed. */
+.sec-side .ss-ib { position: relative; width: 24px; height: 24px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--dim); cursor: pointer; }
+.sec-side .ss-ib:hover:not(:disabled) { background: var(--line); color: var(--text); }
+.sec-side .ss-ib:disabled { opacity: .4; cursor: default; }
+.sec-side .ss-ib.ghost { visibility: hidden; }
+.sec-side .ss-ib.bad::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.sec-side .ss-ib.spin svg { animation: dot-turn 1s linear infinite; }
+.sec-side .ss-auto { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.sec-side .ss-auto .ai { color: var(--dim); display: grid; place-items: center; }
+.sec-side .ss-auto .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.sec-side .ss-auto .switch { flex: none; }
+.sec-side .dots { display: inline-flex; gap: 4px; vertical-align: middle; }
+.sec-side .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.sec-side .dots i.on { background: var(--teal); }
+.sec-side .dots i.bad { background: var(--red); }
+.sec-side .ss-mems { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sec-side .ss-mem { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sec-side .ss-mem:hover { border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .sec-side .ss-ib.spin svg { animation: none; } .sec-side .ss-h .chev { transition: none; } }
 @media (min-width: 901px) { .sec-chat .sec-main > .watch { display: none; } }
 @media (max-width: 900px) { .sec-side { display: none; } }
 @media (min-width: 901px) { .sec-chat .bub { max-width: min(100%, 72ch); } }
