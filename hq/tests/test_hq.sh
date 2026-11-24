@@ -1540,7 +1540,7 @@ python3 "$JS/server.py" "$JS" & JPID=$!; trap 'kill "$JPID" "$ZPID" 2>/dev/null 
 for _ in $(seq 50); do [ -s "$JS/port" ] && break; sleep 0.1; done
 export HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok
 "$HQ" feed jira --site "http://127.0.0.1:$(cat "$JS/port")" --dry-run | grep -q "jira: 2 issues (dry run" && [ ! -e "$T/root/secretary/feed/jira" ] && ok "feed jira --dry-run: reads, saves nothing" || fail "jira dry run"
-grep -q '"site": "http://127.0.0.1:' "$T/root/hq.json" && ok "feed jira --site is remembered in hq.json" || fail "jira site saved"
+grep -q '"jira": "http://127.0.0.1:' "$HOME/.claude/hq/config.json" && ! grep -q 127.0.0.1 "$T/root/hq.json" && ok "feed jira --site is remembered in this machine's config.json, not hq.json" || fail "jira site saved"
 JJ="$("$HQ" feed jira --no-sort --json)"
 echo "$JJ" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["conversations"]==2 and len(r["items"])==2, r' && ok "feed jira: one item per issue; an issue with only your own changes adds nothing" || fail "jira items"
 hqi inbox --json | python3 -c '
@@ -1868,6 +1868,101 @@ assert [x["kind"] for x in f]==["over-budget"] and f[0]["settled"] is None, f' &
   && "$HQ" report weekly --no-gh | grep -q "^## Tidying the board" && ! "$HQ" report daily --no-gh | grep -q "Tidying" \
   && ok "the weekly report's facts end with the board's tidying; the daily's don't" || fail "garden in weekly report"
 for x in "$G1" "$G2" "$G3" "$G4" "$G5"; do "$HQ" set "$x" status=abandoned >/dev/null; done
+
+# ---- hq autoclose: todos closed by their PR, Jira issue or Jenkins build
+AC="$T/ac"; mkdir -p "$AC/bin"
+cat > "$AC/bin/gh" <<'SH'
+#!/bin/sh
+# gh pr view <url> --json …: the state from $AC_STATES ("<url> <STATE>" lines); unknown → error
+s=$(grep -F "$3 " "$AC_STATES" | head -1 | cut -d' ' -f2)
+[ -n "$s" ] || { echo "no pull request found" >&2; exit 1; }
+n=${3##*/}; echo "{\"number\":$n,\"title\":\"t$n\",\"state\":\"$s\",\"mergedAt\":null,\"isDraft\":false}"
+SH
+chmod +x "$AC/bin/gh"
+cat > "$AC/server.py" <<'PY'
+import http.server, json, sys, os
+D = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        st = json.load(open(os.path.join(D, "states.json")))
+        if self.headers.get("Authorization") is None:
+            return self.reply(401, {})
+        p = self.path.split("?")[0]
+        if p.startswith("/rest/api/2/issue/"):
+            k = p.rsplit("/", 1)[1]
+            if k not in st:
+                return self.reply(404, {"errorMessages": ["Issue does not exist"]})
+            cat = "done" if st[k] in ("Done", "Closed") else "indeterminate"
+            return self.reply(200, {"key": k, "fields": {"status": {"name": st[k], "statusCategory": {"key": cat}}}})
+        if p.endswith("/api/json"):
+            b = p[:-len("/api/json")]
+            if b not in st:
+                return self.reply(404, {})
+            r = st[b]
+            return self.reply(200, {"building": r == "RUNNING", "result": None if r == "RUNNING" else r,
+                                    "fullDisplayName": b.split("/")[2] + " #" + b.rsplit("/", 1)[1]})
+        self.reply(404, {})
+    def reply(self, code, d):
+        b = json.dumps(d).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(os.path.join(D, "port"), "w").write(str(s.server_port))
+s.serve_forever()
+PY
+echo '{"QA-9": "Done", "QA-10": "In Progress", "/job/release_test/12": "SUCCESS", "/job/release_test/13": "FAILURE", "/job/release_test/14": "RUNNING", "/job/release_test/21": "SUCCESS"}' > "$AC/states.json"
+python3 "$AC/server.py" "$AC" & APID=$!; trap 'kill "$APID" "$JPID" "$ZPID" 2>/dev/null || true; rm -rf "$T"' EXIT
+for _ in $(seq 50); do [ -s "$AC/port" ] && break; sleep 0.1; done
+AS="http://127.0.0.1:$(cat "$AC/port")"
+printf '%s\n' "https://github.com/o/r/pull/5 MERGED" "https://github.com/o/r/pull/6 CLOSED" "https://github.com/o/r/pull/7 OPEN" > "$AC/prs"
+acq() { env PATH="$AC/bin:$PATH" AC_STATES="$AC/prs" HQ_JIRA_SITE="$AS" HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok HQ_JENKINS_SITE="$AS" HQ_JENKINS_USER=ci HQ_JENKINS_TOKEN=jt "$HQ" "$@"; }
+A1="$("$HQ" new "Autoclose me" --no-focus | head -1)"
+"$HQ" ref add "$A1" "https://github.com/o/r/pull/6" >/dev/null; "$HQ" ref add "$A1" "$AS/job/release_test/21/" >/dev/null
+for t in "@me review and merge https://github.com/o/r/pull/5/files" "@claude review #6" "@me 跟进 QA-9 里的问题" \
+         "@me verify QA-10 (UTF-8 too)" "@me 等 $AS/job/release_test/12/console 跑完" "@me wait for $AS/job/release_test/13/" \
+         "@me 合并 #7，等 $AS/job/release_test/14/ 跑完" "@me no link here" "@me merge #5, then reinstall" \
+         "@me comment the result on https://github.com/o/r/pull/5" "@me watch #21"; do "$HQ" addtodo "$A1" "$t" >/dev/null; done
+"$HQ" set "$A1" status=waiting-on-me >/dev/null
+CARD="$(ls "$T"/root/tasks/"$A1"-*/TASK.md)"; cp "$CARD" "$AC/before"
+acq autoclose --dry-run --json | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+c={x["text"][:12]:x["state"] for x in r["closed"]}
+assert r["todos"]==8 and r["dry"] and r["errors"]==[], r
+assert c=={"review and m":"done","review #6":"drop","跟进 QA-9 里的问题":"done","等 http://127":"done","watch #21":"done"}, c
+w={x["text"][:8]:x["why"] for x in r["waiting"]}
+assert "QA-10 In Progress" in w["verify Q"] and "failure" in w["wait for"] and "running" in w["合并 #7，等 "] and "o/r#7 open" in w["合并 #7，等 "], w' \
+  && cmp -s "$CARD" "$AC/before" && ok "autoclose --dry-run: merged PR (link or #n via refs), Done issue, passed build (link or #n via the card's links) close; open, failed, running wait; nothing written" || fail "autoclose dry run"
+acq autoclose | tail -1 | grep -q "^8 todos with links → closed 4, dropped 1$" && ok "autoclose: the job's last line counts what it closed" || fail "autoclose summary"
+grep -q "\[x\] @me review and merge" "$CARD" && grep -q "\[-\] @claude review #6" "$CARD" && grep -q "\[x\] @me 跟进 QA-9" "$CARD" \
+  && grep -q "\[ \] @me verify QA-10" "$CARD" && grep -q "\[ \] @me wait for" "$CARD" && grep -q "\[ \] @me no link here" "$CARD" \
+  && ok "autoclose ticks and drops on the card; the rest stay open" || fail "autoclose card"
+grep -q "\[ \] @me merge #5, then reinstall" "$CARD" && grep -q "\[ \] @me comment the result on" "$CARD" \
+  && ok "autoclose leaves a todo with a step after the merge, or not about merging, open" || fail "autoclose verbs"
+grep -q "auto-closed todo #1 (PR o/r#5 merged): review and merge .* — reopen it on the board or with hq todo $A1 1 open" "$CARD" \
+  && grep -q "auto-dropped todo #2 (PR o/r#6 closed unmerged)" "$CARD" && grep -q "todo #1 → done (auto: PR o/r#5 merged)" "$(dirname "$CARD")/HISTORY.md" \
+  && ok "autoclose logs why on the card and the tick in HISTORY.md" || fail "autoclose log"
+"$HQ" todo "$A1" 1 open >/dev/null
+acq autoclose --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); assert r["closed"]==[] and [x["text"][:6] for x in r["reopened"]]==["review"], r' \
+  && grep -q "\[ \] @me review and merge" "$CARD" && ok "autoclose leaves a todo you reopened alone" || fail "autoclose reopened"
+python3 - "$AC/states.json" <<'PY'
+import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["QA-10"] = "Done"; d["/job/release_test/14"] = "SUCCESS"; json.dump(d, open(p, "w"))
+PY
+sed -i '' 's#pull/7 OPEN#pull/7 MERGED#' "$AC/prs" 2>/dev/null || sed -i 's#pull/7 OPEN#pull/7 MERGED#' "$AC/prs"
+acq autoclose >/dev/null && grep -q "\[x\] @me verify QA-10" "$CARD" && grep -q "\[x\] @me 合并 #7" "$CARD" && grep -q "\[ \] @me wait for" "$CARD" \
+  && ok "autoclose: a todo naming several things closes once all are finished (UTF-8 isn't an issue); a failed build stays open" || fail "autoclose all links"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert "/job/release_test/13" in "".join(s["final"]) and not any("QA-" in k for k in s["final"]), s["final"]' \
+  "$T/root/secretary/autoclose.json" && ok "autoclose remembers finished builds and PRs, not issues (they reopen)" || fail "autoclose final"
+"$HQ" addtodo "$A1" "@me wait for build $AS/job/release_test/15/" >/dev/null
+acq autoclose >/dev/null 2>&1; "$HQ" addtodo "$A1" "@me watch $AS/job/release_test/16/" >/dev/null; env PATH="$AC/bin:$PATH" AC_STATES="$AC/prs" HQ_JIRA_SITE="$AS" HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok HQ_JENKINS_SITE="$AS" HQ_JENKINS_USER=nobody-here HQ_JENKINS_TOKEN= \
+  HOME="$HOME" "$HQ" autoclose > "$AC/out" 2>&1 && fail "autoclose without a Jenkins token should fail" || true
+grep -q "jenkins: no Jenkins API token in the keychain" "$AC/out" \
+  && ok "autoclose: a source without credentials fails the run and says how to set it up" || fail "autoclose no token: $(cat "$AC/out")"
+grep -q "\[ \] @me wait for build" "$CARD" && ok "a build that is gone (404) leaves its todo open" || fail "autoclose 404 build"
+"$HQ" site jenkins jenkins.example.com | grep -q "^jenkins: https://jenkins.example.com$" && grep -q '"jenkins": "https://jenkins.example.com"' "$HOME/.claude/hq/config.json" \
+  && "$HQ" site jenkins - | grep -q "^jenkins: -$" && ok "hq site keeps a site in this machine's config.json, and forgets it" || fail "hq site"
+"$HQ" set "$A1" status=done >/dev/null
+kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null || true
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

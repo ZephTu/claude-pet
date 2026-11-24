@@ -2832,6 +2832,18 @@ function secFeedItems(st, cls) {
   return `<button class="${cls}" data-action="secretary-feed" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Scan into quick notes", "扫进记一笔")}</span><span class="meta">${when}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
     <button class="${cls}" data-action="secretary-feed-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Scanning…", "扫描中…") : T("Scan now", "现在扫一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
 }
+// Closing finished todos (`hq autoclose`, a job of its own, every 5 minutes): a todo about merging a
+// PR, closing a Jira issue or waiting for a Jenkins build is ticked once that is done. Rows as above.
+function secCloseItems(st, cls) {
+  const f = st.autoclose || {};
+  const mins = f.job ? f.everyMinutes : 5;     // not made yet: it will run every 5 minutes
+  const every = !f.job || f.kind === "every" ? T(`every ${mins} min`, `每 ${mins} 分钟`) : T("as set in Scheduled", "按定时任务的设置");
+  const last = f.last;
+  const tip = T("A todo about merging or reviewing a PR is ticked once the PR merged (dropped if it was closed unmerged); one about closing, fixing or following up a Jira issue once the issue is done; one about waiting for a Jenkins build once it passed. A todo with a step after that (\"merge #12, then reinstall\") is left alone, and so is one you reopen. Each tick is a line in the task's log.",
+    "待办写的是合并或 review 某个 PR 的，PR 合并后勾掉（没合并就关了的标成不做）；写的是关闭、修复、跟进某个 Jira 单子的，单子完成后勾掉；写的是等某个 Jenkins 构建的，构建成功后勾掉。后面还跟着别的步骤的（“合并 #12，然后重装”）不动，你重新打开的也不动。每次勾选都在任务的 Log 里记一行。");
+  return `<button class="${cls}" data-action="secretary-autoclose" data-on="${f.enabled ? "" : "1"}" title="${esc(tip)}"><span class="lbl">${T("Tick finished todos", "自动勾选完成的待办")}</span><span class="meta">${every}</span><span class="switch ${f.enabled ? "on" : ""}"><span></span></span></button>
+    <button class="${cls}" data-action="secretary-autoclose-now" ${f.running ? "disabled" : ""}><span class="lbl">${f.running ? T("Checking…", "检查中…") : T("Check now", "现在查一次")}</span>${last ? `<span class="meta one ${last.failed ? "bad" : ""}" title="${esc(last.summary || "")}">${T("last", "上次")} ${ago(last.at)}${last.summary ? ` · ${esc(last.summary)}` : ""}</span>` : ""}</button>`;
+}
 const localDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const kindWord = (k) => (k === "weekly" ? T("Weekly report", "周报") : T("Daily report", "日报"));
 
@@ -2985,7 +2997,7 @@ function drawSecretary(toBottom) {
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
     : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
-  const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}
+  const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}<hr><div class="ph">${T("Finished todos", "完成的待办")}</div>${secCloseItems(st, "pi")}
     ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
   const ibtn = (pop, label, svg) => `<div class="popwrap"><button class="ibtn" data-action="sec-pop" data-pop="${pop}" aria-expanded="${m.pop === pop}" aria-label="${label}" title="${label}">${svg}</button>${m.pop === pop ? (pop === "rep" ? repPop : morePop) : ""}</div>`;
@@ -3010,6 +3022,7 @@ function drawSecretary(toBottom) {
       ${evening.replace('class="pi"', 'class="ss-row"')}
       <button class="ss-row ss-act" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button>`)}
     ${sideSec("Zulip · Jira", 0, secFeedItems(st, "ss-row"))}
+    ${sideSec(T("Finished todos", "完成的待办"), 0, secCloseItems(st, "ss-row"))}
     ${mem.length ? sideSec(T("What it remembers", "它记得的"), 0, mem.map((f) => `<button class="ss-row" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Open it to edit", "打开编辑")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")) : ""}
   </aside>`;
 
@@ -3788,7 +3801,7 @@ document.addEventListener("click", async (ev) => {
   }
   // The secretary's menus close on any click but their own button's, or the evening report's
   // or the scan's switch (you see it flip).
-  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
+  if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed", "secretary-autoclose"].includes(el.dataset.action))) {
     ui.modal.pop = null;
     drawPeek(false);   // (an item clicked in it still acts: its dataset outlives the redraw)
   }
@@ -4040,6 +4053,12 @@ document.addEventListener("click", async (ev) => {
       catch (e) { return toast(String(e.message || e), true); }
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
       return toast(d.action === "secretary-feed-now" ? T("Scanning…", "正在扫描…") : d.on === "1" ? T("Scan on", "扫描已开启") : T("Scan off", "扫描已关闭"));
+    case "secretary-autoclose":
+    case "secretary-autoclose-now":
+      try { ui.secretary = await apiObj(d.action, { on: d.on === "1" }); }
+      catch (e) { return toast(String(e.message || e), true); }
+      if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
+      return toast(d.action === "secretary-autoclose-now" ? T("Checking…", "正在检查…") : d.on === "1" ? T("Auto-tick on", "自动勾选已开启") : T("Auto-tick off", "自动勾选已关闭"));
     case "secretary-report-now":
       return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
     case "secretary-stop":

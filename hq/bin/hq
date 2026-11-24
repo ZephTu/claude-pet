@@ -2959,7 +2959,9 @@ complete destination (never "skip")."""
 
 
 class FeedError(Exception):
-    pass
+    def __init__(self, msg, code=None):
+        super().__init__(msg)
+        self.code = code        # the HTTP status, when the error is one
 
 
 def feed_dir():
@@ -3019,6 +3021,54 @@ def zulip_conf():
     if not re.match(r"^https?://", site):
         site = "https://" + site
     return {"email": email, "key": key, "site": site.rstrip("/"), "path": path}
+
+
+# ---- sites: where Jira and Jenkins are. This machine's own settings, in ~/.claude/hq/config.json
+# (not the HQ root's hq.json, which may be shared): {"sites": {"jira": URL, "jenkins": URL}}.
+SITE_SERVICES = ("jira", "jenkins")
+
+
+def private_config():
+    c = load_json(CONFIG, {})
+    return c if isinstance(c, dict) else {}
+
+
+def site_setting(name):
+    """The site of a service, "https://host" without a trailing slash, or "": $HQ_<NAME>_SITE,
+    else this machine's config.json, else hq.json's "feed" section (where `hq feed jira --site`
+    kept it before)."""
+    sites = private_config().get("sites")
+    site = (os.environ.get(f"HQ_{name.upper()}_SITE") or (sites.get(name) if isinstance(sites, dict) else "")
+            or (feed_config(name).get("site") if name == "jira" else "") or "")
+    site = str(site).strip().rstrip("/")
+    if site and not re.match(r"^https?://", site):
+        site = "https://" + site
+    return site
+
+
+def set_site(name, url):
+    """Keeps a site (or forgets it, url "") in this machine's config.json."""
+    url = str(url).strip().rstrip("/")
+    if url and not re.match(r"^https?://", url):
+        url = "https://" + url
+    if url and not URL_SPLIT_RE.match(url):
+        die(f"not a URL: {url}")
+    cfg = private_config()
+    sites = cfg.get("sites") if isinstance(cfg.get("sites"), dict) else {}
+    if url:
+        sites[name] = url
+    else:
+        sites.pop(name, None)
+    cfg["sites"] = sites
+    atomic_write(CONFIG, json.dumps(cfg, ensure_ascii=False, indent=1) + "\n")
+    return url
+
+
+def cmd_site(args):
+    if args.service and args.url is not None:
+        set_site(args.service, "" if args.url in ("-", "none") else args.url)
+    for name in ([args.service] if args.service else SITE_SERVICES):
+        print(f"{name}: {site_setting(name) or '-'}")
 
 
 def feed_open(url, user, secret, **headers):
@@ -3245,16 +3295,13 @@ JIRA_OVERLAP = 600             # seconds each scan re-reads before the cursor (s
 
 
 def jira_conf():
-    """site, email and API token: the site from $HQ_JIRA_SITE or "feed": {"jira": {"site": …}} in
-    hq.json (None: Jira isn't set up); the token from $HQ_JIRA_TOKEN (with $HQ_JIRA_EMAIL) or the
-    login keychain, service "hq-jira" (or "keychain" in hq.json), whose account is the email.
-    The token stays there; nothing copies it."""
+    """site, email and API token: the site from site_setting("jira") (None: Jira isn't set up);
+    the token from $HQ_JIRA_TOKEN (with $HQ_JIRA_EMAIL) or the login keychain, service "hq-jira"
+    (or "keychain" in hq.json), whose account is the email. The token stays there; nothing copies it."""
     c = feed_config("jira")
-    site = (os.environ.get("HQ_JIRA_SITE") or c.get("site") or "").strip()
+    site = site_setting("jira")
     if not site:
         return None
-    if not re.match(r"^https?://", site):
-        site = "https://" + site
     email = (os.environ.get("HQ_JIRA_EMAIL") or c.get("email") or "").strip()
     token = os.environ.get("HQ_JIRA_TOKEN") or ""
     service = c.get("keychain") or "hq-jira"
@@ -3293,7 +3340,7 @@ def jira_get(conf, path, **params):
             msg = e.reason
         if e.code == 401:
             msg = f"{msg or 'unauthorized'} (check the API token and the email)"
-        raise FeedError(f"Jira {path}: HTTP {e.code} {msg}")
+        raise FeedError(f"Jira {path}: HTTP {e.code} {msg}", e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise FeedError(f"Jira {path}: {getattr(e, 'reason', e)}")
 
@@ -3432,7 +3479,7 @@ def feed_configured(source):
     if source == "zulip":
         path = os.environ.get("HQ_ZULIPRC") or feed_config("zulip").get("zuliprc") or "~/.zuliprc"
         return os.path.exists(os.path.expanduser(path))
-    return bool((os.environ.get("HQ_JIRA_SITE") or feed_config("jira").get("site") or "").strip())
+    return bool(site_setting("jira"))
 
 
 def feed_ready(source):
@@ -3441,7 +3488,7 @@ def feed_ready(source):
         if source == "zulip":
             zulip_conf()
         elif not jira_conf():
-            return "no site (\"feed\": {\"jira\": {\"site\": …}} in hq.json)"
+            return "no site (hq site jira URL)"
     except FeedError as e:
         return str(e)
     return None
@@ -3487,14 +3534,7 @@ def cmd_feed(args):
     if args.site:
         if args.action != "jira":
             die("--site is for hq feed jira")
-        cfg = load_json(root_config_path(), {})
-        cfg = cfg if isinstance(cfg, dict) else {}
-        if not isinstance(cfg.get("feed"), dict):
-            cfg["feed"] = {}
-        jcfg = cfg["feed"].get("jira") if isinstance(cfg["feed"].get("jira"), dict) else {}
-        site = args.site.strip().rstrip("/")
-        cfg["feed"]["jira"] = dict(jcfg, site=site if re.match(r"^https?://", site) else "https://" + site)
-        atomic_write(root_config_path(), json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
+        set_site("jira", args.site)
     sources = [s for s in FEED_SOURCES if feed_configured(s)] if args.action == "all" else [args.action]
     if args.action == "all" and not sources:
         die("no feed is set up: see hq feed status")
@@ -6416,6 +6456,344 @@ def cmd_garden(args):
     print(json.dumps(g, ensure_ascii=False) if args.json else garden_text(g))
 
 
+# ---------------------------------------------------------------- autoclose: todos settled outside
+# An open todo on an open card that names a GitHub PR, a Jira issue or a Jenkins build is closed
+# once what it names is finished: done when the PR merged, the issue reached a Done status, the
+# build passed; dropped when the PR was closed unmerged. A todo naming several waits for all of
+# them. A failed or aborted build leaves the todo alone: what to do about it is the user's call.
+# Every close is a log line on the card saying why and how to reopen it; a todo the user reopened
+# after a close is never closed again.
+#
+# A link counts only when the todo is about what finishing it means — merging or reviewing the PR,
+# closing or fixing the issue, waiting for the build (AUTOCLOSE_VERBS) — and the todo has no step
+# after it ("merge #101, then reinstall"; AUTOCLOSE_AFTER): "comment the result on PR #9" or
+# "delete the cluster of #9's runs" are not done because #9 merged.
+#
+# What a todo names: a GitHub PR link, or `#123` — a Jenkins build of that number among the card's
+# links (refs and HISTORY.md, where build links go) when the todo waits for a build, else the PR of
+# that number among its refs, else in the one repository its refs' PRs (or, with none, its
+# workdirs' GitHub remotes) are in;
+# a Jira key (ABC-123) or browse link, on the Jira site; a build link on the Jenkins site.
+# Sites: `hq site`. Credentials stay in the keychain: "hq-jira" (account: the Jira email),
+# "hq-jenkins" (account: the Jenkins user name); PRs go through `gh`.
+AUTOCLOSE_HASH_RE = re.compile(r"(?<![\w/&#])#([0-9]+)\b")
+AUTOCLOSE_KEY_RE = re.compile(r"(?<![\w/.-])([A-Z][A-Z0-9]+-[0-9]+)\b")
+AUTOCLOSE_GH_PR_RE = re.compile(r"^https://github\.com/([^/]+/[^/]+)/pull/([0-9]+)$", re.I)
+AUTOCLOSE_REMOTE_RE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", re.I)
+AUTOCLOSE_KEEP_DAYS = 90        # how long a close is remembered (so a reopened todo stays open)
+JENKINS_FAILED = ("FAILURE", "ABORTED", "UNSTABLE", "NOT_BUILT")
+AUTOCLOSE_VERBS = {
+    "pr": re.compile(r"\b(?:merge[sd]?|review|approve|land)\b|合并|合入|审", re.I),
+    "jira": re.compile(r"\b(?:close|resolve|fix|verify|follow[ -]?up)\b|关闭|关掉|关单|解决|修复|验证|跟进", re.I),
+    "jenkins": re.compile(r"\b(?:wait|watch|finish(?:es|ed)?)\b|等|盯|跑完", re.I),
+}
+AUTOCLOSE_AFTER = re.compile(r"\bthen\b|\bafterwards\b|然后|之后|随后|完了再|后再", re.I)
+
+
+def autoclose_path():
+    return os.path.join(hq_root(), "secretary", "autoclose.json")
+
+
+def autoclose_repos(meta, remotes, jenkins_host):
+    """The card's PRs and Jenkins builds ({number: [urls]}), and its repositories (refs' first, else
+    workdirs')."""
+    prs, builds, repos = {}, {}, []
+    refs = meta.get("refs") if isinstance(meta.get("refs"), list) else []
+    history = read_history(meta["path"])["Links"] if jenkins_host and os.path.isfile(history_path(meta["path"])) else []
+    for r in refs + [x[2:] for x in history]:
+        for u in REF_URL_RE.findall(str(r)):
+            c = canonical_url(u)
+            m = AUTOCLOSE_GH_PR_RE.match(c)
+            if m and r in refs:
+                prs.setdefault(int(m.group(2)), []).append(c)
+                repos.append(m.group(1).lower())
+            parts = URL_SPLIT_RE.match(c)
+            if jenkins_host and parts and parts.group(2) == jenkins_host and JENKINS_BUILD_RE.match(parts.group(3)):
+                builds.setdefault(int(c.rsplit("/", 1)[1]), []).append(c)
+    if not repos:
+        for w in (meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []):
+            if w not in remotes:
+                try:
+                    r = subprocess.run(["git", "-C", os.path.expanduser(w), "remote", "get-url", "origin"],
+                                       capture_output=True, text=True, timeout=10)
+                    m = AUTOCLOSE_REMOTE_RE.search(r.stdout.strip()) if r.returncode == 0 else None
+                    remotes[w] = m.group(1).lower() if m else None
+                except (OSError, subprocess.SubprocessError):
+                    remotes[w] = None
+            if remotes[w]:
+                repos.append(remotes[w])
+    return ({n: sorted(set(u)) for n, u in prs.items()}, {n: sorted(set(u)) for n, u in builds.items()},
+            sorted(set(repos)))
+
+
+def autoclose_links(text, meta, sites, remotes):
+    """What a todo's text names and waits on: [{"kind": pr|jira|jenkins, "key", "url", "name"}], in
+    order — only the kinds the text has a verb for, and none when a step comes after."""
+    out, seen = [], set()
+    if AUTOCLOSE_AFTER.search(REF_URL_RE.sub(" ", text)):
+        return out
+
+    def add(kind, key, url, name):
+        if key not in seen and AUTOCLOSE_VERBS[kind].search(REF_URL_RE.sub(" ", text)):
+            seen.add(key)
+            out.append({"kind": kind, "key": key, "url": url, "name": name})
+    jira_host = (URL_SPLIT_RE.match(sites["jira"]).group(2).lower() if sites["jira"] else None)
+    jenkins_host = (URL_SPLIT_RE.match(sites["jenkins"]).group(2).lower() if sites["jenkins"] else None)
+    for u in REF_URL_RE.findall(text):
+        c = canonical_url(u)
+        host = URL_SPLIT_RE.match(c).group(2) if URL_SPLIT_RE.match(c) else ""
+        m = AUTOCLOSE_GH_PR_RE.match(c)
+        j = JIRA_BROWSE_RE.match(URL_SPLIT_RE.match(c).group(3)) if host else None
+        b = JENKINS_BUILD_RE.match(URL_SPLIT_RE.match(c).group(3)) if host else None
+        if m:
+            add("pr", c.lower(), c, f"PR {m.group(1)}#{m.group(2)}")
+        elif j and host == jira_host and "?" not in c:
+            key = c.rsplit("/", 1)[1]
+            add("jira", key, c, key)
+        elif b and host == jenkins_host:
+            jobs = b.group(1).split("/job/")[1:]           # ["a", "b/12"] for /job/a/job/b/12
+            last, num = jobs[-1].rsplit("/", 1)
+            add("jenkins", c, c, f"{'/'.join(jobs[:-1] + [last])} #{num}")
+    bare = REF_URL_RE.sub(" ", text)
+    hashes = AUTOCLOSE_HASH_RE.findall(bare)
+    if hashes:
+        prs, builds, repos = autoclose_repos(meta, remotes, jenkins_host)
+        waits_build = bool(AUTOCLOSE_VERBS["jenkins"].search(bare))
+        for h in hashes:
+            n = int(h)
+            if waits_build and len(builds.get(n, [])) == 1:
+                b = JENKINS_BUILD_RE.match(URL_SPLIT_RE.match(builds[n][0]).group(3))
+                jobs = b.group(1).split("/job/")[1:]
+                add("jenkins", builds[n][0], builds[n][0], f"{'/'.join(jobs[:-1] + [jobs[-1].rsplit('/', 1)[0]])} #{n}")
+                continue
+            urls = prs.get(n) or ([f"https://github.com/{repos[0]}/pull/{n}"] if len(repos) == 1 else [])
+            if len(urls) == 1:
+                m = AUTOCLOSE_GH_PR_RE.match(urls[0])
+                add("pr", urls[0].lower(), urls[0], f"PR {m.group(1)}#{n}")
+    if jira_host:
+        for key in AUTOCLOSE_KEY_RE.findall(bare):
+            add("jira", key, f"{sites['jira']}/browse/{key}", key)
+    return out
+
+
+def jenkins_conf():
+    """site, user and API token: the site from site_setting("jenkins") (None: Jenkins isn't set
+    up); the token from $HQ_JENKINS_TOKEN (with $HQ_JENKINS_USER) or the login keychain, service
+    "hq-jenkins", whose account is the user name."""
+    site = site_setting("jenkins")
+    if not site:
+        return None
+    user = os.environ.get("HQ_JENKINS_USER") or ""
+    token = os.environ.get("HQ_JENKINS_TOKEN") or ""
+    if not token:
+        args = ["security", "find-generic-password", "-s", "hq-jenkins"] + (["-a", user] if user else [])
+        try:
+            info = subprocess.run(args, capture_output=True, text=True, timeout=20)
+            tok = subprocess.run(args + ["-w"], capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            info = tok = None
+        if not tok or tok.returncode != 0 or not tok.stdout.strip():
+            raise FeedError(f'no Jenkins API token in the keychain (service "hq-jenkins"): create one on your '
+                            f'Jenkins user page ({site}/me/configure), copy it, then run '
+                            'security add-generic-password -U -s hq-jenkins -a <your Jenkins user> -w "$(pbpaste)"')
+        token = tok.stdout.strip()
+        if not user:
+            m = re.search(r'"acct"<blob>="([^"]*)"', info.stdout)
+            user = m.group(1) if m else ""
+    if not user:
+        raise FeedError("no Jenkins user: put it in the keychain item's account, or set HQ_JENKINS_USER")
+    return {"site": site, "user": user, "token": token}
+
+
+def jenkins_get(conf, url):
+    import urllib.error
+    try:
+        with feed_open(url, conf["user"], conf["token"], Accept="application/json") as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        hint = " (check the API token and the user)" if e.code in (401, 403) else ""
+        raise FeedError(f"Jenkins: HTTP {e.code} {e.reason}{hint}", e.code)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise FeedError(f"Jenkins: {getattr(e, 'reason', e)}")
+
+
+def autoclose_lookup(links, errors):
+    """Each link's outcome: {key: {"outcome": done|drop|failed|open|none, "why", "final"}}.
+    `final`: it won't change (a merged PR, a finished build), so it needn't be looked up again.
+    A source that can't be asked adds to `errors` and leaves its links out."""
+    from concurrent.futures import ThreadPoolExecutor
+    out = {}
+    by = lambda k: [x for x in links if x["kind"] == k]
+    prs = by("pr")
+    if prs:
+        import shutil
+        if not shutil.which("gh"):
+            errors.append("pr: gh is not installed")
+        else:
+            st = pr_states([x["url"] for x in prs])
+            for x in prs:
+                s = st.get(x["url"])
+                if not s:
+                    continue            # gh couldn't read it: not a PR, or no access — ask again later
+                state = s.get("state")
+                out[x["key"]] = ({"outcome": "done", "why": f"{x['name']} merged", "final": True} if state == "MERGED" else
+                                 {"outcome": "drop", "why": f"{x['name']} closed unmerged", "final": True} if state == "CLOSED" else
+                                 {"outcome": "open", "why": f"{x['name']} open", "final": False})
+    for kind, conf_fn, one in (("jira", jira_conf, autoclose_jira), ("jenkins", jenkins_conf, autoclose_jenkins)):
+        xs = by(kind)
+        if not xs:
+            continue
+        try:
+            conf = conf_fn()
+        except FeedError as e:
+            errors.append(f"{kind}: {e}")
+            continue
+        if not conf:
+            continue
+        failed = []
+
+        def run(x):
+            try:
+                return x["key"], one(conf, x)
+            except FeedError as e:
+                failed.append(str(e))
+                return x["key"], None
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            out.update({k: v for k, v in ex.map(run, xs) if v})
+        if failed:
+            errors.append(f"{kind}: {failed[0]}" + (f" (and {len(failed) - 1} more)" if len(failed) > 1 else ""))
+    return out
+
+
+def autoclose_jira(conf, x):
+    try:
+        d = jira_get(conf, f"issue/{x['key']}", fields="status")
+    except FeedError as e:
+        if e.code == 404:           # not an issue (UTF-8 reads like a key) or not one we may see
+            return {"outcome": "none", "why": f"{x['key']} not found", "final": True}
+        raise
+    st = (d.get("fields") or {}).get("status") or {}
+    done = (st.get("statusCategory") or {}).get("key") == "done"
+    return {"outcome": "done" if done else "open", "why": f"{x['key']} {st.get('name') or '?'}", "final": False}
+
+
+def autoclose_jenkins(conf, x):
+    try:
+        d = jenkins_get(conf, x["url"] + "/api/json?tree=building,result,fullDisplayName")
+    except FeedError as e:
+        if e.code == 404:           # the build is gone (kept builds rotate out)
+            return {"outcome": "none", "why": f"{x['name']} not found", "final": True}
+        raise
+    name = d.get("fullDisplayName") or x["name"]
+    if d.get("building") or not d.get("result"):
+        return {"outcome": "open", "why": f"{name} running", "final": False}
+    if d["result"] == "SUCCESS":
+        return {"outcome": "done", "why": f"{name} passed", "final": True}
+    return {"outcome": "failed", "why": f"{name} {d['result'].lower()}", "final": d["result"] in JENKINS_FAILED}
+
+
+def autoclose_verdict(links, results):
+    """A todo's fate from its links' outcomes: ("done"|"drop", why) or (None, why)."""
+    rs = [results.get(x["key"]) for x in links]
+    if any(r is None for r in rs):
+        return None, "not looked up"        # its source failed, or gh couldn't read the PR
+    known = [r for r in rs if r["outcome"] != "none"]
+    if not known:
+        return None, "; ".join(r["why"] for r in rs)
+    why = "; ".join(r["why"] for r in known)
+    if any(r["outcome"] in ("open", "failed") for r in known):
+        return None, why
+    return ("drop" if any(r["outcome"] == "drop" for r in known) else "done"), why
+
+
+def autoclose_apply(meta, text, state, why):
+    """Closes the open todo with this text; its number, or None when it is no longer open."""
+    card = meta["path"]
+    with card_lock(card):
+        lines = open(card, encoding="utf-8").read().split("\n")
+        pick = next((x for x in card_todos(lines) if x[3] == text and x[2].group(2) == " "), None)
+        if not pick:
+            return None
+        via = "auto: " + re.sub(r"[()]", "", why)
+        _mark_todo(card, lines, pick, state, via)
+        append_log(card, f"auto-{'closed' if state == 'done' else 'dropped'} todo #{pick[1]} ({why}): {text} "
+                         f"— reopen it on the board or with hq todo {meta['id']} {pick[1]} open")
+    if todo_owner(pick[2].group(3)) == "me":
+        settle_status(card, "auto")
+    return pick[1]
+
+
+def autoclose_run(dry=False, now=None):
+    now = now or dt.datetime.now()
+    st = load_json(autoclose_path(), {})
+    st = st if isinstance(st, dict) else {}
+    closed = st.get("closed") if isinstance(st.get("closed"), dict) else {}
+    final = st.get("final") if isinstance(st.get("final"), dict) else {}
+    sites = {s: site_setting(s) for s in SITE_SERVICES}
+    remotes, todos, reopened = {}, [], []
+    for p in card_paths():
+        meta = parse_card(p)
+        if meta.get("status") not in OPEN_STATUSES:
+            continue
+        for t in meta["todos"]:
+            if t["state"] != "open":
+                continue
+            text = " ".join(t["text"].split())
+            links = autoclose_links(t["text"], meta, sites, remotes)
+            if not links:
+                continue
+            if f"{meta['id']} {text}" in closed:
+                reopened.append({"task": meta["id"], "text": text})
+                continue
+            todos.append((meta, t, text, links))
+    links = {x["key"]: x for _, _, _, ls in todos for x in ls}
+    errors = []
+    results = {k: final[k] for k in links if isinstance(final.get(k), dict)}
+    results.update(autoclose_lookup([x for k, x in links.items() if k not in results], errors))
+    out = {"todos": len(todos), "links": {k: sum(1 for x in links.values() if x["kind"] == k) for k in ("pr", "jira", "jenkins")},
+           "closed": [], "waiting": [], "reopened": reopened, "errors": errors, "dry": dry}
+    for meta, t, text, ls in todos:
+        state, why = autoclose_verdict(ls, results)
+        row = {"task": meta["id"], "todo": t["i"], "owner": t["owner"], "text": text, "why": why}
+        if not state:
+            out["waiting"].append(row)
+            continue
+        n = t["i"] if dry else autoclose_apply(meta, text, state, why)
+        if n is not None:
+            out["closed"].append(dict(row, todo=n, state=state))
+            if not dry:
+                closed[f"{meta['id']} {text}"] = {"at": now.isoformat(timespec="seconds"), "state": state, "why": why}
+    if not dry:
+        keep = (now - dt.timedelta(days=AUTOCLOSE_KEEP_DAYS)).isoformat(timespec="seconds")
+        st = {"closed": {k: v for k, v in closed.items() if str(v.get("at", "")) >= keep},
+              "final": {k: r for k, r in results.items() if r.get("final")},
+              "last": {"at": now.isoformat(timespec="seconds"), "todos": len(todos),
+                       "closed": len(out["closed"]), "errors": errors}}
+        atomic_write(autoclose_path(), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
+    return out
+
+
+def cmd_autoclose(args):
+    r = autoclose_run(dry=args.dry_run)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False, indent=1))
+    else:
+        verb = {"done": "done", "drop": "dropped"}
+        for c in r["closed"]:
+            print(f"{c['task']} #{c['todo']} {'would be ' if r['dry'] else ''}{verb[c['state']]}: {clip(c['text'], 80)} ({c['why']})")
+        if args.verbose or r["dry"]:
+            for w in r["waiting"]:
+                print(f"{w['task']} #{w['todo']} waits: {clip(w['text'], 80)} ({w['why']})")
+            for x in r["reopened"]:
+                print(f"{x['task']} reopened after a close, left alone: {clip(x['text'], 80)}")
+        # The job shows the last line, e.g. "4 todos with links → closed 1 · jenkins: HTTP 401 …".
+        drop = sum(1 for c in r["closed"] if c["state"] == "drop")
+        line = f"{r['todos']} todos with links → closed {len(r['closed']) - drop}" + (f", dropped {drop}" if drop else "")
+        print(" · ".join([line] + r["errors"]))
+    if r["errors"]:
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------- hooks
 def last_assistant_text(payload):
     t = payload.get("last_assistant_message")
@@ -6673,11 +7051,18 @@ def main():
     p = sub.add_parser("feed", help="messages from outside into the inbox: hq feed [status] | zulip | jira "
                                       "[--site URL] | all [--since HOURS] [--no-sort] [--dry-run] [--json]")
     p.add_argument("action", nargs="?", choices=["status", "zulip", "jira", "all"], default="status")
-    p.add_argument("--site", help="hq feed jira: your Jira site (https://<you>.atlassian.net), remembered in hq.json")
+    p.add_argument("--site", help="hq feed jira: your Jira site (https://<you>.atlassian.net), remembered as hq site jira")
     p.add_argument("--since", type=float, help="how many hours the first scan looks back (default 24)")
     p.add_argument("--no-sort", action="store_true"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--claude", help="the claude CLI to sort with (default: found on PATH)")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_feed)
+    p = sub.add_parser("autoclose", help="close todos whose PR merged, Jira issue is done or Jenkins build passed: "
+                                           "hq autoclose [--dry-run] [--verbose] [--json]")
+    p.add_argument("--dry-run", action="store_true"); p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_autoclose)
+    p = sub.add_parser("site", help="this machine's Jira / Jenkins sites: hq site [jira|jenkins [URL | -]]")
+    p.add_argument("service", nargs="?", choices=list(SITE_SERVICES)); p.add_argument("url", nargs="?")
+    p.set_defaults(fn=cmd_site)
     p = sub.add_parser("bind", help="bind this Claude session to a task"); p.add_argument("task")
     p.add_argument("--session"); p.set_defaults(fn=cmd_bind)
     p = sub.add_parser("unbind"); p.add_argument("--session"); p.set_defaults(fn=cmd_unbind)
