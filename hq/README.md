@@ -580,7 +580,11 @@ overwrites what the user wrote:
 The agent definition tells it to talk like a colleague in a chat: the answer first, in a few plain
 sentences, lists only for truly separate items, no narrated steps, and for a report only the gist
 (the window links the file). The board's window shows only each turn's last reply, so that is all
-the user reads.
+the user reads. Two fenced blocks are drawn by the board rather than shown as code, and the agent
+uses them: ` ```diff ` (a unified diff with `--- a/<path>` / `+++ b/<path>` and `@@` hunks, drawn
+like a GitHub file diff — how it shows a change to its memory before asking) and ` ```draft `
+(`to:`, `via:`, `subject:`, `cc:` lines, a blank line, the message; drawn with a Copy button). It
+never writes HTML: the board shows any as text.
 
 `init` also replaces an agent definition that is still exactly an older shipped version (matched
 by its sha256), so existing setups pick up new instructions; one the user edited is kept.
