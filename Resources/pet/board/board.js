@@ -2938,7 +2938,9 @@ function drawSecretary(toBottom) {
       : `<div class="pi off">${T("None yet", "还没有")}</div>`}
     <hr><button class="pi" data-action="secretary-report-now" ${busy || ui.sending.has(SEC) ? "disabled" : ""}>${T("Write one now", "让它现在写一份")}</button></div>`;
   const MEM = { "profile.md": T("About you", "关于你"), "people.md": T("Colleagues", "同事"), "playbooks.md": T("Recurring processes", "常做的流程"), "reports.md": T("How reports are written", "报告怎么写") };
-  const mem = Object.keys(st.files || {}).filter((f) => st.files[f]);
+  // Always in this order (hq's JSON doesn't keep one); anything new after them, by name.
+  const memRank = (f) => { const i = Object.keys(MEM).indexOf(f); return i < 0 ? 99 : i; };
+  const mem = Object.keys(st.files || {}).filter((f) => st.files[f]).sort((a, b) => memRank(a) - memRank(b) || a.localeCompare(b));
   const evening = sch.reports === false
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
     ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
@@ -3728,6 +3730,16 @@ document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
   const el = ev.target.closest("[data-action]");
+  // The task drawer closes on a click anywhere outside it — but not one in a dialog or toast over
+  // it, one that ends a text selection, or one on a card or button that opens a drawer itself
+  // (they switch or toggle it). A target already gone was redrawn under the click: leave it.
+  if (ui.drawer && document.contains(ev.target)
+      && !ev.target.closest("#drawer, #modal, #confirm, #toast, #settings, .launch")
+      && !(el && ["open-task", "open-sessions", "goto", "ctx-goto", "ask-answer"].includes(el.dataset.action))
+      && !String(window.getSelection() || "").trim()) {
+    ui.drawer = null;
+    render();
+  }
   // The secretary's menus close on any click but their own button's, or the evening report's
   // or the scan's switch (you see it flip).
   if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed"].includes(el.dataset.action))) {
