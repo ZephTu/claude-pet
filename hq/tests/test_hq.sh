@@ -1568,6 +1568,43 @@ hqi inbox sort --claude "$FAKE" "$NU3" >/dev/null
 card "$UW" | grep -q "^status: active" && card "$UW" | grep -q "waiting-on-me → active (auto, quick note $NU3)" \
   && hqi inbox move -- "$NU3" unsorted >/dev/null && card "$UW" | grep -q "^status: waiting-on-me" && ! card "$UW" | grep -q "→ active (auto" && card "$UW" | grep -q -- "- \[ \] @me send the mail" \
   && ok "inbox update: the last @me todo ticked settles the task; moving it back unsettles it" || fail "inbox update settle: $(card "$UW")"
+# The close button, then the toast's Undo (the update it replaced): the task opens again.
+NU4="$(hqi inbox add --json -- "announce it" | nid)"
+hqi inbox move --json --task="$UT" --next="announce" --done="@me review the docs" -- "$NU4" update >/dev/null
+UST="$(card "$UT" | grep "^status: ")"
+hqi inbox move --json --task="$UT" --status=done -- "$NU4" update >/dev/null && card "$UT" | grep -q "^status: done" \
+  && hqi inbox move --json --task="$UT" --next="announce" --done="@me review the docs" -- "$NU4" update >/dev/null \
+  && [ "$(card "$UT" | grep "^status: ")" = "$UST" ] && ! card "$UT" | grep -q "^closed" && card "$UT" | grep -q '^next: "announce"' && card "$UT" | grep -q -- "- \[x\] @me review the docs" \
+  && ok "inbox update: after the close button, moving back onto the task reopens it" || fail "inbox update reopen: $(card "$UT")"
+# Closed again by hand since: the status and its dates stay.
+hqi inbox move --json --task="$UT" --status=done -- "$NU4" update >/dev/null && "$HQ" set "$UT" status=abandoned
+hqi inbox move -- "$NU4" unsorted >/dev/null
+card "$UT" | grep -q "^status: abandoned" && card "$UT" | grep -q "^closed: " && card "$UT" | grep -q "^closed_at: " \
+  && ok "inbox update moved back: a task closed again since keeps its status and closed date" || fail "inbox update closed kept: $(card "$UT")"
+"$HQ" set "$UT" status=active
+# Todos ending in "." matched exactly; identical lines count as one; the ticked line is the one reopened.
+UD="$("$HQ" new "Update dots" | head -1)"
+python3 - "$(ls "$T"/root/tasks/"$UD"-*/TASK.md)" <<'PY2'
+import re, sys; p = sys.argv[1]; s = open(p).read()
+todos = ["- [ ] @me update docs.", "- [ ] @me update docs for the API", "- [x] @me rerun the suite",
+         "- [ ] @me rerun the suite", "- [ ] @me ping bob", "- [ ] @me ping bob"]
+open(p, "w").write(re.sub(r"(?m)^(## Todo[^\n]*\n)", lambda m: m.group(1) + "\n".join(todos) + "\n", s, count=1))
+PY2
+NU5="$(hqi inbox add --json -- "docs updated, suite rerun, pinged bob" | nid)"
+answer '{"kind":"update","task":"'"$UD"'","text":"done","done":["@me update docs.","@me rerun the suite","@me ping bob"],"confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$NU5" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["dest"]["done"]==["@me update docs.","@me rerun the suite","@me ping bob"], x' \
+  && card "$UD" | grep -q -- "- \[x\] @me update docs\.$" && card "$UD" | grep -q -- "- \[ \] @me update docs for the API" \
+  && [ "$(card "$UD" | grep -c -- '- \[x\] @me rerun the suite')" = 2 ] && [ "$(card "$UD" | grep -c -- '- \[x\] @me ping bob')" = 1 ] \
+  && ok "inbox update: a todo ending in '.' is matched exactly; of two identical ones, one is ticked" || fail "inbox update exact/identical: $(card "$UD")"
+hqi inbox move -- "$NU5" unsorted >/dev/null
+card "$UD" | grep -A1 -- "- \[x\] @me rerun the suite" | tail -1 | grep -q -- "- \[ \] @me rerun the suite" \
+  && ok "inbox update moved back: the line it ticked is reopened, not an identical one closed before" || fail "inbox update tick index: $(card "$UD")"
+# The CLI's bare move to update never closes the task off the close button's guess.
+NU6="$(hqi inbox add --json -- "it is all done" | nid)"
+answer '{"kind":"update","task":"'"$UD"'","text":"all done","status":"done","confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" "$NU6" >/dev/null
+{ hqi inbox move --task="$UD" -- "$NU6" update 2>&1 || true; } | grep -q "nothing on $UD to change" && ! card "$UD" | grep -q "^status: done" \
+  && ok "inbox move to update with no fields doesn't close the task off a guess" || fail "inbox update bare move: $(card "$UD")"
 
 # hq feed zulip: mentions and DMs from a fake Zulip, one inbox item per conversation, sorted in the
 # feed's mode (a log line is filed, a todo waits, a skip is put away).

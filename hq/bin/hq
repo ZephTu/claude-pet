@@ -2684,7 +2684,7 @@ def cmd_report(args):
 #   me      an @me todo that belongs to no task: it goes on the secretary's card
 INBOX_KINDS = ("task", "todo", "note", "update", "me")
 INBOX_ASK_STATUSES = ("done", "abandoned")    # an update closing its task only ever waits for a click
-INBOX_MAX_ALTS = 4             # other places kept on a note, each a button
+INBOX_MAX_ALTS = 6             # other places kept on a note, each a button (an update's come first)
 INBOX_CONFIDENT = 0.7          # below this the guess is shown, not applied
 INBOX_KEEP_DAYS = 30           # sorted and dropped notes are kept this long (for moving them)
 INBOX_SORT_TIMEOUT = 120
@@ -2840,11 +2840,17 @@ def inbox_dest(d, item, undo=None):
     text = _flat(d.get("text"), 500) or _flat(item.get("text"), 500)
     out = {"kind": k, "text": text}
     if k in ("todo", "note", "update"):
-        if not _card_of(d.get("task"), recent=k == "note"):
-            return None
-        out["task"] = d["task"].strip().upper()
+        tid = str(d.get("task") or "").strip().upper()
+        undo = undo if (undo or {}).get("task") == tid else None
+        # A task this note's own update closed is open again once that is taken back.
+        if not _card_of(tid, open_only=not _undo_reopens(undo), recent=k == "note"):
+            if k == "update" and _card_of(tid, recent=True):
+                k = out["kind"] = "note"    # closed lately: what it says still goes in its log
+            else:
+                return None
+        out["task"] = tid
     if k == "update":
-        _update_fields(out, d, undo if (undo or {}).get("task") == out["task"] else None)
+        _update_fields(out, d, undo)
         if not any(f in out for f in UPDATE_DEST_FIELDS + ("maybe",)):
             out["kind"] = "note"    # nothing left to change: what it says is a log line
     if k == "todo":
@@ -2884,16 +2890,41 @@ def todo_label(t):
     return (f"@{o} " if o else "") + todo_plain(t.group(3))
 
 
+def _undo_reopens(u):
+    """Whether taking back undo record `u` reopens its task: it closed it, and it is still so."""
+    st = ((u or {}).get("fields") or {}).get("status")
+    if not st or st[1] not in INBOX_ASK_STATUSES:
+        return False
+    card = _card_of(u.get("task"), open_only=False)
+    return bool(card) and parse_card(card).get("status") == st[1]
+
+
 def open_todo_hits(lines, want):
     """The open todos `want` ("@owner text", or the text alone) can mean: the ones with exactly that
-    text, else those containing it. A model shortens a long todo with "…": that is cut off first."""
+    text, else those containing it. A model shortens a long todo with "…": that is cut off for the
+    containing match only, so a todo that itself ends in "." or "…" still matches exactly."""
     owner = todo_owner(want)
-    key = " ".join(todo_plain(want).rstrip("…. ").split()).casefold()
+    full = " ".join(todo_plain(want).split()).casefold()
+    key = full.rstrip("…. ")
     if not key:
         return []
     mine = [x for x in card_todos(lines) if x[2].group(2) == " "
             and (owner is None or todo_owner(x[2].group(3)) == owner)]
-    return [x for x in mine if x[3].casefold() == key] or [x for x in mine if key in x[3].casefold()]
+    return [x for x in mine if x[3].casefold() == full] or [x for x in mine if key in x[3].casefold()]
+
+
+def one_todo(hits):
+    """The todo hits mean, when they mean one: a single hit, or identical lines (either will do)."""
+    return hits[0] if hits and len({todo_label(x[2]) for x in hits}) == 1 else None
+
+
+def _tick_line(lines, tick):
+    """Where tick [old, new, i] is now: its own line when that is still as written, else the first
+    identical one; None when it is gone."""
+    i = tick[2] if len(tick) > 2 else None
+    if isinstance(i, int) and 0 <= i < len(lines) and lines[i] == tick[1]:
+        return i
+    return lines.index(tick[1]) if tick[1] in lines else None
 
 
 def _update_fields(out, d, undo=None):
@@ -2901,7 +2932,7 @@ def _update_fields(out, d, undo=None):
     it, todos named as the card has them. A todo the note may mean more than one of goes in `maybe`
     (each a list of candidates) — inbox_split makes a button of each. With `undo`, the card is
     read as it will be once that is taken back (a move from one update to another)."""
-    card = _card_of(out["task"])
+    card = _card_of(out["task"], open_only=False)     # checked open (or reopened by `undo`) already
     meta = parse_card(card)
     lines = open(card, encoding="utf-8").read().split("\n")
     undo = undo or {}
@@ -2912,9 +2943,10 @@ def _update_fields(out, d, undo=None):
         m = STATUS_HEADING_RE.search(meta["body"] + "\n")
         if m and m.group(1).strip() == undo["state"][1].strip():
             meta["body"] = meta["body"][:m.start(1)] + undo["state"][0] + meta["body"][m.end(1):]
-    for old, new in undo.get("ticks") or []:
-        if new in lines:
-            lines[lines.index(new)] = old
+    for tick in undo.get("ticks") or []:
+        i = _tick_line(lines, tick)
+        if i is not None:
+            lines[i] = tick[0]
     nxt = _flat(d.get("next"), 300)
     if nxt and not is_placeholder(nxt) and nxt != str(meta.get("next") or ""):
         out["next"] = nxt
@@ -2930,7 +2962,7 @@ def _update_fields(out, d, undo=None):
         out["status"] = status
     done, maybe = [], []
     for want in d.get("done") if isinstance(d.get("done"), list) else []:
-        hits = [todo_label(x[2]) for x in open_todo_hits(lines, str(want))]
+        hits = list(dict.fromkeys(todo_label(x[2]) for x in open_todo_hits(lines, str(want))))
         if len(hits) == 1:
             done.append(hits[0])
         elif hits:
@@ -3102,12 +3134,12 @@ def inbox_apply_update(item, d):
         lines = open(card, encoding="utf-8").read().split("\n")
         ticked = []
         for want in d.get("done") or []:
-            hits = open_todo_hits(lines, want)
-            if len(hits) != 1:
+            hit = one_todo(open_todo_hits(lines, want))
+            if not hit:
                 continue        # ticked or changed since the note was sorted: leave it
-            i, num, t, _ = hits[0]
+            i, num, t, _ = hit
             new = f"{t.group(1)}- [x] {t.group(3)}"
-            u["ticks"].append([lines[i], new])
+            u["ticks"].append([lines[i], new, i])
             lines[i] = new
             ticked.append((num, t))
         if ticked:
@@ -3147,12 +3179,13 @@ def inbox_undo_update(u, card):
     with card_lock(card):
         lines = open(card, encoding="utf-8").read().split("\n")
         unticked = []
-        for old, new in u.get("ticks") or []:
-            if new in lines:
-                lines[lines.index(new)] = old
-                unticked.append(old)
+        for tick in u.get("ticks") or []:
+            i = _tick_line(lines, tick)
+            if i is None:
+                kept.append(tick[1])
             else:
-                kept.append(new)
+                lines[i] = tick[0]
+                unticked.append(tick[0])
         if unticked:
             atomic_write(card, "\n".join(lines))
             for old in unticked:
@@ -3173,7 +3206,11 @@ def inbox_undo_update(u, card):
                 back[f] = old
             elif f in ("next", "status"):
                 kept.append(f"{f}: {meta.get(f)}")
-        set_fields(card, back)      # back from done, `closed` goes too: it was recorded with the status
+        if "status" not in back:
+            # The dates it was closed on and a held close belong to the status: they go back with
+            # it, never alone (a card closed again since keeps its own).
+            back = {f: v for f, v in back.items() if f not in ("closed", "closed_at", "closing")}
+        set_fields(card, back)
     return kept
 
 
@@ -3440,9 +3477,14 @@ def inbox_move(nid, want):
         if want.get("kind") == "unsorted":
             d = None
         else:
-            seed = next((a for a in [x.get("dest")] + list(x.get("alts") or []) if a and a.get("kind") == want.get("kind")
+            # A guess that would close the task comes last: it is only a seed for the other fields.
+            guesses = sorted([a for a in [x.get("dest")] + list(x.get("alts") or []) if a],
+                             key=lambda a: a.get("status") in INBOX_ASK_STATUSES)
+            seed = next((a for a in guesses if a.get("kind") == want.get("kind")
                          and (not want.get("task") or a.get("task") == want["task"].strip().upper())), None) or {}
             base = dict(seed)
+            if want.get("kind") == "update" and base.get("status") in INBOX_ASK_STATUSES:
+                base.pop("status")     # closing the task takes an explicit --status, not a guess
             if want.get("kind") == "update" and any(want.get(f) for f in UPDATE_DEST_FIELDS):
                 # A chip or the CLI said what to change: only that, not the guess's changes too.
                 base = {k: v for k, v in base.items() if k not in UPDATE_DEST_FIELDS + ("maybe",)}
