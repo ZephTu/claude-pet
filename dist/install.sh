@@ -84,8 +84,11 @@ fi
 # ---- 3. Install files ------------------------------------------------------
 
 mkdir -p "$PET_DIR/sessions"
-cp "$EMIT_SRC" "$PET_DIR/pet-emit"
-chmod +x "$PET_DIR/pet-emit"
+# Into place as a new file, never copied over the old one: running sessions' hooks keep calling
+# it, and macOS kills (SIGKILL, "Killed: 9") a signed binary whose file was rewritten in place.
+cp "$EMIT_SRC" "$PET_DIR/pet-emit.new"
+chmod +x "$PET_DIR/pet-emit.new"
+mv -f "$PET_DIR/pet-emit.new" "$PET_DIR/pet-emit"
 say "==> hook binary installed at $PET_DIR/pet-emit"
 
 # ---- 4. Wire the hooks (edits settings.json — the riskiest step) ------------
