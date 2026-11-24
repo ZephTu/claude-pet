@@ -1189,7 +1189,8 @@ assert [n["text"] for n in t["added"]] == ["review the plan"], t["added"]       
 assert [(a["id"], a["answer"], a["note"]) for a in t["answered"]] == [(tid + ".1", "do", "yes, SF100")], t["answered"]
 assert [a["text"] for a in t["asked"]] == ["Rerun tonight?"], t["asked"]          # answered ones aren't repeated as asked
 assert t["prs"][0]["mergedInWindow"] and t["prs"][0]["number"] == 7, t["prs"]
-assert [(o["task"], o["kind"], o["days"]) for o in r["owed"]] == [(tid, "todo", 5)], r["owed"]
+# Only this card: earlier fixtures hold dated @me todos that come due as the calendar moves on.
+assert [(o["task"], o["kind"], o["days"]) for o in r["owed"] if o["task"] == tid] == [(tid, "todo", 5)], r["owed"]
 assert not any(x["id"] == json.load(open(os.path.join(root, "hq.json")))["secretary"]["task"] for pr in r["projects"] for x in pr["moved"] + pr["quiet"])
 assert r["edits"] == [] and r["gh"] is True
 PY2

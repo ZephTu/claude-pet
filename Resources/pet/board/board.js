@@ -131,7 +131,7 @@ if (LANG === "zh") {
   $('[data-action="open-settings"]').title = "设置：项目、分类、session 怎么开";
   $("#guide").title = "使用说明：HQ 怎么用";
   $("#all .vhead h1").textContent = "所有任务";
-  $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前";
+  $("#activefirst").title = "有 session 在跑的项目排最前，最近有动静的在前；每一列里 session 最近有动静的任务排最上面";
   $("#activefirst-cb").nextSibling.nodeValue = " 活跃的在前";
   $("#show-closed").nextSibling.nodeValue = " 最近完成";
   $("#needs .vhead h1").textContent = "等你处理";
@@ -622,6 +622,9 @@ function render() {
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
     scrolls[p.dataset.sid] = p.scrollHeight - p.scrollTop - p.clientHeight < 8 ? "bottom" : p.scrollTop;
   });
+  // So are Focus's lanes: each keeps its own scroll, or a refresh every few seconds would throw a
+  // long lane back to its top.
+  grabLaneScrolls();
 
   renderCounts();
   drawSecretaryButton();
@@ -673,6 +676,7 @@ function render() {
   paintTaskIds();
   paintArmed();
   fitAllGrow();
+  restoreLaneScrolls();   // after the text boxes have their height back
   // Put the cursor back only if the box you were typing in was rebuilt — one that wasn't (the
   // conversation window's reply box, say) keeps it. And look for its stand-in in the same place:
   // a session's message box in the Sessions column shares its key with the conversation window's
@@ -988,6 +992,29 @@ function renderMyTodos() {
     </div>`).join("") + `</div>`;
 }
 
+// The scrolling boxes render() rebuilds — only Focus has them (All scrolls as a whole in #tasks,
+// and Needs you's columns are drawn once): a lane's card list, the lanes' grid where it scrolls
+// as a whole (narrow windows), and the new-task form. Keyed by the lane and the box's place among
+// its kind, so a lane gets its own scroll back even when cards move between lanes. Kept across
+// renders in ui.laneScroll, so coming back to Focus from another tab finds them where they were.
+const LANE_SCROLLERS = ".lane-body, .board, .nt-wrap";
+function laneScrollKeys() {
+  const seen = {};
+  return [...document.querySelectorAll(LANE_SCROLLERS.split(", ").map((x) => `#today-focus ${x}`).join(", "))]
+    .map((el) => {
+      const base = [(el.closest("[data-lane]") || {}).dataset?.lane || "", el.className].join("|");
+      seen[base] = (seen[base] || 0) + 1;
+      return [el, base + "|" + seen[base]];
+    });
+}
+function grabLaneScrolls() {
+  ui.laneScroll = ui.laneScroll || {};
+  for (const [el, k] of laneScrollKeys()) ui.laneScroll[k] = el.scrollTop;
+}
+function restoreLaneScrolls() {
+  for (const [el, k] of laneScrollKeys()) if (ui.laneScroll[k]) el.scrollTop = ui.laneScroll[k];
+}
+
 // Needs you: three columns — what Claude asks, what you are to do, what you jotted down — under a
 // line of totals.
 function renderNeeds() {
@@ -1239,6 +1266,13 @@ function compareTasks(a, b) {
   return taskRank(b) - taskRank(a) || openAsks(b).length - openAsks(a).length ||
     String(b.updated).localeCompare(String(a.updated)) || String(a.id).localeCompare(String(b.id));
 }
+// When its live sessions last did something (0: none) — what Active first orders a lane by.
+const taskActivity = (t) => Math.max(0, ...liveFor(t.id).map((s) => Date.parse(s.updatedAt) || 0));
+// The cards in a lane: with Active first on, the task whose session moved last comes first (All;
+// in Focus too, over the order you added them in); the rest as before.
+function laneOrder(a, b) {
+  return ui.activeFirst ? taskActivity(b) - taskActivity(a) || compareTasks(a, b) : compareTasks(a, b);
+}
 
 // The search box filters every tab: a task matches on its id, title, refs, category or project;
 // an ask or a todo also on its own text.
@@ -1256,15 +1290,18 @@ function filterNote(shown, total) {
 
 // ------------------------------------------------------------------ lanes
 // Focus and All are boards of four columns, worked out from what the card and its sessions say —
-// never stored: an open ask, your todo or a session stopped on you puts a task in Needs you; else
-// a working session puts it in Running; else Blocked is its status; the rest is Ready to push on.
+// never stored: a session stopped on you (a prompt to answer) puts a task in Needs you; else a
+// session working or something it started still running in the background puts it in Running —
+// its asks and todos still show on the card, and it is nothing you can pick up yet; else an open
+// ask, your todo or status waiting-on-me puts it in Needs you; else Blocked is its status; the
+// rest is Ready to push on.
 // Dragging a card into another column sets the status that belongs there (Running is the
 // sessions' to decide). Recently done is a fifth, optional column.
 const LANES = ["you", "run", "ready", "blocked"];
 const LANE_NAME = { you: T("Needs you", "等你"), run: T("Running", "在跑"), ready: T("Ready", "待推进"), blocked: T("Blocked", "卡住"), done: T("Recently done", "最近完成") };
 const LANE_HINT = {
   you: T("A question or a todo of yours, or a session waiting on you", "有问题等你答、有你的待办，或 session 停下来等你"),
-  run: T("A session is working on it", "有 session 正在干活"),
+  run: T("A session is working on it, or something it started runs in the background", "有 session 在干活，或它起的东西还在后台跑"),
   ready: T("Nothing running — start or resume a session", "没在跑——开一个或接上 session"),
   blocked: T("Waiting on someone or something else", "在等别人或别的事"),
   done: T("Finished in the last 3 days", "3 天内完成的"),
@@ -1275,9 +1312,9 @@ const myTodos = (t) => t.todos.filter((x) => x.state === "open" && x.owner === "
 function lane(t) {
   if (!isOpen(t)) return "done";
   const live = liveFor(t.id);
-  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me" ||
-    live.some((s) => liveState(s) === "waiting")) return "you";
+  if (live.some((s) => liveState(s) === "waiting")) return "you";
   if (live.some((s) => liveState(s) === "busy" || bgRunning(s))) return "run";
+  if (openAsks(t).length || myTodos(t).length || t.waiting_on_me || t.status === "waiting-on-me") return "you";
   if (t.status === "blocked") return "blocked";
   return "ready";
 }
@@ -1369,7 +1406,7 @@ function renderTasks() {
   let html = filterNote(visible.length, pool.length) +
     `<div class="swim-cols" ${grid}>${cols.map((l) => laneHead(l, visible.filter((t) => lanes[t.id] === l).length)).join("")}</div>`;
   const row = ({ key, head, group, shut, closed, empty }) => `<div class="swim-row ${shut ? "fold" : ""}">${head}
-    ${shut ? "" : empty ? empty : `<div class="swim-grid" ${grid}>${cols.map((l) => `<div class="cell l-${l}" data-lane="${l}">${group.filter((t) => lanes[t.id] === l).sort(compareTasks).map((t) => kcard(t, { compact: true, noProject: ui.groupBy === "project" })).join("")}</div>`).join("")}</div>`}</div>`;
+    ${shut ? "" : empty ? empty : `<div class="swim-grid" ${grid}>${cols.map((l) => `<div class="cell l-${l}" data-lane="${l}">${group.filter((t) => lanes[t.id] === l).sort(laneOrder).map((t) => kcard(t, { compact: true, noProject: ui.groupBy === "project" })).join("")}</div>`).join("")}</div>`}</div>`;
   const pills = (group) => {
     const you = group.filter((t) => lanes[t.id] === "you").length, run = group.filter((t) => lanes[t.id] === "run").length;
     return `${you ? `<span class="lpill you" title="${T("Tasks waiting on you", "在等你的任务")}">${T(`${you} on you`, `${you} 等你`)}</span>` : ""}${run ? `<span class="lpill run" title="${T("Tasks with a session working", "有 session 在干活的任务")}">${T(`${run} running`, `${run} 在跑`)}</span>` : ""}`;
@@ -1505,6 +1542,7 @@ function renderToday() {
       <div class="meta" style="margin-top:4px">${T("Add the tasks you want in view with the box above, or star ☆ them in All. New tasks join automatically; they stay until you take them off.", "用上面的输入框把想盯着的任务加进来，或者在 All 里点 ☆。新建的任务会自动加入；一直留着，直到你把它拿掉。")}</div></div>`;
   const by = Object.fromEntries(LANES.concat("done").map((l) => [l, []]));
   for (const t of shown) by[lane(t)].push(t);
+  if (ui.activeFirst) for (const l of LANES) by[l].sort((a, b) => taskActivity(b) - taskActivity(a));   // stable: ties keep yours
   // Done: what was finished lately, Focus or not (a finished task leaves Focus by itself).
   by.done = listed().filter((t) => recentDone(t) && taskMatches(t) && !shown.includes(t)).concat(by.done)
     .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -2243,7 +2281,7 @@ function renderSessionSettings() {
       `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
-    ${row(T("Active first", "活跃的在前"), T("In All, project rows with a live session come first, most recently active first. Off: your own order", "All 里有 session 在跑的项目行排最前，最近有动静的在前。不勾：按你自己的顺序"),
+    ${row(T("Active first", "活跃的在前"), T("In All, project rows with a live session come first, most recently active first; in every lane (All and Focus), the task whose session moved last comes first. Off: your own order", "All 里有 session 在跑的项目行排最前，最近有动静的在前；每一列里（All 和 Focus），session 最近有动静的任务排最上面。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
   </div>`;
 }
@@ -4776,7 +4814,7 @@ document.addEventListener("drop", async (ev) => {
   if (now && now !== at.lane && isOpen(taskById(id))) {
     const lead = changed ? T(`${id}: status saved, but`, `${id}：状态已改，但`)
       : T(`${id} is already ${STATUS_SHORT[status] || status}, but`, `${id} 本来就是「${STATUS_SHORT[status] || status}」，但`);
-    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours`, `${lead}它还有没答的问题或你的待办，所以留在「等你」`)
+    toast(now === "you" ? T(`${lead} it stays in Needs you — it has an open ask or a todo of yours, or a session waiting on you`, `${lead}它还有没答的问题、你的待办，或有 session 停下来等你，所以留在「等你」`)
       : now === "run" ? T(`${lead} a session is working on it, so it stays in Running`, `${lead}有 session 在干活，所以留在「在跑」`)
       : T(`${lead} it stays in ${LANE_NAME[now]}`, `${lead}它留在「${LANE_NAME[now]}」`));
   }
