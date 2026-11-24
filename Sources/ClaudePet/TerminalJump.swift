@@ -163,8 +163,10 @@ enum TerminalJump {
         run(URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", script]) { ok, stdout in
             // The tab may have been closed since the hook ran; the script says
             // so and still exits 0, so the status alone would raise Ghostty on
-            // whatever tab happened to be in front.
-            guard ok, stdout.contains("ok") else {
+            // whatever tab happened to be in front. Compared whole rather than
+            // by substring: "notfound" does not contain "ok", but nothing says a
+            // future message could not.
+            guard ok, stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "ok" else {
                 NSLog("ClaudePet: Ghostty tab not found for this session")
                 return
             }

@@ -159,7 +159,8 @@ enum HookEmit {
             document["pid"] = pid
         }
         if let terminal = terminalRef(cwd: cwd,
-                                      tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "") {
+                                      tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "",
+                                      claudePID: pid, sessionID: sessionID) {
             document["terminal"] = terminal
         }
         // Which prompt this is, so a click in the pet answers THIS one — see
@@ -317,11 +318,46 @@ enum HookEmit {
     /// - Parameter tty: the Claude Code process's controlling terminal. The hook
     ///   cannot read its own — it is run detached — so this is resolved from the
     ///   pid instead, and is empty for a session that has no terminal at all.
-    private static func terminalRef(cwd: String, tty: String) -> [String: String]? {
-        guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
-                                                cwd: cwd, tty: tty)
+    /// - Parameters claudePID, sessionID: used only to find the `claude attach`
+    ///   process when this session is running under one; see `terminalContext`.
+    private static func terminalRef(cwd: String, tty: String, claudePID: Int32?,
+                                    sessionID: String) -> [String: String]? {
+        let context = terminalContext(tty: tty, claudePID: claudePID, sessionID: sessionID)
+        guard let ref = TerminalTarget.identify(environment: context.environment,
+                                                cwd: cwd, tty: context.tty)
         else { return nil }
         return ["kind": ref.kind, "handle": ref.handle]
+    }
+
+    /// Whose environment and terminal describe the tab the user is looking at.
+    ///
+    /// Normally the hook's own: it is a child of the Claude Code process, so it
+    /// inherited the terminal's variables, and that process holds the terminal.
+    ///
+    /// Not so when the session runs inside a background process the daemon owns
+    /// (`claude bg-spare`). The hook then inherits that process's environment,
+    /// which names no terminal at all — only stale leftovers like
+    /// `GHOSTTY_BIN_DIR` from whatever shell started the daemon — and its
+    /// controlling terminal is not a tab anyone can see. The tab belongs to a
+    /// separate `claude attach <session>` process, and BOTH answers have to come
+    /// from there: taking only the environment would put a jump arrow on the row
+    /// that lands on the background process's tty, which is worse than no arrow.
+    ///
+    /// Gated on that process's own command line, so the only cost to an ordinary
+    /// session is reading one known pid's arguments. Terminals that set no
+    /// `TERM_PROGRAM` of their own — kitty, Alacritty — would otherwise pay for
+    /// a full process scan on every hook and never find anything.
+    private static func terminalContext(tty: String, claudePID: Int32?, sessionID: String)
+        -> (environment: [String: String], tty: String) {
+        let own = (environment: ProcessInfo.processInfo.environment, tty: tty)
+        guard let claudePID,
+              let arguments = ProcessProbe.arguments(pid: claudePID),
+              ProcessProbe.isBackgroundSpare(arguments: arguments),
+              let attached = ProcessProbe.attachedTerminalProcess(sessionID: sessionID),
+              let inspected = ProcessProbe.argsAndEnvironment(pid: attached),
+              let attachedTTY = ProcessProbe.controllingTTY(pid: attached)
+        else { return own }
+        return (inspected.environment, attachedTTY)
     }
 
     /// When the user last actually typed into this session.
