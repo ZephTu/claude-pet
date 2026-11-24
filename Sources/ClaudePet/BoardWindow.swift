@@ -408,8 +408,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "note-move":
             // Each field as --name=value: a text starting with "-" must not read as an option. Options
             // first and the action word after "--" (see noteAdd).
-            let fields = ["task", "owner", "text", "title", "project", "workdir"]
+            // An update's `done` is a list: one --done= per todo it ticks.
+            let fields = ["task", "owner", "text", "title", "project", "workdir", "next", "state", "status"]
                 .filter { !str($0).isEmpty }.map { "--\($0)=\(str($0))" }
+                + ((body["done"] as? [String]) ?? []).map { "--done=\($0)" }
             return await hq(["inbox", "--json"] + fields + ["--", "move", str("id"), str("kind")])
         case "note-drop": return await hq(["inbox", "--json", "--", "drop", str("id")])
         case "note-restore": return await hq(["inbox", "--json", "--", "restore", str("id")])

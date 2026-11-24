@@ -669,19 +669,27 @@ N-001` asks a cheap model where it belongs and files it there:
   full), else the folder the project's tasks use most — so New session can start on it;
 - `todo`: a todo on an open task, `@me`, `@claude` or a colleague;
 - `note`: a log line on an open task (or one closed in the last 14 days);
+- `update`: the note moves an open task on — a log line as for `note`, plus any of its `next`,
+  its status section (`state`), its `status`, and the open todos it finishes (`done`, named
+  `@owner text`; the sorter sees each open task's open todos). Ticking the last `@me` todo settles
+  a waiting-on-me task. A close (`done` / `abandoned`) is never applied by the sorter: it becomes
+  an alternative, one click away; so does each candidate when a todo matches more than one;
 - `me`: an `@me` todo on the secretary's card (only once the secretary is set up).
 
 Links in the note go to the task's refs. The sorter is one `claude -p --model haiku` run with
 `--json-schema`, no settings, no MCP and no tools (Read only when there are images); it sees the
-open tasks, projects and the secretary's memory. A pick with confidence ≥ 0.7 is
-applied at once; anything else stays `unsorted` with the guess and up to two alternatives kept for
-a one-click choice. Change the model with `"inbox": {"model": "sonnet"}` in `hq.json` or
+open tasks (with their open todos), projects and the secretary's memory. A pick with confidence
+≥ 0.7 is applied at once; anything else stays `unsorted` with the guess and up to four
+alternatives kept for a one-click choice. Feed notes (Zulip, Jira) never get `update`. Change the model with `"inbox": {"model": "sonnet"}` in `hq.json` or
 `HQ_INBOX_MODEL`.
 
-`hq inbox move N-001 task|todo|note|me|unsorted [--task T-012] [--owner …] [--text …] [--title …]
-[--project …] [--workdir …]` files it somewhere else: what the last place got (its
-todo, log line and refs; a card it created, deleted — or marked abandoned if edited since) is
-taken back out first, and the old place becomes an alternative. `hq inbox drop|restore N-001`
+`hq inbox move N-001 task|todo|note|update|me|unsorted [--task T-012] [--owner …] [--text …] [--title …]
+[--project …] [--workdir …] [--next …] [--state …] [--status …] [--done TODO …]` files it
+somewhere else: what the last place got (its todo, log line and refs; a card it created, deleted —
+or marked abandoned if edited since; an update's next, status section, status, `closed` date and
+ticks, each put back unless changed since) is taken back out first, and the old place becomes an
+alternative. Moving to `update` with none of `--next/--state/--status/--done` takes the changes
+from the model's update guess for that task; one that would change nothing is refused. `hq inbox drop|restore N-001`
 deletes an unsorted note or brings it back. `hq inbox [--all] [--json]` lists the unsorted notes and
 those sorted in the last 48 hours; `hq board --json` carries the same list as `inbox`.
 

@@ -1512,6 +1512,63 @@ answer '{"kind":"task","title":"Docs","text":"t","project":"pone","workdir":"doc
 NF3="$(hqi inbox sort --claude "$FAKE" --json N-009 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 card "$NF3" | grep -q "^workdirs: \[\"$T/w1/docs\"\]" && ok "a folder named by its last part is looked up in the note's project first" || fail "project-first folder match"
 
+# kind "update": a note moves a task on — its next, status section and status, the todos it finishes.
+# A move takes back exactly that; closing the task and a todo it may mean twice wait for a click.
+UT="$("$HQ" new "Update target" | head -1)"
+"$HQ" addtodo "$UT" "@claude merge PR 91"; "$HQ" addtodo "$UT" "@me review the release notes"; "$HQ" addtodo "$UT" "@me review the docs"
+"$HQ" set "$UT" next="wait for PR 91"
+nid() { python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
+NU="$(hqi inbox add --json -- "PR 91 merged, T-x next is the release" | nid)"
+answer '{"kind":"update","task":"'"$UT"'","text":"PR 91 merged","next":"cut the release","state":"PR 91 merged\n## not a heading","status":"blocked","done":["@claude merge PR 91"],"confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$NU" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["kind"]=="update" and x["dest"]["done"]==["@claude merge PR 91"], x' \
+  && grep -q "open todos: @claude merge PR 91; @me review the release notes" "$FAKE_DIR/stdin" && grep -q '"done"' "$FAKE_DIR/args" \
+  && ok "inbox update: the sorter sees open todos and may answer with an update" || fail "inbox update sort"
+card "$UT" | grep -q '^next: "cut the release"' && card "$UT" | grep -q "^status: blocked" && card "$UT" | grep -q -- "- \[x\] @claude merge PR 91" \
+  && card "$UT" | grep -q "^PR 91 merged$" && card "$UT" | grep -q "^not a heading$" && card "$UT" | grep -q ": PR 91 merged$" \
+  && grep -q "todo #1 → done (quick note $NU)" "$(dirname "$(ls "$T"/root/tasks/"$UT"-*/TASK.md)")/HISTORY.md" \
+  && ok "inbox update: next, status section, status and the todo written; the tick in HISTORY.md" || fail "inbox update apply: $(card "$UT")"
+hqi inbox move -- "$NU" unsorted >/dev/null
+card "$UT" | grep -q '^next: "wait for PR 91"' && card "$UT" | grep -q "^status: active" && card "$UT" | grep -q -- "- \[ \] @claude merge PR 91" \
+  && ! card "$UT" | grep -q "PR 91 merged" && card "$UT" | grep -q "^<" \
+  && ok "inbox update moved back: next, status, status section and the todo are as they were" || fail "inbox update undo: $(card "$UT")"
+# Closing and an ambiguous todo: nothing of that is written; each is a button.
+NU2="$(hqi inbox add --json -- "all reviewed, T-x is done" | nid)"
+answer '{"kind":"update","task":"'"$UT"'","text":"all reviewed","status":"done","done":["review"],"confidence":0.95,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" --json "$NU2" | python3 -c '
+import json,sys; x=json.load(sys.stdin); a=x["alts"]
+assert x["state"]=="sorted" and x["dest"]["kind"]=="note", x
+assert a[0]["kind"]=="update" and a[0]["status"]=="done" and "done" not in a[0], a
+assert [y.get("done") for y in a[1:3]]==[["@me review the release notes"],["@me review the docs"]] and all("status" not in y for y in a[1:3]), a' \
+  && card "$UT" | grep -q "^status: active" && [ "$(card "$UT" | grep -c -- '- \[x\]')" = 0 ] \
+  && ok "inbox update: closing the task and a todo it may mean twice become buttons, not writes" || fail "inbox update buttons"
+hqi inbox move --json --task="$UT" --status=done -- "$NU2" update >/dev/null && card "$UT" | grep -q "^status: done" && card "$UT" | grep -q "^closed: " \
+  && hqi inbox move -- "$NU2" unsorted >/dev/null && card "$UT" | grep -q "^status: active" && ! card "$UT" | grep -q "^closed" \
+  && ok "inbox update: the close button closes the task; moving it back reopens it, closed date gone" || fail "inbox update close/undo: $(card "$UT")"
+hqi inbox move --json --task="$UT" --done="@me review the docs" -- "$NU2" update | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["dest"]["done"]==["@me review the docs"] and "status" not in x["dest"], x' \
+  && card "$UT" | grep -q -- "- \[x\] @me review the docs" && card "$UT" | grep -q -- "- \[ \] @me review the release notes" \
+  && ok "inbox update: a todo button ticks that one only (not the guess's close too)" || fail "inbox update tick button"
+hqi inbox move --json --task="$UT" --done="@me review the docs" --status=done -- "$NU2" update | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["dest"]["done"]==["@me review the docs"] and x["dest"]["status"]=="done", x' \
+  && card "$UT" | grep -q -- "- \[x\] @me review the docs" && card "$UT" | grep -q "^status: done" \
+  && ok "inbox update: from one update to another, a todo the first ticked is ticked again" || fail "inbox update to update: $(card "$UT")"
+hqi inbox move -- "$NU2" unsorted >/dev/null
+"$HQ" todo "$UT" 3 done
+{ hqi inbox move --task="$UT" --done="@me review the docs" -- "$NU2" update 2>&1 || true; } | grep -q "nothing on $UT to change" \
+  && ok "inbox update: one with nothing left to change is refused" || fail "inbox update nothing"
+"$HQ" todo "$UT" 3 open
+# Changed by hand since: that stays, the rest goes back.
+hqi inbox move --json --task="$UT" --next="ship it" --done="@me review the docs" -- "$NU2" update >/dev/null
+"$HQ" set "$UT" next="my own next"
+hqi inbox move -- "$NU2" unsorted | grep -q "next: my own next" && card "$UT" | grep -q '^next: "my own next"' && card "$UT" | grep -q -- "- \[ \] @me review the docs" \
+  && ok "inbox update moved back: a next changed since is left, and said so" || fail "inbox update changed since: $(card "$UT")"
+# Ticking the last @me todo settles waiting-on-me; moving it back puts both back.
+UW="$("$HQ" new "Update waits" | head -1)"; "$HQ" addtodo "$UW" "@me send the mail"; "$HQ" set "$UW" status=waiting-on-me
+NU3="$(hqi inbox add --json -- "mail sent" | nid)"
+answer '{"kind":"update","task":"'"$UW"'","text":"mail sent","done":["send the mail"],"confidence":0.9,"reason":"r","alternatives":[]}'
+hqi inbox sort --claude "$FAKE" "$NU3" >/dev/null
+card "$UW" | grep -q "^status: active" && card "$UW" | grep -q "waiting-on-me → active (auto, quick note $NU3)" \
+  && hqi inbox move -- "$NU3" unsorted >/dev/null && card "$UW" | grep -q "^status: waiting-on-me" && ! card "$UW" | grep -q "→ active (auto" && card "$UW" | grep -q -- "- \[ \] @me send the mail" \
+  && ok "inbox update: the last @me todo ticked settles the task; moving it back unsettles it" || fail "inbox update settle: $(card "$UW")"
+
 # hq feed zulip: mentions and DMs from a fake Zulip, one inbox item per conversation, sorted in the
 # feed's mode (a log line is filed, a todo waits, a skip is put away).
 "$HQ" feed | grep -q "zulip: not set up" && ok "feed without a zuliprc: not set up" || fail "feed no zuliprc"
