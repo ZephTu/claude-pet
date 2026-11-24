@@ -99,7 +99,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
+  drafts: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(), scan: null, scanPick: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -455,11 +455,20 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // timed rebuild while a mouse button is down.
 async function refresh(force) {
   let sig = null;
+  const readNo = ++ui.readNo;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
       api("pet").catch(() => "{}"), (ui.mode === "jobs" || ui.mode === "projects") && typeof loadJobs === "function" ? loadJobs() : ""]);
+    // Reads overlap (a timer's, one after a save); an older one finishing last must not put back
+    // what a newer one has already shown.
+    if (readNo < ui.readDone) { if (force !== "timer") render(); return; }
+    ui.readDone = readNo;
     sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
+    for (const [id, p] of Object.entries(ui.statusPending)) {
+      if (p.after !== undefined && readNo > p.after) delete ui.statusPending[id];   // read after the save: hq has it
+      else { const t = taskById(id); if (t) t.status = p.status; }
+    }
     const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
@@ -2128,14 +2137,32 @@ async function stopAll(list, lead = "") {
 // Resume picks them up. A task its own session finished (that session's hq-update) is handled the
 // same way, see sessionFinishes; one finished by `hq set` only gets the "still running" bar.
 const finishStop = () => pref("hq-finish-stop", "ask");   // ask | stop | keep
+// The new status shows at once; saving it (hq) and reading the board back take a few hundred ms.
+// Until a read started after the save, refreshes keep showing the pick (ui.statusPending). Saves of
+// one task run one after another, so quick re-picks land in order and the last one wins; only the
+// last pick goes on to stop its sessions or ask about them.
 async function setStatus(id, status) {
+  const seq = ui.statusSeq[id] = (ui.statusSeq[id] || 0) + 1;
+  const latest = () => ui.statusSeq[id] === seq;
   const live = isOpen({ status }) ? [] : liveFor(id);
-  try { await api("set", { task: id, fields: [`status=${status}`] }); }
-  catch (e) { toast(String(e.message || e), true); await refresh(); return false; }
+  const t = taskById(id);
+  if (t) t.status = status;
+  const pend = ui.statusPending[id] = { status };
+  render();
+  const save = (ui.statusQ[id] || Promise.resolve()).then(() => api("set", { task: id, fields: [`status=${status}`] }));
+  ui.statusQ[id] = save.catch(() => {});
+  try { await save; }
+  catch (e) {
+    toast(String(e.message || e), true);
+    if (ui.statusPending[id] === pend) { delete ui.statusPending[id]; await refresh(); }   // a newer pick is still on its way otherwise
+    return false;
+  }
+  if (ui.statusPending[id] === pend) pend.after = ui.readNo;
+  if (!latest()) return true;
   if (live.length && finishStop() === "stop") { await stopAll(live, T("Status saved; ", "状态已保存；")); return true; }
   toast(T("Status saved", "状态已保存"));
   await refresh();
-  if (live.length && finishStop() === "ask") { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
+  if (live.length && finishStop() === "ask" && latest()) { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
   return true;
 }
 // The question, in its own small window over the board. Its list is the task's sessions at the
@@ -2144,7 +2171,9 @@ function drawFinishAsk() {
   const box = $("#confirm");
   const a = ui.finishAsk;
   const live = a ? liveFor(a.task) : [];
-  if (!a || !live.length) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
+  const t = a && taskById(a.task);
+  // Nothing left to stop, or the task is open again (picked back before the save landed).
+  if (!a || !live.length || (t && isOpen(t))) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
   const word = esc(STATUS_SHORT[a.status] || a.status);
   const n = live.length;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Stop its sessions?", "停掉它的 session？")}">
