@@ -1913,3 +1913,20 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
 }
 .pick-photo svg { width: 20px; height: 20px; }
 .pick-photo { flex: none; }
+
+/* Peek: a slash command you ran, as typed; a compaction going on, under the list (T-108) */
+.pmsg.user.cmd .pcmd { font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pcompacting { flex: none; margin: 8px 20px 0; font-size: 12.5px; color: var(--accent); }
+.pcompacting .spin { display: inline-block; animation: pcompact-spin 2.4s linear infinite; }
+@keyframes pcompact-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pcompacting .spin { animation: none; } }
+/* A session's last reply under its row on the task: one line folded, the reply open (T-108) */
+/* Its own line under the whole row (the row's icons leave its text column narrow on a phone),
+   lined up with the text past the dot (8px + the row's 9px gap). */
+.tsess .bsess:has(> .sess-reply) { flex-wrap: wrap; row-gap: 0; }
+.tsess .bsess > .sess-reply { flex: 1 0 100%; margin: 6px 0 2px 17px; min-width: 0; max-width: calc(100% - 17px); box-sizing: border-box; }
+.sess-reply .ask-reply-h { min-width: 0; }
+.sess-reply .sr-k { flex: none; }
+.sess-reply .ask-reply-h .meta { flex: none; }
+.sess-reply .sr-first { flex: 1; min-width: 0; margin-left: 6px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-reply .ask-reply-body { padding-top: 6px; font-size: 13px; }

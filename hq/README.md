@@ -41,11 +41,18 @@ captured automatically and sessions don't get the task rules.
 recent messages from their transcripts under `~/.claude/projects`. Nothing leaves the machine.
 `hq sessions --json` gives each one's `phase` (`"compacting"` while its context is being compacted, else empty) and `finished` — `{task, status, at}` once that session's own
 hq-update moved its task from open to done or abandoned (the board then applies its
-"Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null.
+"Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null,
+and `lastReply` — `{text, ts, prev}`, the reply its last finished turn ended on (HQ blocks stripped,
+at most 6000 characters; Claude Code's `<synthetic>` stand-ins and compaction summaries skipped),
+or null. Idle, it comes from the transcript; while a turn runs (`prev: true`) it is the one the
+Stop hook saved for a bound session in `~/.claude/hq/state/replies/<session id>.json` (a reply of
+only HQ blocks keeps the one before; files untouched for 14 days are removed).
 Its `state` is the pet's, except that a turn held open only by a background command that looks
 like a wait (the pet's `backgroundAgents` all `"shell"`) reads `idle` once 20 minutes have passed.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
-`{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`,
+`{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`;
+a slash command you ran is a user message with `command: true` and the command as typed as its text,
+`/compact` placed before the compaction it ran),
 and events: `{kind:"event", event:"compact", trigger: manual|auto, pre, post, ts}` for a compaction,
 `{kind:"event", event:"hook", hook, text, ts}` for a hook that sent Claude's reply back),
 `turn` (`start`, `done`, `ms`, output `tokens`, `context` — after a compaction with no reply

@@ -1211,6 +1211,46 @@ function askReply(t, asks) {
   </div>`;
 }
 
+// A session's reply at the end of its last turn, under its row on its task: where it got to,
+// without opening Peek. (While a turn is going, the one before it: hq's lastReply.) Folded to a
+// line; it opens by itself for a session that finished a turn you have not looked at (its "new"
+// tag), and stays open for that reply until you fold it — so it does not snap shut under you when
+// a Peek clears the tag. Remembered per reply: the next one decides afresh. Not shown when an open
+// ask of this session came with it or later: that reply is above the asks already.
+const SESS_REPLY_KEY = "hq-sess-reply";
+const sessReplyOpen = (() => { try { return JSON.parse(localStorage.getItem(SESS_REPLY_KEY) || "{}") || {}; } catch (e) { return {}; } })();
+function setSessReply(key, open) {
+  delete sessReplyOpen[key];
+  sessReplyOpen[key] = open;     // newest last: the oldest are dropped
+  const ks = Object.keys(sessReplyOpen);
+  for (const k of ks.slice(0, Math.max(0, ks.length - 200))) delete sessReplyOpen[k];
+  try { localStorage.setItem(SESS_REPLY_KEY, JSON.stringify(sessReplyOpen)); } catch (e) { /* private mode */ }
+}
+// The line of its last words above that, unless they are what that reply says: idle, they
+// usually are; they aren't while a turn runs (unless it was just woken, say by a background task
+// ending), or after an API error, whose stand-in is no reply, so the reply below is an older one.
+function lastWordsShown(s) {
+  const w = plainText(s.lastText), r = s.lastReply;
+  if (!w) return false;
+  if (!r || !r.text) return true;
+  return !plainText(r.text).startsWith(w.slice(0, 80));
+}
+function sessReply(t, s) {
+  const r = s.lastReply;
+  if (!r || !r.text) return "";
+  const at = Date.parse(r.ts) || 0;
+  if (openAsks(t).some((a) => a.session === s.sessionId && a.context && (Date.parse(a.ts) || 0) >= at - 1000)) return "";
+  const key = replyKey(r.text);
+  if (!(key in sessReplyOpen) && ui.unread && ui.unread[s.sessionId]) setSessReply(key, true);
+  const open = sessReplyOpen[key] === true;
+  const first = plainText(r.text);
+  return `<div class="ask-reply sess-reply ${open ? "open" : ""}">
+    <button class="ask-reply-h" data-action="sess-reply" data-id="${esc(key)}" title="${open ? T("Fold", "收起") : T("Show the whole reply", "展开整段回复")}">
+      <span class="tw">${open ? "▾" : "▸"}</span><span class="sr-k">${r.prev ? T("Its reply before this turn", "上一轮的最后回复") : T("Claude's last reply", "Claude 的最后一段回复")}</span><span class="meta"><span data-ago="${esc(r.ts || "")}">${ago(r.ts)}</span></span>${open ? "" : `<span class="sr-first">${esc(first)}</span>`}</button>
+    ${open ? `<div class="md ask-reply-body" data-reply="${esc(key)}">${markdown(r.text)}</div>` : ""}
+  </div>`;
+}
+
 // The secretary's asks are labeled as its own and open its window, not its (hidden) card.
 const secChip = () => `<span class="chip link sec" data-action="open-secretary" title="${T("Open the secretary", "打开秘书")}">${T("Secretary", "秘书")}</span>`;
 // An ask: its question, a box for your answer, ✕ (No), ⋯ (the rare answers) and, on its own, Send
@@ -2302,7 +2342,7 @@ function renderTaskBody(t) {
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${outboxMark(s.sessionId)}${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
-          ${plainText(s.lastText) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
+          ${lastWordsShown(s) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
           ${s.background
@@ -2311,7 +2351,7 @@ function renderTaskBody(t) {
             : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
-        </div></div>`;
+        </div>${sessReply(t, s)}</div>`;
   // Claude's open questions come first: they are what the task waits on you for.
   const asks = openAsks(t);
   const askSec = asks.length || laterAsks(t).length ? `<div class="dr-asks">
@@ -2855,7 +2895,7 @@ async function refreshPeek(first) {
   // alone only redraws those lines, so the list you are reading or scrolling is left alone.
   const bodySig = JSON.stringify([msgs, act.items, s ? liveState(s) : null]);
   // (The secretary's window shows neither tokens nor todos: only the turn ending counts there.)
-  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, act.queued, s ? s.waitingOn || "" : null]);
+  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, act.queued, s ? s.waitingOn || "" : null, s ? s.phase || "" : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
@@ -2913,10 +2953,10 @@ function drawPeekLive() {
   // The queue box, only when it changed: rewriting it resets its own scroll. It sits under the
   // list, so the list's height changes with it — a reader at the bottom stays there.
   const q = $("#modal .pqueue-slot"), qh = peekQueue(m, s);
-  if (q && q.dataset.h !== qh) {
+  if (q && q.dataset.h !== slotSig(qh)) {
     const body = $("#modal .peek-body");
     const atBottom = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
-    q.innerHTML = qh; q.dataset.h = qh;
+    q.innerHTML = qh; q.dataset.h = slotSig(qh);
     if (atBottom) body.scrollTop = body.scrollHeight;
   }
   $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
@@ -2969,10 +3009,10 @@ function drawPeek(toBottom) {
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
-    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : x.kind === "event" ? peekEvent(x) : `<div class="pmsg ${x.role}">
+    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : x.kind === "event" ? peekEvent(x) : `<div class="pmsg ${x.role}${x.command ? " cmd" : ""}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
-        <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
+        ${x.command ? `<div class="pcmd">${esc(x.text)}</div>` : `<div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>`}
       </div>`).join("");
   const keepDraft = box.querySelector(".pfoot textarea") ? null : draft("msg:" + key);
   const chip = m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
@@ -2991,7 +3031,7 @@ function drawPeek(toBottom) {
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
-    <div class="pqueue-slot" data-h="${esc(queue)}">${queue}</div>
+    <div class="pqueue-slot" data-h="${esc(slotSig(queue))}">${queue}</div>
     ${outboxHtml(key)}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
@@ -3651,11 +3691,20 @@ function peekTodos(m) {
 // Messages waiting in Claude Code's queue (sent while it was busy, not taken in yet), oldest
 // first, just above the reply box: what it will read when this turn ends. Only while the session
 // is live and in a turn: a queue never outlives one.
+// Under the list, as the terminal shows it under the conversation: a compaction going on (nothing
+// of it is in the transcript until it is over: only the PreCompact hook says so, and the session's
+// state has not changed since, so its time is when that came), then what waits in the queue.
+// (The slot is rewritten only when this HTML changes, which would also reset the queue's scroll:
+// its running time is left out of that comparison — see slotSig — and ticks by itself.)
+const slotSig = (h) => h.replace(/(data-since="[^"]*">)[^<]*/g, "$1");
 function peekQueue(m, s) {
   const q = m.queued;
   const st = liveState(s);
-  if (!m.live || !q || !q.length || (st !== "busy" && st !== "waiting")) return "";
-  return `<div class="pqueue">
+  const compacting = m.live && st === "busy" && s.phase === "compacting"
+    ? `<div class="pcompacting"><span class="spin">✻</span> ${T("Compacting the context…", "正在压缩上下文…")}${s.updatedAt
+      ? ` <span class="faint" data-since="${esc(s.updatedAt)}">${fmtDur(secsSince(s.updatedAt))}</span>` : ""}</div>` : "";
+  if (!m.live || !q || !q.length || (st !== "busy" && st !== "waiting")) return compacting;
+  return compacting + `<div class="pqueue">
     <div class="pqueue-head">${T(`Queued · ${q.length} — it reads ${q.length === 1 ? "this" : "these"} when the turn ends`, `排队中 · ${q.length} 条——这一轮结束后它会读到`)}</div>
     ${q.map((x) => `<div class="pqueue-item"><span class="pqueue-text">${esc(x.text)}</span><span class="pqueue-at" data-ago="${esc(x.ts || "")}">${ago(x.ts)}</span></div>`).join("")}
   </div>`;
@@ -4569,6 +4618,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "resolve-all": return resolveAll(d.task, String(d.ids || "").split(" ").filter(Boolean));
     case "ask-reply": toggleReplyFold(d.id); return render();
+    case "sess-reply": setSessReply(d.id, sessReplyOpen[d.id] !== true); return render();
     case "do-todo": return doTodo(d.task, d.text);
     case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.has(d.id) ? ui.moreRes.delete(d.id) : ui.moreRes.add(d.id); return render();
