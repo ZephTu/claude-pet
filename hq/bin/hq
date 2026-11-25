@@ -1935,6 +1935,11 @@ def cmd_board(args):
         out = []
         for m in metas:
             d = {k: v for k, v in m.items() if k not in ("dir",)}
+            # The reply that raised an ask is shown while it is open; once answered it is only
+            # history (`hq asks <task> --all --json` still has it), and across every card it was
+            # most of the board — re-read every few seconds, and over a slow link by a phone.
+            d["asks"] = [a if a.get("state") == "open" else {k: v for k, v in a.items() if k != "context"}
+                         for a in m["asks"]]
             d["repo"] = task_repo(m)        # for the board's By repo view: a worktree counts as its repo
             # What the card budget moved to HISTORY.md: the board shows it with the card's own.
             h = read_history(m["path"])
@@ -1948,7 +1953,7 @@ def cmd_board(args):
         projects = [dict(project_info(pr), stats=project_stats(pr["name"], metas)) for pr in load_projects()]
         print(json.dumps({"root": hq_root(), "focus": focus_state(), "projects": projects,
                           "links": links, "secretary": secretary_task_id(), "inbox": inbox_view(), "tasks": out},
-                         ensure_ascii=False, indent=1))
+                         ensure_ascii=False, separators=(",", ":")))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open" and not snoozed(a)]
     my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES

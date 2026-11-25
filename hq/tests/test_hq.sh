@@ -53,6 +53,7 @@ MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n``
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
 [ "$("$HQ" asks T-001 | wc -l | tr -d ' ')" = 2 ] && ok "Stop hook records asks from hq-asks block"
 "$HQ" asks T-001 --json | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; assert a["context"].startswith("Done.") and "hq-asks" not in a["context"], a' && ok "asks keep the reply that raised them"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["asks"][0]["context"].startswith("Done."), t["asks"]' && ok "board --json: an open ask comes with the reply that raised it" || fail "board json open ask context"
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
@@ -75,6 +76,7 @@ printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/ro
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==4' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; a=json.load(sys.stdin)["tasks"][0]["asks"]; assert all(x["state"]!="open" and "context" not in x for x in a), a' && "$HQ" asks T-001 --all --json | python3 -c 'import json,sys; a=json.load(sys.stdin); assert a[0]["context"].startswith("Done."), a' && ok "board --json leaves out answered asks' replies; hq asks --all still has them" || fail "board json answered ask context"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and isinstance(t["workdirs"], list), t' && ok "list fields with template comments parse as lists"
 
 "$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"

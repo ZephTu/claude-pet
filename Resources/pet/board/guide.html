@@ -349,7 +349,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>改第 2 条待办的状态</td></tr>
 <tr><td><code>hq log T-012 "决定先做 Neo4j"</code></td><td>往日志追加一行，带本地日期和时间（精确到秒）</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
-<tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask；加 <code>--json</code> 时每条带着提出它的那段回复。看板只给未回应的问题显示这段回复，已回答的要看就用 <code>hq asks T-012 --all --json</code>（看板的数据里不带，免得每次刷新都传一遍）</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明" [--grant "措辞"]</code></td><td>回应一条 ask；<code>--grant</code>（只能配 do）同时加一条常设授权</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
@@ -848,7 +848,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq todo T-012 2 done|drop|open</code></td><td>change todo #2</td></tr>
 <tr><td><code>hq log T-012 "decided: Neo4j first"</code></td><td>append to the log, stamped with the local date and time to the second</td></tr>
 <tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
-<tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks</td></tr>
+<tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks; with <code>--json</code>, each with the reply that raised it. The board shows that reply only for open asks; for answered ones use <code>hq asks T-012 --all --json</code> (the board's data leaves it out, rather than carry it on every refresh)</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
 <tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…" [--grant "wording"]</code></td><td>answer an ask; <code>--grant</code> (with do only) also adds a standing grant</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
