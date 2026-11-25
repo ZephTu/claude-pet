@@ -87,7 +87,7 @@
 <h1 id="zh-board">顶栏 · Needs you · 项目与职责</h1>
 <h2>顶栏</h2>
 <ul>
-<li>顶栏只放能点的东西：左边切换 <b>Focus · 项目与职责 · Needs you · 定时任务</b>（标签上是各自的数字），旁边是 <b>记一笔</b> 输入框（见<a href="#zh-quick">记一笔</a>），右边是搜索框、<b>秘书</b>（见<a href="#zh-secretary">秘书</a>）、<b>＋ 新建</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮。</li>
+<li>顶栏只放能点的东西：左边切换 <b>Focus · 项目与职责 · Needs you · 定时任务</b>（标签上是各自的数字），旁边是 <b>记一笔</b> 输入框（见<a href="#zh-quick">记一笔</a>），右边是搜索框、<b>秘书</b>（见<a href="#zh-secretary">秘书</a>）、<b>＋ 新建</b>、<b>⚙</b> 设置、<b>?</b> 本说明。看板每 4 秒自动刷新，不需要手动刷新按钮；页面上选中了文字（比如要从 Claude 的回复里复制一段）时先不刷新，取消选中后马上补上，最多等一分钟。</li>
 <li><b>底部状态栏</b>：session 有几个（在干活的、等你的；点一下打开 session 列表），问题、待办和没分拣的记录各几条（点一下跳到 Needs you），最右边是额度。任务数在标签上。</li>
 <li><b>浅色 / 深色</b>：跟着系统外观走（系统设置 → 外观）。</li>
 <li><b>中文 / English</b>：右键小猫 → <b>Settings → Language · 语言</b>，可选 <b>跟随系统</b>（默认，macOS 首选语言是中文就显示中文）、<b>English</b>、<b>中文</b>。小猫的菜单、列表、气泡，看板，本说明和连接状态窗口一起切换，切换后页面立刻重新加载，草稿不会丢。定时任务页也跟着这个设置走，没有单独的开关。中文界面里 session、todo、ask、Resume 这类术语保留英文。</li>
@@ -554,7 +554,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <h1 id="en-board">Top bar · Needs you · Projects &amp; duties</h1>
 <h2>Top bar</h2>
 <ul>
-<li>The top bar holds only things you click: <b>Focus · Projects &amp; duties · Needs you · Scheduled</b> on the left (each with its count), then the <b>Quick note</b> box (see <a href="#en-quick">Quick notes</a>); the filter box, <b>Secretary</b> (see <a href="#en-secretary">Secretary</a>), <b>＋ New</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button.</li>
+<li>The top bar holds only things you click: <b>Focus · Projects &amp; duties · Needs you · Scheduled</b> on the left (each with its count), then the <b>Quick note</b> box (see <a href="#en-quick">Quick notes</a>); the filter box, <b>Secretary</b> (see <a href="#en-secretary">Secretary</a>), <b>＋ New</b>, <b>⚙</b> settings and <b>?</b> (this guide) on the right. The board refreshes itself every 4 seconds, so there is no refresh button; while text on the page is selected (say, a part of Claude's reply you are copying) it waits, and catches up as soon as the selection is cleared, or after a minute.</li>
 <li><b>The status bar</b> at the bottom: sessions (working, waiting on you; click to open the session list), asks, todos and unsorted notes (click → Needs you), and the quota on the right. Task counts are on the tabs.</li>
 <li><b>Light or dark</b>: follows the system appearance (System Settings → Appearance).</li>
 <li><b>English / 中文</b>: right-click the cat → <b>Settings → Language · 语言</b>: <b>Follow System</b> (the default — Chinese when macOS's preferred language is), <b>English</b> or <b>中文</b>. The cat's menu, list and bubbles, the board, this guide and the Connection Status window all switch together; the pages reload at once and drafts are kept. The Scheduled page follows it too; it has no switch of its own. The Chinese keeps terms like session, todo, ask and Resume in English.</li>

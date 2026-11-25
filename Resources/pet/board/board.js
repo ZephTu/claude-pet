@@ -704,9 +704,10 @@ async function refresh(force) {
     // Only a timed rebuild waits for the mouse button; one you caused shows at once. (A native
     // dropdown's menu swallows the mouseup, so waiting for it could hold the board stale.)
     // Nor while the pointer rests on an Approve box: the row under it must not change while aimed at.
-    if ((ui.pointerDown || ui.overApprove) && force === "timer") ui.pendingRender = true;
+    // Nor while text is selected (a reply you are copying from): the rebuild would drop it.
+    if (holdTimed() && force === "timer") ui.pendingRender = true;
     else render();
-  }
+  } else flushPending();   // nothing new, but one held back (past a selection's minute) still shows
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
   else if (ui.modal && ui.modal.type === "prompt") checkPrompt();
   loadFlags();
@@ -717,12 +718,27 @@ window.hqRefresh = refresh;
 // The Focus cards' ⚠ lines: `hq status --focus` reads each task's sessions, so it runs once a
 // minute (and when the Focus list changes), not on every few-second refresh; it never holds one up.
 const FLAGS_EVERY_MS = 60000;
+// Text selected on the page (not inside a box: render keeps a box's own selection). A timed redraw
+// waits for it to be cleared, but not for more than a minute, so a forgotten one can't freeze the board.
+const SELECT_HOLD_MS = 60000;
+function textSelected() {
+  const sel = window.getSelection();
+  return Boolean(sel && !sel.isCollapsed && String(sel).trim());
+}
+const holdTimed = () => ui.pointerDown || ui.overApprove
+  || (textSelected() && Date.now() - (ui.selectSince || Date.now()) < SELECT_HOLD_MS);
+// The redraw held back, once nothing holds it any more.
+function flushPending() {
+  if (!ui.pendingRender || holdTimed()) return;
+  ui.pendingRender = false;
+  setTimeout(render, 0);
+}
 function showFlags(flags) {
   const key = JSON.stringify(flags);
   if (key === ui.flagsKey) return;
   ui.flags = flags; ui.flagsKey = key;
-  // A timed redraw, so it waits for the mouse button and the Approve box as refresh() does.
-  if (ui.pointerDown || ui.overApprove) ui.pendingRender = true;
+  // A timed redraw, so it waits for the mouse button, the Approve box and a selection as refresh() does.
+  if (holdTimed()) ui.pendingRender = true;
   else render();
 }
 async function loadFlags() {
@@ -978,6 +994,7 @@ function render() {
   if (ui.composing) { ui.renderPending = true; return; }
   const active = document.activeElement;
   if (active && active.tagName === "SELECT") return;
+  ui.pendingRender = false;   // this redraw is the one that was held back
   const key = active && active.dataset ? active.dataset.key : null;
   const sel = key && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
   // Which copy it was: the conversation window, the task drawer and the page can each show a box
@@ -5592,7 +5609,7 @@ document.addEventListener("mouseover", (ev) => {
   const over = Boolean(ev.target.closest && ev.target.closest(".approve"));
   if (over === Boolean(ui.overApprove)) return;
   ui.overApprove = over;
-  if (!over && !ui.pointerDown && ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }
+  if (!over) flushPending();
 }, true);
 // Which steady() lists the pointer is over (their data-okey, inner to outer). Leaving one whose
 // reorder was held back redraws.
@@ -5609,5 +5626,10 @@ document.addEventListener("mouseover", (ev) => {
 document.documentElement.addEventListener("mouseleave", () => setHover(new Set()));
 document.addEventListener("mouseup", () => {
   ui.pointerDown = false;
-  if (ui.pendingRender) { ui.pendingRender = false; setTimeout(render, 0); }
+  flushPending();
 }, true);
+// When a selection starts (for its one-minute hold), and the held redraw once it is cleared.
+document.addEventListener("selectionchange", () => {
+  if (!textSelected()) { ui.selectSince = 0; flushPending(); }
+  else if (!ui.selectSince) ui.selectSince = Date.now();
+});
