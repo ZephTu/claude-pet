@@ -185,7 +185,14 @@ async function claimPairing(code) {
   let msg;
   try {
     const { r, j } = await post(code, { op: "pair" });
-    if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
+    if (j.result && j.result.token) {
+      setRemoteToken(j.result.token);
+      // "Not paired yet", left by a read before the code was typed, would stay up until the
+      // board arrives — over a slow link, many seconds.
+      if ($("#error")) $("#error").hidden = true;
+      toast(T("Paired — loading the board…", "配对成功，正在加载看板…"));
+      return true;
+    }
     msg = r.status === 429 && j.error ? j.error
       : T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
   } catch (e) {
