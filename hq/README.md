@@ -424,7 +424,8 @@ due: 2026-12-19            # a goal's deadline
 parent: qa-oncall          # a goal can sit under a duty (only a goal, only under a duty)
 phases: ["Design", "Build", "Ship"]   # a goal's phases, in order; a card's `phase:` picks one
 auto: ["qahub-ci"]         # a duty's switches for work that comes in by itself:
-                           #   qahub-ci | github-review | jira-filter (switches only, for now)
+                           #   qahub-ci | github-review | jira-filter (github-review makes
+                           #   tasks, set up in Auto intake; the others are switches only)
 jira: ["QA-9397"]          # epics it tracks
 fixVersions: ["4.2.7"]
 updated: 2026-11-23
@@ -435,14 +436,15 @@ updated: 2026-11-23
 ## Done when               ← or 完成标准; a duty's is "Healthy when" / 健康标准. One `- ` line
                            #   per criterion, `- [x] ` once it holds (the board ticks them)
 ## Templates               ← or 常见的活: a duty's kinds of recurring work, see below
+## Auto intake             ← or 自动来活: how a duty's sources make tasks, see "Work that comes in by itself"
 ## Brief                   ← or 简报: given to every session on one of its tasks
 ## Grants                  ← or 授权: project grants, same format as a card's
 ## Log                     ← or 决策记录
 ```
 
 Headings are read in either language, or both (`## 目标 / Goal`). A section runs to the next
-Goal / Out of scope / Done when / Templates / Brief / Grants / Log heading, so other `##` headings (a brief's own
-`## Commands`) stay inside it — and inside a Brief, so do Out of scope and Templates headings
+Goal / Out of scope / Done when / Templates / Auto intake / Brief / Grants / Log heading, so other `##` headings (a brief's own
+`## Commands`) stay inside it — and inside a Brief, so do Out of scope, Templates and Auto intake headings
 (sections that came after briefs: a brief's own `## Templates` is not cut off). A second heading
 of a section (a Scope after a Goal) reads as more of it, and the next write of that section folds
 it into the first. Older files' `不管：…` / `Out of scope: …` lines in the goal read as the
@@ -500,7 +502,8 @@ card's Goal), `--phase` (the card's `phase:`; `hq set ID phase=…` changes it) 
 
 `hq board --json` gives each project its PROJECT.md fields (`defined` says whether there is
 one; also `parent`, `phases`, `auto`, `out`, `criteria` [{i, text, done}], `templates`
-[{name, title, goal, todos}] and `raw`, each section's text as written, comments and all — empty
+[{name, title, goal, todos}], `intake` ({source: {repos, workdir, run, permissions, done, focus,
+title, goal, prompt, problems}}), `lang` (zh when its headings are Chinese) and `raw`, each section's text as written, comments and all — empty
 for one holding only the template's hints) and `stats`, and each task a
 `repo`: the git repo of its first workdir that still exists (else its first), a worktree counted
 as its main repo (through the worktree's `commondir`, so bare repos too). `done_7d` goes by the
@@ -795,6 +798,66 @@ at once. The last output line is a summary (`zulip: 12 messages, 4 conversations
 likely skip 2 ($0.02)`; for `all`, `zulip 4 · jira 2 → to review 2, likely skip 4 ($0.03)`), which Claude Pet shows for its "Secretary: scan Zulip · Jira" job, running `hq feed all`
 (weekdays, hourly 9–19, off until turned on from the secretary's window).
 
+### Work that comes in by itself: `hq intake`
+
+A duty with a source switched on in `auto:` and set up in its Auto intake section gets a task for
+each new thing the source has for you. `github-review` is the one that does so far: every open PR
+that asks for your review (`gh search prs --review-requested=@me`, drafts left out) in a repository
+the section names. The section holds a `### <source>` block of `key: value` lines:
+
+```
+## Auto intake
+### github-review
+repos: tigergraph/bigtest, tigergraph/mit-devops   # comma-separated; * for any repository
+workdir: ~/code/bigtest     # where the task's work and its session happen (default: the duty's first path;
+                            #   one written here must exist — never another folder instead)
+run: yes                    # start a background session on each new task (default: no)
+permissions: skip           # that session runs with --dangerously-skip-permissions (default: ask)
+done: manual                # only the user closes the task (default); auto: the session may
+focus: yes                  # the task joins Focus (default)
+title: Review {name}#{number}: {title}
+goal: {author} asked you to review {url} ({branch} → {base}) …
+prompt: Review {url} with /code-review …   # last: the lines after it, as written, up to the next `### <source>`
+```
+
+Placeholders: `{repo}` (owner/name), `{name}`, `{number}`, `{title}`, `{url}`, `{author}`, `{branch}`,
+`{base}`. Unknown keys, bad values, a missing workdir and blocks for sources that make no tasks yet
+are listed as `problems` (the board shows them in red); `repos: *` with `permissions: skip` and
+`run: yes` is one too, and no session starts with it. Comments are skipped outside the prompt; a
+`## ` line inside the prompt still ends the section. The
+first active duty, in `hq.json`'s order, whose repos match takes the PR. Its task: `project` the
+duty, the PR as a ref (`PR owner/repo#n <url>`), a log line, and the frontmatter `intake:
+github-review`, `intake_key: owner/repo#n`, `intake_done: manual|auto`. Without `run: yes` it is
+waiting-on-me. With it, `hq intake` starts `claude --bg --name "<id> <title>"` in the workdir
+(plus `--dangerously-skip-permissions` with `permissions: skip`; in a session of its own, and without
+the pet job's `CLAUDE_PET_JOB` / `CLAUDE_PET_RUN`, so the pet sees it), telling the session to run `hq
+bind <id>` first — and, for `done: manual`, never to close the task — then the prompt, and binds
+the session itself once `claude agents --json --all` lists it. One that fails to start is logged on
+the card, which turns waiting-on-me, and counts as an error. The default prompt has the session
+review with /code-review, put its comments on the card and ask before posting anything.
+
+`done: manual` holds: a session bound to such a card is told so with the protocol; an hq-update
+`status: done` or `abandoned` from it is sent back by the Stop hook (not held over open asks
+either), and so is `hq set … status=done|abandoned` run with `CLAUDE_CODE_SESSION_ID` set; the
+board's Done and `hq set` from a terminal still close it. A closed card records `intake_closed_by`
+(`session` when a session closed it, for the board's list). `hq continue` carries `intake`,
+`intake_key` and `intake_done` to the new card. A PR with an open card of that `intake_key` makes
+no other, whatever the state file says (a scan stopped part-way). Once that task is closed (or
+deleted), the PR makes a new one only when it asked for your review again after that: a
+`review_requested` event (`gh api repos/O/R/issues/N/events`) for your login or a team, newer than
+the card's `closed_at` (or the task's making). A scan makes at most 3 new tasks; the rest wait for
+the next one. The state entry is written as soon as the card exists, before its session starts.
+
+`hq intake [scan] [--dry-run] [--json] [--claude PATH]` scans; `--dry-run` lists what it would make.
+The last line sums it up (`github-review: 3 waiting, 1 new task (T-112)`); it exits 1 when a source
+or a task failed. `hq intake status [--json]` shows each duty's setup, the last scan, and `recent`:
+the tasks that came in by themselves, open or closed in the last 14 days. State is
+`<root>/secretary/intake/state.json` (per source: `items` {key: {task, head, at, duty}},
+`last_scan`, `last`), written under a lock; a second scan while one runs exits at once. Card ids
+are picked under a lock too, since the board, feeds and scans make cards unattended. Claude
+Pet runs it as the "Auto intake: scan GitHub" shell job, every 10 minutes, turned on from a duty's
+page (switching GitHub on does it too).
+
 ### Closing finished todos
 
 `hq autoclose [--dry-run] [-v] [--json]` ticks the open todos of open cards (active, blocked,
@@ -855,7 +918,8 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 ├── .claude/agents/           your leads, and secretary.md
 ├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md, reports.md
 │   ├── reports/              its reports; .drafts/, .reports.json and .pending.json track edits and windows
-│   └── feed/                 state.json (scan cursors and last results); zulip/ and jira/<date>.jsonl raw (30 days)
+│   ├── feed/                 state.json (scan cursors and last results); zulip/ and jira/<date>.jsonl raw (30 days)
+│   └── intake/               state.json: what `hq intake` has made a task for, and its last scan
 ├── inbox.json                quick notes: {"last": n, "items": [{id, text, images, state, dest, alts, …}]};
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
