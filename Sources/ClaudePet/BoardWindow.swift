@@ -312,7 +312,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         // window only — BoardServer refuses these from a phone.
         case "remote": return (BoardServer.shared.status(), nil)
         case "remote-enable": return BoardServer.shared.setEnabled(body["on"] as? Bool == true)
-        case "remote-pair": return BoardServer.shared.pair()
+        case "remote-tailnet": return await BoardServer.shared.setTailnet(body["on"] as? Bool == true)
+        case "remote-pair": return BoardServer.shared.pair(overTailnet: body["via"] as? String == "tailnet")
         case "remote-revoke": return BoardServer.shared.revoke(str("id"))
         case "click-target":
             Self.onClickTarget?(str("value"))

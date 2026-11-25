@@ -396,15 +396,22 @@ ref: PR #9 https://github.com/…/pull/9
 <li><b>打开</b>：在 Mac 的看板里点 <b>设置（⚙）→ 手机访问</b>，勾上<b>在手机上打开看板</b>。宠物（Claude Pet）会在局域网上开一个小网页服务（默认端口 8790），下面列出手机能用的地址（VPN 的地址不列）。第一次打开时 macOS 防火墙可能会问「是否允许 ClaudePet 接受传入的网络连接」，要选允许；每次重新安装宠物后可能会再问一次。如果手机连不上，先看这一步。</li>
 <li><b>配对</b>：点<b>配对手机</b>，会出现一个二维码和一个 8 位的配对码（比如 <code>K7QM-3XPA</code>）。用手机相机扫二维码，在 Safari 里打开就配对好了。一个码只能用一次，15 分钟内不用就失效：手机用它的那一刻，Mac 会给这台手机换一个它自己的 token，这个码随即作废，被别人看到也没用。</li>
 <li><b>添加到主屏幕</b>：在 Safari 里点 <b>分享 → 添加到主屏幕</b>，看板就像一个 App 一样全屏打开。iOS 给主屏幕上的 App 单独一份存储，Safari 里的配对不一定带得过去；App 里出现配对页时，在 Mac 上再点一次<b>配对手机</b>，把 8 位配对码输进去就行（大小写、横线都无所谓）。扫码总是打开 Safari，配对不了主屏幕 App。也可以跳过 Safari：直接在 Safari 里打开设置里列出的地址，先添加到主屏幕，再在 App 里输码配对。</li>
+<li><b>出门在外：通过 Tailscale</b>：Mac 和手机都装了 <a href="https://tailscale.com">Tailscale</a>、登录同一个账号时，在 <b>设置 → 手机访问</b> 里再勾上<b>也通过 Tailscale 访问</b>。下面会出现一个 Tailscale 地址（<code>http://你的Mac名.xxx.ts.net:8790</code>），点<b>用 Tailscale 配对</b>，按上面的方法配对一次：iPhone 把不同的地址当成不同的网站，局域网地址上的配对带不过来，主屏幕上也要为这个地址另加一个图标。手机开着 Tailscale 时，这个地址在家和在外面都能用（在家时 Tailscale 会自己走局域网直连），所以以后只留这一个图标就够了。
+  <ul>
+  <li>只放进<b>和这台 Mac 登录同一个 Tailscale 用户</b>的设备：每个连进来的设备，宠物都先用 <code>tailscale whois</code> 问清楚是谁的，别人的设备、带标签的服务器和网关一个字节都不读。公司的 tailnet 谁能连到你的 Mac 由管理员的规则决定，所以多了这一道；配对码和 token 照样要。</li>
+  <li>Tailscale 一路用 WireGuard 加密，局域网那种「同一个 Wi-Fi 能抓包」的问题在这里没有。</li>
+  <li>第一次打开可能要等很久：手机和 Mac 打不通直连时，Tailscale 会绕道它的中继服务器，有时在半个地球之外。页面文件会压缩着传，手机会缓存起来，之后再打开就快了；看板没变化时，每次刷新也只回一句「没变」。Tailscale 的 App 里能看到走的是直连还是中继（relay）。</li>
+  <li>Mac 上要开着 Tailscale。设置里写出 Tailscale 没装、没连上，或者这台 Mac 是带标签的设备（那样就没有「你的设备」可言）时，这条路走不通。</li>
+  </ul></li>
 <li><b>已配对的手机</b>列在同一个地方，写着最近一次来访的时间和地址；点<b>移除</b>，那台手机就再也打不开看板，除非重新配对。手机上在 <b>设置 → 这台手机</b> 里也可以自己<b>取消配对</b>。</li>
 <li><b>跟 Mac 上不一样的地方</b>：session 还是开在 Mac 上（终端、Orca 或后台），手机上看它的对话窗口。<b>Jump</b> 在手机上打开对话窗口，不去跳终端。对话窗口、任务详情都占满整个屏幕，用右上角的 <b>✕</b> 关掉（手机上没有 Esc，也没有「外面」可点）。Attach、「用编辑器打开」这些要在 Mac 屏幕上开东西的按钮在手机上不显示。选目录变成手动输入路径。发消息的地方多了一个<b>照片</b>按钮，可以从相册选图片发给 session。<b>跳过权限确认</b>和<b>新 session 开在</b>跟 Mac 上的看板是同一份设置，哪边改了另一边都跟着变。「留在看板上」在手机上默认是开的。</li>
 <li><b>安全</b>：配对过的手机能做看板能做的一切，包括开 session、批准权限请求，也就是相当于能操作这台 Mac 上的 Claude。所以：
   <ul>
-  <li>只回应局域网里的设备：私有地址（192.168.x、10.x 等），以及和 Mac 在同一个网段的 IPv6 地址（家里的路由器有 IPv6 时手机会用到）。路由器转发进来的公网请求、Tailscale 这类 VPN 过来的连接、用别的域名指过来的网页都会被拒绝。</li>
+  <li>只回应局域网里的设备：私有地址（192.168.x、10.x 等），以及和 Mac 在同一个网段的 IPv6 地址（家里的路由器有 IPv6 时手机会用到）。路由器转发进来的公网请求、VPN 过来的连接、用别的域名指过来的网页都会被拒绝；Tailscale 只在打开了<b>也通过 Tailscale 访问</b>时、而且只对你自己的设备例外（见上）。</li>
   <li>每台手机一个 256 位的随机 token，Mac 上只存它的哈希；没有 token 的请求什么都做不了，连发过来的数据都不收。一个地址（IPv6 按它所在的 /64 网段算）连续猜错 20 次，会被挡 10 分钟。配对码虽然只有 8 位，但同一时间只有一个，用一次、15 分钟就失效；不管从多少个地址来猜，一共猜错 100 次这个码就作废，设置里会写出来。<b>收起二维码</b>也会作废还没用过的码。手机不能再去配对别的手机，也不能改手机访问的设置。</li>
   <li>局域网里传的是<b>明文</b> HTTP：同一个 Wi-Fi 上有人抓包就能看到内容、偷走 token。只在家里这种你信得过的网络上打开它，在公司、咖啡店这种公共网络上关掉；怀疑 token 泄露了，就在 Mac 上移除那台手机再重新配对。</li>
   </ul></li>
-<li>Mac 睡着时手机连不上。端口被占用时设置里会写出来；要换端口，在终端里跑 <code>defaults write local.claudepet boardServerPort 8791</code>，再关掉、打开一次手机访问。不在家时访问（走 Tailscale 之类）还没做。</li>
+<li>Mac 睡着时手机连不上。端口被占用时设置里会写出来；要换端口，在终端里跑 <code>defaults write local.claudepet boardServerPort 8791</code>，再关掉、打开一次手机访问。</li>
 </ul>
 
 <h1 id="zh-workdirs">工作目录与链接</h1>
@@ -888,15 +895,22 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <li><b>Turn it on</b>: on the Mac's board, <b>Settings (⚙) → Phone access</b>, tick <b>Open the board from a phone</b>. Claude Pet starts a small web server on the local network (port 8790) and lists the addresses a phone can use (not a VPN's). The first time, the macOS firewall may ask whether ClaudePet should accept incoming network connections: allow it. It may ask again after each reinstall of the pet. If a phone can't connect, check this first.</li>
 <li><b>Pair a phone</b>: press <b>Pair a phone</b> for a QR code and an 8-character pairing code (like <code>K7QM-3XPA</code>). Scan the QR code with the phone's camera and open it in Safari: that pairs it. A code works once and lapses after 15 minutes unused: when the phone uses it, the Mac trades it for a token of the phone's own and the code is spent, so someone who saw it pairs nothing.</li>
 <li><b>Add to Home Screen</b>: in Safari, <b>Share → Add to Home Screen</b>, and the board opens full screen like an app. iOS gives a Home Screen app storage of its own, so Safari's pairing may not come along. When the app shows the pairing page, press <b>Pair a phone</b> on the Mac again and type the 8-character code (case and dashes don't matter). Scanning always opens Safari, so it can't pair the Home Screen app. You can also skip pairing Safari: open one of the addresses listed in Settings in Safari, add it to the Home Screen, and type a code in the app.</li>
+<li><b>Away from home, over Tailscale</b>: with <a href="https://tailscale.com">Tailscale</a> on both the Mac and the phone, logged in as the same user, also tick <b>Also over Tailscale</b> in <b>Settings → Phone access</b>. A Tailscale address appears below it (<code>http://your-mac.xxx.ts.net:8790</code>): press <b>Pair over Tailscale</b> and pair once more as above. iOS treats each address as a site of its own, so the pairing on the local address doesn't carry over, and the Home Screen needs an icon for this address too. With Tailscale on in the phone, this address works at home and away (at home Tailscale goes straight over the local network), so this one icon can be all you keep.
+  <ul>
+  <li>Only devices <b>logged in as the same Tailscale user as this Mac</b> get in: for each device that connects, the pet asks <code>tailscale whois</code> whose it is, and reads not a byte from other people's devices or from tagged servers and gateways. On a company tailnet the admins' rules decide who can reach your Mac, hence this extra check; the pairing code and token are still needed.</li>
+  <li>Tailscale encrypts the whole way (WireGuard): the local network's "anyone on the Wi-Fi can capture it" doesn't apply.</li>
+  <li>The first load can take a long while: when the phone and the Mac can't connect directly, Tailscale goes through one of its relays, sometimes half the world away. The page's files travel compressed and the phone keeps them, so later loads are quick; while the board hasn't changed, each refresh is answered with just "same". Tailscale's app shows whether the way is direct or through a relay.</li>
+  <li>Tailscale must be on in the Mac. Settings says so when Tailscale isn't installed or connected, or the Mac is a tagged device (then there's no user whose devices to let in).</li>
+  </ul></li>
 <li><b>Paired phones</b> are listed in the same place, with when and from where each was last seen. <b>Remove</b> one and it can't open the board until paired again. On the phone, <b>Settings → This phone → Unpair</b> does the same from its side.</li>
 <li><b>What's different on the phone</b>: sessions still open on the Mac (in a terminal, Orca or the background), and you follow them in their conversation window on the phone. <b>Jump</b> opens the conversation instead of a terminal. A conversation or a task's details fill the screen: close them with <b>✕</b> at the top right (a phone has no Esc, and there's no outside to click). Buttons that open something on the Mac's screen (Attach, Open in editor) aren't shown. A folder is typed rather than picked. Message boxes get a <b>photos</b> button to send pictures from the phone. <b>Skip permissions</b> and <b>New sessions open in</b> are one setting shared with the Mac's board: change it on either and both follow. "Stay on board" is on by default on the phone.</li>
 <li><b>Security</b>: a paired phone can do anything the board can, starting sessions and approving permission prompts among them: in effect, it can drive Claude on this Mac. So:
   <ul>
-  <li>Only devices on the local network get an answer: private addresses (192.168.x, 10.x …), and IPv6 addresses in the Mac's own network (what a phone uses when the home router has IPv6). Requests from a forwarded router port, connections over a VPN such as Tailscale, and web pages that point another domain at the Mac are refused.</li>
+  <li>Only devices on the local network get an answer: private addresses (192.168.x, 10.x …), and IPv6 addresses in the Mac's own network (what a phone uses when the home router has IPv6). Requests from a forwarded router port, connections over a VPN, and web pages that point another domain at the Mac are refused; Tailscale is the exception only when <b>Also over Tailscale</b> is on, and only for your own devices (see above).</li>
   <li>Each phone has its own random 256-bit token; the Mac keeps only its hash. A request without one can do nothing; the Mac doesn't even take what it sends. An address (for IPv6, its /64 network) with 20 wrong tokens in a row is shut out for 10 minutes. A pairing code is only 8 characters, but there is one at a time, it works once and lapses in 15 minutes, and after 100 wrong tries in all, from however many addresses, it is cancelled (Settings says so). <b>Hide the code</b> cancels an unused one too. A phone can't pair other phones or change phone access.</li>
   <li>The local network carries it as <b>plain HTTP</b>: anyone capturing traffic on the same Wi-Fi can read it and take the token. Turn it on at home, on a network you trust, and off on shared ones (office, café). If a token may have leaked, remove that phone on the Mac and pair it again.</li>
   </ul></li>
-<li>A sleeping Mac doesn't answer. A port already in use is reported in Settings; to use another, run <code>defaults write local.claudepet boardServerPort 8791</code> and turn phone access off and on again. Access from outside the home network (over Tailscale or the like) isn't there yet.</li>
+<li>A sleeping Mac doesn't answer. A port already in use is reported in Settings; to use another, run <code>defaults write local.claudepet boardServerPort 8791</code> and turn phone access off and on again.</li>
 </ul>
 
 <h1 id="en-workdirs">Workdirs and links</h1>

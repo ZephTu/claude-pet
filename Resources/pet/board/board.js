@@ -196,12 +196,12 @@ async function claimPairing(code) {
   if (box && !box.hidden && err) { err.textContent = msg; err.hidden = false; } else showPairing(msg);
   return false;
 }
-async function post(token, body) {
+async function post(token, body, have) {
   let r;
+  const headers = { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) };
+  if (have) headers["X-HQ-Have"] = have;
   try {
-    r = await fetch("/api", { method: "POST", cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
-      body: JSON.stringify(body) });
+    r = await fetch("/api", { method: "POST", cache: "no-store", headers, body: JSON.stringify(body) });
   } catch (e) {
     throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
   }
@@ -218,6 +218,7 @@ function deviceName() {
   if (/Android/.test(ua)) return "Android";
   return "";
 }
+const remoteMemo = new Map();
 async function api(op, args = {}) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
   if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
@@ -227,7 +228,18 @@ async function api(op, args = {}) {
   if (pairingClaim) await pairingClaim;
   const token = remoteToken();
   if (!token) { showPairing(""); throw new Error(T("This phone isn't paired yet", "这台手机还没配对")); }
-  const { r, j } = await post(token, Object.assign({ op }, args));
+  // The answer last time, by request: the Mac sends {same: true} when it hasn't changed — the
+  // board is polled every few seconds, and over Tailscale's relay or a phone's data plan the
+  // whole board each time is too much.
+  const key = JSON.stringify([op, args]);
+  const memo = remoteMemo.get(key);
+  const { r, j } = await post(token, Object.assign({ op }, args), memo && memo.tag);
+  if (j.same && memo && r.ok) return memo.result;
+  if (j.tag && r.ok && !j.error) {
+    remoteMemo.delete(key);
+    remoteMemo.set(key, { tag: j.tag, result: j.result });
+    if (remoteMemo.size > 40) remoteMemo.delete(remoteMemo.keys().next().value);
+  }
   // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
   // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
   if (j.pair) { setRemoteToken(""); showPairing(j.error || ""); }
@@ -2696,8 +2708,9 @@ function renderSessionSettings() {
   </div>`;
 }
 
-// ---- Phone access (BoardServer): the board on a phone's browser over the local network. On the
-// Mac: turn it on, pair a phone with a QR code, see and remove the paired ones.
+// ---- Phone access (BoardServer): the board on a phone's browser over the local network, and over
+// Tailscale when that is on too. On the Mac: turn it on, pair a phone with a QR code, see and
+// remove the paired ones.
 const REMOTE_POLL_MS = 3000;
 function loadRemote(force) {
   if (REMOTE || ui.remoteLoading || (!force && Date.now() - (ui.remoteAt || 0) < REMOTE_POLL_MS)) return;
@@ -2723,6 +2736,14 @@ function renderPhoneAccess() {
   const urls = list(st.urls);
   const devs = list(st.devices);
   const pair = ui.remotePair;
+  const tn = st.tailnet || {};
+  // The code under the row whose button made it: a code pairs either way, only the link differs.
+  const pairPanel = (via) => (pair && (pair.via || "") === via ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
+        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
+          ${via === "tailnet" ? T(`The phone needs Tailscale on, logged in as ${esc(tn.login || "you")}. `, `手机上要开着 Tailscale，并登录 ${esc(tn.login || "你的账号")}。`) : ""}
+          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
+          <div class="pair-url"><code>${esc(pair.url)}</code></div>
+          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : "");
   return `<div class="set-h">${T("Phone access", "手机访问")}</div><div class="set-list">
     ${row(T("Open the board from a phone", "在手机上打开看板"),
       T("Serves this board to a phone or iPad on the same Wi-Fi, once paired. A paired phone can do anything this board can — start sessions, answer permission prompts — and the network carries it unencrypted: turn it on at home, not on a shared network", "让同一个 Wi-Fi 里的手机或 iPad 配对后打开这个看板。配对过的手机能做看板能做的一切——开 session、批准权限请求——而且网络上传的是明文：在家里打开，别在公共网络上开"),
@@ -2732,11 +2753,15 @@ function renderPhoneAccess() {
     ${on && st.running ? `<div class="set-row remote-pair"><div><b>${T("Address", "地址")}</b>
         <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
-      ${pair ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
-        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
-          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
-          <div class="pair-url"><code>${esc(pair.url)}</code></div>
-          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : ""}` : ""}
+      ${pairPanel("")}
+      ${row(T("Also over Tailscale", "也通过 Tailscale 访问"),
+        T("For away from home: the board also answers your own devices on this Mac's tailnet — logged in as the same Tailscale user as this Mac, not tagged servers or other people's devices. Tailscale encrypts the way. A phone pairs once more for this address.", "出门在外用：看板也接受这台 Mac 所在 tailnet 上你自己的设备——和这台 Mac 登录同一个 Tailscale 用户的设备，不接受带标签的服务器或别人的设备。Tailscale 一路加密。这个地址要让手机再配对一次。"),
+        `<input type="checkbox" data-action="remote-tailnet" ${tn.on ? "checked" : ""}>`)}
+      ${tn.on && tn.problem ? `<div class="meta warn">${esc(tn.problem)}</div>` : ""}
+      ${tn.on && tn.url ? `<div class="set-row remote-pair"><div><b>${T("Tailscale address", "Tailscale 地址")}</b>
+        <div class="meta"><code>${esc(tn.url)}</code>${tn.login ? ` · ${T("for", "仅限")} ${esc(tn.login)}` : ""}</div></div>
+        <button class="btn small primary" data-action="remote-pair" data-via="tailnet">${T("Pair over Tailscale", "用 Tailscale 配对")}</button></div>
+      ${pairPanel("tailnet")}` : ""}` : ""}
     ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
       ${devs.map((x) => `<div class="dev"><span>${esc(x.name)}</span><span class="meta">${x.paired
         ? `${x.lastSeen ? T("last seen", "最近") + " " + ago(x.lastSeen) : ""}${x.lastAddress ? " · " + esc(x.lastAddress) : ""}`
@@ -4700,7 +4725,7 @@ document.addEventListener("click", async (ev) => {
     case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
     case "pick-photo": return pickPhotos(d.session);
     case "remote-pair":
-      try { ui.remotePair = Object.assign(await apiObj("remote-pair"), { at: Date.now() }); } catch (e) { toast(String(e.message || e), true); }
+      try { ui.remotePair = Object.assign(await apiObj("remote-pair", { via: d.via || "" }), { at: Date.now(), via: d.via || "" }); } catch (e) { toast(String(e.message || e), true); }
       loadRemote(true);
       return renderSettings();
     case "remote-pair-close": {
@@ -5110,6 +5135,15 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "remote-tailnet") {
+    // A Tailscale code shown unused is cancelled with it, as Hide the code would.
+    const id = ui.remotePair && ui.remotePair.via === "tailnet" ? ui.remotePair.id : "";
+    if (id) ui.remotePair = null;
+    (id ? apiObj("remote-revoke", { id }).catch(() => {}) : Promise.resolve())
+      .then(() => apiObj("remote-tailnet", { on: el.checked })).then((st) => { ui.remoteSt = st; renderSettings(); })
+      .catch((e) => toast(String(e.message || e), true));
+    return;
+  }
   if (d.action === "remote-enable") {
     ui.remotePair = null;
     apiObj("remote-enable", { on: el.checked }).then((st) => { ui.remoteSt = st; renderSettings(); })
