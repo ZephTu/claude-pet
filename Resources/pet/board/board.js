@@ -821,10 +821,19 @@ function ensureHistory(taskId) {
     .finally(() => { ui.historyLoading.delete(taskId); render(); });
 }
 // Ended sessions of a task, newest first (a live one is listed with the live sessions instead).
+// Live is what the sessions list says now, not what the history read said up to a minute ago: a
+// session just stopped from here (or closed in its terminal) was missing from both lists until
+// that read expired — no Resume for it. Such a row also brings the read forward, for its last words.
 function earlierSessions(t) {
   ensureHistory(t.id);
   const live = new Set(ui.sessions.map((s) => s.sessionId));
-  return ((ui.history[t.id] || {}).rows || []).filter((r) => !r.live && !live.has(r.sessionId));
+  const h = ui.history[t.id];
+  const rows = (h || {}).rows || [];
+  if (h && Date.now() - h.at > 5000 && rows.some((r) => r.live && !live.has(r.sessionId))) {
+    h.at = 0;
+    ensureHistory(t.id);
+  }
+  return rows.filter((r) => !live.has(r.sessionId));
 }
 const resumeTip = (r) => T(`Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`,
   `续上它：在 ${r.cwd || "它原来的目录"} 里 claude --resume${skipPerms() ? "（跳过权限确认）" : ""}，开在 ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`);
@@ -1058,8 +1067,14 @@ function render() {
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
       .find((x) => regionOf(x) === activeRegion && x.getClientRects().length);
     if (el) {
-      el.focus();
+      // Without moving anything: focusing a box (and putting its caret back) scrolls it into view,
+      // so a task's drawer read further down, with the cursor left in an ask's answer box at its
+      // top, jumped back up to that box on every refresh.
+      const held = [];
+      for (let p = el.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight) held.push([p, p.scrollTop]);
+      el.focus({ preventScroll: true });
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
+      for (const [p, top] of held) p.scrollTop = top;
     }
   }
   restoreTextScrolls(document, taScrolls);
