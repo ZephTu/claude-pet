@@ -1396,8 +1396,13 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .dr-status button { border: 1px solid var(--line); background: var(--bg); color: var(--dim); border-radius: 14px; padding: 1px 10px; font-size: 12px; cursor: pointer; }
 .dr-status button:hover { color: var(--text); }
 .dr-status button.on { color: var(--on-accent); background: var(--lc, var(--teal)); border-color: var(--lc, var(--teal)); font-weight: 600; }
-.dr-status .lane-now { margin-left: auto; font-size: 12px; }
-.dr-status .lane-now b { color: var(--lc); font-weight: 600; }
+/* The status you set, when the task sits in another column (an ask, a session at work): a dot. */
+.dr-status button.set { position: relative; color: var(--text); }
+.dr-status button.set::after { content: ""; position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--lc, var(--teal)); box-shadow: 0 0 0 2px var(--panel, var(--bg)); }
+.dr-status .run-now { color: var(--teal); font-size: 12px; font-weight: 600; margin-right: 4px; }
+.dr-status button.more { border-color: transparent; background: none; padding: 1px 6px; }
+.dr-status button.more.on { color: var(--text); background: var(--line); }
+.dr-status button.give-up { color: var(--red); border-color: var(--red); }
 .dr-head .fflags { margin: 8px 0 0; }
 .dr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 24px; overscroll-behavior: contain; }
 .dr-body .task-body { padding: 0; }

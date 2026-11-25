@@ -81,6 +81,13 @@ grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "
 "$HQ" bind T-002 --session sess-2 >/dev/null
 hook '{"session_id":"sess-2","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "bound this session to an HQ task from the board" && ok "board-side bind announced on next prompt"
 hook '{"session_id":"sess-2","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "from the board" && fail "announced twice" || ok "announcement only once"
+# status takes the board's column names too
+st2() { grep "^status:" "$T"/root/tasks/T-002-*/TASK.md; }
+was=$(st2)
+"$HQ" set T-002 status=needs-you >/dev/null && [ "$(st2)" = "status: waiting-on-me" ] \
+  && "$HQ" set T-002 status=Ready >/dev/null && [ "$(st2)" = "status: active" ] && ok "set status=needs-you / ready are waiting-on-me / active" || fail "status aliases: $(st2)"
+rc=0; "$HQ" set T-002 status=running 2>/dev/null || rc=$?; [ "$rc" = 1 ] && [ "$(st2)" = "status: active" ] && ok "Running is no status" || fail "status=running took"
+"$HQ" set T-002 "status=${was#status: }" >/dev/null
 # categories: generic defaults, add / rename / guarded remove
 "$HQ" category list | grep -q "^feature" && ok "default categories are generic"
 "$HQ" set T-002 category=bug >/dev/null

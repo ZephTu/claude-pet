@@ -1345,7 +1345,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         return bits.isEmpty ? "" : " · " + bits.joined(separator: " · ")
     }
     private static let statusWord: [String: (String, String)] = [
-        "active": ("active", "进行中"), "blocked": ("blocked", "卡住"), "waiting-on-me": ("waiting on me", "等我"),
+        "active": ("ready", "待推进"), "blocked": ("blocked", "卡住"), "waiting-on-me": ("needs you", "等你"),
         "done": ("done", "完成"), "abandoned": ("abandoned", "放弃")]
 
     /// Go to whatever has been waiting longest. Every outcome says what
