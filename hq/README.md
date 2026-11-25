@@ -934,7 +934,10 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 └── state/sessions.json       session id → bound task, delivery cursor, turn start, finished
 ```
 
-`hq board --json` is the read API for UIs (the Claude Pet panel uses it); `hq ask resolve`,
+`hq board --json` is the read API for UIs (the Claude Pet panel uses it). It is compact JSON,
+and an answered ask comes without `context` (the reply that raised it: the board shows it only
+while the ask is open, and across every card it was most of the output, which the board reads
+every few seconds); `hq asks T-012 --all --json` has it. `hq ask resolve`,
 `hq todo` and `hq set` are the write API (`hq todo T-012 2 done --text "…"` matches the todo
 by its text when #2 has moved, and refuses if it is gone). Everything is plain files, so cards can also live
 in git.

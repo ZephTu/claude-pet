@@ -160,12 +160,19 @@ if (REMOTE) document.documentElement.classList.add("remote");
 // The token: in this browser's storage, and in a cookie as well — iOS gives a web app added to
 // the Home Screen its own storage, and brings the site's cookies along, not the rest.
 const TOKEN_KEY = "hq-remote-token";
+// Answers already had, by request, with their tag (see api).
+const remoteMemo = new Map();
 function remoteToken() {
   const m = document.cookie.match(/(?:^|;\s*)hq-token=([\w-]+)/);
   return pref(TOKEN_KEY, "") || (m ? m[1] : "");
 }
 function setRemoteToken(tok) {
   try { if (tok) localStorage.setItem(TOKEN_KEY, tok); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  // Unpaired (or removed on the Mac): the board kept on this phone goes too.
+  if (!tok) {
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith("hq-kept:")) localStorage.removeItem(k); } catch (e) { /* storage off */ }
+    remoteMemo.clear();
+  }
   document.cookie = tok ? `hq-token=${tok}; max-age=31536000; path=/; SameSite=Strict` : "hq-token=; max-age=0; path=/";
 }
 // The pairing code from the Mac's QR code: #pair=<code>, taken out of the address bar and traded
@@ -185,7 +192,14 @@ async function claimPairing(code) {
   let msg;
   try {
     const { r, j } = await post(code, { op: "pair" });
-    if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
+    if (j.result && j.result.token) {
+      setRemoteToken(j.result.token);
+      // "Not paired yet", left by a read before the code was typed, would stay up until the
+      // board arrives — over a slow link, many seconds.
+      if ($("#error")) $("#error").hidden = true;
+      toast(T("Paired — loading the board…", "配对成功，正在加载看板…"));
+      return true;
+    }
     msg = r.status === 429 && j.error ? j.error
       : T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
   } catch (e) {
@@ -196,12 +210,12 @@ async function claimPairing(code) {
   if (box && !box.hidden && err) { err.textContent = msg; err.hidden = false; } else showPairing(msg);
   return false;
 }
-async function post(token, body) {
+async function post(token, body, have) {
   let r;
+  const headers = { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) };
+  if (have) headers["X-HQ-Have"] = have;
   try {
-    r = await fetch("/api", { method: "POST", cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
-      body: JSON.stringify(body) });
+    r = await fetch("/api", { method: "POST", cache: "no-store", headers, body: JSON.stringify(body) });
   } catch (e) {
     throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
   }
@@ -218,6 +232,24 @@ function deviceName() {
   if (/Android/.test(ua)) return "Android";
   return "";
 }
+// The board itself is also kept in the phone's storage: opened again, or reloaded, the page asks
+// whether it changed instead of fetching a megabyte first. (Only the board: the rest is small, or
+// changes every few seconds.)
+const KEPT_OPS = ["board"];
+const KEPT_PREFIX = "hq-kept:";
+function keptMemo(key) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return null;
+  try {
+    const m = JSON.parse(localStorage.getItem(KEPT_PREFIX + key) || "null");
+    if (m && m.tag) { remoteMemo.set(key, m); return m; }
+  } catch (e) { /* none kept, or storage off */ }
+  return null;
+}
+function keepMemo(key, tag, result) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return;
+  try { localStorage.setItem(KEPT_PREFIX + key, JSON.stringify({ tag, result })); }
+  catch (e) { try { localStorage.removeItem(KEPT_PREFIX + key); } catch (e2) { /* storage off */ } }
+}
 async function api(op, args = {}) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
   if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
@@ -227,7 +259,19 @@ async function api(op, args = {}) {
   if (pairingClaim) await pairingClaim;
   const token = remoteToken();
   if (!token) { showPairing(""); throw new Error(T("This phone isn't paired yet", "这台手机还没配对")); }
-  const { r, j } = await post(token, Object.assign({ op }, args));
+  // The answer last time, by request: the Mac sends {same: true} when it hasn't changed — the
+  // board is polled every few seconds, and over Tailscale's relay or a phone's data plan the
+  // whole board each time is too much.
+  const key = JSON.stringify([op, args]);
+  const memo = remoteMemo.get(key) || keptMemo(key);
+  const { r, j } = await post(token, Object.assign({ op }, args), memo && memo.tag);
+  if (j.same && memo && r.ok) return memo.result;
+  if (j.tag && r.ok && !j.error) {
+    remoteMemo.delete(key);
+    remoteMemo.set(key, { tag: j.tag, result: j.result });
+    if (remoteMemo.size > 40) remoteMemo.delete(remoteMemo.keys().next().value);
+    keepMemo(key, j.tag, j.result);
+  }
   // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
   // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
   if (j.pair) { setRemoteToken(""); showPairing(j.error || ""); }
@@ -667,8 +711,20 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // element under the pointer, and the browser then fires no click at all — which is what "the
 // first click sometimes does nothing" was. So: skip rebuilds when nothing changed, and hold a
 // timed rebuild while a mouse button is down.
+// One read at a time for the timer: over a slow link (Tailscale's relay) a read takes longer than
+// the 4 seconds between them, and reads piling up on one another never finish.
 async function refresh(force) {
+  ui.reading = (ui.reading || 0) + 1;
+  try { return await readBoard(force); } finally { ui.reading--; }
+}
+async function readBoard(force) {
   let sig = null;
+  // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
+  if (REMOTE && !ui.board && !ui.loadNote) {
+    ui.loadNote = setTimeout(() => {
+      if (!ui.board && remoteToken()) toast(T("Loading the board from the Mac… over a slow connection this takes a while", "正在从 Mac 加载看板……网络慢时要等一会儿"));
+    }, 3000);
+  }
   const readNo = ++ui.readNo;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
@@ -2736,8 +2792,9 @@ function renderSessionSettings() {
   </div>`;
 }
 
-// ---- Phone access (BoardServer): the board on a phone's browser over the local network. On the
-// Mac: turn it on, pair a phone with a QR code, see and remove the paired ones.
+// ---- Phone access (BoardServer): the board on a phone's browser over the local network, and over
+// Tailscale when that is on too. On the Mac: turn it on, pair a phone with a QR code, see and
+// remove the paired ones.
 const REMOTE_POLL_MS = 3000;
 function loadRemote(force) {
   if (REMOTE || ui.remoteLoading || (!force && Date.now() - (ui.remoteAt || 0) < REMOTE_POLL_MS)) return;
@@ -2763,6 +2820,14 @@ function renderPhoneAccess() {
   const urls = list(st.urls);
   const devs = list(st.devices);
   const pair = ui.remotePair;
+  const tn = st.tailnet || {};
+  // The code under the row whose button made it: a code pairs either way, only the link differs.
+  const pairPanel = (via) => (pair && (pair.via || "") === via ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
+        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
+          ${via === "tailnet" ? T(`The phone needs Tailscale on, logged in as ${esc(tn.login || "you")}. `, `手机上要开着 Tailscale，并登录 ${esc(tn.login || "你的账号")}。`) : ""}
+          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
+          <div class="pair-url"><code>${esc(pair.url)}</code></div>
+          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : "");
   return `<div class="set-h">${T("Phone access", "手机访问")}</div><div class="set-list">
     ${row(T("Open the board from a phone", "在手机上打开看板"),
       T("Serves this board to a phone or iPad on the same Wi-Fi, once paired. A paired phone can do anything this board can — start sessions, answer permission prompts — and the network carries it unencrypted: turn it on at home, not on a shared network", "让同一个 Wi-Fi 里的手机或 iPad 配对后打开这个看板。配对过的手机能做看板能做的一切——开 session、批准权限请求——而且网络上传的是明文：在家里打开，别在公共网络上开"),
@@ -2772,11 +2837,15 @@ function renderPhoneAccess() {
     ${on && st.running ? `<div class="set-row remote-pair"><div><b>${T("Address", "地址")}</b>
         <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
-      ${pair ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
-        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
-          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
-          <div class="pair-url"><code>${esc(pair.url)}</code></div>
-          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : ""}` : ""}
+      ${pairPanel("")}
+      ${row(T("Also over Tailscale", "也通过 Tailscale 访问"),
+        T("For away from home: the board also answers your own devices on this Mac's tailnet — logged in as the same Tailscale user as this Mac, not tagged servers or other people's devices. Tailscale encrypts the way. A phone pairs once more for this address.", "出门在外用：看板也接受这台 Mac 所在 tailnet 上你自己的设备——和这台 Mac 登录同一个 Tailscale 用户的设备，不接受带标签的服务器或别人的设备。Tailscale 一路加密。这个地址要让手机再配对一次。"),
+        `<input type="checkbox" data-action="remote-tailnet" ${tn.on ? "checked" : ""}>`)}
+      ${tn.on && tn.problem ? `<div class="meta warn">${esc(tn.problem)}</div>` : ""}
+      ${tn.on && tn.url ? `<div class="set-row remote-pair"><div><b>${T("Tailscale address", "Tailscale 地址")}</b>
+        <div class="meta"><code>${esc(tn.url)}</code>${tn.login ? ` · ${T("for", "仅限")} ${esc(tn.login)}` : ""}</div></div>
+        <button class="btn small primary" data-action="remote-pair" data-via="tailnet">${T("Pair over Tailscale", "用 Tailscale 配对")}</button></div>
+      ${pairPanel("tailnet")}` : ""}` : ""}
     ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
       ${devs.map((x) => `<div class="dev"><span>${esc(x.name)}</span><span class="meta">${x.paired
         ? `${x.lastSeen ? T("last seen", "最近") + " " + ago(x.lastSeen) : ""}${x.lastAddress ? " · " + esc(x.lastAddress) : ""}`
@@ -3742,6 +3811,10 @@ function drawContext() {
   const box = $("#modal");
   if (!t) { closePeek(); return toast(T("That task is gone", "这个任务已经不在了"), true); }
   const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
+  // The reply that raised it, as when the window opened: answered since (here, on a phone, in its
+  // session), the board's data no longer carries it (hq board --json), but this window still shows it.
+  if (ask && ask.context) m.context = ask.context;
+  const askContext = (ask && ask.context) || m.context || "";
   const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
   const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : T("Your todo", "你的待办");
   const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
@@ -3757,7 +3830,7 @@ function drawContext() {
       <div class="meta">${T(`Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}`,
         `${ask.session ? `在${askSession ? ` <b>${esc(askSession.title || askSession.project)}</b>（运行中）` : ` session ${esc(ask.session.slice(0, 8))}（已结束）`}里，` : ""}${ago(ask.ts)}提出`)}</div>
       ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, T("Open that conversation", "打开那段对话"), Boolean(askSession))}</div>` : ""}
-      ${ask.context ? `<div class="md quote">${markdown(ask.context)}</div>`
+      ${askContext ? `<div class="md quote">${markdown(askContext)}</div>`
         : `<div class="empty">${T("The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.", "提出这个问题的那条回复没有记录下来（这个功能加上之前的 ask）——打开上面的对话看。")}</div>`}
     </section>`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Context", "上下文")}">
@@ -4750,7 +4823,7 @@ document.addEventListener("click", async (ev) => {
     case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
     case "pick-photo": return pickPhotos(d.session);
     case "remote-pair":
-      try { ui.remotePair = Object.assign(await apiObj("remote-pair"), { at: Date.now() }); } catch (e) { toast(String(e.message || e), true); }
+      try { ui.remotePair = Object.assign(await apiObj("remote-pair", { via: d.via || "" }), { at: Date.now(), via: d.via || "" }); } catch (e) { toast(String(e.message || e), true); }
       loadRemote(true);
       return renderSettings();
     case "remote-pair-close": {
@@ -5160,6 +5233,15 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "remote-tailnet") {
+    // A Tailscale code shown unused is cancelled with it, as Hide the code would.
+    const id = ui.remotePair && ui.remotePair.via === "tailnet" ? ui.remotePair.id : "";
+    if (id) ui.remotePair = null;
+    (id ? apiObj("remote-revoke", { id }).catch(() => {}) : Promise.resolve())
+      .then(() => apiObj("remote-tailnet", { on: el.checked })).then((st) => { ui.remoteSt = st; renderSettings(); })
+      .catch((e) => toast(String(e.message || e), true));
+    return;
+  }
   if (d.action === "remote-enable") {
     ui.remotePair = null;
     apiObj("remote-enable", { on: el.checked }).then((st) => { ui.remoteSt = st; renderSettings(); })
@@ -5652,7 +5734,7 @@ document.addEventListener("drop", async (ev) => {
 });
 
 refresh();
-setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
+setInterval(() => { if (document.visibilityState === "visible" && !document.hidden && !ui.reading) refresh("timer"); }, 4000);
 // Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
 document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseover", (ev) => {
