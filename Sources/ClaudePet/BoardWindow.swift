@@ -304,8 +304,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
         case "board-prefs":
-            // How sessions start (skip permissions, where they open): one choice for the Mac's
-            // board and every phone's — see BoardPrefs.
+            // How sessions start (skip permissions, where they open) and what finishing a task
+            // does to its sessions: one choice for the Mac's board and every phone's — see BoardPrefs.
             BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
             return (["ok": true], nil)
         // Phone access (BoardServer): on or off, pairing a phone, the paired ones. The Mac's

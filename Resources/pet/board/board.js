@@ -101,9 +101,10 @@ const escButton = (s) => canInterrupt(s)
 // with the board's skip-permissions choice, as a session started from here would be.
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
 
-// How sessions start (skip permissions, where they open) is one choice for the Mac's board and
-// every phone's: the app keeps it (BoardPrefs), and the "pet" read brings it with every refresh.
-const SHARED_PREFS = ["hq-skip-perms", "hq-launch"];
+// How sessions start (skip permissions, where they open) and what finishing a task does to its
+// live sessions are one choice for the Mac's board and every phone's: the app keeps it
+// (BoardPrefs), and the "pet" read brings it with every refresh.
+const SHARED_PREFS = ["hq-skip-perms", "hq-launch", "hq-finish-stop"];
 let sharedPrefs = null;   // null until the first read
 function pref(key, dflt) {
   if (sharedPrefs && SHARED_PREFS.includes(key) && key in sharedPrefs) return sharedPrefs[key];
@@ -2618,8 +2619,11 @@ async function setStatus(id, status) {
   if (!latest()) return true;
   if (live.length && finishStop() === "stop") { await stopAll(live, T("Status saved; ", "状态已保存；")); return true; }
   toast(T("Status saved", "状态已保存"));
+  // Asked as soon as the status is saved, from the sessions the board already has: on a phone over
+  // a slow link, reading the whole board back first kept it from showing for many seconds.
+  if (live.length && finishStop() === "ask") { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
   await refresh();
-  if (live.length && finishStop() === "ask" && latest()) { ui.finishAsk = { task: id, status }; drawFinishAsk(); }
+  if (ui.finishAsk && ui.finishAsk.task === id) drawFinishAsk();   // the sessions as they are now
   return true;
 }
 // The question, in its own small window over the board. Its list is the task's sessions at the

@@ -6,12 +6,13 @@ import Network
 import SystemConfiguration
 import WebKit
 
-/// How the board starts sessions — skip permissions, where they open — kept by the app rather than
-/// in one page's storage, so the Mac's board and every phone's start them the same way.
+/// How the board starts sessions — skip permissions, where they open — and what finishing a task
+/// does to its live sessions, kept by the app rather than in one page's storage, so the Mac's
+/// board and every phone's do the same.
 @MainActor
 enum BoardPrefs {
     /// The page's own storage keys; the values are the strings it stores ("1"/"0", "orca"…).
-    static let keys = ["hq-skip-perms", "hq-launch"]
+    static let keys = ["hq-skip-perms", "hq-launch", "hq-finish-stop"]
     private static let defaultsKey = "boardSharedPrefs"
 
     static var current: [String: String] {
