@@ -160,12 +160,19 @@ if (REMOTE) document.documentElement.classList.add("remote");
 // The token: in this browser's storage, and in a cookie as well — iOS gives a web app added to
 // the Home Screen its own storage, and brings the site's cookies along, not the rest.
 const TOKEN_KEY = "hq-remote-token";
+// Answers already had, by request, with their tag (see api).
+const remoteMemo = new Map();
 function remoteToken() {
   const m = document.cookie.match(/(?:^|;\s*)hq-token=([\w-]+)/);
   return pref(TOKEN_KEY, "") || (m ? m[1] : "");
 }
 function setRemoteToken(tok) {
   try { if (tok) localStorage.setItem(TOKEN_KEY, tok); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  // Unpaired (or removed on the Mac): the board kept on this phone goes too.
+  if (!tok) {
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith("hq-kept:")) localStorage.removeItem(k); } catch (e) { /* storage off */ }
+    remoteMemo.clear();
+  }
   document.cookie = tok ? `hq-token=${tok}; max-age=31536000; path=/; SameSite=Strict` : "hq-token=; max-age=0; path=/";
 }
 // The pairing code from the Mac's QR code: #pair=<code>, taken out of the address bar and traded
@@ -225,7 +232,24 @@ function deviceName() {
   if (/Android/.test(ua)) return "Android";
   return "";
 }
-const remoteMemo = new Map();
+// The board itself is also kept in the phone's storage: opened again, or reloaded, the page asks
+// whether it changed instead of fetching a megabyte first. (Only the board: the rest is small, or
+// changes every few seconds.)
+const KEPT_OPS = ["board"];
+const KEPT_PREFIX = "hq-kept:";
+function keptMemo(key) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return null;
+  try {
+    const m = JSON.parse(localStorage.getItem(KEPT_PREFIX + key) || "null");
+    if (m && m.tag) { remoteMemo.set(key, m); return m; }
+  } catch (e) { /* none kept, or storage off */ }
+  return null;
+}
+function keepMemo(key, tag, result) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return;
+  try { localStorage.setItem(KEPT_PREFIX + key, JSON.stringify({ tag, result })); }
+  catch (e) { try { localStorage.removeItem(KEPT_PREFIX + key); } catch (e2) { /* storage off */ } }
+}
 async function api(op, args = {}) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
   if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
@@ -239,13 +263,14 @@ async function api(op, args = {}) {
   // board is polled every few seconds, and over Tailscale's relay or a phone's data plan the
   // whole board each time is too much.
   const key = JSON.stringify([op, args]);
-  const memo = remoteMemo.get(key);
+  const memo = remoteMemo.get(key) || keptMemo(key);
   const { r, j } = await post(token, Object.assign({ op }, args), memo && memo.tag);
   if (j.same && memo && r.ok) return memo.result;
   if (j.tag && r.ok && !j.error) {
     remoteMemo.delete(key);
     remoteMemo.set(key, { tag: j.tag, result: j.result });
     if (remoteMemo.size > 40) remoteMemo.delete(remoteMemo.keys().next().value);
+    keepMemo(key, j.tag, j.result);
   }
   // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
   // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
@@ -686,8 +711,20 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // element under the pointer, and the browser then fires no click at all — which is what "the
 // first click sometimes does nothing" was. So: skip rebuilds when nothing changed, and hold a
 // timed rebuild while a mouse button is down.
+// One read at a time for the timer: over a slow link (Tailscale's relay) a read takes longer than
+// the 4 seconds between them, and reads piling up on one another never finish.
 async function refresh(force) {
+  ui.reading = (ui.reading || 0) + 1;
+  try { return await readBoard(force); } finally { ui.reading--; }
+}
+async function readBoard(force) {
   let sig = null;
+  // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
+  if (REMOTE && !ui.board && !ui.loadNote) {
+    ui.loadNote = setTimeout(() => {
+      if (!ui.board && remoteToken()) toast(T("Loading the board from the Mac… over a slow connection this takes a while", "正在从 Mac 加载看板……网络慢时要等一会儿"));
+    }, 3000);
+  }
   const readNo = ++ui.readNo;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
@@ -5643,7 +5680,7 @@ document.addEventListener("drop", async (ev) => {
 });
 
 refresh();
-setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
+setInterval(() => { if (document.visibilityState === "visible" && !document.hidden && !ui.reading) refresh("timer"); }, 4000);
 // Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
 document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseover", (ev) => {
