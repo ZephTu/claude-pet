@@ -1191,6 +1191,11 @@ function renderCounts() {
       `${later ? `<span class="sp">${T(`${later} for later`, `${later} 条稍后再答`)}</span>` : ""}</span>` : "");
   $("#quota").innerHTML = usageChips();
 }
+// The page leaves room under it for the status bar, which on a phone can take a few lines.
+try {
+  new ResizeObserver(([e]) => document.body.style.setProperty("--statusbar-h", `${Math.ceil(e.target.offsetHeight)}px`))
+    .observe(document.getElementById("statusbar"));
+} catch (e) { /* no ResizeObserver: the CSS fallback */ }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
 // statusline last saw them (see BoardBridge.usageSnapshot). Nothing when there is no fresh copy.
 function untilText(iso) {

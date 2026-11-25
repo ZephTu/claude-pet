@@ -1880,7 +1880,8 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
 @media (max-width: 640px) {
   /* The page scrolls as one, not each lane in its own box. */
   html, body { height: auto; min-height: 100%; }
-  body { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+  /* Room under the page for the status bar, however many lines it takes (--statusbar-h, set from its height). */
+  body { padding-bottom: calc(var(--statusbar-h, calc(40px + env(safe-area-inset-bottom))) + 8px); }
   main, main.kanban { height: auto; display: block; }
   #top { flex-wrap: wrap; height: auto; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; gap: 8px; position: static; }
   #top .brand { order: 0; }
@@ -1920,6 +1921,15 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
   body.reading > main { margin-right: 0; }
   body.reading #modal, body.reading #settings, body.reading #confirm, body.reading #statusbar { right: 0; }
   #statusbar { padding-bottom: env(safe-area-inset-bottom); height: auto; min-height: 32px; }
+  /* Too narrow for one line: the counts wrap, and the quota gets a line of its own. */
+  #statusbar { flex-wrap: wrap; row-gap: 4px; padding-top: 6px; padding-left: 12px; padding-right: 12px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  #statusbar .spacer { display: none; }
+  #statusbar #counts { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; column-gap: 16px; white-space: normal; overflow: visible; }
+  .sgroup { flex-wrap: wrap; }
+  .sgroup + .sgroup { padding-left: 0; border-left: 0; }   /* on a line of its own it would start with a bar */
+  #quota { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
+  #quota:empty { display: none; }
   #toast { bottom: calc(44px + env(safe-area-inset-bottom)); max-width: calc(100% - 24px); }
 
   /* Fingers, not a pointer. */
