@@ -53,6 +53,7 @@ MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n``
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
 [ "$("$HQ" asks T-001 | wc -l | tr -d ' ')" = 2 ] && ok "Stop hook records asks from hq-asks block"
 "$HQ" asks T-001 --json | python3 -c 'import json,sys; a=json.load(sys.stdin)[0]; assert a["context"].startswith("Done.") and "hq-asks" not in a["context"], a' && ok "asks keep the reply that raised them"
+"$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["asks"][0]["context"].startswith("Done."), t["asks"]' && ok "board --json: an open ask comes with the reply that raised it" || fail "board json open ask context"
 
 "$HQ" ask resolve T-001.1 do "go with v2" --via board
 ctx="$(hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
@@ -75,6 +76,7 @@ printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/ro
 "$HQ" todo T-001 1 done --via board
 grep -q -- "- \[x\] @me review the plan" "$T"/root/tasks/T-001-*/TASK.md && ok "todo toggled"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["todos"][1]["owner"]=="claude"; assert len(t["asks"])==4' && ok "board --json exposes todos and asks"
+"$HQ" board --json | python3 -c 'import json,sys; a=json.load(sys.stdin)["tasks"][0]["asks"]; assert all(x["state"]!="open" and "context" not in x for x in a), a' && "$HQ" asks T-001 --all --json | python3 -c 'import json,sys; a=json.load(sys.stdin); assert a[0]["context"].startswith("Done."), a' && ok "board --json leaves out answered asks' replies; hq asks --all still has them" || fail "board json answered ask context"
 "$HQ" board --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][1]; assert t["refs"]==[] and isinstance(t["workdirs"], list), t' && ok "list fields with template comments parse as lists"
 
 "$HQ" addtodo T-001 "@me ping Wenbing" && grep -A2 "draft the pilot" "$T"/root/tasks/T-001-*/TASK.md | grep -q "@me ping Wenbing" && ok "addtodo appends after last todo"
@@ -468,7 +470,57 @@ stop sess-1 "$(printf 'still done\n```hq-update\nstatus: done\nlog: tidy\n```')"
 [ "$(fin)" = "$first" ] && ok "a task already done is not finished again" || fail "re-finished: $(fin)"
 mkdir -p "$HOME/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"sess-1\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
 "$HQ" sessions --json | python3 -c 'import json,sys; s=[x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]; assert s["finished"]["status"]=="done" and s["task"]=="T-001", s' && ok "hq sessions --json carries the finished mark" || fail "sessions --json finished"
+# Its last turn's reply, saved at Stop for the board's session row (the transcript is not here).
+lr() { "$HQ" sessions --json | python3 -c 'import json,sys; print(json.dumps([x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]["lastReply"]))'; }
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["ts"], r' && ok "hq sessions --json carries the reply its last turn ended on, without HQ blocks" || fail "lastReply: $(lr)"
+stop sess-1 "$(printf '```hq-update\ntouch\n```')" >/dev/null
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "a reply holding only HQ blocks keeps the one before it" || fail "lastReply bookkeeping: $(lr)"
+echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["prev"] is True, r' && ok "while a turn runs, the reply is the last turn's, marked prev" || fail "lastReply busy: $(lr)"
+# A turn ended with Esc never reached the Stop hook: a newer reply in the transcript wins over the saved one.
+esc_turn() { python3 - "$T/tr.jsonl" "$1" <<'PY'
+import json, sys
+row = lambda o: json.dumps(o)
+y = sys.argv[2]
+with open(sys.argv[1], "w") as f:
+    f.write(row({"type": "user", "message": {"role": "user", "content": "go"}, "timestamp": f"{y}-01-01T00:00:00Z"}) + "\n")
+    f.write(row({"type": "assistant", "message": {"model": "claude", "content": [{"type": "text", "text": "cut short"}]}, "timestamp": f"{y}-01-01T00:00:05Z"}) + "\n")
+    f.write(row({"type": "user", "message": {"role": "user", "content": "next"}, "timestamp": f"{y}-01-01T00:00:09Z"}) + "\n")
+PY
+echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\", \"transcript\": \"$T/tr.jsonl\"}" > "$HOME/.claude/pet/sessions/sess-1.json"; }
+esc_turn 2099; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="cut short" and r["prev"] is True, r' && ok "mid-turn, a reply newer than the saved one (an Esc-ended turn) wins" || fail "stale saved reply: $(lr)"
+esc_turn 2001; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "an older one in the transcript doesn't" || fail "older transcript reply won: $(lr)"
+rm "$T/tr.jsonl"
 rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null
+
+# Peek shows the slash commands you ran (/compact before the line saying it compacted, as it ran),
+# and a session's last reply skips Claude Code's stand-ins and, mid-turn, the turn going on.
+python3 - "$HQ" <<'PY' && ok "slash commands in Peek; last_reply picks the finished turn's reply" || fail "commands / last_reply"
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+def u(text, ts, **kw): return {"type": "user", "message": {"role": "user", "content": text}, "timestamp": ts, **kw}
+def a(text, ts, model="claude"): return {"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": text}]}, "timestamp": ts}
+T = lambda s: f"2026-01-01T00:00:{s:02d}Z"
+cmd = "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"
+entries = [u("hi", T(1)), a("Hello.\n```hq-update\ntouch\n```", T(2)),
+           {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "manual", "preTokens": 9, "postTokens": 1}, "timestamp": T(9)},
+           u("summary", T(8), isCompactSummary=True), u(cmd, T(5)),
+           u("<local-command-stdout>Compacted</local-command-stdout>", T(9)),
+           u("<command-name>/task</command-name><command-args>T-108</command-args>", T(10)),
+           u("skill body", T(10), isMeta=True), a("No response requested.", T(11), model="<synthetic>")]
+items = hq.peek_timeline(entries)
+kinds = [(i["kind"], i.get("text") or i.get("event")) for i in items]
+assert kinds == [("msg", "hi"), ("msg", "Hello.\n```hq-update\ntouch\n```"), ("msg", "/compact"), ("event", "compact"), ("msg", "/task T-108"), ("msg", "No response requested.")], kinds
+assert items[2]["command"] and items[4]["command"]
+r = hq.last_reply(entries, False)
+assert r["text"] == "Hello." and r["prev"] is False, r
+busy = [u("do it", T(1)), a("Done: all of it.", T(2)), u("next", T(3)), a("Looking at the code…", T(4)),
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "also this", "origin": {"kind": "human"}}, "timestamp": T(5)}]
+r = hq.last_reply(busy, True)
+assert r["text"] == "Done: all of it." and r["prev"] is True, r
+assert hq.last_reply(busy, False)["text"] == "Looking at the code…"
+PY
 stop sess-1 "$(printf 'reopened\n```hq-update\nstatus: blocked\n```')" >/dev/null
 stop sess-1 "$(printf 'gave up\n```hq-update\nstatus: abandoned\n```')" >/dev/null
 fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="abandoned", d' && ok "reopened and abandoned: a new finished mark" || fail "abandoned mark: $(fin)"
@@ -612,6 +664,33 @@ echo "{\"pid\": $$}" > "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 " && fail "a live asker's answer went to another session" || ok "a live asker keeps its answer"
 rm "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker has ended, the next session on the task takes the answer"
+rm -rf "$HOME/.claude/pet"
+
+# A turn held open only by a background command that looks like a wait (the pet labels it
+# "shell") runs for 20 minutes at most; one held by an agent runs as long as the agent does.
+mkdir -p "$HOME/.claude/pet/sessions"
+old=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+new=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+held() { echo "{\"pid\": $$, \"sessionId\": \"$1\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": $2, \"updatedAt\": \"$3\"}" > "$HOME/.claude/pet/sessions/$1.json"; }
+held w-old '["shell"]' "$old"; held w-new '["shell"]' "$new"; held a-old '["shell", "auditor"]' "$old"
+"$HQ" sessions --json | python3 -c 'import json,sys; s={x["sessionId"]: x for x in json.load(sys.stdin)}
+assert s["w-old"]["state"]=="idle" and s["w-old"]["phase"]=="", s["w-old"]
+assert s["w-new"]["state"]=="busy" and s["w-new"]["phase"]=="awaiting-agent", s["w-new"]
+assert s["a-old"]["state"]=="busy", s["a-old"]' \
+  && ok "a wait-only hold runs 20 minutes; an agent's runs until it reports" || fail "wait-only hold limit"
+# Past the limit its reply is the turn's own, not the one before it.
+python3 - "$T/held.jsonl" <<'PY'
+import json, sys
+rows = [("user", "go", "00"), ("assistant", "before", "01"), ("user", "again", "02"), ("assistant", "the turn's reply", "03")]
+with open(sys.argv[1], "w") as f:
+    for k, t, s in rows:
+        c = t if k == "user" else [{"type": "text", "text": t}]
+        f.write(json.dumps({"type": k, "message": {"role": k, "model": "claude", "content": c}, "timestamp": f"2026-01-01T00:00:{s}Z"}) + "\n")
+PY
+echo "{\"pid\": $$, \"sessionId\": \"w-old\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": [\"shell\"], \"updatedAt\": \"$old\", \"transcript\": \"$T/held.jsonl\"}" > "$HOME/.claude/pet/sessions/w-old.json"
+"$HQ" sessions --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["sessionId"]=="w-old"][0]["lastReply"]
+assert r["text"]=="the turn\x27s reply" and not r["prev"], r' && ok "past the limit, its last reply is its own turn's" || fail "held reply"
+rm "$T/held.jsonl"
 rm -rf "$HOME/.claude/pet"
 
 # history: the sessions that worked on a task, with what resuming one needs.
@@ -2388,6 +2467,99 @@ tail -1 "$AC/out" | grep -q "pr: gh can't reach GitHub" && ok "autoclose: gh log
   && "$HQ" site jenkins - | grep -q "^jenkins: -$" && grep -q '"root"' "$HOME/.claude/hq/config.json" && ok "hq site keeps a site in this machine's config.json (root kept), and forgets it" || fail "hq site"
 "$HQ" set "$A1" status=done >/dev/null
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null || true
+
+# ---- intake: a duty's Auto intake makes tasks from GitHub review requests
+IK="$T/intake"; mkdir -p "$IK/bin" "$T/work-rev"
+cat > "$IK/bin/gh" <<'SH'
+#!/bin/sh
+case "$1 $2" in
+  "search prs") echo "$*" > "$IK/search-args"; cat "$IK/search.json" ;;
+  "pr view") printf '{"headRefOid":"%s","headRefName":"feat-%s","baseRefName":"main"}\n' "$(cat "$IK/head" 2>/dev/null || echo abc)" "$3" ;;
+  "api user") echo me ;;
+  api*) cat "$IK/events" 2>/dev/null ;;
+  *) exit 1 ;;
+esac
+SH
+cat > "$IK/claude" <<'SH'
+#!/bin/sh
+if [ "$1" = agents ]; then echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-4000-8000-000000000001"}]'; exit 0; fi
+printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "${CLAUDE_PET_JOB:-none}" > "$IK/claude-env"; echo "Started background session abcd1234"
+SH
+chmod +x "$IK/bin/gh" "$IK/claude"
+cat > "$IK/search.json" <<'JS'
+[{"repository":{"nameWithOwner":"acme/web"},"number":12,"title":"Fix login","url":"https://github.com/acme/web/pull/12","author":{"login":"ann"},"isDraft":false},
+ {"repository":{"nameWithOwner":"acme/web"},"number":13,"title":"WIP","url":"https://github.com/acme/web/pull/13","author":{"login":"ann"},"isDraft":true},
+ {"repository":{"nameWithOwner":"other/lib"},"number":5,"title":"Bump","url":"https://github.com/other/lib/pull/5","author":{"login":"bob"},"isDraft":false}]
+JS
+ik() { env IK="$IK" PATH="$IK/bin:$PATH" "$HQ" "$@"; }
+"$HQ" project add rev --kind duty >/dev/null
+printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\n<!-- a note -->\nbogus: 1\ngoal: Look at it.\nNote: carefully\nprompt: Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short.\n### jira-filter\nrepos: x\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
+"$HQ" project show rev --json | python3 -c '
+import json,sys; i=json.load(sys.stdin)["intake"]; c=i["github-review"]
+assert c["repos"]==["acme/web"] and c["run"] is True and c["permissions"]=="skip" and c["done"]=="manual" and c["focus"] is True, c
+assert c["prompt"]=="Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short." and c["goal"]=="Look at it.\nNote: carefully", c
+assert len(c["problems"])==1 and "unknown key" in c["problems"][0], c
+assert "makes no tasks yet" in i["jira-filter"]["problems"][0], i' \
+  && grep -q "^## Auto intake" "$T/root/projects/rev/PROJECT.md" && ok "intake section: repos, switches, defaults, a prompt kept as written (### Steps, <…> lines) up to the next source, goal lines, unknown keys and sources flagged" || fail "intake section"
+ik intake | tail -1 | grep -q "github-review: no duty set up" && [ ! -f "$IK/search-args" ] && ok "intake: a section without the switch on asks GitHub nothing" || fail "intake off"
+"$HQ" project set rev auto=github-review >/dev/null
+N0="$(ls "$T/root/tasks" | wc -l)"
+ik intake --dry-run | tail -1 | grep -q "github-review: 1 waiting, 1 new" && [ "$(ls "$T/root/tasks" | wc -l)" = "$N0" ] && ok "intake --dry-run: drafts and other repos left out, nothing made" || fail "intake dry run"
+CLAUDE_PET_JOB=intake-scan ik intake --claude "$IK/claude" --json > "$IK/out.json"
+IT="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["results"][0]; m=r["made"]; assert len(m)==1 and m[0]["session"].startswith("abcd1234"), r; print(m[0]["task"])' "$IK/out.json")"
+ITC="$(ls "$T"/root/tasks/$IT-*/TASK.md)"
+grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && grep -q '^intake_key: acme/web#12' "$ITC" && grep -q '^intake_done: manual' "$ITC" \
+  && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q '^Note: carefully$' "$ITC" \
+  && grep -q 'title: "Review web#12: Fix login"' "$ITC" && grep -q '"abcd1234"' "$ITC" && grep -q "review-requested=@me" "$IK/search-args" \
+  && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref, the default title and the section's goal" || fail "intake task: $(cat "$ITC")"
+grep -qx -- "--bg" "$IK/claude-args" && grep -qx -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
+  && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
+  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = none ] \
+  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule, not as the pet's job" || fail "intake launch: $(cat "$IK/claude-args")"
+"$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
+mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"
+mv "$IK/state.bak" "$T/root/secretary/intake/state.json"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 1 waiting, 0 new tasks" && ok "intake: a PR whose task is open makes no other" || fail "intake repeat"
+MSG='done\n\n```hq-update\nstatus: done\n```'
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
+  && grep -q '^status: active' "$ITC" && ok "a session can't close a task that came in by itself (done: manual)" || fail "intake manual done: $(grep status: "$ITC")"
+"$HQ" ask add "$IT" "Post the comments?" >/dev/null
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
+  && ok "…nor hold a close over open asks" || fail "intake manual done with asks"
+SETOUT="$(CLAUDE_CODE_SESSION_ID=sess-x "$HQ" set "$IT" status=done 2>&1 || true)"; echo "$SETOUT" | grep -q "the user closes it" && ! grep -q "^status: done" "$ITC" && ok "…nor hq set from inside a session" || fail "intake hq set guard"
+"$HQ" set "$IT" status=done >/dev/null
+echo "2020-01-01T00:00:00Z" > "$IK/events"; echo def > "$IK/head"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and not asked again since (new commits or not): no new task" || fail "intake closed not asked"
+python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))' >> "$IK/events"
+IT2="$(ik intake --claude "$IK/claude" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["made"][0]["task"])')"
+[ "$IT2" != "$IT" ] && ok "intake: asked again after it was closed: a new task" || fail "intake asked again"
+"$HQ" set "$IT2" intake_done=auto >/dev/null
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
+grep -q '^status: done' "$T"/root/tasks/$IT2-*/TASK.md && grep -q '^intake_closed_by: session' "$T"/root/tasks/$IT2-*/TASK.md && ok "done: auto — the session may close it, and it says so" || fail "intake auto done"
+"$HQ" intake status --json | python3 -c '
+import json,sys; s=json.load(sys.stdin); ids=[t["id"] for t in s["recent"]]
+assert ids==[sys.argv[2], sys.argv[1]] and all(t["status"]=="done" for t in s["recent"]), s["recent"]
+d=s["sources"]["github-review"]; assert d["last"]["made"]==[sys.argv[2]] and d["duties"][0]["name"]=="rev" and d["duties"][0]["problems"], d' "$IT" "$IT2" \
+  && ok "intake status: recent tasks that came in by itself, done ones too, and the last scan" || fail "intake status"
+python3 - "$IK/search.json" <<'PY'
+import json, sys
+json.dump([{"repository": {"nameWithOwner": "acme/web"}, "number": n, "title": f"PR {n}", "url": f"https://github.com/acme/web/pull/{n}",
+            "author": {"login": "ann"}, "isDraft": False} for n in range(20, 25)], open(sys.argv[1], "w"))
+PY
+ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 3 new tasks (.*), 2 left for the next scan" \
+  && ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 2 new tasks" && ok "intake: at most 3 new tasks a scan; the rest come next time" || fail "intake cap"
+IC="$("$HQ" intake status --json | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["recent"] if t["status"]!="done"][0])')"
+ICN="$("$HQ" continue "$IC" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["to"])')"
+grep -q '^intake_key: acme/web#' "$T"/root/tasks/$ICN-*/TASK.md && grep -q '^intake_done: manual' "$T"/root/tasks/$ICN-*/TASK.md && ok "hq continue carries what came in by itself" || fail "intake continue"
+printf '### github-review\nrepos: acme/web\nworkdir: %s/nope\nrun: yes\n' "$T" | "$HQ" project section rev intake >/dev/null
+"$HQ" project show rev --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]; assert "no folder" in c["problems"][0], c' \
+  && python3 -c 'import json; print(json.dumps([{"repository":{"nameWithOwner":"acme/web"},"number":30,"title":"X","url":"https://github.com/acme/web/pull/30","author":{"login":"ann"},"isDraft":False}]))' > "$IK/search.json" \
+  && rm -f "$IK/claude-args" && ! ik intake --claude "$IK/claude" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
+  && IB="$(grep -l '^intake_key: acme/web#30' "$T"/root/tasks/*/TASK.md)" && grep -q '^status: waiting-on-me' "$IB" && grep -q 'could not start a background session: no folder to run in' "$IB" \
+  && grep -q 'ann asked you to review https://github.com/acme/web/pull/30 (feat-30 → main)' "$IB" \
+  && ok "intake: a workdir written wrong is flagged; no session starts anywhere else, the task (default goal) waits on you" || fail "intake bad workdir"
+"$HQ" project set rev auto= >/dev/null
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

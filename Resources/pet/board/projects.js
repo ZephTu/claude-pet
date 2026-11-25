@@ -10,9 +10,10 @@
 // Two kinds of project sit at the top (PROJECT.md `kind:`): a goal (◆) has an end — done-when
 // criteria, a deadline, optional phases its tasks go through; a duty (↻) is ongoing — healthy-when
 // criteria, and work that comes in: tasks made from its templates ("常见的活"), recurring jobs that
-// make them on a timetable ("定期来活"), and sources that will make them by themselves ("自动来活",
-// switches only until the data side lands). A goal can sit under a duty. Tasks in no project are
-// "Not in a project".
+// make them on a timetable ("定期来活"), and sources that make them by themselves ("自动来活":
+// GitHub review requests so far, set up in PROJECT.md's Auto intake section and scanned by the
+// `intake-scan` job, `hq intake`; the other sources are switches only). A goal can sit under a
+// duty. Tasks in no project are "Not in a project".
 //
 // ui.proj: "" the list page, a project's name its page, "(none)" the tasks in no project.
 // Buttons here carry data-action="p-…"; board.js's click handler (which does the two-click
@@ -28,6 +29,25 @@ const AUTO_SOURCES = [
   ["github-review", T("GitHub review requests", "GitHub 上请你 review"), T("a PR waiting on your review becomes a task", "有 PR 等你 review 就建一个任务")],
   ["jira-filter", T("Jira filter", "Jira 过滤器"), T("a new issue in your filter becomes a task", "过滤器里出现新 issue 就建一个任务")],
 ];
+// The sources that make tasks (hq's INTAKE_SOURCES); the others are switches only, for now.
+const INTAKE_READY = ["github-review"];
+const INTAKE_JOB = "intake-scan";
+const intakeJob = () => ((typeof jui !== "undefined" && jui.data && jui.data.jobs) || []).find((j) => j.id === INTAKE_JOB) || null;
+// What a new Auto intake section starts as: every key, with what it does in the hint under it.
+const INTAKE_SAMPLE = () => T(`### github-review
+repos: owner/repo
+workdir: ~/code/repo
+run: yes
+permissions: ask
+done: manual
+prompt: Review {url} with /code-review. Put the comments on the task card and ask me before posting anything to GitHub.`,
+`### github-review
+repos: owner/repo
+workdir: ~/code/repo
+run: yes
+permissions: ask
+done: manual
+prompt: 用 /code-review 审 {url}。把意见写在任务卡上，问过我之后再发到 GitHub。`);
 const projTasks = (name) => listed().filter((t) => (t.project || "") === name);
 const projLabel = (pr, name) => (pr && pr.title) || name;
 const goalsUnder = (name) => projects().filter((p) => p.defined && p.kind === "goal" && p.parent === name);
@@ -411,24 +431,60 @@ function intake(pr) {
       <button class="icon x" data-confirm="${T("Delete?", "删除？")}" data-action="p-job-del" data-id="${esc(j.id)}" title="${T("Delete this recurring job", "删掉这个定期任务")}">✕</button></div>`).join("")}
     ${form || (jobs.length ? "" : `<div class="empty">${tpls.length ? T("None. ＋ makes a task from a template on a timetable (a job on the Scheduled page).", "没有。点 ＋ 按时间表用模板建任务（在定时任务页里是一个 job）。") : T("Write a template first; a recurring job makes tasks from one.", "先写一个常见的活；定期来活就是按时用它建任务。")}</div>`)}</div>`;
   const auto = new Set(pr.auto || []);
-  const autoBox = `<div class="ibox"><h4>${T("Comes in by itself", "自动来活")}</h4>
-    ${AUTO_SOURCES.map(([k, label, what]) => `<div class="irow"><span class="t">${esc(label)}<small>${esc(what)}</small></span>
+  const autoBox = `<div class="ibox"><h4>${T("Comes in by itself", "自动来活")}${editBtn(name, "intake")}</h4>
+    ${AUTO_SOURCES.map(([k, label, what]) => `<div class="irow"><span class="t">${esc(label)}${auto.has(k) && INTAKE_READY.includes(k) ? intakeSummary(pr, k) : `<small>${esc(what)}</small>`}</span>
       <button class="switch ${auto.has(k) ? "on" : ""}" data-action="p-auto" data-p="${esc(name)}" data-k="${k}"><span></span></button></div>`).join("")}
-    <div class="meta inote">${T("Only switches for now: nothing makes tasks from these sources yet.", "目前只是开关：接上这些信息来源之后才会自动建任务。")}</div></div>`;
+    ${INTAKE_READY.some((k) => auto.has(k)) ? intakeScanRow() : ""}
+    ${Object.entries(pr.intake || {}).filter(([k]) => !INTAKE_READY.includes(k)).flatMap(([, c]) => c.problems || []).map((x) => `<div class="meta inote warn">${esc(x)}</div>`).join("")}
+    <div class="meta inote">${T("QA Hub CI and Jira filter are switches only for now.", "QA Hub CI 和 Jira 过滤器目前只是开关。")}</div></div>`;
+  const autoEdit = editing(name, "intake") ? `<div class="tpl-edit">${sectionEditor(name, "intake", INTAKE_SAMPLE())}
+    <div class="meta">${T("A ### heading per source (github-review). repos: (comma-separated, * for any); workdir: where its session runs (default: the duty's first folder); run: yes starts a background session on each new task; permissions: skip lets it run without asking; done: manual (only you close the task) or auto; title: / goal: / prompt: (last: it takes the rest) can use {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.",
+      "每个来源一个 ### 标题（github-review）。repos:（逗号分隔，* 表示任意仓库）；workdir: session 在哪个目录跑（默认职责的第一个目录）；run: yes 每建一个任务就在后台起一个 session；permissions: skip 让它不问权限直接跑；done: manual（只能你来关）或 auto；title: / goal: / prompt:（放最后，后面的行都算它的）可以用 {repo}（owner/name）{name} {number} {title} {url} {author} {branch} {base}。")}</div></div>` : "";
   const tplEdit = editing(name, "templates") ? `<div class="tpl-edit">${sectionEditor(name, "templates",
     T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"))}
     <div class="meta">${T("A ### heading per template: title: (with {date} / {week}), goal:, and - [ ] @owner todo lines.", "每个模板一个 ### 标题：title:（可用 {date} / {week}）、goal:，以及 - [ ] @owner 待办 行。")}</div></div>` : "";
   // Folded under the tasks unless opened (remembered per duty) or a template is being edited: the
   // page is for the tasks; its one line says what there is.
-  const open2 = intakeOpen(name) || Boolean(tplEdit) || open;
+  const open2 = intakeOpen(name) || Boolean(tplEdit) || Boolean(autoEdit) || open;
   const on = [...auto].filter((k) => AUTO_SOURCES.some(([x]) => x === k)).length;
   const sum = [T(`${tpls.length} common`, `常见的活 ${tpls.length}`), T(`${jobs.length} recurring`, `定期 ${jobs.length}`),
     T(`${on} by itself on`, `自动来活开了 ${on} 个`)].join(" · ");
   // Held open while a template or recurring job is being edited: the header doesn't fold it then.
-  const held = Boolean(tplEdit) || open;
+  const held = Boolean(tplEdit) || Boolean(autoEdit) || open;
   return `<div class="sec-h ${held ? "" : "fold"} ${open2 ? "open" : ""}" ${held ? "" : `data-action="p-intake" data-p="${esc(name)}"`}
       title="${T("Where its work comes from: templates, recurring jobs, sources", "活从哪来：模板、定期任务、自动来源")}">${T("How work comes in", "来活方式")}<span class="sub">${esc(sum)}${held ? "" : open2 ? T(" · click to fold", " · 点击收起") : T(" · click to show", " · 点击展开")}</span></div>
-    ${open2 ? `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}` : ""}`;
+    ${open2 ? `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}${autoEdit}` : ""}`;
+}
+// A switched-on source's setup, from PROJECT.md's Auto intake section: what it watches, whether a
+// session starts on each task, and who closes it — or what is missing.
+function intakeSummary(pr, k) {
+  const c = (pr.intake || {})[k];
+  if (!c || !(c.repos || []).length) return `<small class="warn">${T("No repositories yet: ✎ to set it up", "还没配置仓库：点 ✎ 写配置")}</small>`;
+  const bits = [c.repos.join(", "), c.run ? (c.permissions === "skip" ? T("runs a session (no prompts)", "自动跑（不问权限）") : T("runs a session", "自动跑"))
+    : T("task only", "只建任务"), c.done === "auto" ? T("may close itself", "可以自己关") : T("you close it", "你来关")];
+  return `<small class="full">${esc(bits.join(" · "))}</small>${(c.problems || []).map((x) => `<small class="warn">${esc(x)}</small>`).join("")}`;
+}
+// The scan job's row: on or off, when it last ran and what it said, and Scan now.
+function intakeScanRow() {
+  const j = intakeJob(), last = j ? lastReal(j) : null;
+  const when = j && j.running ? T("scanning…", "扫描中…") : last ? `${T("last", "上次")} ${jwhen(last.started)}${last.summary ? " · " + last.summary : ""}` : T("not run yet", "还没扫过");
+  const bad = last && isFail(last);
+  return `<div class="irow"><span class="t">${T("Scan every 10 minutes", "每 10 分钟扫描一次")}<small class="${bad ? "warn" : ""}" title="${esc(last && last.summary || "")}">${esc(when)}</small></span>
+    <button class="btn small" data-action="p-intake-now" ${j && j.running ? "disabled" : ""}>${T("Scan now", "立即扫描")}</button>
+    <button class="switch ${j && j.enabled ? "on" : ""}" data-action="p-intake-job" data-on="${j && j.enabled ? "" : "1"}" title="${j && j.enabled ? T("On — click to pause", "开着——点击暂停") : T("Off — click to switch on", "关着——点击打开")}"><span></span></button></div>`;
+}
+// Tasks that came in by themselves: the open ones and those closed in the last 14 days — so one
+// that a session closed by itself (done: auto) is still seen.
+const INTAKE_LABEL = { "github-review": T("GitHub review", "GitHub review") };
+function intakeLog(name) {
+  const cut = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+  const ts = projTasks(name).filter((t) => t.intake && (isOpen(t) || String(t.closed || t.updated || "") >= cut))
+    .sort((a, b) => String(b.id).localeCompare(String(a.id), undefined, { numeric: true }));
+  if (!ts.length) return "";
+  return `<div class="sec-h">${T("Came in by itself", "自动来活记录")}<span class="c">${ts.length}</span><span class="sub">${T("open, and closed in the last 14 days", "进行中的，和最近 14 天关掉的")}</span></div>
+    <div class="donelist">${ts.map((t) => `<div class="dl" data-action="open-task" data-task="${esc(t.id)}" title="${esc((INTAKE_LABEL[t.intake] || t.intake) + " · " + (t.intake_key || ""))}"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="t">${esc(t.title)}</span>
+      <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
+      ${isOpen(t) ? "" : `<span class="d">${t.intake_closed_by === "session" ? T("by its session · ", "session 自己关 · ") : ""}${esc(t.closed || t.updated || "")}</span>`}</div>`).join("")}</div>`;
 }
 const INTAKE_KEY = "hq-intake-open";
 const intakeOpen = (name) => { try { return JSON.parse(localStorage.getItem(INTAKE_KEY) || "[]").includes(name); } catch (e) { return false; } };
@@ -482,6 +538,7 @@ function projDetail(name) {
       main += board4(items);
     }
   }
+  if (duty) main += intakeLog(name);
   main += doneList(name);
   return head + `<div class="pd"><aside class="pd-info">${projAside(pr)}</aside><div class="pd-main">${main}</div></div>`;
 }
@@ -690,7 +747,7 @@ async function projAction(d) {
       }
       if (part === "meta") for (const k of META_KEYS(pr)) ui.drafts[`pm:${name}:${k}`] = metaVal(pr, k);
       // The section as written in PROJECT.md, comments and all (the parsed one drops details).
-      else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || "";
+      else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || (part === "intake" ? INTAKE_SAMPLE() : "");
       render();
       const el = document.querySelector(`#proj-view [data-key="${CSS.escape(part === "meta" ? `pm:${name}:title` : `pe:${name}:${part}`)}"]`);
       if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
@@ -768,8 +825,15 @@ async function projAction(d) {
       on.has(d.k) ? on.delete(d.k) : on.add(d.k);
       pr.auto = [...on];   // shows at once; the refresh confirms it
       render();
-      return run(() => api("project", { action: "set", names: [name, "auto=" + AUTO_SOURCES.map(([k]) => k).filter((k) => on.has(k)).join(",")] }));
+      // A source that makes tasks needs the scan: switching one on turns it on too.
+      const scan = on.has(d.k) && INTAKE_READY.includes(d.k) && !(intakeJob() || {}).enabled;
+      return run(async () => {
+        await api("project", { action: "set", names: [name, "auto=" + AUTO_SOURCES.map(([k]) => k).filter((k) => on.has(k)).join(",")] });
+        if (scan) await api("intake-job-set", { on: true });
+      });
     }
+    case "p-intake-job": return run(() => api("intake-job-set", { on: Boolean(d.on) }), d.on ? T("Scan on", "扫描已开启") : T("Scan off", "扫描已关闭"));
+    case "p-intake-now": return run(() => api("intake-job-now"), T("Scanning…", "正在扫描…"));
     case "p-recur": pui.recur = pui.recur === name ? null : name; return render();
     case "p-recur-save": {
       const pr = projectByName(name) || {};

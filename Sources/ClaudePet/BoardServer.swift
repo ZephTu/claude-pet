@@ -27,19 +27,22 @@ enum BoardPrefs {
     static var skip: Bool? { current["hq-skip-perms"].map { $0 == "1" } }
 }
 
-/// Phone access: the board, served over the local network to a paired phone's browser.
+/// Phone access: the board, served over the local network to a paired phone's browser — and,
+/// when turned on as well, over Tailscale to the user's own devices (Tailnet).
 ///
 /// The same pages the Mac's window shows, from the same files, and the same operations: a phone's
 /// `POST /api` goes to BoardBridge.handle as the window's messages do. What only the Mac may do
 /// (pair more phones, a folder picker) is refused — see RemoteAccess. Off until turned on in the
-/// board's settings; then it listens on every interface, answers only private addresses, and
-/// runs nothing for a request without a paired phone's token.
+/// board's settings; then it listens on every interface, answers only private addresses (and
+/// Tailscale ones of the user's own devices), and runs nothing for a request without a paired
+/// phone's token.
 @MainActor
 final class BoardServer {
     static let shared = BoardServer()
     private static let enabledKey = "boardServerEnabled"
     private static let portKey = "boardServerPort"
     private static let devicesKey = "boardServerDevices"
+    private static let tailnetKey = "boardServerTailnet"
 
     private var listener: NWListener?
     private let bridge = BoardBridge()
@@ -52,9 +55,13 @@ final class BoardServer {
     /// Connections open now. A phone opens a handful at once; many more is someone flooding.
     private var open = 0
     private static let maxOpen = 48
+    /// Files already compressed, by ETag: the board's scripts don't change between loads.
+    private var gzipped: [String: Data] = [:]
     private var root: URL? { Bundle.module.url(forResource: "pet", withExtension: nil)?.standardizedFileURL }
 
     var enabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
+    /// Also over Tailscale: off unless turned on, beside phone access itself.
+    var tailnetOn: Bool { UserDefaults.standard.bool(forKey: Self.tailnetKey) }
     /// `--serve-board`: a port of its own, so a development copy runs beside the installed pet.
     private var portOverride: UInt16?
     var port: UInt16 {
@@ -63,7 +70,17 @@ final class BoardServer {
         return (1024...65535).contains(p) ? UInt16(p) : RemoteAccess.defaultPort
     }
 
-    func startIfEnabled() { if enabled { start() } }
+    func startIfEnabled() {
+        guard enabled else { return }
+        start()
+        if tailnetOn { Tailnet.shared.refresh() }
+    }
+
+    func setTailnet(_ on: Bool) async -> (Any?, String?) {
+        UserDefaults.standard.set(on, forKey: Self.tailnetKey)
+        if on { await Tailnet.shared.current(force: true) }
+        return (status(), nil)
+    }
 
     func setEnabled(_ on: Bool) -> (Any?, String?) {
         UserDefaults.standard.set(on, forKey: Self.enabledKey)
@@ -140,8 +157,18 @@ final class BoardServer {
     /// A pairing code for one more phone: the address to open, with the code after `#` (a
     /// fragment never leaves the phone's browser — not in a request, not in a log), the same as a
     /// QR code to scan, and the code alone to type. The code is kept only as its hash.
-    func pair() -> (Any?, String?) {
+    /// `overTailnet`: the link and QR code use the Mac's Tailscale name, for a phone away from home.
+    func pair(overTailnet: Bool = false) -> (Any?, String?) {
         guard listener != nil else { return (nil, L("turn phone access on first", "先打开手机访问")) }
+        let base: String
+        if overTailnet {
+            guard tailnetOn, let url = tailnetURL() else {
+                return (nil, L("Tailscale isn't ready on this Mac", "这台 Mac 上的 Tailscale 还没就绪"))
+            }
+            base = url
+        } else {
+            base = baseURLs().first ?? "http://localhost:\(port)"
+        }
         let token = RemoteAccess.newPairingCode()
         // One code waits at a time: a new one cancels the last, if it went unused.
         var all = RemoteAccess.live(devices, now: Date()).filter { $0.paired != nil }
@@ -150,7 +177,7 @@ final class BoardServer {
         devices = all
         codeFailures = 0
         notice = nil
-        let url = "\(baseURLs().first ?? "http://localhost:\(port)")/board/board.html#pair=\(token)"
+        let url = "\(base)/board/board.html#pair=\(token)"
         let shown = "\(token.prefix(4))-\(token.suffix(4))"
         return (["url": url, "qr": Self.qrCode(url) ?? "", "code": shown, "id": id], nil)
     }
@@ -172,7 +199,29 @@ final class BoardServer {
                                 "urls": baseURLs(), "devices": list]
         if let e = lastError { o["error"] = e }
         if let notice { o["notice"] = notice }
+        if tailnetOn {
+            let t = Tailnet.shared
+            t.refresh()
+            var tn: [String: Any] = ["on": true]
+            if let url = tailnetURL() { tn["url"] = url }
+            if let login = t.me?.login { tn["login"] = login }
+            if let problem = t.problem {
+                tn["problem"] = problem
+            } else if let me = t.me, me.running, me.login == nil {
+                tn["problem"] = L("This Mac is a tagged device on its tailnet, so it has no user whose devices could be let in",
+                                  "这台 Mac 在 tailnet 里是带标签的设备，没有所属用户，所以没法判断哪些是你的设备")
+            }
+            o["tailnet"] = tn
+        } else {
+            o["tailnet"] = ["on": false]
+        }
         return o
+    }
+
+    /// The Mac's address over Tailscale: its MagicDNS name, the same at home and away.
+    private func tailnetURL() -> String? {
+        guard let me = Tailnet.shared.me, me.running, me.login != nil, let name = me.name else { return nil }
+        return "http://\(name):\(port)"
     }
 
     /// How a phone reaches this Mac: its Bonjour name (stays the same when the router hands out
@@ -217,15 +266,29 @@ final class BoardServer {
     // MARK: - Connections
 
     private func accept(_ conn: NWConnection) {
-        // Turned away before a byte is read: a peer outside the local network.
-        guard let address = Self.peerBytes(conn.endpoint),
-              RemoteAccess.isLocal(address) || Self.onLink(address), open < Self.maxOpen else {
+        // Turned away before a byte is read: a peer outside the local network — unless it comes
+        // over Tailscale, which is turned on, from a device of this Mac's own user.
+        guard let address = Self.peerBytes(conn.endpoint), open < Self.maxOpen else {
             conn.cancel()
             return
         }
+        var gate: (@MainActor () async -> Bool)?
+        if !(RemoteAccess.isLocal(address) || Self.onLink(address)) {
+            guard tailnetOn, RemoteAccess.isTailnet(address) else {
+                conn.cancel()
+                return
+            }
+            // Started at once (the handshake waits on it), but not a byte read until Tailscale
+            // says whose device it is.
+            let name = Self.peerName(conn.endpoint)
+            gate = { [weak self] in
+                guard await Tailnet.shared.allows(name), let self else { return false }
+                return self.tailnetOn && self.listener != nil
+            }
+        }
         open += 1
         let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address))
-        let c = Connection(conn: conn, peer: peer,
+        let c = Connection(conn: conn, peer: peer, gate: gate,
                            admit: { [weak self] req, peer in self?.admit(req, from: peer) ?? .refuse(Data()) },
                            handler: { [weak self] req, peer in
                                await self?.respond(to: req, from: peer)
@@ -292,7 +355,11 @@ final class BoardServer {
     /// Decided on a request's head, before its body is read: everything that turns a request away
     /// without running anything — so only a paired phone gets to send a body (a pasted picture).
     fileprivate func admit(_ req: RemoteAccess.Request, from peer: Peer) -> Admit {
-        let names = [(SCDynamicStoreCopyLocalHostName(nil) as String?) ?? ""].filter { !$0.isEmpty }
+        var names = [(SCDynamicStoreCopyLocalHostName(nil) as String?) ?? ""].filter { !$0.isEmpty }
+        // Over Tailscale: the Mac's MagicDNS name, whole or its first part.
+        if tailnetOn, let name = Tailnet.shared.me?.name {
+            names += [name, String(name.prefix { $0 != "." })]
+        }
         guard RemoteAccess.hostAllowed(req.headers["host"], names: names) else {
             return .refuse(text(403, "This address can't be used for the board."))
         }
@@ -347,7 +414,7 @@ final class BoardServer {
                                          extra: ["Location": "/board/board.html"])
         }
         if req.path == "/manifest.webmanifest" { return manifest() }
-        return file(req.path)
+        return file(req)
     }
 
     private func text(_ status: Int, _ s: String) -> Data {
@@ -359,9 +426,32 @@ final class BoardServer {
         return RemoteAccess.response(status: status, type: "application/json", body: data)
     }
 
+    /// Compressed when the phone takes gzip and it's worth it: over a slow link the board's
+    /// scripts and its data are most of the wait.
+    private func encoded(_ body: Data, type: String, for req: RemoteAccess.Request, etag: String? = nil) -> Data {
+        var extra: [String: String] = [:]
+        if let etag { extra["ETag"] = etag }
+        var body = body
+        if body.count > 1024, RemoteAccess.compressible(type), RemoteAccess.acceptsGzip(req.headers["accept-encoding"]) {
+            let z: Data?
+            if let etag, let kept = gzipped[etag] { z = kept } else { z = RemoteAccess.gzip(body) }
+            if let z, z.count < body.count {
+                if let etag {
+                    if gzipped.count > 64 { gzipped = [:] }
+                    gzipped[etag] = z
+                }
+                body = z
+                extra["Content-Encoding"] = "gzip"
+                extra["Vary"] = "Accept-Encoding"
+            }
+        }
+        return RemoteAccess.response(status: 200, type: type, body: body, extra: extra, cached: etag != nil)
+    }
+
     /// The pet's own files (the board, the guide, the skin pictures), as the Mac's window loads
     /// them over pet:// — with the language and "remote" set at the top of each page.
-    private func file(_ rawPath: String) -> Data {
+    private func file(_ req: RemoteAccess.Request) -> Data {
+        let rawPath = req.path
         guard let root else { return text(404, "not found") }
         let relative = rawPath.removingPercentEncoding ?? rawPath
         let url = root.appendingPathComponent(relative).standardizedFileURL
@@ -369,7 +459,7 @@ final class BoardServer {
             return text(404, "not found")
         }
         let type = PetSchemeHandler.mimeType(for: url)
-        guard url.pathExtension == "html" else { return RemoteAccess.response(status: 200, type: type, body: data) }
+        guard url.pathExtension == "html" else { return cachable(data, type: type, for: req) }
         let skin = BoardWindow.currentSkin()
         let tags = """
         <script>\(UILanguage.pageScript) window.HQ_REMOTE = true;</script>
@@ -385,7 +475,16 @@ final class BoardServer {
         let html = RemoteAccess.inject(tags, into: String(decoding: data, as: UTF8.self))
             .replacingOccurrences(of: #"content="width=device-width, initial-scale=1""#,
                                   with: #"content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover""#)
-        return RemoteAccess.response(status: 200, type: "text/html; charset=utf-8", body: Data(html.utf8))
+        return cachable(Data(html.utf8), type: "text/html; charset=utf-8", for: req)
+    }
+
+    /// A file the phone may keep: sent again only when it has changed (304 otherwise).
+    private func cachable(_ body: Data, type: String, for req: RemoteAccess.Request) -> Data {
+        let etag = RemoteAccess.etag(body)
+        if RemoteAccess.unchanged(req.headers["if-none-match"], etag: etag) {
+            return RemoteAccess.response(status: 304, type: type, body: Data(), extra: ["ETag": etag], cached: true)
+        }
+        return encoded(body, type: type, for: req, etag: etag)
     }
 
     /// What "Add to Home Screen" makes of it: an app of its own, full screen, named HQ.
@@ -435,7 +534,14 @@ final class BoardServer {
         }
         let (result, error) = await bridge.handle(body)
         if let error { return json(200, ["error": error]) }
-        return json(200, ["result": result ?? NSNull()])
+        // The board asks for the same things every few seconds, and the answer — the whole
+        // board, over a megabyte — is mostly the same as last time: a phone that says which
+        // version it has (its tag) is told only that nothing changed.
+        let data = (try? JSONSerialization.data(withJSONObject: result ?? NSNull(), options: [.fragmentsAllowed])) ?? Data("null".utf8)
+        let tag = String(RemoteAccess.etag(data).dropFirst().dropLast())   // hex, without the quotes
+        if req.headers[RemoteAccess.haveHeader] == tag { return json(200, ["same": true]) }
+        let whole = Data(#"{"result":"#.utf8) + data + Data(#","tag":"\#(tag)"}"#.utf8)
+        return encoded(whole, type: "application/json", for: req)
     }
 }
 
@@ -461,16 +567,20 @@ private final class Connection {
     private let admit: (RemoteAccess.Request, Peer) -> Admit
     private let handler: (RemoteAccess.Request, Peer) async -> Data
     private let closed: () -> Void
+    /// Asked before the request is read, when there's something to ask (a Tailscale peer).
+    private let gate: (@MainActor () async -> Bool)?
     private var buffer = Data()
     /// Set once the head is admitted.
     private var maxBody: Int?
     private var done = false
     private var counted = true
 
-    init(conn: NWConnection, peer: Peer, admit: @escaping (RemoteAccess.Request, Peer) -> Admit,
+    init(conn: NWConnection, peer: Peer, gate: (@MainActor () async -> Bool)? = nil,
+         admit: @escaping (RemoteAccess.Request, Peer) -> Admit,
          handler: @escaping (RemoteAccess.Request, Peer) async -> Data, closed: @escaping () -> Void) {
         self.conn = conn
         self.peer = peer
+        self.gate = gate
         self.admit = admit
         self.handler = handler
         self.closed = closed
@@ -488,7 +598,11 @@ private final class Connection {
         conn.start(queue: .main)
         // A request that never finishes arriving doesn't hold the connection forever.
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in finish() }
-        receive()
+        guard let gate else { return receive() }
+        Task { @MainActor [self] in
+            let ok = await gate()
+            if ok { receive() } else { finish() }
+        }
     }
 
     private func receive() {

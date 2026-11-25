@@ -1,4 +1,5 @@
 import ClaudePetCore
+import Compression
 import Foundation
 
 /// Phone access (BoardServer): reading a request, who may connect, paired phones' tokens.
@@ -54,6 +55,79 @@ enum RemoteAccessTests {
         let global: [UInt8] = [0x20, 0x01, 0x0d, 0xb8] + Array(repeating: 0, count: 12)
         let tailnet: [UInt8] = [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0, 0xab, 0x12] + Array(repeating: 0, count: 7) + [9]
         t.check("Tailscale's IPv6 addresses are not local (they reach across the internet)", !RemoteAccess.isLocal(tailnet))
+
+        // Over Tailscale: its addresses, and only the Mac's own user's untagged devices.
+        t.check("100.64/10, Tailscale's IPv6 and a mapped 100.x are Tailscale addresses",
+                RemoteAccess.isTailnet([100, 64, 0, 1]) && RemoteAccess.isTailnet([100, 127, 155, 26])
+                && RemoteAccess.isTailnet(tailnet)
+                && RemoteAccess.isTailnet([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 100, 96, 1, 2]))
+        t.check("100.0–63.x, 100.128.x, private and other ULA addresses are not",
+                !RemoteAccess.isTailnet([100, 63, 0, 1]) && !RemoteAccess.isTailnet([100, 128, 0, 1])
+                && !RemoteAccess.isTailnet([192, 168, 0, 2]) && !RemoteAccess.isTailnet([0xfd, 0x12] + Array(repeating: 0, count: 14)))
+        let status = Data("""
+        {"BackendState":"Running","Self":{"UserID":123,"DNSName":"My-Mac.tail1.ts.net.","TailscaleIPs":["100.96.1.2","fd7a:115c:a1e0::1"]},
+         "User":{"123":{"ID":123,"LoginName":"me@example.com"}}}
+        """.utf8)
+        t.check("the Mac on its tailnet: connected, its user, its name without the dot",
+                RemoteAccess.tailnetSelf(statusJSON: status)
+                == RemoteAccess.TailnetSelf(running: true, login: "me@example.com", name: "my-mac.tail1.ts.net",
+                                            addresses: ["100.96.1.2", "fd7a:115c:a1e0::1"]))
+        let stopped = Data(#"{"BackendState":"Stopped","Self":{"UserID":123,"Tags":["tag:server"]},"User":{"123":{"LoginName":"x"}}}"#.utf8)
+        t.check("a stopped or tagged Mac: not running, no user",
+                RemoteAccess.tailnetSelf(statusJSON: stopped).map { !$0.running && $0.login == nil } == true
+                && RemoteAccess.tailnetSelf(statusJSON: Data("nope".utf8)) == nil)
+        func whois(_ login: String, tags: String = "") -> Data {
+            Data(#"{"Node":{"Name":"phone.tail1.ts.net."\#(tags)},"UserProfile":{"LoginName":"\#(login)"}}"#.utf8)
+        }
+        t.check("whois: a device of the Mac's own user is let in, whatever the case",
+                RemoteAccess.tailnetOwnDevice(whoisJSON: whois("Me@Example.com"), login: "me@example.com"))
+        t.check("whois: someone else's device, a tagged one, or no answer is not",
+                !RemoteAccess.tailnetOwnDevice(whoisJSON: whois("colleague@example.com"), login: "me@example.com")
+                && !RemoteAccess.tailnetOwnDevice(whoisJSON: whois("me@example.com", tags: #","Tags":["tag:connector"]"#), login: "me@example.com")
+                && !RemoteAccess.tailnetOwnDevice(whoisJSON: whois("tagged-devices"), login: "")
+                && !RemoteAccess.tailnetOwnDevice(whoisJSON: Data(), login: "me@example.com"))
+        t.check("the Mac's Tailscale name is a Host the board answers to, when given",
+                RemoteAccess.hostAllowed("my-mac.tail1.ts.net:8790", names: ["my-mac.tail1.ts.net"])
+                && !RemoteAccess.hostAllowed("other.tail1.ts.net:8790", names: ["my-mac.tail1.ts.net"])
+                && RemoteAccess.hostAllowed("100.96.1.2:8790", names: []))
+        t.check("changing Tailscale access is the Mac's alone", !RemoteAccess.allowed(op: "remote-tailnet"))
+
+        // Slow links: files compressed, and kept by the phone until they change.
+        t.check("CRC-32 as gzip computes it", RemoteAccess.crc32(Data("hello".utf8)) == 0x3610_a686
+                && RemoteAccess.crc32(Data()) == 0)
+        let script = Data(String(repeating: "function board() { return 42; }\n", count: 400).utf8)
+        if let z = RemoteAccess.gzip(script) {
+            let inner = [UInt8](z[10..<(z.count - 8)])
+            var back = [UInt8](repeating: 0, count: script.count + 16)
+            let n = compression_decode_buffer(&back, back.count, inner, inner.count, nil, COMPRESSION_ZLIB)
+            let tail = [UInt8](z.suffix(8))
+            let crc = tail[0..<4].enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
+            let size = tail[4..<8].enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
+            t.check("gzip: the header, a deflate stream that inflates back, its CRC and size",
+                    z.prefix(3) == Data([0x1f, 0x8b, 8]) && Data(back[0..<n]) == script
+                    && crc == RemoteAccess.crc32(script) && size == UInt32(script.count) && z.count < script.count / 4)
+        } else {
+            t.check("gzip compresses", false)
+        }
+        t.check("gzip is taken when the browser says so, not when it says q=0",
+                RemoteAccess.acceptsGzip("gzip, deflate, br") && RemoteAccess.acceptsGzip("br;q=1.0, GZIP;q=0.8")
+                && !RemoteAccess.acceptsGzip("gzip;q=0") && !RemoteAccess.acceptsGzip("deflate") && !RemoteAccess.acceptsGzip(nil))
+        t.check("only text is compressed",
+                RemoteAccess.compressible("text/javascript; charset=utf-8") && RemoteAccess.compressible("application/json")
+                && RemoteAccess.compressible("image/svg+xml") && !RemoteAccess.compressible("image/png"))
+        let tag = RemoteAccess.etag(script)
+        t.check("a file's tag follows its bytes", tag == RemoteAccess.etag(script) && tag != RemoteAccess.etag(Data("x".utf8)))
+        t.check("If-None-Match: the same version, a weak one, one in a list, or * is unchanged",
+                RemoteAccess.unchanged(tag, etag: tag) && RemoteAccess.unchanged("W/" + tag, etag: tag)
+                && RemoteAccess.unchanged("\"abc\", \(tag)", etag: tag) && RemoteAccess.unchanged("*", etag: tag)
+                && !RemoteAccess.unchanged("\"abc\"", etag: tag) && !RemoteAccess.unchanged(nil, etag: tag))
+        let kept = String(decoding: RemoteAccess.response(status: 200, type: "text/css", body: Data(), cached: true), as: UTF8.self)
+        t.check("a file the phone may keep asks each time; anything else is never kept",
+                kept.contains("Cache-Control: no-cache\r\n") && resp304OK())
+        func resp304OK() -> Bool {
+            String(decoding: RemoteAccess.response(status: 304, type: "text/css", body: Data()), as: UTF8.self)
+                .hasPrefix("HTTP/1.1 304 Not Modified\r\n")
+        }
         let net6: [UInt8] = [0x24, 0x09, 0x89, 0x20, 0x11, 0x00, 0xab, 0xcd] + Array(repeating: 0, count: 8)
         let mask64: [UInt8] = Array(repeating: 0xff, count: 8) + Array(repeating: 0, count: 8)
         let sameNet = Array(net6.prefix(8)) + [1, 2, 3, 4, 5, 6, 7, 8]

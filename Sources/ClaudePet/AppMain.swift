@@ -249,7 +249,9 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // The board shares the "finished, not looked at" marks: it shows them on its session rows,
         // and opening a conversation, jumping to it or replying from the board reads them.
         BoardBridge.unreadBySession = { [weak self] in
-            Dictionary(grouping: self?.completions?.unread ?? [], by: \.sessionId).mapValues(\.count)
+            Dictionary(grouping: CompletionQueue.shown(self?.completions?.unread ?? [],
+                                                       sessions: self?.lastState?.sessions ?? []),
+                       by: \.sessionId).mapValues(\.count)
         }
         BoardBridge.onSeen = { [weak self] sid in self?.markSessionRead(sid) }
         BoardBridge.petDots = { [weak self] in self?.bridge?.dotState ?? [:] }
@@ -394,7 +396,13 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
             let replied = CompletionQueue.answered(c.unread, sessions: state.sessions)
             if !replied.isEmpty { c.markRead(replied) }
         }
-        let unread = paused ? [] : (completions?.unread ?? [])
+        // What finish detection reads: a turn's end counts once it has held — see
+        // StateAggregator.settled. Everything that says "it finished" takes this
+        // one — the bubble, the Finished list, the badge — and lastState keeps it,
+        // so each pair compared is of the same kind.
+        let settled = StateAggregator.settled(state, previous: lastState, now: now)
+        let unread = paused ? [] : CompletionQueue.shown(completions?.unread ?? [],
+                                                         sessions: settled.sessions)
         let hq = taskIndex.snapshot(now: now)
         let jobs = paused ? JobsController.Report() : JobsController.shared.poll(now: now)
         let motion = currentMotion(state, now: now)
@@ -410,7 +418,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         // happening.
         bridge?.setPhase(StateAggregator.phase(state.sessions))
         refreshTitlesIfPinned(for: state.sessions, now: now)
-        noticeTransients(state, previous: lastState)
+        noticeTransients(settled, previous: lastState)
         backgroundShells = findBackgroundShells(state.sessions)
         transcriptStats = transcripts.stats(for: state.sessions)
         contextReadings = readContext(for: state.sessions, now: now)
@@ -448,15 +456,15 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                         wanted: !badge.isEmpty,
                                         blockedOn: state.waitingOn, motion: motion,
                                         struggling: state.sessions.contains(where: Struggle.isStruggling)))
-        announceFinishes(state, now: now)
+        announceFinishes(settled, now: now)
         for n in jobs.notices {
             bridge?.notify(n.text, hold: 25, emphasis: n.emphasis, sessionId: "job:" + n.jobId, jumpable: false)
         }
         // (No daily "pick today's tasks" prompt any more: Focus stays until you change it.)
         if !paused { announceAsks(hq) }
         noticeReturn(state, now: now)
-        maybeSpeak(state: state, now: now)
-        lastState = state
+        maybeSpeak(state: settled, now: now)
+        lastState = settled
     }
 
     /// sessionId → commands it left running after its turn ended. Refreshed
@@ -540,6 +548,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
     /// How long the pointer must rest on the pet before it volunteers the quota.
     private static let dwellDelay: TimeInterval = 1
 
+    /// The last render's state as finish detection read it (StateAggregator.settled).
     private var lastState: GlobalState?
     private var lastSpoken: [Chatter.Kind: Date] = [:]
     private var lastAnything: Date?
