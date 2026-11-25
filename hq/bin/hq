@@ -1940,6 +1940,11 @@ def cmd_board(args):
             h = read_history(m["path"])
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],
                             "todos": [todo_fields(x) for x in (TODO_RE.match(i.split("\n", 1)[0]) for i in h["Todos"]) if x]}
+            # When each closed todo was closed, so the board lists the latest first.
+            closed = todo_closed_times(m)
+            for x in d["todos"] + d["history"]["todos"]:
+                if x["state"] != "open":
+                    x["closed"] = closed.get(" ".join(x["text"].split()))
             d["historyInfo"] = history_info(m["path"])
             d["lastActive"] = last_active(m, h)
             out.append(d)
@@ -2383,6 +2388,22 @@ def history_log_entries(card):
 
 
 TICK_RE = re.compile(r"^todo #\d+ → (done|drop|open) \(([^)]*)\): (.*)$")
+
+
+def todo_closed_times(meta):
+    """When each closed todo was closed: its plain text → the time of its latest done or drop tick,
+    from the Log of the card and of HISTORY.md (the card's lines carry no such time). A reopen
+    after it clears it; a todo closed by hand on the card has none."""
+    out = {}
+    for t, text in sorted(log_entries(meta["body"]) + history_log_entries(meta["path"]), key=lambda e: e[0]):
+        tick = TICK_RE.match(text)
+        if tick:
+            key = todo_plain(tick.group(3))
+            if tick.group(1) == "open":
+                out.pop(key, None)
+            else:
+                out[key] = iso(t)
+    return out
 
 
 def pr_states(urls, timeout=20):

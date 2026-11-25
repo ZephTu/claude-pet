@@ -2221,7 +2221,15 @@ function renderTaskBody(t) {
   const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
   // Closed todos the card budget moved to HISTORY.md follow the card's own, read-only.
   const histDone = list(t.history && t.history.todos).map((x) => ({ ...x, hist: true }));
-  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse());
+  // Latest closed first, by the time hq read from the tick log (`closed`), or the tick made here a
+  // moment ago that hq hasn't read back yet; ones with no time (closed by hand on the card) last,
+  // in the card's order.
+  const closedAt = (x) => {
+    const r = !x.hist && ui.recent.find((r) => r.task === t.id && r.i === x.i);
+    return (r && r.at) || Date.parse(x.closed || "") || 0;
+  };
+  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse())
+    .map((x, k) => [x, k]).sort((a, b) => closedAt(b[0]) - closedAt(a[0]) || a[1] - b[1]).map(([x]) => x);
   const anyTodos = t.todos.length + histDone.length;
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
   const shownDone = foldDone ? finished.filter(isRecent) : finished;
