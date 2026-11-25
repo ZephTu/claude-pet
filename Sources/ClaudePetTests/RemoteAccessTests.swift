@@ -67,6 +67,10 @@ enum RemoteAccessTests {
                 RemoteAccess.lockKey([192, 168, 0, 9]) == "192.168.0.9" && RemoteAccess.lockKey(mapped) == "192.168.0.9"
                 && RemoteAccess.lockKey(sameNet) == "240989201100abcd/64"
                 && RemoteAccess.lockKey(sameNet) == RemoteAccess.lockKey(Array(net6.prefix(8)) + Array(repeating: 9, count: 8)))
+        let linkLocalA: [UInt8] = [0xfe, 0x80] + Array(repeating: 0, count: 13) + [1]
+        let linkLocalB: [UInt8] = [0xfe, 0x80] + Array(repeating: 0, count: 13) + [2]
+        t.check("link-local IPv6 counts by the whole address (fe80::/64 is every device's)",
+                RemoteAccess.lockKey(linkLocalA) != RemoteAccess.lockKey(linkLocalB))
         var lock = RemoteAccess.Lockout()
         let t0 = Date(timeIntervalSince1970: 1_000_000)
         for k in 0..<(RemoteAccess.maxFailures - 1) { lock.fail("a", now: t0.addingTimeInterval(Double(k))) }

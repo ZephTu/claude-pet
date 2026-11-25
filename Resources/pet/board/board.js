@@ -166,16 +166,22 @@ let pairingClaim = null;
   history.replaceState(null, "", location.pathname + location.search);
   if (REMOTE) pairingClaim = claimPairing(m[1]);
 })();
+// Trades a code for this phone's token. Fails quietly when this phone is paired already (an old
+// link opened again); otherwise says why, in the pairing box when it is up — keeping what was
+// typed — or on a pairing screen.
 async function claimPairing(code) {
+  let msg;
   try {
-    const { j } = await post(code, { op: "pair" });
+    const { r, j } = await post(code, { op: "pair" });
     if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
-    // Used already (by this phone, or someone who had the link) or lapsed. A phone paired
-    // already keeps its own token.
-    if (!remoteToken()) showPairing(T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」"));
+    msg = r.status === 429 && j.error ? j.error
+      : T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
   } catch (e) {
-    showPairing(e.message);
+    msg = e.message;
   }
+  if (remoteToken()) return false;
+  const box = $("#pairing"), err = $("#pair-err");
+  if (box && !box.hidden && err) { err.textContent = msg; err.hidden = false; } else showPairing(msg);
   return false;
 }
 async function post(token, body) {
@@ -275,7 +281,7 @@ function showPairing(why) {
 }
 // Return in the code box pairs, as the button does.
 document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && ev.target && ev.target.id === "pair-link") { ev.preventDefault(); pairFromLink(ev.target.value); }
+  if (ev.key === "Enter" && !ev.isComposing && ev.target && ev.target.id === "pair-link") { ev.preventDefault(); pairFromLink(ev.target.value); }
 });
 // A pairing code as typed: case, spaces and dashes don't matter; O, I and L read as 0, 1, 1
 // (RemoteAccess.normalizeCode). Or the whole link, pasted.
@@ -2610,12 +2616,14 @@ const REMOTE_POLL_MS = 3000;
 function loadRemote(force) {
   if (REMOTE || ui.remoteLoading || (!force && Date.now() - (ui.remoteAt || 0) < REMOTE_POLL_MS)) return;
   ui.remoteLoading = true;
+  const asked = Date.now();
   apiObj("remote")
     .then((st) => {
       const was = JSON.stringify(ui.remoteSt || null);
       ui.remoteSt = st;
-      // The phone the code was for has used it: the code is done with.
-      if (ui.remotePair && list(st.devices).some((x) => x.paired && !list((ui.remoteSt0 || {}).devices).some((y) => y.id === x.id && y.paired))) ui.remotePair = null;
+      // The code is done with: its phone has paired, or it lapsed or was cancelled. Only a reading
+      // taken after the code was made can tell.
+      if (ui.remotePair && asked > ui.remotePair.at && !list(st.devices).some((x) => x.id === ui.remotePair.id && !x.paired)) ui.remotePair = null;
       if (JSON.stringify(st) !== was) renderSettings();
     })
     .catch((e) => { ui.remoteSt = { error: String(e.message || e) }; })
@@ -2634,6 +2642,7 @@ function renderPhoneAccess() {
       T("Serves this board to a phone or iPad on the same Wi-Fi, once paired. A paired phone can do anything this board can — start sessions, answer permission prompts — and the network carries it unencrypted: turn it on at home, not on a shared network", "让同一个 Wi-Fi 里的手机或 iPad 配对后打开这个看板。配对过的手机能做看板能做的一切——开 session、批准权限请求——而且网络上传的是明文：在家里打开，别在公共网络上开"),
       `<input type="checkbox" data-action="remote-enable" ${on ? "checked" : ""}>`)}
     ${st.error ? `<div class="meta warn">${esc(st.error)}</div>` : ""}
+    ${st.notice && !pair ? `<div class="meta warn">${esc(st.notice)}</div>` : ""}
     ${on && st.running ? `<div class="set-row remote-pair"><div><b>${T("Address", "地址")}</b>
         <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
@@ -2645,7 +2654,7 @@ function renderPhoneAccess() {
     ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
       ${devs.map((x) => `<div class="dev"><span>${esc(x.name)}</span><span class="meta">${x.paired
         ? `${x.lastSeen ? T("last seen", "最近") + " " + ago(x.lastSeen) : ""}${x.lastAddress ? " · " + esc(x.lastAddress) : ""}`
-        : T("waiting for its scan", "等它扫码")}</span>
+        : T("waiting for its code", "等它配对")}</span>
         <button class="btn small ghost" data-confirm="${T("Remove?", "移除？")}" data-action="remote-revoke" data-id="${esc(x.id)}" title="${T("It can no longer open the board until paired again", "移除后它就打不开看板了，除非重新配对")}">${x.paired ? T("Remove", "移除") : T("Cancel", "作废")}</button></div>`).join("")}
       </div></div>` : ""}
   </div>`;
@@ -4598,10 +4607,16 @@ document.addEventListener("click", async (ev) => {
     case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
     case "pick-photo": return pickPhotos(d.session);
     case "remote-pair":
-      try { ui.remoteSt0 = ui.remoteSt; ui.remotePair = await apiObj("remote-pair"); } catch (e) { toast(String(e.message || e), true); }
+      try { ui.remotePair = Object.assign(await apiObj("remote-pair"), { at: Date.now() }); } catch (e) { toast(String(e.message || e), true); }
       loadRemote(true);
       return renderSettings();
-    case "remote-pair-close": ui.remotePair = null; return renderSettings();
+    case "remote-pair-close": {
+      // A code hidden unused is cancelled: nothing left waiting for someone to guess it.
+      const id = ui.remotePair && ui.remotePair.id;
+      ui.remotePair = null;
+      if (id) { try { ui.remoteSt = await apiObj("remote-revoke", { id }); } catch (e) { /* lapses anyway */ } }
+      return renderSettings();
+    }
     case "remote-revoke":
       try { ui.remoteSt = await apiObj("remote-revoke", { id: d.id }); } catch (e) { toast(String(e.message || e), true); }
       return renderSettings();

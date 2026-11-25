@@ -399,7 +399,7 @@ ref: PR #9 https://github.com/…/pull/9
 <li><b>安全</b>：配对过的手机能做看板能做的一切，包括开 session、批准权限请求，也就是相当于能操作这台 Mac 上的 Claude。所以：
   <ul>
   <li>只回应局域网里的设备：私有地址（192.168.x、10.x 等），以及和 Mac 在同一个网段的 IPv6 地址（家里的路由器有 IPv6 时手机会用到）。路由器转发进来的公网请求、Tailscale 这类 VPN 过来的连接、用别的域名指过来的网页都会被拒绝。</li>
-  <li>每台手机一个 256 位的随机 token，Mac 上只存它的哈希；没有 token 的请求什么都做不了，连发过来的数据都不收。一个地址（IPv6 按它所在的 /64 网段算）连续猜错 20 次，会被挡 10 分钟。手机不能再去配对别的手机，也不能改手机访问的设置。</li>
+  <li>每台手机一个 256 位的随机 token，Mac 上只存它的哈希；没有 token 的请求什么都做不了，连发过来的数据都不收。一个地址（IPv6 按它所在的 /64 网段算）连续猜错 20 次，会被挡 10 分钟。配对码虽然只有 8 位，但同一时间只有一个，用一次、15 分钟就失效；不管从多少个地址来猜，一共猜错 100 次这个码就作废，设置里会写出来。<b>收起二维码</b>也会作废还没用过的码。手机不能再去配对别的手机，也不能改手机访问的设置。</li>
   <li>局域网里传的是<b>明文</b> HTTP：同一个 Wi-Fi 上有人抓包就能看到内容、偷走 token。只在家里这种你信得过的网络上打开它，在公司、咖啡店这种公共网络上关掉；怀疑 token 泄露了，就在 Mac 上移除那台手机再重新配对。</li>
   </ul></li>
 <li>Mac 睡着时手机连不上。端口被占用时设置里会写出来；要换端口，在终端里跑 <code>defaults write local.claudepet boardServerPort 8791</code>，再关掉、打开一次手机访问。不在家时访问（走 Tailscale 之类）还没做。</li>
@@ -889,7 +889,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <li><b>Security</b>: a paired phone can do anything the board can, starting sessions and approving permission prompts among them: in effect, it can drive Claude on this Mac. So:
   <ul>
   <li>Only devices on the local network get an answer: private addresses (192.168.x, 10.x …), and IPv6 addresses in the Mac's own network (what a phone uses when the home router has IPv6). Requests from a forwarded router port, connections over a VPN such as Tailscale, and web pages that point another domain at the Mac are refused.</li>
-  <li>Each phone has its own random 256-bit token; the Mac keeps only its hash. A request without one can do nothing; the Mac doesn't even take what it sends. An address (for IPv6, its /64 network) with 20 wrong tokens in a row is shut out for 10 minutes. A phone can't pair other phones or change phone access.</li>
+  <li>Each phone has its own random 256-bit token; the Mac keeps only its hash. A request without one can do nothing; the Mac doesn't even take what it sends. An address (for IPv6, its /64 network) with 20 wrong tokens in a row is shut out for 10 minutes. A pairing code is only 8 characters, but there is one at a time, it works once and lapses in 15 minutes, and after 100 wrong tries in all, from however many addresses, it is cancelled (Settings says so). <b>Hide the code</b> cancels an unused one too. A phone can't pair other phones or change phone access.</li>
   <li>The local network carries it as <b>plain HTTP</b>: anyone capturing traffic on the same Wi-Fi can read it and take the token. Turn it on at home, on a network you trust, and off on shared ones (office, café). If a token may have leaked, remove that phone on the Mac and pair it again.</li>
   </ul></li>
 <li>A sleeping Mac doesn't answer. A port already in use is reported in Settings; to use another, run <code>defaults write local.claudepet boardServerPort 8791</code> and turn phone access off and on again. Access from outside the home network (over Tailscale or the like) isn't there yet.</li>

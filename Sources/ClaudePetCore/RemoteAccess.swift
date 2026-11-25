@@ -25,6 +25,9 @@ public enum RemoteAccess {
     /// Wrong tokens from one address before it is turned away for a while.
     public static let maxFailures = 20
     public static let lockout: TimeInterval = 10 * 60
+    /// Wrong tokens from anywhere while a pairing code waits: past this many, the code is
+    /// cancelled. Whatever addresses someone guesses from, a code's odds stay at 100 in 2^40.
+    public static let maxCodeFailures = 100
 
     // MARK: - Requests
 
@@ -154,12 +157,16 @@ public enum RemoteAccess {
     }
 
     /// What wrong tokens are counted against: the address, or for IPv6 its /64 — a phone, or
-    /// anyone, gets a new IPv6 address from its /64 whenever it likes.
+    /// anyone, gets a new IPv6 address from its /64 whenever it likes. Not for link-local ones
+    /// (fe80::/64 is every device's), which count by the whole address.
     public static func lockKey(_ bytes: [UInt8]) -> String {
         if bytes.count == 16, bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
             return lockKey(Array(bytes[12..<16]))
         }
         if bytes.count == 4 { return bytes.map(String.init).joined(separator: ".") }
+        if bytes.count == 16, bytes[0] == 0xfe, (bytes[1] & 0xc0) == 0x80 {
+            return bytes.map { String(format: "%02x", $0) }.joined()
+        }
         return bytes.prefix(8).map { String(format: "%02x", $0) }.joined() + "/64"
     }
 

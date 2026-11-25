@@ -45,6 +45,10 @@ final class BoardServer {
     private let bridge = BoardBridge()
     private var lastError: String?
     private var lockout = RemoteAccess.Lockout()
+    /// Wrong tokens from anywhere while a pairing code waits (RemoteAccess.maxCodeFailures).
+    private var codeFailures = 0
+    /// Said in Settings until the next pairing: why a code went away.
+    private var notice: String?
     /// Connections open now. A phone opens a handful at once; many more is someone flooding.
     private var open = 0
     private static let maxOpen = 48
@@ -139,13 +143,16 @@ final class BoardServer {
     func pair() -> (Any?, String?) {
         guard listener != nil else { return (nil, L("turn phone access on first", "先打开手机访问")) }
         let token = RemoteAccess.newPairingCode()
-        var all = RemoteAccess.live(devices, now: Date())
-        all.append(RemoteAccess.Device(id: UUID().uuidString.prefix(8).lowercased(), name: L("New phone", "新手机"),
-                                       hash: RemoteAccess.hash(token), created: Date()))
+        // One code waits at a time: a new one cancels the last, if it went unused.
+        var all = RemoteAccess.live(devices, now: Date()).filter { $0.paired != nil }
+        let id = UUID().uuidString.prefix(8).lowercased()
+        all.append(RemoteAccess.Device(id: id, name: L("New phone", "新手机"), hash: RemoteAccess.hash(token), created: Date()))
         devices = all
+        codeFailures = 0
+        notice = nil
         let url = "\(baseURLs().first ?? "http://localhost:\(port)")/board/board.html#pair=\(token)"
         let shown = "\(token.prefix(4))-\(token.suffix(4))"
-        return (["url": url, "qr": Self.qrCode(url) ?? "", "code": shown], nil)
+        return (["url": url, "qr": Self.qrCode(url) ?? "", "code": shown, "id": id], nil)
     }
 
     func revoke(_ id: String) -> (Any?, String?) {
@@ -164,6 +171,7 @@ final class BoardServer {
         var o: [String: Any] = ["enabled": enabled, "running": listener != nil, "port": Int(port),
                                 "urls": baseURLs(), "devices": list]
         if let e = lastError { o["error"] = e }
+        if let notice { o["notice"] = notice }
         return o
     }
 
@@ -227,12 +235,13 @@ final class BoardServer {
         c.start()
     }
 
-    /// A VPN's interface (Tailscale, a company VPN: utun…, point-to-point): its addresses are for
-    /// the far end, not for a phone on the Wi-Fi.
+    /// A VPN's interface (Tailscale, a company VPN: utun…, point-to-point, tap…, ZeroTier's feth…)
+    /// or a virtual machine's network (vmenet…, bridge100…): its addresses are for the far end or
+    /// the VM, not for a phone on the Wi-Fi.
     private static func isTunnel(_ ifa: ifaddrs) -> Bool {
         let name = String(cString: ifa.ifa_name)
         return (ifa.ifa_flags & UInt32(IFF_POINTOPOINT)) != 0
-            || ["utun", "ipsec", "ppp", "gif", "stf", "awdl", "llw"].contains(where: name.hasPrefix)
+            || ["utun", "ipsec", "ppp", "gif", "stf", "awdl", "llw", "tap", "feth", "vmenet", "bridge1"].contains(where: name.hasPrefix)
     }
 
     /// A peer in a network the Mac is on itself — a public IPv6 address from the home router, say.
@@ -300,12 +309,28 @@ final class BoardServer {
             return .refuse(json(429, ["error": L("Too many wrong tokens from this address — try again in 10 minutes",
                                                  "这个地址试错 token 的次数太多——10 分钟后再试")]))
         }
-        guard RemoteAccess.match(req.headers[RemoteAccess.tokenHeader], in: devices, now: now) != nil else {
+        let all = devices
+        guard RemoteAccess.match(Self.presented(req), in: all, now: now) != nil else {
             lockout.fail(peer.key, now: now)
+            if RemoteAccess.live(all, now: now).contains(where: { $0.paired == nil }) {
+                codeFailures += 1
+                if codeFailures >= RemoteAccess.maxCodeFailures {
+                    devices = all.filter { $0.paired != nil }
+                    codeFailures = 0
+                    notice = L("Too many wrong pairing codes were tried, so the code was cancelled — press Pair a phone for a new one",
+                               "有人试了太多错误的配对码，这个码已作废——点「配对手机」重新生成")
+                    NSLog("ClaudePet: phone access — pairing code cancelled after \(RemoteAccess.maxCodeFailures) wrong tries")
+                }
+            }
             return .refuse(unpaired())
         }
         lockout.clear(peer.key)
         return .read(maxBody: RemoteAccess.maxBody)
+    }
+
+    /// The token a request carries; a pairing code as the phone may have typed it.
+    private static func presented(_ req: RemoteAccess.Request) -> String? {
+        req.headers[RemoteAccess.tokenHeader].map { RemoteAccess.normalizeCode($0) ?? $0 }
     }
 
     private func unpaired() -> Data {
@@ -378,7 +403,7 @@ final class BoardServer {
         let now = Date()
         var all = devices
         // Matched in admit; gone since only if removed while the body arrived.
-        guard let i = RemoteAccess.match(req.headers[RemoteAccess.tokenHeader], in: all, now: now) else { return unpaired() }
+        guard let i = RemoteAccess.match(Self.presented(req), in: all, now: now) else { return unpaired() }
         guard var body = (try? JSONSerialization.jsonObject(with: req.body)) as? [String: Any],
               let op = body["op"] as? String else { return json(400, ["error": "bad request"]) }
         // A pairing code buys the phone its own token, once, and nothing else.
