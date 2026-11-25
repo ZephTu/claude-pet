@@ -776,13 +776,13 @@ html, body {
   color: var(--tabby); font: 600 10.5px/1.35 var(--round);
 }
 .row.hqask .tidtag.st-blocked { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 50%, transparent); }
-.row.hqask .tidtag.st-active { color: var(--sage); border-color: color-mix(in srgb, var(--sage) 50%, transparent); }
+.row.hqask .tidtag.st-active { color: var(--sky); border-color: color-mix(in srgb, var(--sky) 50%, transparent); }
 .row.hqask .asktext { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.hqask .ask-go { flex: none; color: var(--faint); }
 /* A status word only when the task wants attention. */
 .task .stw.st-waiting-on-me { color: var(--tabby); }
 .task .stw.st-blocked { color: var(--coral); }
-.task .stw.st-done { color: var(--sky); }
+.task .stw.st-done { color: var(--dim); }
 .task .stw.st-abandoned { color: var(--fainter); }
 
 /* Dimmer and lighter than the project name on purpose: the name is the thing

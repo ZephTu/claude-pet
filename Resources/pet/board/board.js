@@ -10,8 +10,10 @@ const T = (en, zh) => (LANG === "zh" ? zh : en);
 document.documentElement.lang = LANG;
 
 const ORDER = ["waiting-on-me", "blocked", "active", "done", "abandoned"];
+// A status is named after the Focus column it puts a task in (see lane()): active is Ready,
+// waiting-on-me is Needs you. Only the names: the stored values (and hq's) stay as they are.
 const LABEL = {
-  "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"),
+  "waiting-on-me": T("Needs you", "等你"), blocked: T("Blocked", "卡住"), active: T("Ready", "待推进"),
   done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃"),
 };
 // How an ask can be answered. An ask is answered in words: you write in its box and send it
@@ -137,7 +139,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusMore: null, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -1506,7 +1508,7 @@ function renderMyTodos() {
     const x = t && t.todos.find((y) => y.i === r.i);
     return x && x.state !== "open" && taskMatches(t, r.text);
   });
-  const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? T(" · blocked", " · 阻塞中") : ""}</div>`;
+  const src = (t) => `<div class="meta src"><span class="tid link" data-action="goto" data-task="${esc(t.id)}">${esc(t.id)}</span> ${esc(t.title)}${t.status === "blocked" ? T(" · blocked", " · 卡住") : ""}</div>`;
   const note = filterNote(items.length + legacy.length, total);
   if (!items.length && !recent.length && !legacy.length) return `<div class="group-title">${T("Your todos", "你的待办")}</div>${note || `<div class="empty">${T("Nothing waiting on you.", "没有在等你的事。")}</div>`}`;
   return `<div class="group-title">${T("Your todos", "你的待办")} <span class="meta">${items.length + legacy.length}</span></div>${note}<div class="inbox-list">` + legacy.map((t) => `
@@ -1593,7 +1595,7 @@ function destLabel(d) {
   if (d.kind === "update") return `${d.task} ${T("update", "更新")}${updateDetail(d)}`;
   return T("your todo", "我的待办");
 }
-const STATUS_WORD = { active: T("active", "进行中"), blocked: T("blocked", "卡住"), "waiting-on-me": T("waiting on me", "等我"), done: T("done", "完成"), abandoned: T("abandoned", "放弃") };
+const STATUS_WORD = { active: T("ready", "待推进"), blocked: T("blocked", "卡住"), "waiting-on-me": T("needs you", "等你"), done: T("done", "完成"), abandoned: T("abandoned", "放弃") };
 // What an update changes beyond its log line — so its buttons (close the task, tick this todo or
 // that one) read apart. A single todo is named; AppMain.updateDetail says it the same way.
 function updateDetail(d) {
@@ -1992,19 +1994,51 @@ function laneCol(ln, items, opt = {}) {
 }
 const showDoneToggle = () => `<label class="toggle" title="${T("Show a column of tasks finished in the last 3 days", "多一列：3 天内完成的任务")}"><input type="checkbox" data-action="show-done" ${ui.showDone ? "checked" : ""}> ${T("recently done", "最近完成")}</label>`;
 
-const STATUS_SHORT = { "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"), done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃") };
+const STATUS_SHORT = LABEL;
 
 // ------------------------------------------------------------------ the drawer
 // A task's details slide in from the right over the board (ui.drawer: its id), with buttons to
 // set its status; "@sessions" shows every live session instead (the status bar's count opens it).
-const DRAWER_STATUS = [["active", T("Active", "进行中")], ["waiting-on-me", T("Waiting on me", "等我")], ["blocked", T("Blocked", "卡住")], ["done", T("Done", "完成")]];
+// The buttons are the columns a status puts a task in, and the one it is in now is lit. Running is
+// no status (its sessions decide), so it shows as a marker; abandoning sits behind ⋯.
+const DRAWER_STATUS = [["active", "ready"], ["waiting-on-me", "you"], ["blocked", "blocked"], ["done", "done"]];
+const LANE_OF_STATUS = { active: "ready", "waiting-on-me": "you", blocked: "blocked", done: "done", abandoned: "done" };
+// Why a task sits in another column than its status's: only Needs you and Running can pull it away.
+function laneWhy(t, ln) {
+  if (ln === "run") return T("a session is working on it", "有 session 在干活");
+  if (ln !== "you") return "";
+  if (liveFor(t.id).some((s) => liveState(s) === "waiting")) return T("a session stopped to wait on you (a permission or a question)", "有 session 停下来等你（授权或提问）");
+  if (openAsks(t).length || myTodos(t).length) return T("it has an open ask or a todo of yours", "它有没答的问题或你的待办");
+  return T("its card says it waits on you", "任务卡上写着在等你");
+}
+function drawerStatus(t, ln) {
+  const open = isOpen(t);
+  const mine = LANE_OF_STATUS[t.status];
+  const why = open && mine !== ln ? laneWhy(t, ln) : "";
+  const btn = ([s, l]) => {
+    const on = open ? l === ln : s === t.status;
+    const set = why && s === t.status;
+    const name = l === "done" ? T("Done", "完成") : LANE_NAME[l];
+    const title = set ? T(`Your status is ${name}; it sits in ${LANE_NAME[ln]} because ${why}`, `你设的状态是「${name}」；它在「${LANE_NAME[ln]}」是因为${why}`)
+      : on ? (why ? T(`The column it is in now: ${why}`, `它现在所在的列：${why}`) : T("The column it is in now", "它现在所在的列"))
+      : T(`Set the status to ${name}`, `把状态改成「${name}」`);
+    return `<button class="l-${l} ${on ? "on" : ""} ${set ? "set" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}" ${on ? `data-on="1"` : ""} title="${esc(title)}">${name}</button>`;
+  };
+  const n = liveFor(t.id).filter((s) => liveState(s) === "busy" || bgRunning(s)).length;
+  const run = ln === "run" ? `<span class="run-now" title="${esc(T("Running is up to its sessions: it shows while one is working", "「在跑」由 session 决定：有 session 在干活时就是在跑"))}">● ${T(`Running · ${n} session${n === 1 ? "" : "s"}`, `在跑 · ${n} 个 session`)}</span>` : "";
+  const more = ui.statusMore === t.id;
+  return `<div class="dr-status">${run}${DRAWER_STATUS.map(btn).join("")}
+    ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>`
+      : `<button class="more ${more ? "on" : ""}" data-action="status-more" data-task="${esc(t.id)}" title="${T("More", "更多")}">⋯</button>`
+        + (more ? `<button class="give-up" data-action="drawer-status" data-task="${esc(t.id)}" data-s="abandoned" title="${T("Close it without finishing", "不做了，关掉这个任务")}">${T("Abandon", "放弃")}</button>` : "")}</div>`;
+}
 function renderDrawer() {
   const el = $("#drawer");
   const body0 = el.querySelector(".dr-body");
   const keep = body0 && el.dataset.for === ui.drawer ? body0.scrollTop : 0;
   const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
   if (ui.drawer && ui.drawer !== "@sessions" && !t) ui.drawer = null;
-  if (!ui.drawer) { el.hidden = true; el.innerHTML = ""; el.dataset.for = ""; return; }
+  if (!ui.drawer) { el.hidden = true; el.innerHTML = ""; el.dataset.for = ""; ui.statusMore = null; return; }
   el.hidden = false;
   el.dataset.for = ui.drawer;
   const close = `<button class="icon x" data-action="drawer-close" title="${T("Close (Esc)", "关闭（Esc）")}">✕</button>`;
@@ -2022,9 +2056,7 @@ function renderDrawer() {
         ${t.project ? `<span class="chip link" data-action="project-panel" data-p="${esc(t.project)}">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}<span class="spacer"></span>
         ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}${close}</div>
       <h2>${esc(t.title)}</h2>
-      <div class="dr-status">${DRAWER_STATUS.map(([s, w]) => `<button class="${t.status === s ? "on" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}">${w}</button>`).join("")}
-        ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
-        ${ln !== "done" || recentDone(t) ? `<span class="meta lane-now">${T("Column:", "在：")} <b>${LANE_NAME[ln]}</b></span>` : ""}</div>
+      ${drawerStatus(t, ln)}
       ${focusFlags(t)}</div>
       <div class="dr-body">${renderTaskBody(t)}</div>`;
   }
@@ -2034,6 +2066,7 @@ function renderDrawer() {
 function openDrawer(id) {
   ui.drawer = id;
   ui.launchMenu = null;
+  ui.statusMore = null;
   render();
   const node = document.getElementById("kc-" + id);
   if (node) flashCard(node);
@@ -4811,10 +4844,20 @@ document.addEventListener("click", async (ev) => {
     case "drawer-close": ui.drawer = null; return render();
     case "open-sessions": ui.drawer = ui.drawer === "@sessions" ? null : "@sessions"; return render();
     case "drawer-status": {
+      // The lit button is where the task is, not a status to save: in Needs you only because of an
+      // ask or a waiting session, saving waiting-on-me would lose a Blocked for good (as a drag
+      // within its own column changes nothing). Neither does the status it already has.
       const t = taskById(d.task);
-      if (!t || t.status === d.s) return;
+      ui.statusMore = null;
+      if (!t) return render();
+      if (d.on || t.status === d.s) {
+        const ln = lane(t), why = isOpen(t) && LANE_OF_STATUS[t.status] !== ln ? laneWhy(t, ln) : "";
+        if (why) toast(T(`${t.id} stays in ${LANE_NAME[ln]}: ${why}`, `${t.id} 留在「${LANE_NAME[ln]}」：${why}`));
+        return render();
+      }
       return setStatus(d.task, d.s);
     }
+    case "status-more": ui.statusMore = ui.statusMore === d.task ? null : d.task; return render();
     case "launch-menu": ui.launchMenu = ui.launchMenu === d.task ? null : d.task; return render();
     case "goto": return revealTask(d.task);
     case "sec-goto":

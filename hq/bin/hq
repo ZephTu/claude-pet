@@ -31,6 +31,8 @@ HQ_BIN = os.path.join(HOME_DIR, "bin", "hq")
 
 STATUSES = ["waiting-on-me", "blocked", "active", "done", "abandoned"]
 OPEN_STATUSES = ["waiting-on-me", "blocked", "active"]
+# The board names a status after the Focus column it puts a task in; `hq set` takes those names too.
+STATUS_ALIASES = {"ready": "active", "needs-you": "waiting-on-me"}
 RESOLUTIONS = {
     "do": "will do / here is how",
     "drop": "won't do",
@@ -5030,8 +5032,10 @@ def cmd_set(args):
         if "=" not in kv:
             die(f"expected key=value, got {kv}")
         k, v = kv.split("=", 1)
-        if k == "status" and v not in STATUSES:
-            die(f"status must be one of {', '.join(STATUSES)}")
+        if k == "status":
+            v = STATUS_ALIASES.get(v.lower(), v.lower())
+            if v not in STATUSES:
+                die(f"status must be one of {', '.join(STATUSES)} (or {', '.join(STATUS_ALIASES)})")
         if k == "category" and v:
             v = check_category(v)
             ensure_listed(v)

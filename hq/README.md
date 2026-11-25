@@ -135,7 +135,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
 `hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
-`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"`, `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary),
+`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary),
 `hq grant list|add|revoke T-012 …` (standing grants, below).
 
 ### Where things stand: `hq status`
