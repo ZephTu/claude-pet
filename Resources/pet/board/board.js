@@ -2959,11 +2959,14 @@ function drawPeek(toBottom) {
       </div>`).join("");
   const keepDraft = box.querySelector(".pfoot textarea") ? null : draft("msg:" + key);
   const chip = m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
-  const sub = `${esc(m.project || "")} · ${T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
+  // A phone has no Esc, and full screen no outside: ✕ closes it there.
+  const sub = `${esc(m.project || "")} · ${REMOTE
+    ? T(`last ${msgs ? msgs.length : "…"} messages`, `最近 ${msgs ? msgs.length : "…"} 条消息`)
+    : T(`last ${msgs ? msgs.length : "…"} messages · click outside or Esc to close`, `最近 ${msgs ? msgs.length : "…"} 条消息 · 点外面或按 Esc 关闭`)}`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
-      <div><div class="stitle">${esc(m.title)}${chip}</div><div class="meta">${sub}</div></div>
+      <div><div class="stitle ptitle"><span class="pt">${esc(m.title)}</span>${chip}</div><div class="meta">${sub}</div></div>
       <span style="flex:1"></span>
       <button class="btn small" data-action="copy-all">${T("Copy all", "全部复制")}</button>
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
