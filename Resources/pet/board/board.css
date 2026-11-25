@@ -364,9 +364,12 @@ select.place { max-width: 100px; }
 #modal .panel { width: min(980px, 100%); height: min(860px, 100%); display: flex; flex-direction: column;
   background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
 .phead { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-/* A long title shortens (…) rather than pushing the buttons, ✕ among them, out of a narrow window. */
+/* A long title shortens (…) rather than pushing the buttons, ✕ among them, out of a narrow window;
+   the line under it wraps. Peek's "ended" chip stays whole beside a shortened title. */
 .phead > div { min-width: 0; }
-.phead > div .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ptitle { display: flex; align-items: baseline; gap: 6px; }
+.ptitle .pt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ptitle .chip { flex: none; }
 /* The secretary before it is set up: what setting it up makes. */
 #modal .panel.sec-setup { height: auto; max-width: 640px; }
 .sec-body { padding: 12px 16px 16px; overflow: auto; line-height: 1.5; }
@@ -1852,6 +1855,7 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
   /* Full screen, the drawer covers the board: what opens from it (a session's Peek, a document,
      a confirmation, the / menu in a message box) goes over it, in the Mac's order. */
   #modal { z-index: 25; }
+  #reader-pill { z-index: 26; }
   #confirm { z-index: 27; }
   #slash { z-index: 28; }
   body.reading > main { margin-right: 0; }

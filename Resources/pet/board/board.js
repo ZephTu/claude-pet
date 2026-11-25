@@ -2897,7 +2897,7 @@ function drawPeek(toBottom) {
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Conversation", "对话")}">
     <div class="phead">
       ${m.back ? `<button class="btn small ghost" data-action="modal-back" title="${T("Back", "返回")}">←</button>` : ""}
-      <div><div class="stitle">${esc(m.title)}${chip}</div><div class="meta">${sub}</div></div>
+      <div><div class="stitle ptitle"><span class="pt">${esc(m.title)}</span>${chip}</div><div class="meta">${sub}</div></div>
       <span style="flex:1"></span>
       <button class="btn small" data-action="copy-all">${T("Copy all", "全部复制")}</button>
       ${m.live ? `<button class="btn small" data-action="jump" data-session="${esc(m.sid)}">Jump</button>` : ""}
