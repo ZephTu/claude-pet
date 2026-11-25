@@ -2138,7 +2138,8 @@ function secHead(title, t, what, tip, count, extra = "") {
     <button class="icon ${on ? "on" : ""}" title="${esc(tip)}" data-action="toggle-add" data-what="${what}" data-task="${esc(t.id)}">${PLUS}</button>${extra}</div>`;
 }
 // A directory as it reads best: the home directory as ~.
-const tildePath = (p) => String(p).replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+// The home folder as ~ (any /Users/<name> but the shared one: the board doesn't know whose it is).
+const tildePath = (p) => String(p).replace(/^\/Users\/(?!Shared(?:\/|$))[^/]+(?=\/|$)/, "~");
 
 // "New session" with its options behind ▾: where it opens, skip permissions, stay on board.
 function launchSplit(t) {

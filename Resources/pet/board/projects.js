@@ -260,18 +260,24 @@ function infoSec(name, part, title, body, hint, extra = "") {
 }
 // A labelled group of sections, as a card.
 const piGroup = (label, body, cls = "") => `<div class="pi-group ${cls}"><div class="pi-label">${label}</div><div class="pi-card">${body}</div></div>`;
-// A long brief is shown in part until opened (per project, until the board reloads).
-const BRIEF_FOLD = 200;
+// A long brief is shown in part until opened (per project, until the board reloads). Whether it
+// is long is measured once it is on the page (foldBriefs), so a short one never gets the toggle.
 function briefHTML(pr) {
   if (!pr.brief) return `<div class="empty">${T("Empty: sessions are told nothing about this project.", "空的：session 不会收到这个项目的任何说明。")}</div>`;
-  const long = pr.brief.length > BRIEF_FOLD || pr.brief.split("\n").length > 6;
-  if (!long) return `<div class="md">${markdown(pr.brief)}</div>`;
   const open = pui.briefOpen.has(pr.name);
   return `<div class="md pbrief ${open ? "open" : "clamp"}">${markdown(pr.brief)}</div>
-    <button class="addrow" data-action="p-brief" data-p="${esc(pr.name)}">${open ? T("Show less", "收起") : T("Show all", "展开全部")}</button>`;
+    <button class="addrow pbrief-t" data-action="p-brief" data-p="${esc(pr.name)}">${open ? T("Show less", "收起") : T("Show all", "展开全部")}</button>`;
 }
-// A path as it is shown: the home folder as ~ (the full path stays in its title).
-const homeShort = (x) => String(x).replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
+// The brief's fold, kept only where the text runs past it (its max-height in board.css).
+const BRIEF_MAX = 210;
+function foldBriefs(box) {
+  for (const el of box.querySelectorAll(".pbrief")) {
+    if (el.scrollHeight > BRIEF_MAX + 8) continue;
+    el.classList.remove("clamp");
+    const t = el.nextElementSibling;
+    if (t && t.classList.contains("pbrief-t")) t.remove();
+  }
+}
 
 function projAside(pr) {
   const name = pr.name, duty = pr.kind === "duty";
@@ -293,7 +299,7 @@ function projAside(pr) {
     + infoSec(name, "out", T("Out of scope", "不管"), mdOr(pr.out, T("Nothing said.", "没写。")), T("What it leaves to others", "哪些事不归它"), "pi-out")
     + infoSec(name, "done_when", duty ? T("Healthy when", "健康标准") : T("Done when", "完成标准"), criteriaHTML(pr), T("- one criterion per line", "- 一行一条"));
   const forSessions = infoSec(name, "brief", T("Brief", "简报"), briefHTML(pr), T("Repos, branches, rules every session here should know", "仓库、分支、每个 session 都该知道的规矩"))
-    + `<section class="pi-sec"><h4 title="${T("Hold for every task in it", "对它的每个任务都有效")}">${T("Grants", "授权")}${ng ? `<span class="c">${ng}</span>` : ""}</h4>${grants}</section>`
+    + `<section class="pi-sec"><h4>${T("Grants", "授权")}${ng ? `<span class="c">${ng}</span>` : ""}<span class="sub">${T("hold for every task in it", "对它的每个任务都有效")}</span></h4>${grants}</section>`
     + dirsSec(pr);
   return details
     + piGroup(duty ? T("What it is", "这个职责管什么") : T("What it is", "这个项目要做什么"), what)
@@ -306,10 +312,10 @@ function projAside(pr) {
 function dirsSec(pr) {
   if (!projectByName(pr.name)) return "";
   const name = pr.name, on = editing(name, "dirs"), paths = pr.paths || [];
-  const rows = paths.map((x) => `<div class="pdir"><code title="${esc(x)}">${esc(homeShort(x))}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
+  const rows = paths.map((x) => `<div class="pdir"><code title="${esc(x)}">${esc(tildePath(x))}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
   const add = on ? `<div class="row nowrap pdir-add"><input class="note" list="pdir-list" data-key="${esc("pdir:" + name)}" data-pdir="${esc(name)}" value="${esc(draft("pdir:" + name))}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}">${dirList("pdir-list")}
       <button class="btn small" data-action="p-dir-add" data-p="${esc(name)}">${T("Add", "添加")}</button></div>` : "";
-  return `<section class="pi-sec"><h4 title="${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}">${T("Default directories", "默认目录")}${paths.length ? `<span class="c">${paths.length}</span>` : ""}${editBtn(name, "dirs")}</h4>
+  return `<section class="pi-sec"><h4>${T("Default directories", "默认目录")}${paths.length ? `<span class="c">${paths.length}</span>` : ""}<span class="sub">${T("new tasks there join it", "在这里新建的任务归它")}</span>${editBtn(name, "dirs")}</h4>
     ${on ? `<div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>` : ""}
     ${rows || (on ? "" : `<div class="empty">${T("None — tasks only join it by hand.", "没有——任务只能手动归到这里。")}</div>`)}${add}</section>`;
 }
@@ -485,6 +491,7 @@ function renderProjectsView() {
   if (ui.proj && ui.proj !== "(none)" && !projectByName(ui.proj) && !listed().some((t) => t.project === ui.proj)) { ui.proj = ""; savePref("hq-proj", ""); }
   box.className = ui.proj ? "detail" : "list";
   box.innerHTML = ui.proj ? projDetail(ui.proj) : `<div class="pscroll">${projList()}</div>`;
+  if (ui.proj) foldBriefs(box);
 }
 
 // ------------------------------------------------------------------ ＋ New
