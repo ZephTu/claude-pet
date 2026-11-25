@@ -1778,3 +1778,79 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
   .sec-side { display: none; }
   .sec-chat .sec-main > .watch { display: block; }
 }
+
+/* ---- Settings → Phone access (on the Mac), and pairing (on the phone) */
+.set-h { font: 650 13px var(--round); color: var(--dim); margin: 18px 4px 4px; }
+.set-list .warn { color: var(--amber); padding: 0 4px 8px; }
+.remote-pair code, .pair-url code { font-size: 11.5px; word-break: break-all; }
+.pair-qr { display: flex; gap: 16px; align-items: flex-start; padding: 6px 4px 12px; border-bottom: 1px solid var(--line); }
+.pair-qr img { width: 180px; height: 180px; image-rendering: pixelated; background: #fff; padding: 8px; border-radius: 8px; flex: none; }
+.pair-qr .meta { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.set-row.devs .dev { display: flex; align-items: center; gap: 10px; padding: 6px 0 0; }
+.set-row.devs .dev > span:first-child { font-weight: 600; }
+.set-row.devs .dev .meta { flex: 1; margin: 0; }
+#pairing { position: fixed; inset: 0; z-index: 40; background: var(--bg); display: flex; align-items: flex-start;
+  justify-content: center; padding: calc(48px + env(safe-area-inset-top)) 18px 18px; overflow-y: auto; }
+#pairing[hidden] { display: none; }
+#pairing .panel { max-width: 460px; width: 100%; display: flex; flex-direction: column; gap: 10px; font-size: 15px; }
+#pairing h2 { font: 650 20px var(--round); margin: 0 0 4px; color: var(--text); }
+#pairing ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+#pairing .row { display: flex; gap: 8px; }
+#pairing input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); }
+
+/* ---- the board on a phone (served by the app over the local network: Settings → Phone access).
+   Opening a terminal or a file happens on the Mac's screen: those buttons go; Jump opens the
+   conversation instead (board.js). */
+.remote [data-action="attach"], .remote [data-action="rd-edit"], .remote #modal [data-action="jump"] { display: none !important; }
+
+/* No hover on a touch screen: what shows on hover shows always. */
+@media (hover: none) {
+  .icon.x, .session .icons, .pwho .btn, .sec-chat .bub .copy, .sec-chat .report .copy, .att.mini .icon, .rd-tab .rd-x { opacity: 1; }
+  .session .stime { visibility: hidden; }
+  .grip { display: none; }
+}
+
+@media (max-width: 640px) {
+  /* The page scrolls as one, not each lane in its own box. */
+  html, body { height: auto; min-height: 100%; }
+  body { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+  main, main.kanban { height: auto; display: block; }
+  #top { flex-wrap: wrap; height: auto; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; gap: 8px; position: static; }
+  #top .brand { order: 0; }
+  #top .spacer { order: 1; }
+  #secretary-btn, #new-task, #top .top-icon { order: 2; }
+  #mode { order: 3; flex: 1 0 100%; margin: 0; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  #mode::-webkit-scrollbar { display: none; }
+  #mode .tab { flex: none; padding: 7px 12px; }
+  .capture { order: 4; flex: 1 1 58%; height: 36px; min-width: 0; }
+  .searchbox { order: 5; flex: 1 1 30%; height: 36px; min-width: 0; }
+  .needs-sum { flex-wrap: wrap; }
+  #today-focus, .board, .ncols, .lane, .lane-body { min-height: 0; height: auto; overflow: visible; }
+  .board.c4, .board.c5, .ncols, .tcols { display: flex; flex-direction: column; gap: 12px; padding: 0 12px 16px; }
+  .board .lane, .ncols .lane { min-height: 0; }
+  main.kanban > .vhead, #today-focus > .vhead { padding: 14px 12px 10px; flex-wrap: wrap; }
+  #today-focus > .card, #today-focus > .fnote { margin-left: 12px; margin-right: 12px; }
+
+  /* What opens over the board fills the screen, under the notch. */
+  .drawer, body.reading .drawer { top: 0; bottom: 0; right: 0; width: 100%; border-left: 0;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); z-index: 24; }
+  #modal, #settings, #confirm { padding: 0; align-items: stretch; }
+  #modal .panel, #settings .panel, #modal .panel.sec-chat { width: 100%; height: 100%; max-height: none; border-radius: 0;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  #modal .panel.sec-setup { height: 100%; }
+  #confirm .panel { margin: auto 12px; }
+  #reader { top: 0; width: 100%; padding-top: env(safe-area-inset-top); z-index: 25; }
+  body.reading > main { margin-right: 0; }
+  body.reading #modal, body.reading #settings, body.reading #confirm, body.reading #statusbar { right: 0; }
+  #statusbar { padding-bottom: env(safe-area-inset-bottom); height: auto; min-height: 32px; }
+  #toast { bottom: calc(44px + env(safe-area-inset-bottom)); max-width: calc(100% - 24px); }
+
+  /* Fingers, not a pointer. */
+  .icon { min-width: 34px; min-height: 34px; }
+  .btn.small { padding: 6px 10px; }
+  .set-row { flex-wrap: wrap; }
+  .pair-qr { flex-direction: column; align-items: center; }
+}
+.pick-photo svg { width: 20px; height: 20px; }
+.pick-photo { flex: none; }

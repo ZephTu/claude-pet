@@ -266,7 +266,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
-        let body = message.body as? [String: Any] ?? [:]
+        await handle(message.body as? [String: Any] ?? [:])
+    }
+
+    /// One request from the board: from its window on the Mac, or from a phone over the local
+    /// network — see BoardServer, which turns away what only the Mac may do first.
+    func handle(_ body: [String: Any]) async -> (Any?, String?) {
         func str(_ key: String) -> String { body[key] as? String ?? "" }
 
         switch body["op"] as? String ?? "" {
@@ -294,9 +299,21 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if let usage = Self.usage?() { pet["usage"] = usage }
             if let target = Self.clickTarget?() { pet["clickTarget"] = target }
             pet["skin"] = BoardWindow.currentSkin()
+            pet["prefs"] = BoardPrefs.current
             pet["secretary"] = SecretaryController.shared.glance
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
+        case "board-prefs":
+            // How sessions start (skip permissions, where they open): one choice for the Mac's
+            // board and every phone's — see BoardPrefs.
+            BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
+            return (["ok": true], nil)
+        // Phone access (BoardServer): on or off, pairing a phone, the paired ones. The Mac's
+        // window only — BoardServer refuses these from a phone.
+        case "remote": return (BoardServer.shared.status(), nil)
+        case "remote-enable": return BoardServer.shared.setEnabled(body["on"] as? Bool == true)
+        case "remote-pair": return BoardServer.shared.pair()
+        case "remote-revoke": return BoardServer.shared.revoke(str("id"))
         case "click-target":
             Self.onClickTarget?(str("value"))
             return ("ok", nil)

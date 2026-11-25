@@ -87,8 +87,34 @@ const escButton = (s) => canInterrupt(s)
 // with the board's skip-permissions choice, as a session started from here would be.
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
 
-function pref(key, dflt) { try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; } }
-function savePref(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
+// How sessions start (skip permissions, where they open) is one choice for the Mac's board and
+// every phone's: the app keeps it (BoardPrefs), and the "pet" read brings it with every refresh.
+const SHARED_PREFS = ["hq-skip-perms", "hq-launch"];
+let sharedPrefs = null;   // null until the first read
+function pref(key, dflt) {
+  if (sharedPrefs && SHARED_PREFS.includes(key) && key in sharedPrefs) return sharedPrefs[key];
+  try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; }
+}
+function savePref(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+  if (SHARED_PREFS.includes(key)) {
+    (sharedPrefs ||= {})[key] = value;
+    api("board-prefs", { prefs: { [key]: value } }).catch((e) => toast(String(e.message || e), true));
+  }
+}
+// The first read: a choice made on this Mac before the app kept it moves to the app.
+function takeSharedPrefs(prefs) {
+  const first = sharedPrefs === null;
+  sharedPrefs = Object.assign({}, prefs || {});
+  if (!first || REMOTE) return;
+  const missing = {};
+  for (const k of SHARED_PREFS) {
+    let v = null;
+    try { v = localStorage.getItem(k); } catch (e) { /* private mode */ }
+    if (v !== null && !(k in sharedPrefs)) { missing[k] = v; sharedPrefs[k] = v; }
+  }
+  if (Object.keys(missing).length) api("board-prefs", { prefs: missing }).catch(() => {});
+}
 // All, the page of every task, is gone: whoever had it open lands on the Projects & duties list.
 function startMode() {
   const m = pref("hq-mode", "today");
@@ -113,10 +139,122 @@ const ui = {
 };
 
 // ------------------------------------------------------------------ bridge
+// On the Mac the page talks to the app through WebKit; on a phone (Settings → Phone access, the
+// app serving the board over the local network: BoardServer) it posts the same requests over HTTP,
+// with the token it was paired with.
+const NATIVE = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hq;
+const REMOTE = !NATIVE && Boolean(window.HQ_REMOTE);
+if (REMOTE) document.documentElement.classList.add("remote");
+// The token: in this browser's storage, and in a cookie as well — iOS gives a web app added to
+// the Home Screen its own storage, and brings the site's cookies along, not the rest.
+const TOKEN_KEY = "hq-remote-token";
+function remoteToken() {
+  const m = document.cookie.match(/(?:^|;\s*)hq-token=([\w-]+)/);
+  return pref(TOKEN_KEY, "") || (m ? m[1] : "");
+}
+function setRemoteToken(tok) {
+  try { if (tok) localStorage.setItem(TOKEN_KEY, tok); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  document.cookie = tok ? `hq-token=${tok}; max-age=31536000; path=/; SameSite=Strict` : "hq-token=; max-age=0; path=/";
+}
+// The pairing code from the Mac's QR code: #pair=<token>. Kept, then taken out of the address bar.
+(function takePairing() {
+  const m = location.hash.match(/[#&]pair=([\w-]+)/);
+  if (!m) return;
+  setRemoteToken(m[1]);
+  history.replaceState(null, "", location.pathname + location.search);
+})();
+// What the Mac's list of phones calls this one. iPadOS Safari says "Macintosh"; its touch screen
+// gives it away.
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "iPad";
+  if (/Android/.test(ua)) return "Android";
+  return "";
+}
 async function api(op, args = {}) {
-  const h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.hq;
-  if (!h) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
-  return h.postMessage(Object.assign({ op }, args));
+  if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
+  if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
+  // What happens on the phone itself rather than on the Mac.
+  const local = remoteLocal(op, args);
+  if (local) return local;
+  const token = remoteToken();
+  if (!token) { showPairing(""); throw new Error(T("This phone isn't paired yet", "这台手机还没配对")); }
+  let r;
+  try {
+    r = await fetch("/api", { method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
+      body: JSON.stringify(Object.assign({ op }, args)) });
+  } catch (e) {
+    throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
+  }
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* not JSON: a status line says enough */ }
+  // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
+  // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
+  if (j.pair) { setRemoteToken(""); showPairing(j.error || ""); }
+  if (j.error) throw new Error(j.error);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return j.result;
+}
+// On a phone: copy to the phone's clipboard, open links in its browser, type a folder instead of
+// picking one on the Mac's screen. Returns a promise, or null for a request that goes to the Mac.
+function remoteLocal(op, args) {
+  if (op === "copy") {
+    // Too late after the tap (an await came between): show it to copy by hand.
+    if (!localCopy(args.text || "")) window.prompt(T("Copy it from here:", "从这里复制："), args.text || "");
+    return Promise.resolve({ ok: true });
+  }
+  // Opening a file or a terminal happens on the Mac's screen, where no one is looking.
+  if (["open", "openPath", "attach"].includes(op)) return Promise.reject(new Error(T("That opens on the Mac — not from the phone", "这个要在 Mac 上打开，手机上打不开")));
+  if (op === "openURL") { window.open(args.url, "_blank", "noopener"); return Promise.resolve({ ok: true }); }
+  if (op === "pick-folder") {
+    const p = window.prompt(args.message || T("Folder on the Mac (e.g. ~/code/app)", "Mac 上的目录（比如 ~/code/app）"), args.path || "");
+    return Promise.resolve({ path: (p || "").trim() });
+  }
+  return null;
+}
+// The phone's clipboard: navigator.clipboard needs https, which a local address doesn't have; the
+// older way works while the tap that asked for it is still being handled.
+function localCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+// A phone without a token, or with one the Mac no longer knows: how to pair it.
+function showPairing(why) {
+  let box = $("#pairing");
+  if (!box) { box = document.createElement("div"); box.id = "pairing"; document.body.appendChild(box); }
+  // Asked again by every refresh: leave a link being pasted alone.
+  if (!box.hidden && box.innerHTML && (!why || box.dataset.why === why)) return;
+  box.dataset.why = why;
+  box.innerHTML = `<div class="panel">
+    <h2>${T("Pair this phone with the Mac", "把这台手机和 Mac 配对")}</h2>
+    ${why ? `<p class="meta">${esc(why)}</p>` : ""}
+    <ol>
+      <li>${T("On the Mac, open the board's <b>Settings → Phone access</b> and turn it on.", "在 Mac 上打开看板的 <b>设置 → 手机访问</b>，打开它。")}</li>
+      <li>${T("Press <b>Pair a phone</b> and scan the QR code with this phone's camera.", "点 <b>配对手机</b>，用这台手机的相机扫二维码。")}</li>
+    </ol>
+    <p class="meta">${T("Added the board to the Home Screen? Scanning opens Safari: or paste the pairing link here.", "已经添加到主屏幕了？扫码会打开 Safari——也可以把配对链接粘贴到这里。")}</p>
+    <div class="row"><input id="pair-link" type="url" placeholder="http://…#pair=…" autocomplete="off">
+      <button class="btn primary" data-action="pair-paste">${T("Pair", "配对")}</button></div></div>`;
+  box.hidden = false;
+}
+function pairFromLink(text) {
+  const m = String(text || "").match(/pair=([\w-]+)/);
+  if (!m) return toast(T("That isn't a pairing link", "这不是配对链接"), true);
+  setRemoteToken(m[1]);
+  const box = $("#pairing");
+  if (box) box.hidden = true;
+  refresh();
 }
 async function apiJSON(op, args) { return JSON.parse(await api(op, args)); }
 // For ops whose reply is an object already (launch) — or JSON text, either way.
@@ -487,6 +625,8 @@ async function refresh(force) {
     ui.clickTarget = pet.clickTarget || "";   // empty: no pet behind this board (--render-board)
     ui.skin = pet.skin || ui.skin || "cat";    // the secretary wears the pet's face
     ui.secGlance = pet.secretary || null;
+    if (pet.prefs) takeSharedPrefs(pet.prefs);
+    if ($("#pairing")) $("#pairing").hidden = true;
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
@@ -574,7 +714,8 @@ const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: T("Ba
 const skipPerms = () => pref("hq-skip-perms", "0") === "1";
 // Stay on the board: a session the board starts or resumes opens its terminal tab in the
 // background, and its conversation window opens here instead — carry on from the board.
-const stayOnBoard = () => pref("hq-stay", "0") === "1";
+// On a phone it is on unless turned off: there, the conversation is the only window onto a session.
+const stayOnBoard = () => pref("hq-stay", REMOTE ? "1" : "0") === "1";
 function launchOptions() {
   return `<label class="skipperm" title="${T("Start and resume sessions with --dangerously-skip-permissions: Claude won't stop to ask before running commands or editing files", "新开和续上的 session 带 --dangerously-skip-permissions：Claude 跑命令、改文件前不再停下来问")}">
     <input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}> ${T("skip permissions", "跳过权限确认")}</label>
@@ -2393,7 +2534,7 @@ function renderSettings() {
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Settings", "设置")}">
     <div class="phead"><div class="stitle">${T("Settings", "设置")}</div>
       <span style="flex:1"></span><button class="btn small" data-action="close-settings">${T("Done", "完成")}</button></div>
-    <div class="settings-body">${renderSessionSettings()}</div></div>`;
+    <div class="settings-body">${renderSessionSettings()}${REMOTE ? renderThisPhone() : renderPhoneAccess()}</div></div>`;
   box.hidden = false;
   box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
 }
@@ -2407,12 +2548,66 @@ function renderSessionSettings() {
       `<input type="checkbox" data-action="skip-perms" ${skipPerms() ? "checked" : ""}>`)}
     ${row(T("Stay on board", "留在看板上"), T("Open the session's terminal tab in the background and carry on here, in its conversation window", "终端标签页在后台打开，留在这里、在它的对话窗口里接着干"),
       `<input type="checkbox" data-action="stay-board" ${stayOnBoard() ? "checked" : ""}>`)}
-    ${ui.clickTarget ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task's drawer opens here, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，打开这个任务的详情侧栏，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
+    ${ui.clickTarget && !REMOTE ? row(T("Clicking a session on the pet opens", "在宠物上点击 session 时打开"), T("A finish bubble, a row in the pet's list, or the jump-to-waiting shortcut. Its task's drawer opens here, with the session picked out and its conversation open; a session bound to no task still goes to its terminal. Also in the pet's right-click menu → Settings", "完成气泡、宠物列表里的一行，或“跳到等待中的 session”快捷键。打开看板上它的任务时，打开这个任务的详情侧栏，并把这个 session 高亮、打开它的对话；没绑定任务的 session 照旧跳终端。宠物右键菜单 → 设置 里也能改"),
       `<select class="bind" data-action="click-target">${[["terminal", T("Its terminal", "它的终端")], ["board", T("Its task on the board", "看板上它的任务")]].map(([k, v]) => `<option value="${k}" ${ui.clickTarget === k ? "selected" : ""}>${v}</option>`).join("")}</select>`) : ""}
     ${row(T("Finishing a task", "结束任务时"), T("When you set a task to done or abandoned here and it still has live sessions", "在看板上把任务改成 done 或 abandoned、它还有 session 在跑时"),
       `<select class="bind" data-action="finish-stop-pref">${[["ask", T("Ask each time", "每次问")], ["stop", T("Stop its sessions", "停掉它的 session")], ["keep", T("Leave them running", "不停")]].map(([k, v]) => `<option value="${k}" ${finishStop() === k ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
     ${row(T("Active first", "活跃的在前"), T("On Projects & duties, projects with a live session come first, most recently active first; in every lane (Focus and a project's page), the task whose session moved last comes first. Off: your own order", "项目与职责里有 session 在跑的项目排最前，最近有动静的在前；每一列里（Focus 和项目页），session 最近有动静的任务排最上面。不勾：按你自己的顺序"),
       `<input type="checkbox" data-action="active-first" ${ui.activeFirst ? "checked" : ""}>`)}
+  </div>`;
+}
+
+// ---- Phone access (BoardServer): the board on a phone's browser over the local network. On the
+// Mac: turn it on, pair a phone with a QR code, see and remove the paired ones.
+const REMOTE_POLL_MS = 3000;
+function loadRemote(force) {
+  if (REMOTE || ui.remoteLoading || (!force && Date.now() - (ui.remoteAt || 0) < REMOTE_POLL_MS)) return;
+  ui.remoteLoading = true;
+  apiObj("remote")
+    .then((st) => {
+      const was = JSON.stringify(ui.remoteSt || null);
+      ui.remoteSt = st;
+      // The phone the code was for has used it: the code is done with.
+      if (ui.remotePair && list(st.devices).some((x) => x.paired && !list((ui.remoteSt0 || {}).devices).some((y) => y.id === x.id && y.paired))) ui.remotePair = null;
+      if (JSON.stringify(st) !== was) renderSettings();
+    })
+    .catch((e) => { ui.remoteSt = { error: String(e.message || e) }; })
+    .finally(() => { ui.remoteLoading = false; ui.remoteAt = Date.now(); });
+}
+function renderPhoneAccess() {
+  loadRemote();
+  const st = ui.remoteSt || {};
+  const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
+  const on = Boolean(st.enabled);
+  const urls = list(st.urls);
+  const devs = list(st.devices);
+  const pair = ui.remotePair;
+  return `<div class="set-h">${T("Phone access", "手机访问")}</div><div class="set-list">
+    ${row(T("Open the board from a phone", "在手机上打开看板"),
+      T("Serves this board to a phone or iPad on the same Wi-Fi, once paired. A paired phone can do anything this board can — start sessions, answer permission prompts — and the network carries it unencrypted: turn it on at home, not on a shared network", "让同一个 Wi-Fi 里的手机或 iPad 配对后打开这个看板。配对过的手机能做看板能做的一切——开 session、批准权限请求——而且网络上传的是明文：在家里打开，别在公共网络上开"),
+      `<input type="checkbox" data-action="remote-enable" ${on ? "checked" : ""}>`)}
+    ${st.error ? `<div class="meta warn">${esc(st.error)}</div>` : ""}
+    ${on && st.running ? `<div class="set-row remote-pair"><div><b>${T("Address", "地址")}</b>
+        <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
+        <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
+      ${pair ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
+        <div class="meta">${T("Scan it with the phone's camera and open the link. The code pairs one phone and lapses in 15 minutes if unused. Then, in Safari: Share → Add to Home Screen.", "用手机相机扫码，打开链接。这个码只配对一台手机，15 分钟内不用就失效。之后在 Safari 里：分享 → 添加到主屏幕。")}
+          <div class="pair-url"><code>${esc(pair.url)}</code></div>
+          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : ""}` : ""}
+    ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
+      ${devs.map((x) => `<div class="dev"><span>${esc(x.name)}</span><span class="meta">${x.paired
+        ? `${x.lastSeen ? T("last seen", "最近") + " " + ago(x.lastSeen) : ""}${x.lastAddress ? " · " + esc(x.lastAddress) : ""}`
+        : T("waiting for its scan", "等它扫码")}</span>
+        <button class="btn small ghost" data-confirm="${T("Remove?", "移除？")}" data-action="remote-revoke" data-id="${esc(x.id)}" title="${T("It can no longer open the board until paired again", "移除后它就打不开看板了，除非重新配对")}">${x.paired ? T("Remove", "移除") : T("Cancel", "作废")}</button></div>`).join("")}
+      </div></div>` : ""}
+  </div>`;
+}
+// On the phone: which Mac it is paired with, and a way to unpair.
+function renderThisPhone() {
+  return `<div class="set-h">${T("This phone", "这台手机")}</div><div class="set-list">
+    <div class="set-row"><div><b>${T("Paired with", "已配对")} ${esc(location.host)}</b>
+      <div class="meta">${T("Skip permissions and where sessions open are the Mac's settings: changing them here changes them there too.", "跳过权限确认、session 开在哪，跟 Mac 上的设置是同一份：在这里改，Mac 上也跟着改。")}</div></div>
+      <button class="btn small ghost" data-confirm="${T("Unpair?", "取消配对？")}" data-action="remote-forget">${T("Unpair", "取消配对")}</button></div>
   </div>`;
 }
 
@@ -3124,7 +3319,7 @@ function drawSecretary(toBottom) {
   const quick = busy || st.waking ? "" : `<div class="quick">${QUICK.map(([label, fill]) => `<button class="chipq" data-action="sec-quick" ${fill ? `data-fill="${esc(fill)}"` : `data-text="${esc(label)}"`}>${esc(label)}</button>`).join("")}</div>`;
   // While it replies, what you send waits in the outbox and goes when it is done.
   const sendBtn = (busy ? `<button class="sendc stop" data-action="secretary-stop" title="${T("Stop its reply", "让它停下")}" aria-label="${T("Stop", "停止")}"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></button>` : "")
-    + `<button class="sendc" data-action="send" data-session="${SEC}" title="${busy || st.waking ? T("Send — it reads it when this reply is done (⌘Enter)", "发送——它回完这一条就会读到（⌘回车）") : T("Send (⌘Enter)", "发送（⌘回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
+    + photoButton(SEC) + `<button class="sendc" data-action="send" data-session="${SEC}" title="${busy || st.waking ? T("Send — it reads it when this reply is done (⌘Enter)", "发送——它回完这一条就会读到（⌘回车）") : T("Send (⌘Enter)", "发送（⌘回车）")}" aria-label="${T("Send", "发送")}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>`;
 
   const sideTop = (box.querySelector(".sec-side") || {}).scrollTop || 0;   // redrawn below: keep its place
   box.innerHTML = `<div class="panel sec-chat" role="dialog" aria-label="${T("Secretary", "秘书")}">
@@ -3789,6 +3984,21 @@ async function addImages(sid, files) {
   if (added && sid.startsWith("ask:")) autoPick(sid.slice(4), true);   // an image is an answer too
   if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && peekKey(ui.modal) === sid) drawPeek(false); }
 }
+// On a phone there is nothing to paste or drop a screenshot from: a button picks photos instead
+// (Safari hands over a JPEG, even for a HEIC photo).
+const PHOTO_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg>`;
+const photoButton = (sid) => (REMOTE ? `<button class="icon pick-photo" data-action="pick-photo" data-session="${esc(sid)}" title="${T("Add photos", "添加照片")}" aria-label="${T("Add photos", "添加照片")}">${PHOTO_ICON}</button>` : "");
+function pickPhotos(sid) {
+  let input = $("#photo-input");
+  if (!input) {
+    input = document.createElement("input");
+    Object.assign(input, { type: "file", accept: "image/*", multiple: true, id: "photo-input", hidden: true });
+    input.addEventListener("change", () => { const files = [...input.files]; input.value = ""; if (files.length) addImages(input.dataset.sid, files); });
+    document.body.appendChild(input);
+  }
+  input.dataset.sid = sid;
+  input.click();
+}
 document.addEventListener("paste", (ev) => {
   const box = ev.target.closest && ev.target.closest("textarea[data-session], [data-att]");
   if (!box || !ev.clipboardData) return;
@@ -4012,7 +4222,7 @@ function outboxMark(sid) {
 }
 
 function sendButton(sid, enabled) {
-  return `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" title="${T("Send (⌘Enter)", "发送（⌘回车）")}" ${enabled ? "" : "disabled"}>${T("Send", "发送")}</button>`;
+  return photoButton(sid) + `<button class="btn small primary" data-action="send" data-session="${esc(sid)}" title="${T("Send (⌘Enter)", "发送（⌘回车）")}" ${enabled ? "" : "disabled"}>${T("Send", "发送")}</button>`;
 }
 
 async function saveField(el) {
@@ -4335,7 +4545,23 @@ document.addEventListener("click", async (ev) => {
     case "note-skips": ui.showSkips = !ui.showSkips; return render();
     case "note-drop": return act("note-drop", { id: d.id }, T("Deleted — Restore brings it back", "已删掉——点恢复可以找回"));
     case "note-restore": return act("note-restore", { id: d.id }, T("Restored", "已恢复"));
-    case "jump": return act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
+    // On a phone the terminal is out of reach: its conversation, here, is the way in.
+    case "jump": return REMOTE ? openPeek(d.session) : act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
+    case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
+    case "pick-photo": return pickPhotos(d.session);
+    case "remote-pair":
+      try { ui.remoteSt0 = ui.remoteSt; ui.remotePair = await apiObj("remote-pair"); } catch (e) { toast(String(e.message || e), true); }
+      loadRemote(true);
+      return renderSettings();
+    case "remote-pair-close": ui.remotePair = null; return renderSettings();
+    case "remote-revoke":
+      try { ui.remoteSt = await apiObj("remote-revoke", { id: d.id }); } catch (e) { toast(String(e.message || e), true); }
+      return renderSettings();
+    case "remote-forget":
+      setRemoteToken("");
+      ui.settings = false;
+      render();
+      return showPairing("");
     case "decide": {
       if (d.behavior === "allow" && !(ui.allowArmed && ui.allowArmed.ask === d.ask)) {
         clearTimeout(ui.allowArmed && ui.allowArmed.timer);
@@ -4728,6 +4954,12 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "remote-enable") {
+    ui.remotePair = null;
+    apiObj("remote-enable", { on: el.checked }).then((st) => { ui.remoteSt = st; renderSettings(); })
+      .catch((e) => toast(String(e.message || e), true));
+    return;
+  }
   if (d.action === "finish-stop-pref") { savePref("hq-finish-stop", el.value); return render(); }
   if (d.action === "stay-board") { savePref("hq-stay", el.checked ? "1" : "0"); return render(); }
   // Kept by the pet, which its menu shares; shows at once, the next refresh confirms it.

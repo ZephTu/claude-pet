@@ -26,7 +26,10 @@ body.guide { height: auto; min-height: 100%; }
 .tip { border-left: 3px solid var(--amber); background: var(--panel); padding: 7px 12px; border-radius: 0 8px 8px 0; }
 a { color: var(--accent); }
 @media (max-width: 820px) {
-  .doc article { grid-template-columns: 1fr; }
+  /* minmax(0, …): a long <pre> or command scrolls inside its box instead of widening the page. */
+  .doc article { grid-template-columns: minmax(0, 1fr); }
+  .content pre { overflow-x: auto; }
+  .content code { overflow-wrap: anywhere; }
   .toc { position: static; flex-direction: row; flex-wrap: wrap; }
   .content table.cmds td:first-child { white-space: normal; }
 }

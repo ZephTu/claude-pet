@@ -36,14 +36,45 @@ struct AppMain {
             }
             exit(0)
         }
-        // The HQ board with live data, as a PNG: `--render-board out.png [js]`.
+        // The HQ board with live data, as a PNG: `--render-board out.png [js] [--size WxH]`
+        // (--size 390x844: the board as a phone shows it).
         if let i = arguments.firstIndex(of: "--render-board"), i + 1 < arguments.count {
             app.setActivationPolicy(.prohibited)
-            let script = i + 2 < arguments.count ? arguments[i + 2] : ""
+            var rest = Array(arguments[(i + 2)...])
+            var size: NSSize?
+            if let s = rest.firstIndex(of: "--size"), s + 1 < rest.count {
+                let wh = rest[s + 1].split(separator: "x").compactMap { Double($0) }
+                if wh.count == 2 { size = NSSize(width: wh[0], height: wh[1]) }
+                rest.removeSubrange(s...(s + 1))
+            }
+            let script = rest.first ?? ""
             MainActor.assumeIsolated {
                 let window = BoardWindow()
+                if let size { window.setContentSize(size) }
                 window.renderPreview(to: arguments[i + 1], script: script) { exit($0 ? 0 : 1) }
                 _ = Unmanaged.passRetained(window)
+            }
+            app.run()
+        }
+        // The board served to phones, alone: `--serve-board PORT` prints a pairing link.
+        if let i = arguments.firstIndex(of: "--serve-board"), i + 1 < arguments.count, let port = UInt16(arguments[i + 1]) {
+            app.setActivationPolicy(.prohibited)
+            MainActor.assumeIsolated { BoardServer.shared.serveForDevelopment(port: port) }
+            app.run()
+        }
+        // A page as a phone's browser shows it (no app behind it but its server), as a PNG:
+        // `--render-url URL out.png [js] [--size WxH]` — the board from `--serve-board`.
+        if let i = arguments.firstIndex(of: "--render-url"), i + 2 < arguments.count {
+            app.setActivationPolicy(.prohibited)
+            var rest = Array(arguments[(i + 3)...])
+            var size = NSSize(width: 390, height: 844)
+            if let s = rest.firstIndex(of: "--size"), s + 1 < rest.count {
+                let wh = rest[s + 1].split(separator: "x").compactMap { Double($0) }
+                if wh.count == 2 { size = NSSize(width: wh[0], height: wh[1]) }
+                rest.removeSubrange(s...(s + 1))
+            }
+            MainActor.assumeIsolated {
+                PageShot.render(url: arguments[i + 1], to: arguments[i + 2], script: rest.first ?? "", size: size) { exit($0 ? 0 : 1) }
             }
             app.run()
         }
@@ -239,6 +270,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                     "source": u.source]
         }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
+        // Phone access to the board, if it was left on (Settings → Phone access).
+        BoardServer.shared.startIfEnabled()
         panel.showOnDesktop()
         panel.updateLayoutSide()
         // A saved spot can be on a display that is no longer attached, or one
