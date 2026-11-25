@@ -457,24 +457,26 @@ PROJECT_SECTIONS = {            # heading words (either language; "A / B" headin
     "out": re.compile(r"^(?:out of scope|不管)$", re.I),
     "done_when": re.compile(r"^(?:done when|healthy when|完成标准|健康标准)$", re.I),
     "templates": re.compile(r"^(?:templates|task templates|常见的活|模板)$", re.I),
+    "intake": re.compile(r"^(?:auto intake|comes in by itself|自动来活)$", re.I),
     "brief": re.compile(r"^(?:brief|project brief|简报|项目简报)$", re.I),
 }
 # The heading a section gets when `hq project section` writes one the file doesn't have yet
 # (in the file's language): {key: (zh, en)}; done_when depends on the kind.
 PROJECT_HEADINGS = {"goal": ("目标", "Goal"), "out": ("不管", "Out of scope"),
                     "done_when": ("完成标准", "Done when"), "templates": ("常见的活", "Templates"),
-                    "brief": ("简报", "Brief")}
+                    "intake": ("自动来活", "Auto intake"), "brief": ("简报", "Brief")}
 DUTY_HEALTH_HEADING = ("健康标准", "Healthy when")
 PROJECT_END_RE = re.compile(r"^(?:log|decision log|decisions|决策记录|日志)$", re.I)
 PROJECT_SET_KEYS = ("title", "kind", "status", "due", "jira", "fixVersions", "parent", "phases", "auto")
 PROJECT_LIST_KEYS = ("jira", "fixVersions", "phases", "auto")
-# Where a duty's work could come in by itself. Only a switch for now: nothing reads them yet.
+# Where a duty's work could come in by itself: switched on here (`auto:`), set up in the duty's Auto
+# intake section. Only those in INTAKE_SOURCES make tasks so far; the others are switches.
 AUTO_SOURCES = ("qahub-ci", "github-review", "jira-filter")
 # "不管：…" / "Out of scope: …" written as a line of the goal (as older PROJECT.md files do).
 OUT_LINE_RE = re.compile(r"^\s*(?:不管|out of scope)\s*[:：]\s*(.+)$", re.I)
 # Sections added after briefs were in use: inside a brief, a "## Templates" is the brief's own
 # heading, not the start of one of these.
-LATE_SECTIONS = ("out", "templates")
+LATE_SECTIONS = ("out", "templates", "intake")
 CRIT_RE = re.compile(r"^(\s*)[-*] (?:\[([ xX])\] )?(.*\S)\s*$")
 BRIEF_CHARS = 2000              # of the brief a session is given; the rest: read PROJECT.md
 
@@ -668,6 +670,7 @@ def load_project(name):
     except OSError:
         return None
     sec, raw = project_sections(body), project_sections(body, raw=True)
+    intake_raw = raw.get("intake", "")     # as written: a prompt keeps its <…> lines
     kind, status = str(meta.get("kind") or "").lower(), str(meta.get("status") or "").lower()
     # Older files say what is out of scope as "不管：…" lines of the goal: shown (and, on the next
     # write, moved) as part of the out-of-scope section.
@@ -687,7 +690,9 @@ def load_project(name):
             "auto": as_list(meta.get("auto")),
             "goal": goal, "out": out, "done_when": sec.get("done_when", ""),
             "criteria": project_criteria(sec.get("done_when", "")),
-            "templates": project_templates(sec.get("templates", "")), 
+            "templates": project_templates(sec.get("templates", "")),
+            "intake": project_intake(intake_raw),
+            "lang": "zh" if re.search(r"^## .*[\u4e00-\u9fff]", body, re.M) else "en",
             "brief": sec.get("brief", ""), "raw": raw, "grants": card_grants(body)}
 
 
@@ -696,7 +701,7 @@ def project_info(pr):
     p = load_project(pr["name"])
     base = {"title": "", "kind": "", "status": "active", "due": "", "jira": [], "fixVersions": [],
             "updated": "", "parent": "", "phases": [], "auto": [], "goal": "", "out": "", "done_when": "",
-            "criteria": [], "templates": [], "raw": {}, "brief": "", "grants": [], "file": None}
+            "criteria": [], "templates": [], "intake": {}, "lang": "", "raw": {}, "brief": "", "grants": [], "file": None}
     return {**base, **(p or {}), "name": pr["name"], "paths": pr.get("paths", []), "defined": bool(p)}
 
 
@@ -1659,8 +1664,10 @@ def hold_close(card, block):
     for k, v in update_lines(block):
         if k == "status" and v and v.lower() in STATUSES:
             st = v.lower()
+    # A task that came in by itself and waits for the user to close it isn't closed by a session at
+    # all: the block goes on to apply_update, which turns the close away.
     if (st not in CLOSED_STATUSES or parse_card(card).get("status") not in OPEN_STATUSES
-            or not open_ask_count(card)):
+            or not open_ask_count(card) or intake_manual(card)):
         return block, None
 
     def closing(line):
@@ -1749,6 +1756,14 @@ def session_id(arg=None):
 
 # ---------------------------------------------------------------- protocol text
 def protocol(meta):
+    text = _protocol(meta)
+    if meta.get("intake") and str(meta.get("intake_done") or "manual") != "auto":
+        p = load_project(meta.get("project") or "")
+        text += "\n" + INTAKE_MANUAL_DONE[(p or {}).get("lang") or "en"]
+    return text
+
+
+def _protocol(meta):
     return f"""This Claude Code session is bound to HQ task {meta['id']}: {meta.get('title','')}.
 Task card: {meta['path']}
 The card, not this conversation, is the source of truth. Rules:
@@ -1935,6 +1950,11 @@ def cmd_board(args):
         out = []
         for m in metas:
             d = {k: v for k, v in m.items() if k not in ("dir",)}
+            # The reply that raised an ask is shown while it is open; once answered it is only
+            # history (`hq asks <task> --all --json` still has it), and across every card it was
+            # most of the board — re-read every few seconds, and over a slow link by a phone.
+            d["asks"] = [a if a.get("state") == "open" else {k: v for k, v in a.items() if k != "context"}
+                         for a in m["asks"]]
             d["repo"] = task_repo(m)        # for the board's By repo view: a worktree counts as its repo
             # What the card budget moved to HISTORY.md: the board shows it with the card's own.
             h = read_history(m["path"])
@@ -1953,7 +1973,7 @@ def cmd_board(args):
         projects = [dict(project_info(pr), stats=project_stats(pr["name"], metas)) for pr in load_projects()]
         print(json.dumps({"root": hq_root(), "focus": focus_state(), "projects": projects,
                           "links": links, "secretary": secretary_task_id(), "inbox": inbox_view(), "tasks": out},
-                         ensure_ascii=False, indent=1))
+                         ensure_ascii=False, separators=(",", ":")))
         return
     open_asks = [(m, a) for m in metas for a in m["asks"] if a["state"] == "open" and not snoozed(a)]
     my_todos = [(m, t) for m in metas if m.get("status") in OPEN_STATUSES
@@ -2129,6 +2149,17 @@ def task_template():
 
 
 def new_card(title, slug=None, category=None, project=None, lead=None, workdirs=None, focus=True):
+    # The board, feeds and `hq intake` make cards unattended: one at a time picks the next id.
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    with open(os.path.join(LOCK_DIR, "new-card.lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            return _new_card(title, slug, category, project, lead, workdirs, focus)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _new_card(title, slug=None, category=None, project=None, lead=None, workdirs=None, focus=True):
     td = tasks_dir()
     nums = [int(m.group(1)) for d in os.listdir(td) for m in [re.match(r"T-(\d+)", d)] if m]
     tid = f"T-{(max(nums) + 1 if nums else 1):03d}"
@@ -4414,6 +4445,508 @@ def cmd_feed(args):
         sys.exit(1)
 
 
+# ---------------------------------------------------------------- intake (自动来活)
+# Work that comes in by itself: a duty with a source switched on (PROJECT.md `auto:`) and set up
+# in its "自动来活 / Auto intake" section gets a task for each new thing that source has for the
+# user, and — when the section says so — a background Claude Code session started on it with the
+# section's prompt. `hq intake` scans (Claude Pet runs it as a scheduled shell job).
+#
+# The section holds a `### <source>` block per source, `key: value` lines; `prompt:` comes last
+# and takes the rest of the block (blank lines and all):
+#
+#   ### github-review
+#   repos: tigergraph/bigtest, tigergraph/mit-devops      (`*`: any repository)
+#   workdir: ~/code/bigtest       where the session runs (default: the duty's first folder; one
+#                                 written here must exist — no falling back to another folder)
+#   run: yes                      start a background session on each new task (default: no)
+#   permissions: skip             that session skips permission prompts (default: ask)
+#   done: manual                  only the user closes the task (default); auto: the session may
+#   focus: yes                    the task joins Focus (default)
+#   title: Review {repo}#{number}: {title}
+#   goal: …
+#   prompt: Review {url} with /code-review …
+#
+# Placeholders: {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.
+# Inside the prompt only a `### <source>` line ends it (a `## ` heading still ends the section).
+INTAKE_SOURCES = ("github-review",)         # the auto sources that make tasks so far
+INTAKE_KEYS = ("repos", "workdir", "run", "permissions", "done", "focus", "title", "goal", "prompt")
+INTAKE_YES = ("yes", "on", "true", "1", "是", "开")
+INTAKE_NO = ("no", "off", "false", "0", "否", "关")
+INTAKE_DEFAULT = {
+    "github-review": {
+        "title": {"zh": "Review {name}#{number}：{title}", "en": "Review {name}#{number}: {title}"},
+        "goal": {"zh": "{author} 请你 review {url}（{branch} → {base}）。意见先写在这张卡上，你确认之后再发到 GitHub。",
+                 "en": "{author} asked you to review {url} ({branch} → {base}). The comments wait on this card; "
+                       "they go to GitHub once you say so."},
+        "prompt": {"zh": "用 /code-review 审这个 PR：{url}（{repo}#{number}「{title}」，作者 {author}）。审完把要发的意见"
+                         "整理好写在任务卡上，然后用 hq-asks 问我要不要发到 GitHub。我同意之前，不要在 GitHub 上发任何"
+                         "评论、review 或 approve。",
+                   "en": "Review this PR with /code-review: {url} ({repo}#{number} \"{title}\" by {author}). Put the "
+                         "comments you would post on the task card, then ask me in hq-asks whether to post them. "
+                         "Post nothing on GitHub — no comment, review or approval — until I say so."},
+    },
+}
+INTAKE_MANUAL_DONE = {
+    "zh": "这个任务是自动来活建的，由用户自己关：不要写 `status: done` 或 `abandoned`；做完了写 `status: waiting-on-me`，"
+          "`next:` 写明可以关了。",
+    "en": "This task came in by itself and the user closes it: never write `status: done` or `abandoned`; when "
+          "the work is finished, write `status: waiting-on-me` with a `next:` saying it is ready to close.",
+}
+INTAKE_RECENT_DAYS = 14         # what `hq intake status` lists as recent
+INTAKE_MAX_NEW = 3              # new tasks a scan makes; the rest wait for the next (a launch can take a minute)
+# The pet's job env (JobRunner): a session started with it would count as the job's and be hidden
+# from the pet (HookEmit skips processes with CLAUDE_PET_JOB) — no permission prompts shown.
+INTAKE_DROP_ENV = ("CLAUDE_PET_JOB", "CLAUDE_PET_RUN", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+
+
+class IntakeError(Exception):
+    pass
+
+
+def project_intake(text):
+    """An Auto intake section, as written → {source: {key: value, "problems": [...]}}. `repos` is a
+    list; run, focus are booleans; permissions is ask|skip; done is manual|auto; the rest are
+    strings. Comments are skipped outside the prompt; the prompt keeps every line as written until
+    a `### <source>` line (so a `### Steps` of its own stays in it)."""
+    out, cur, key, inc = {}, None, None, False
+    for line in text.split("\n"):
+        h = re.match(r"^###\s+(.+?)\s*$", line)
+        if h and (key != "prompt" or h.group(1).strip().lower() in AUTO_SOURCES):
+            cur, key, inc = {"problems": []}, None, False
+            out[h.group(1).strip().lower()] = cur
+            continue
+        if cur is None:
+            continue
+        if key == "prompt":                 # the prompt takes the rest of the block
+            cur["prompt"] += "\n" + line
+            continue
+        vis, inc = visible_text(line, inc)
+        if not vis.strip():
+            continue
+        m = re.match(r"^\s*([A-Za-z]+)\s*[:：]\s*(.*?)\s*$", vis)
+        if m and m.group(1).lower() in INTAKE_KEYS:
+            key = m.group(1).lower()
+            # The prompt's first line as written (comments and all); the others' without comments.
+            cur[key] = re.sub(r"^\s*prompt\s*[:：]\s*", "", line, flags=re.I) if key == "prompt" else m.group(2)
+        elif key == "goal":
+            cur["goal"] += "\n" + vis.strip()
+        elif m:
+            cur["problems"].append(f"unknown key {m.group(1)!r} (keys: {', '.join(INTAKE_KEYS)})")
+            key = None
+        else:
+            cur["problems"].append(f"not a `key: value` line: {vis.strip()}")
+    for src, c in out.items():
+        if "prompt" in c:
+            c["prompt"] = c["prompt"].strip()
+        c["repos"] = [r for r in re.split(r"[\s,，]+", c.get("repos", "")) if r]
+        for k, default in (("run", False), ("focus", True)):
+            v = str(c.get(k, "")).strip().lower()
+            if v and v not in INTAKE_YES + INTAKE_NO:
+                c["problems"].append(f"{k}: yes or no (got {v!r})")
+            c[k] = (v in INTAKE_YES) if v else default
+        for k, allowed in (("permissions", ("ask", "skip")), ("done", ("manual", "auto"))):
+            v = str(c.get(k, "")).strip().lower()
+            if v and v not in allowed:
+                c["problems"].append(f"{k}: {' or '.join(allowed)} (got {v!r})")
+                v = ""
+            c[k] = v or allowed[0]
+        if c.get("workdir"):
+            d = os.path.normpath(os.path.expanduser(c["workdir"]))
+            if not os.path.isdir(d):
+                c["problems"].append(f"workdir: no folder {c['workdir']} — no session starts until it exists")
+            elif not ok_workdir(d):
+                c["problems"].append(f"workdir: {c['workdir']} — /, the home folder and the HQ root are never a workdir")
+        if "*" in c["repos"] and c["permissions"] == "skip" and c["run"]:
+            c["problems"].append("repos: * with permissions: skip would let anyone who asks for your review run a "
+                                 "session without permission checks — no session starts; name the repositories")
+        if src not in INTAKE_SOURCES:
+            c["problems"].append(f"{src}: makes no tasks yet (sources that do: {', '.join(INTAKE_SOURCES)})")
+    return out
+
+
+def intake_fill(text, values):
+    """{repo}, {number}, … filled in; other braces stay as written."""
+    for k, v in values.items():
+        text = text.replace("{" + k + "}", str(v))
+    return text
+
+
+def intake_dir():
+    return os.path.join(hq_root(), "secretary", "intake")
+
+
+def intake_state():
+    d = load_json(os.path.join(intake_dir(), "state.json"), {})
+    return d if isinstance(d, dict) else {}
+
+
+def save_intake_state(st):
+    atomic_write(os.path.join(intake_dir(), "state.json"), json.dumps(st, ensure_ascii=False, indent=1) + "\n")
+
+
+@contextlib.contextmanager
+def intake_lock():
+    os.makedirs(LOCK_DIR, exist_ok=True)
+    with open(os.path.join(LOCK_DIR, "intake.lock"), "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise IntakeError("a scan is already running")
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def intake_duties(source):
+    """[(project info, its config)] of the active duties with `source` switched on and set up, in
+    hq.json's order (the first one whose repos match takes a PR)."""
+    out = []
+    for pr in load_projects():
+        p = load_project(pr["name"])
+        if not p or p["kind"] != "duty" or p["status"] != "active" or source not in p["auto"]:
+            continue
+        cfg = p.get("intake", {}).get(source)
+        if cfg and cfg["repos"]:
+            out.append((dict(p, paths=pr.get("paths", [])), cfg))
+    return out
+
+
+def gh_json(args, timeout=60):
+    """`gh <args>` → its JSON output. Raises IntakeError with gh's own message."""
+    if not shutil.which("gh"):
+        raise IntakeError("gh is not installed (https://cli.github.com)")
+    try:
+        r = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise IntakeError(f"gh {args[0]}: {e}")
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout).strip().splitlines()
+        raise IntakeError(f"gh {' '.join(args[:2])}: {msg[-1] if msg else 'failed'}")
+    try:
+        return json.loads(r.stdout or "null")
+    except ValueError:
+        raise IntakeError(f"gh {' '.join(args[:2])}: not JSON")
+
+
+def repo_matches(repo, repos):
+    return any(r == "*" or r.lower() == repo.lower() for r in repos)
+
+
+def intake_workdir(duty, cfg):
+    """Where the task's work (and its session) happens: the section's `workdir`, else the duty's
+    first folder. None when that isn't an existing folder a task may use — a `workdir` written
+    wrong never falls back to another folder."""
+    for d in [cfg["workdir"]] if cfg.get("workdir") else list(duty.get("paths") or [])[:1]:
+        d = os.path.normpath(os.path.expanduser(d))
+        if os.path.isdir(d) and ok_workdir(d):
+            return d
+    return None
+
+
+def find_claude(given=None):
+    if given:
+        return given
+    home = os.path.expanduser("~")
+    for c in [shutil.which("claude"), f"{home}/.local/bin/claude", f"{home}/.claude/local/claude",
+              "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]:
+        if c and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def intake_launch(tid, title, wd, prompt, skip, lang, manual, claude=None):
+    """Starts a background Claude Code session on the task (`claude --bg`, as the board's ▶ New
+    session does in the background): it is told to bind itself first, and is bound from here too
+    once `claude agents` reports its id. Returns its session id (or short id); raises IntakeError."""
+    claude = find_claude(claude)
+    if not claude:
+        raise IntakeError("can't find the claude command")
+    hq = shlex.quote(os.path.realpath(__file__))
+    first = (f"Start by running `{hq} bind {tid}` — it binds this background session to the task and prints "
+             f"its rules. " + (INTAKE_MANUAL_DONE[lang] + " " if manual else "") + "Then: ")
+    name = f"{tid} {title}"[:60]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION")
+           and k not in FEED_SECRET_ENV + INTAKE_DROP_ENV}
+    env["HQ_ROOT"] = hq_root()
+    args = [claude, "--bg", "--name", name] + (["--dangerously-skip-permissions"] if skip else []) + [first + prompt]
+    try:
+        # A session of its own: the job's end kills its process group, which must not take this along.
+        r = subprocess.run(args, cwd=wd, capture_output=True, text=True, timeout=30, env=env, start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise IntakeError(f"claude --bg: {e}")
+    said = (r.stdout or "") + (r.stderr or "")
+    if r.returncode != 0 or "not trusted" in said.lower():
+        raise IntakeError("claude --bg: " + (said.strip()[:300] or f"exit {r.returncode}"))
+    m = re.search(r"\b[0-9a-f]{8}\b", said)
+    if not m:
+        return ""
+    short = m.group(0)
+    for _ in range(10):
+        try:
+            rows = json.loads(subprocess.run([claude, "agents", "--json", "--all"], capture_output=True, text=True,
+                                             timeout=5, env=env).stdout or "[]")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            rows = []
+        row = next((x for x in rows if isinstance(x, dict) and x.get("id") == short), None) if isinstance(rows, list) else None
+        if row and row.get("sessionId"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                cmd_bind(argparse.Namespace(task=tid, session=row["sessionId"]))
+            return row["sessionId"]
+        time.sleep(0.3)
+    return short
+
+
+def intake_make(source, duty, cfg, item, claude=None, dry=False, record=None):
+    """One task for `item` (a PR's fields: repo, number, title, url, author, branch, base, head).
+    `record(tid)` is called as soon as the card exists, before any session starts: a scan stopped
+    after that (a timeout, Stop) doesn't make the task again. Returns {task, key, duty, title,
+    session?, error?}."""
+    lang = duty.get("lang") or "en"
+    dflt = INTAKE_DEFAULT[source]
+    values = {k: item.get(k, "") for k in ("repo", "number", "title", "url", "author", "branch", "base")}
+    values["name"] = item["repo"].split("/")[-1]
+    title = intake_fill(cfg.get("title") or dflt["title"][lang], values).strip()
+    goal = intake_fill(cfg.get("goal") or dflt["goal"][lang], values).strip()
+    key = f"{item['repo']}#{item['number']}"
+    out = {"key": key, "duty": duty["name"], "title": title, "url": item["url"]}
+    if dry:
+        return out
+    wd = intake_workdir(duty, cfg)
+    tid, card = new_card(title, project=duty["name"], workdirs=[wd] if wd else [], focus=cfg["focus"])
+    set_fields(card, {"intake": source, "intake_key": key, "intake_done": cfg["done"]})
+    if record:
+        record(tid)
+    set_card_goal(card, goal)
+    _add_refs(card, [f"PR {key} {item['url']}"])
+    append_log(card, ("自动来活：" if lang == "zh" else "came in by itself: ") + f"{source} {item['url']}")
+    out["task"] = tid
+    if not cfg["run"]:
+        set_fields(card, {"status": "waiting-on-me"})    # no session works on it: it is the user's
+    if cfg["run"]:
+        try:
+            if not wd:
+                raise IntakeError(f"no folder to run in: {cfg['workdir']} is not one" if cfg.get("workdir") else
+                                  "no folder to run in: set `workdir:` in the duty's Auto intake section")
+            if "*" in cfg["repos"] and cfg["permissions"] == "skip":
+                raise IntakeError("repos: * with permissions: skip — name the repositories, or let it ask for permissions")
+            prompt = intake_fill(cfg.get("prompt") or dflt["prompt"][lang], values)
+            sid = intake_launch(tid, title, wd, prompt, cfg["permissions"] == "skip", lang, cfg["done"] == "manual", claude)
+            out["session"] = sid
+            append_log(card, ("后台 session 已启动" if lang == "zh" else "background session started") + (f" {sid[:8]}" if sid else ""))
+        except IntakeError as e:
+            out["error"] = str(e)
+            append_log(card, ("没能启动后台 session：" if lang == "zh" else "could not start a background session: ") + str(e))
+            set_fields(card, {"status": "waiting-on-me"})
+    return out
+
+
+def card_by_id(tid):
+    for p in card_paths():
+        d = os.path.basename(os.path.dirname(p))
+        if d == tid or d.startswith(tid + "-"):
+            return p
+    return None
+
+
+def gh_lines(args, timeout=60):
+    """`gh <args>` → its output lines. Raises IntakeError with gh's own message."""
+    if not shutil.which("gh"):
+        raise IntakeError("gh is not installed (https://cli.github.com)")
+    try:
+        r = subprocess.run(["gh"] + args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise IntakeError(f"gh {args[0]}: {e}")
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout).strip().splitlines()
+        raise IntakeError(f"gh {' '.join(args[:2])}: {msg[-1] if msg else 'failed'}")
+    return [l.strip() for l in r.stdout.splitlines() if l.strip()]
+
+
+def review_asked_at(repo, number, me):
+    """When the PR last asked for the user's review — of them, or of a team (which may be theirs) —
+    as an aware datetime, or None."""
+    q = ('.[] | select(.event == "review_requested") | '
+         f'select(.requested_team != null or (.requested_reviewer.login // "" | ascii_downcase) == "{me.lower()}") | .created_at')
+    times = [local_dt(x) for x in gh_lines(["api", f"repos/{repo}/issues/{number}/events?per_page=100", "--paginate", "--jq", q])]
+    times = [t for t in times if t]
+    return max(times) if times else None
+
+
+def intake_github_review(claude=None, dry=False):
+    """Open PRs that request the user's review (`review-requested:@me`, drafts left out) in the
+    repositories a duty watches → a task each, at most INTAKE_MAX_NEW a scan. A PR with an open
+    task (by its card's `intake_key`) makes no other. Once that task is closed (or its card
+    deleted), a new one only when the PR asked for the user's review again after that."""
+    source = "github-review"
+    duties = intake_duties(source)
+    r = {"source": source, "duties": [d["name"] for d, _ in duties], "found": 0, "made": [], "errors": [], "left": 0}
+    if not duties:
+        return r
+    prs = gh_json(["search", "prs", "--review-requested=@me", "--state=open", "--limit", "100",
+                   "--json", "repository,number,title,url,author,isDraft"]) or []
+    open_keys = {}
+    for p in card_paths():
+        m = parse_card(p)
+        if m.get("intake") == source and m.get("intake_key") and m.get("status") in OPEN_STATUSES:
+            open_keys[str(m["intake_key"]).lower()] = m["id"]
+    st = intake_state()
+    items = st.setdefault(source, {}).setdefault("items", {})
+    me = None
+    for pr in prs:
+        repo = ((pr.get("repository") or {}).get("nameWithOwner") or "")
+        if pr.get("isDraft") or not repo:
+            continue
+        match = next(((d, c) for d, c in duties if repo_matches(repo, c["repos"])), None)
+        if not match:
+            continue
+        r["found"] += 1
+        key = f"{repo}#{pr['number']}"
+        if key.lower() in open_keys:
+            continue
+        try:
+            prev = items.get(key)
+            if prev:
+                # Its task is closed or gone: only a request made after that makes a new one.
+                card = card_by_id(prev.get("task", ""))
+                m = parse_card(card) if card else {}
+                since = local_dt(m.get("closed_at") or m.get("closed") or prev.get("at"))
+                if me is None:
+                    me = (gh_lines(["api", "user", "--jq", ".login"]) or [""])[0]
+                asked = review_asked_at(repo, pr["number"], me)
+                if not asked or (since and asked <= since):
+                    continue
+            if len([x for x in r["made"] if x.get("task") or dry]) >= INTAKE_MAX_NEW:
+                r["left"] += 1
+                continue
+            view = gh_json(["pr", "view", str(pr["number"]), "-R", repo, "--json", "headRefOid,headRefName,baseRefName"])
+            item = {"repo": repo, "number": pr["number"], "title": pr.get("title", ""), "url": pr.get("url", ""),
+                    "author": (pr.get("author") or {}).get("login", ""), "branch": view.get("headRefName", ""),
+                    "base": view.get("baseRefName", "")}
+
+            def record(tid, key=key, head=view.get("headRefOid", ""), duty=match[0]["name"]):
+                items[key] = {"task": tid, "head": head, "at": now_iso(), "duty": duty}
+                save_intake_state(st)       # before any session starts: a stopped scan won't make it twice
+            made = intake_make(source, match[0], match[1], item, claude=claude, dry=dry, record=record)
+        except Exception as e:              # one PR going wrong doesn't stop the others
+            r["errors"].append(f"{key}: {e}")
+            continue
+        r["made"].append(made)
+        if made.get("error"):
+            r["errors"].append(f"{made.get('task')}: {made['error']}")
+    return r
+
+
+INTAKE_RUN = {"github-review": intake_github_review}
+
+
+def intake_lang(card):
+    """The language of the duty a card is in (its PROJECT.md's headings): zh or en."""
+    p = load_project(parse_card(card).get("project") or "")
+    return (p or {}).get("lang") or "en"
+
+
+def intake_recent(days=INTAKE_RECENT_DAYS):
+    """Tasks that came in by itself, newest first: the ones still open, and those closed in the
+    last `days` days."""
+    cut = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    out = []
+    for p in card_paths():
+        m = parse_card(p)
+        if not m.get("intake"):
+            continue
+        if m.get("status") not in OPEN_STATUSES and str(m.get("closed") or m.get("updated") or "") < cut:
+            continue
+        out.append({k: m.get(k) for k in ("id", "title", "status", "project", "intake", "intake_key", "intake_done",
+                                           "intake_closed_by", "closed", "updated")})
+    return sorted(out, key=lambda x: int(re.sub(r"\D", "", x["id"] or "0") or 0), reverse=True)
+
+
+def intake_status():
+    st = intake_state()
+    out = {"sources": {}, "recent": intake_recent()}
+    for src in INTAKE_SOURCES:
+        s = st.get(src) if isinstance(st.get(src), dict) else {}
+        duties = []
+        for pr in load_projects():
+            p = load_project(pr["name"])
+            if not p or p["kind"] != "duty":
+                continue
+            cfg = p.get("intake", {}).get(src)
+            on = src in p["auto"]
+            if not on and not cfg:
+                continue
+            others = [x for k, c in p.get("intake", {}).items() if k != src for x in c.get("problems", [])]
+            duties.append({"name": p["name"], "on": on, "active": p["status"] == "active", "set_up": bool(cfg and cfg["repos"]),
+                           "repos": (cfg or {}).get("repos", []), "run": bool((cfg or {}).get("run")),
+                           "done": (cfg or {}).get("done", "manual"), "problems": (cfg or {}).get("problems", []) + others})
+        out["sources"][src] = {"duties": duties, "last_scan": s.get("last_scan"), "last": s.get("last"),
+                               "tracked": len(s.get("items") or {})}
+    return out
+
+
+def cmd_intake(args):
+    if args.action == "status":
+        st = intake_status()
+        if args.json:
+            print(json.dumps(st, ensure_ascii=False, indent=1))
+            return
+        for src, s in st["sources"].items():
+            print(f"{src}: last scan {s['last_scan'] or 'never'}" +
+                  (f" — made {len(s['last'].get('made') or [])}" if s.get("last") else ""))
+            for d in s["duties"]:
+                state = ("on" if d["on"] else "off") + ("" if d["set_up"] else ", no repos set") + ("" if d["active"] else ", paused")
+                print(f"  {d['name']} ({state}): {', '.join(d['repos']) or '-'}; run {'yes' if d['run'] else 'no'}; done {d['done']}")
+                for pb in d["problems"]:
+                    print(f"    ! {pb}")
+        if st["recent"]:
+            print("\nrecent:")
+            for t in st["recent"]:
+                print(f"  {t['id']:<6} {t['status']:<13} [{t['project']}] {t['title']}")
+        return
+    results, failed = [], []
+    try:
+        with intake_lock():
+            for src in INTAKE_SOURCES:
+                try:
+                    r = INTAKE_RUN[src](claude=args.claude, dry=args.dry_run)
+                except IntakeError as e:
+                    failed.append(f"{src} failed: {e}")
+                    continue
+                results.append(r)
+                if not args.dry_run:
+                    st = intake_state()
+                    s = st.setdefault(src, {})
+                    s["last_scan"] = now_iso()
+                    s["last"] = {"found": r["found"], "made": [m.get("task") for m in r["made"]], "errors": r["errors"],
+                                 "left": r.get("left", 0)}
+                    save_intake_state(st)
+    except IntakeError as e:
+        die(str(e))
+    if args.json:
+        print(json.dumps({"results": results, "failed": failed}, ensure_ascii=False, indent=1))
+    else:
+        for r in results:
+            for m in r["made"]:
+                extra = " (dry run)" if args.dry_run else (f" → session {m['session'][:8]}" if m.get("session") else "") + \
+                    (f" — {m['error']}" if m.get("error") else "")
+                print(f"{m.get('task', '+')} [{m['duty']}] {m['title']}{extra}")
+        # The job shows the last line, e.g. "github-review: 3 waiting, 1 new task (T-112)".
+        parts = []
+        for r in results:
+            if not r["duties"]:
+                parts.append(f"{r['source']}: no duty set up")
+                continue
+            made = [m.get("task") for m in r["made"] if m.get("task")]
+            parts.append(f"{r['source']}: {r['found']} waiting, " + (f"{len(r['made'])} new" if args.dry_run else
+                         f"{len(made)} new task{'s' if len(made) != 1 else ''}" + (f" ({', '.join(made)})" if made else ""))
+                         + (f", {r['left']} left for the next scan" if r.get("left") else "")
+                         + (f", {len(r['errors'])} error{'s' if len(r['errors']) != 1 else ''}" if r["errors"] else ""))
+        print(" · ".join(parts + failed))
+    if failed or any(r["errors"] for r in results):
+        sys.exit(1)
+
+
 def cmd_bind(args):
     sid = session_id(args.session)
     if not sid:
@@ -4506,9 +5039,14 @@ def cmd_set(args):
             v = check_category(v)
             ensure_project(v)
         fields[k] = v
+    card = find_card(args.task)
     if "status" in fields:
         fields.setdefault("closing", None)   # a status set outright replaces a held close
-    set_fields(find_card(args.task), fields)
+        if parse_card(card).get("intake"):
+            if fields["status"] in CLOSED_STATUSES and os.environ.get("CLAUDE_CODE_SESSION_ID") and intake_manual(card):
+                die(f"{args.task}: {INTAKE_MANUAL_DONE[intake_lang(card)]}")
+            fields["intake_closed_by"] = None    # closed by the user (or reopened)
+    set_fields(card, fields)
 
 
 def cmd_todo(args):
@@ -5172,6 +5710,9 @@ def continue_task(card, title=None):
             fields["refs"] = list(refs)
         if old.get("next"):
             fields["next"] = old["next"]
+        for k in ("intake", "intake_key", "intake_done"):    # still the same piece of work that came in
+            if old.get(k):
+                fields[k] = old[k]
         if old.get("status") != "active":
             fields["status"] = old["status"]         # blocked / waiting-on-me carries on too
         if str(old.get("waiting_on_me") or "").strip():
@@ -5380,6 +5921,12 @@ def apply_update(card, block, via="session", change=None, settle=True, hold=Fals
         return problems
 
 
+def intake_manual(card):
+    """A task that came in by itself and waits for the user to close it (`intake_done: manual`)."""
+    m = parse_card(card)
+    return bool(m.get("intake")) and str(m.get("intake_done") or "manual") != "auto"
+
+
 def _apply_update(card, entries, via, closing=None):
     problems, fields, state = [], {}, []
     adds, marks, logs, refs, dirs, pins = [], [], [], [], [], set()
@@ -5400,8 +5947,13 @@ def _apply_update(card, entries, via, closing=None):
         elif is_placeholder(v):
             problems.append(f"`{k}: {v}` is the template's placeholder, not a value")
         elif k == "status":
-            if v.lower() in STATUSES:
+            if v.lower() in CLOSED_STATUSES and via == "session" and intake_manual(card):
+                problems.append(f"`status: {v}` — {INTAKE_MANUAL_DONE[intake_lang(card)]}")
+            elif v.lower() in STATUSES:
                 fields["status"] = v.lower()
+                if parse_card(card).get("intake"):
+                    # Who closed it, for the duty's "came in by itself" list.
+                    fields["intake_closed_by"] = via if v.lower() in CLOSED_STATUSES else None
             else:
                 problems.append(f"status must be one of {', '.join(STATUSES)} (got {v!r})")
         elif k == "next":
@@ -5542,6 +6094,21 @@ def cmd_asks(args):
 
 # ---------------------------------------------------------------- live sessions
 PET_SESSIONS = os.path.expanduser("~/.claude/pet/sessions")
+# How long a turn held open only by background commands that look like waits (the pet's
+# BackgroundWork.isWait: labelled "shell") still counts as running. The pet lets the finish
+# through after this; so does the board, or a wrong guess would keep a task in Running all day.
+SHELL_WAIT_LIMIT = 20 * 60
+
+
+def pet_activity(d):
+    """A pet session file's state, with that limit applied."""
+    st = d.get("state")
+    agents = d.get("backgroundAgents") or []
+    if st == "busy" and d.get("phase") == "awaiting-agent" and agents and all(a == "shell" for a in agents):
+        at = local_dt(d.get("updatedAt"))
+        if at and (dt.datetime.now().astimezone() - at).total_seconds() > SHELL_WAIT_LIMIT:
+            return "idle"
+    return st
 
 
 def pid_alive(pid):
@@ -5617,6 +6184,29 @@ def message_text(o):
         t = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
         return t.strip() or None
     return None
+
+
+COMMAND_NAME = re.compile(r"<command-name>\s*(/?[^<\s]+)\s*</command-name>")
+COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+
+
+def command_text(o):
+    """A slash command the user ran ("/compact", "/task T-108"), as typed, else None. Claude Code
+    writes it as a user entry of <command-name>/<command-args> tags, which message_text leaves out
+    with the rest of its markup; its output (<local-command-stdout>) is a separate entry, not this."""
+    if o.get("type") != "user" or o.get("isSidechain") or o.get("isMeta"):
+        return None
+    c = (o.get("message") or {}).get("content")
+    if isinstance(c, list):
+        c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+    if not isinstance(c, str) or "<command-name>" not in c[:400]:
+        return None
+    m = COMMAND_NAME.search(c)
+    if not m:
+        return None
+    name = m.group(1) if m.group(1).startswith("/") else "/" + m.group(1)
+    a = COMMAND_ARGS.search(c)
+    return f"{name} {a.group(1).strip()}".strip() if a else name
 
 
 def ts_seconds(ts):
@@ -5907,6 +6497,18 @@ def peek_timeline(entries):
             for it in [tools.get(m.group(1).strip()) if m else None] + [by_bg.get(k.strip()) for k in NOTE_TASK.findall(note)]:
                 if it and it["status"] == "background":
                     it.update(status=note_status(st), endTs=ts, bg=st or "done")
+            continue
+        cmd = command_text(o)
+        if cmd:
+            # /compact is written once the compaction is over, after the line saying it happened
+            # (its own timestamp is from when it was typed): it goes before that line, as it ran.
+            row = {"kind": "msg", "role": "user", "text": cmd, "ts": ts, "command": True}
+            k, at_s = len(items), ts_seconds(ts)
+            while k and items[k - 1]["kind"] == "event" and items[k - 1]["event"] == "compact" \
+                    and at_s is not None and (ts_seconds(items[k - 1]["ts"]) or 0) > at_s:
+                k -= 1
+            items.insert(k, row)
+            last_user = {"text": cmd, "ts": ts}
             continue
         t = message_text(o)
         if not t:
@@ -6212,7 +6814,7 @@ def live_sessions():
         if not isinstance(d, dict) or not pid_alive(d.get("pid")):
             continue
         sid = d.get("sessionId") or name[:-5]
-        last = None
+        last, reply = None, None
         # Screenshots and big tool results can fill the tail; widen once if needed.
         for nbytes in (300_000, 3_000_000):
             entries = transcript_tail(d.get("transcript"), nbytes)
@@ -6225,14 +6827,26 @@ def live_sessions():
                         break
             if last:
                 break
+        # The reply its last turn ended on. Idle, that is the end of the transcript; while a turn
+        # runs, it is what the Stop hook saved, unless the transcript's tail reaches a newer one:
+        # a turn ended with Esc, or run while the session was unbound, never reached that hook.
+        act = pet_activity(d)   # a wait-only hold past its limit is over: idle, its reply is the last one
+        turn_open = act in ("busy", "waiting")
+        found = last_reply(entries, turn_open)
+        saved = saved_reply(sid) if turn_open else None
+        if saved and not (found and (ts_seconds(found.get("ts")) or 0) > (ts_seconds(saved.get("ts")) or 0)):
+            reply = {"text": saved["text"], "ts": saved.get("ts"), "prev": True}
+        else:
+            reply = found or (None if turn_open else saved_reply(sid))
         out.append({
             "sessionId": sid,
             "title": session_title(entries),
             "project": d.get("project") or os.path.basename(d.get("cwd", "")),
             "cwd": d.get("cwd"),
-            "state": d.get("state"),
+            "state": act,
             "waitingOn": d.get("waitingOn"),
-            "phase": d.get("phase") or "",   # "compacting" while the context is being compacted
+            # "compacting" while the context is being compacted
+            "phase": (d.get("phase") or "") if act == d.get("state") else "",
             "updatedAt": d.get("updatedAt"),
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),
@@ -6240,9 +6854,65 @@ def live_sessions():
             # Set when this session's own hq-update finished its task: {task, status, at}.
             "finished": state.get(sid, {}).get("finished"),
             "lastText": (last or "")[:400],
+            "lastReply": reply,
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
     return out
+
+
+LAST_REPLY_MAX = 6000   # as much as an ask keeps of the reply that raised it
+REPLIES = os.path.join(HOME_DIR, "state", "replies")   # <session id>.json: its last turn's reply
+REPLIES_KEEP_DAYS = 14
+
+
+def save_reply(sid, text):
+    """At a bound session's Stop: what its turn ended on, for the board to show while the next turn
+    runs — by then the reply may sit megabytes back in the transcript, under the turn's screenshots
+    and tool output, too far for a poll every few seconds to read. A reply holding only HQ's blocks
+    keeps the one before it. Files untouched for REPLIES_KEEP_DAYS go (their sessions are long over)."""
+    t = strip_hq_blocks(text or "").strip()
+    if not sid or not t or "/" in sid:
+        return
+    os.makedirs(REPLIES, exist_ok=True)
+    old = time.time() - REPLIES_KEEP_DAYS * 86400
+    for name in os.listdir(REPLIES):
+        try:
+            if os.path.getmtime(os.path.join(REPLIES, name)) < old:
+                os.remove(os.path.join(REPLIES, name))
+        except OSError:
+            pass
+    atomic_write(os.path.join(REPLIES, sid + ".json"),
+                 json.dumps({"text": t[:LAST_REPLY_MAX], "ts": now_iso()}, ensure_ascii=False))
+
+
+def saved_reply(sid):
+    d = load_json(os.path.join(REPLIES, sid + ".json"), None) if sid and "/" not in sid else None
+    return d if isinstance(d, dict) and d.get("text") else None
+
+
+def last_reply(entries, turn_open):
+    """What the session said at the end of its last finished turn: {text, ts, prev}, or None. Its
+    last reply without HQ's blocks (a reply that was only those says nothing: the one before it
+    counts); Claude Code's own stand-ins (model <synthetic>) and compaction summaries are not
+    replies. While a turn is going (turn_open), what it says mid-turn is not where it got to: the
+    reply is the one before the turn's prompt, and prev says so."""
+    # A turn starts with a user entry: a prompt, a slash command, or a background task's
+    # notification reaching an idle session. Not an attachment: a prompt queued while Claude
+    # works, or a notification arriving then, is folded into the turn already going.
+    def starts(o):
+        return o.get("type") == "user" and not o.get("isSidechain") and not o.get("isMeta") \
+            and bool(message_text(o) or notification_text(o) or command_text(o))
+    hi = len(entries)
+    if turn_open:
+        hi = next((i for i in range(len(entries) - 1, -1, -1) if starts(entries[i])), 0)
+    for o in reversed(entries[:hi]):
+        if o.get("type") != "assistant" or o.get("isSidechain") \
+                or (o.get("message") or {}).get("model") == "<synthetic>":
+            continue
+        t = strip_hq_blocks(message_text(o) or "").strip()
+        if t:
+            return {"text": t[:LAST_REPLY_MAX], "ts": entry_ts(o), "prev": bool(turn_open)}
+    return None
 
 
 # ---------------------------------------------------------------- onboarding scan
@@ -7278,7 +7948,7 @@ def session_status(sid, path, now, n_msgs):
     # From the whole transcript, not the tail: a run launched long ago may still be going.
     background = [one_line(f"{it['title']}: {it['label']}", 80) for it in peek_timeline(background_entries(path))
                   if it["kind"] == "tool" and it["status"] == "background"] if live else []
-    st = {"busy": "working", "waiting": "waiting-on-you", "idle": "idle"}.get((rec or {}).get("state"), "idle") \
+    st = {"busy": "working", "waiting": "waiting-on-you", "idle": "idle"}.get(pet_activity(rec), "idle") \
         if live else "ended"
     # Context: the last real reply's request, as the pet counts it (an API error has no tokens),
     # unless a compaction came after it: then the size the boundary gives, until the next reply.
@@ -8288,6 +8958,10 @@ def _hook_main():
 
     elif event == "Stop":
         text = last_assistant_text(payload)
+        try:
+            save_reply(sid, text)
+        except OSError as e:   # a full disk must not cost the reply its hq-update and asks
+            print(f"hq hook: saving the reply: {e}", file=sys.stderr)
         problems = []
         blocks = hq_blocks(text)
         # A status the reply wrote itself (and that was applied) wins over the automatic moves,
@@ -8431,6 +9105,12 @@ def main():
     p.add_argument("--no-sort", action="store_true"); p.add_argument("--dry-run", action="store_true")
     p.add_argument("--claude", help="the claude CLI to sort with (default: found on PATH)")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_feed)
+    p = sub.add_parser("intake", help="work that comes in by itself (a duty's Auto intake): hq intake [scan] "
+                                        "[--dry-run] [--json] | status [--json]")
+    p.add_argument("action", nargs="?", choices=["scan", "status"], default="scan")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--claude", help="the claude CLI to start sessions with (default: found on PATH)")
+    p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_intake)
     p = sub.add_parser("autoclose", help="close todos whose PR merged, Jira issue is done or Jenkins build passed: "
                                            "hq autoclose [--dry-run] [--verbose] [--json]")
     p.add_argument("--dry-run", action="store_true"); p.add_argument("-v", "--verbose", action="store_true")
@@ -8460,7 +9140,7 @@ def main():
     p.add_argument("--to"); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_category)
     p = sub.add_parser("project", help="hq project list | show NAME | brief NAME | add NAME [--kind goal|duty] "
                                          "[--title T] [--due D] [--parent DUTY] [--path DIR] | set NAME key=value... | "
-                                         "section NAME goal|out|done_when|templates|brief [TEXT] | check NAME N [done|open] | "
+                                         "section NAME goal|out|done_when|templates|intake|brief [TEXT] | check NAME N [done|open] | "
                                          "paths NAME DIR... | rename OLD NEW | remove NAME [--to OTHER] | auto | order NAME...")
     p.add_argument("action", choices=["list", "show", "brief", "add", "set", "section", "check", "paths",
                                       "rename", "remove", "auto", "order"])

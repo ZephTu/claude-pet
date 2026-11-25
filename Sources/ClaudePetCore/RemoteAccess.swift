@@ -1,7 +1,8 @@
+import Compression
 import CryptoKit
 import Foundation
 
-/// Phone access to the HQ board over the local network: the parts of the pet's small web server
+/// Phone access to the HQ board over the local network (and over Tailscale): the parts of the pet's small web server
 /// (BoardServer) that decide, without touching the network — reading a request, who may connect,
 /// which phones are paired, what a phone may ask for.
 ///
@@ -20,6 +21,9 @@ public enum RemoteAccess {
     public static let tokenHeader = "x-hq-token"
     /// What the phone calls itself (see deviceName).
     public static let deviceHeader = "x-hq-device"
+    /// The version of an answer the phone already has (the `tag` it came with): the same answer
+    /// again is sent as `{"same": true}`.
+    public static let haveHeader = "x-hq-have"
     /// How long a pairing code shown on the Mac waits for its phone.
     public static let pairWindow: TimeInterval = 15 * 60
     /// Wrong tokens from one address before it is turned away for a while.
@@ -113,17 +117,80 @@ public enum RemoteAccess {
     }
 
     /// A whole response, `Connection: close` (one request per connection keeps the reader simple;
-    /// on a local network the extra connections cost nothing).
-    public static func response(status: Int, type: String, body: Data, extra: [String: String] = [:]) -> Data {
-        let reason = [200: "OK", 204: "No Content", 302: "Found", 400: "Bad Request", 401: "Unauthorized",
+    /// on a local network the extra connections cost nothing; over Tailscale's relay each costs a
+    /// round trip, but the board's polls are small "same" answers by then).
+    ///
+    /// `cached`: a page or script the browser may keep, asking each time whether it changed
+    /// (ETag, answered 304); anything else is never kept.
+    public static func response(status: Int, type: String, body: Data, extra: [String: String] = [:],
+                                cached: Bool = false) -> Data {
+        let reason = [200: "OK", 204: "No Content", 302: "Found", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized",
                       403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 413: "Payload Too Large",
                       429: "Too Many Requests", 431: "Request Header Fields Too Large",
                       500: "Internal Server Error"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(type)\r\nContent-Length: \(body.count)\r\n"
-        head += "Connection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+        head += "Connection: close\r\nCache-Control: \(cached ? "no-cache" : "no-store")\r\nX-Content-Type-Options: nosniff\r\n"
         head += "Referrer-Policy: no-referrer\r\n"
         for (k, v) in extra.sorted(by: { $0.key < $1.key }) { head += "\(k): \(v)\r\n" }
         return Data((head + "\r\n").utf8) + body
+    }
+
+    // MARK: - Slow links
+
+    /// Over Tailscale the way may go through a relay half the world away, where the board's
+    /// scripts take many seconds: they travel compressed, and a phone keeps them until they change.
+
+    /// A file's version, for If-None-Match: the same bytes, the same tag.
+    public static func etag(_ data: Data) -> String {
+        "\"" + SHA256.hash(data: data).prefix(12).map { String(format: "%02x", $0) }.joined() + "\""
+    }
+
+    /// Whether an If-None-Match header names this version (a list, or `*`).
+    public static func unchanged(_ ifNoneMatch: String?, etag: String) -> Bool {
+        guard let ifNoneMatch else { return false }
+        return ifNoneMatch.split(separator: ",").contains {
+            let t = $0.trimmingCharacters(in: .whitespaces)
+            return t == "*" || t == etag || t == "W/" + etag
+        }
+    }
+
+    public static func acceptsGzip(_ acceptEncoding: String?) -> Bool {
+        guard let acceptEncoding else { return false }
+        return acceptEncoding.lowercased().split(separator: ",").contains {
+            let parts = $0.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+            return parts.first == "gzip" && !parts.dropFirst().contains("q=0")
+        }
+    }
+
+    /// Text worth compressing: pages, scripts, styles, JSON, SVG.
+    public static func compressible(_ type: String) -> Bool {
+        let t = type.lowercased()
+        return t.hasPrefix("text/") || t.contains("javascript") || t.contains("json") || t.contains("svg")
+    }
+
+    /// `data` gzipped (RFC 1952): a raw deflate stream between a header and its CRC-32 and size.
+    public static func gzip(_ data: Data) -> Data? {
+        guard !data.isEmpty else { return nil }
+        let capacity = data.count + data.count / 8 + 1024
+        var out = [UInt8](repeating: 0, count: capacity)
+        let n = data.withUnsafeBytes { src in
+            compression_encode_buffer(&out, capacity, src.bindMemory(to: UInt8.self).baseAddress!, data.count,
+                                      nil, COMPRESSION_ZLIB)
+        }
+        guard n > 0 else { return nil }
+        var z = Data([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff])
+        z.append(contentsOf: out[0..<n])
+        let crc = crc32(data), size = UInt32(truncatingIfNeeded: data.count)
+        for v in [crc, size] { z.append(contentsOf: (0..<4).map { UInt8(truncatingIfNeeded: v >> ($0 * 8)) }) }
+        return z
+    }
+
+    private static let crcTable: [UInt32] = (0..<256).map { i in
+        (0..<8).reduce(UInt32(i)) { c, _ in c & 1 != 0 ? 0xedb8_8320 ^ (c >> 1) : c >> 1 }
+    }
+
+    public static func crc32(_ data: Data) -> UInt32 {
+        ~data.reduce(~UInt32(0)) { crcTable[Int(($0 ^ UInt32($1)) & 0xff)] ^ ($0 >> 8) }
     }
 
     // MARK: - Who may connect
@@ -228,6 +295,65 @@ public enum RemoteAccess {
         guard let origin, !origin.isEmpty else { return true }   // not a browser's cross-origin request
         guard let host else { return false }
         return hostName(origin) == hostName(host)
+    }
+
+    // MARK: - Tailscale
+
+    /// Away from home a phone reaches the Mac over Tailscale, when that is turned on: a peer with
+    /// a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48), let in only once `tailscale whois`
+    /// says it is a device of the Mac's own user (tailnetOwnDevice). The tailnet may be a company's,
+    /// whose rules let other people's devices, and shared ones, reach this Mac.
+    public static func isTailnet(_ bytes: [UInt8]) -> Bool {
+        if bytes.count == 4 { return bytes[0] == 100 && (bytes[1] & 0xc0) == 64 }
+        guard bytes.count == 16 else { return false }
+        if bytes[0..<10].allSatisfy({ $0 == 0 }) && bytes[10] == 0xff && bytes[11] == 0xff {
+            return isTailnet(Array(bytes[12..<16]))
+        }
+        return bytes[0..<6] == [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0]
+    }
+
+    /// This Mac on its tailnet, from `tailscale status --json`.
+    public struct TailnetSelf: Equatable, Sendable {
+        /// Connected: Tailscale's BackendState is "Running".
+        public var running: Bool
+        /// The user the Mac is logged in as ("someone@example.com"); a tagged Mac has none.
+        public var login: String?
+        /// Its MagicDNS name ("my-mac.tail1234.ts.net"), without the final dot.
+        public var name: String?
+        public var addresses: [String]
+
+        public init(running: Bool, login: String?, name: String?, addresses: [String]) {
+            self.running = running
+            self.login = login
+            self.name = name
+            self.addresses = addresses
+        }
+    }
+
+    public static func tailnetSelf(statusJSON data: Data) -> TailnetSelf? {
+        guard let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        let me = o["Self"] as? [String: Any] ?? [:]
+        let tags = me["Tags"] as? [String] ?? []
+        var login: String?
+        if tags.isEmpty, let uid = me["UserID"] as? NSNumber,
+           let user = (o["User"] as? [String: Any])?[uid.stringValue] as? [String: Any] {
+            login = (user["LoginName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        var name = me["DNSName"] as? String
+        if name?.hasSuffix(".") == true { name?.removeLast() }
+        return TailnetSelf(running: o["BackendState"] as? String == "Running", login: login,
+                           name: name.flatMap { $0.isEmpty ? nil : $0.lowercased() },
+                           addresses: me["TailscaleIPs"] as? [String] ?? [])
+    }
+
+    /// Whether `tailscale whois --json` describes a device of `login`'s own: logged in as the
+    /// same user, and not a tagged device (a server or gateway that belongs to no one person).
+    public static func tailnetOwnDevice(whoisJSON data: Data, login: String) -> Bool {
+        guard !login.isEmpty, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let node = o["Node"] as? [String: Any],
+              let who = (o["UserProfile"] as? [String: Any])?["LoginName"] as? String else { return false }
+        if let tags = node["Tags"] as? [String], !tags.isEmpty { return false }
+        return who.caseInsensitiveCompare(login) == .orderedSame
     }
 
     // MARK: - Paired phones
@@ -337,7 +463,7 @@ public enum RemoteAccess {
     /// Operations only the Mac's own window may run: managing phone access (a phone must not mint
     /// more tokens or undo a revoke), and a folder picker — a modal dialog on the Mac's screen,
     /// waiting for someone who isn't there.
-    public static let macOnly: Set<String> = ["remote", "remote-enable", "remote-pair", "remote-revoke", "pick-folder"]
+    public static let macOnly: Set<String> = ["remote", "remote-enable", "remote-tailnet", "remote-pair", "remote-revoke", "pick-folder"]
 
     public static func allowed(op: String) -> Bool { !macOnly.contains(op) }
 

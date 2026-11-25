@@ -312,7 +312,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         // window only — BoardServer refuses these from a phone.
         case "remote": return (BoardServer.shared.status(), nil)
         case "remote-enable": return BoardServer.shared.setEnabled(body["on"] as? Bool == true)
-        case "remote-pair": return BoardServer.shared.pair()
+        case "remote-tailnet": return await BoardServer.shared.setTailnet(body["on"] as? Bool == true)
+        case "remote-pair": return BoardServer.shared.pair(overTailnet: body["via"] as? String == "tailnet")
         case "remote-revoke": return BoardServer.shared.revoke(str("id"))
         case "click-target":
             Self.onClickTarget?(str("value"))
@@ -512,6 +513,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "secretary-feed-now": return await secretary.feedNow()
         case "secretary-autoclose": return await secretary.setAutoclose(on: body["on"] as? Bool == true)
         case "secretary-autoclose-now": return await secretary.autocloseNow()
+        case "intake-job": return secretary.intakeStatus()
+        case "intake-job-set": return await secretary.setIntake(on: body["on"] as? Bool == true)
+        case "intake-job-now": return await secretary.intakeNow()
         case "jobs": return (JobsController.shared.list(), nil)
         case "job-save": return await JobsController.shared.save(body["job"] as? [String: Any] ?? [:])
         case "job-enable": return await JobsController.shared.setEnabled(str("id"), body["on"] as? Bool ?? false)

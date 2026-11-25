@@ -20,6 +20,11 @@ import Foundation
 ///   each conversation or issue into the inbox for the sorter;
 /// - a third, `secretary-autoclose`, closes the todos whose PR merged, Jira issue is done or Jenkins
 ///   build passed: a shell job running `hq autoclose` every 5 minutes (off until turned on).
+///
+/// Not the secretary's, but made the same way: `intake-scan`, the duties' "comes in by itself"
+/// (自动来活) — a shell job running `hq intake` every 10 minutes, which makes a task for each new
+/// GitHub review request a duty watches (and starts a session on it when the duty says so). It is
+/// turned on from a duty's page, when a source is switched on there.
 @MainActor
 final class SecretaryController {
     static let shared = SecretaryController()
@@ -30,6 +35,8 @@ final class SecretaryController {
     static let feedSchedule = Schedule(kind: .cron, cron: "0 9-19 * * 1-5")
     static let closeJobID = "secretary-autoclose"
     static let closeSchedule = Schedule(kind: .every, everyMinutes: 5)
+    static let intakeJobID = "intake-scan"
+    static let intakeSchedule = Schedule(kind: .every, everyMinutes: 10)
 
     /// The secretary's shell jobs: what makes each one what it is, put back if edited away.
     private struct ShellJob {
@@ -43,6 +50,12 @@ final class SecretaryController {
     private static var closeJob: ShellJob {
         ShellJob(id: closeJobID, name: L("Secretary: close finished todos", "秘书：自动勾选完成的待办"), command: hqCommand("autoclose"),
                  schedule: closeSchedule, notify: .never, timeout: 5)
+    }
+    /// Every 10 minutes. A failure (gh logged out, a session that couldn't start) shows on the duty's
+    /// page and its row; a task whose session didn't start waits on the user.
+    private static var intakeJob: ShellJob {
+        ShellJob(id: intakeJobID, name: L("Auto intake: scan GitHub", "自动来活：扫描 GitHub"), command: hqCommand("intake"),
+                 schedule: intakeSchedule, notify: .never, timeout: 10)
     }
     private var jobs: JobsController { JobsController.shared }
     private var store: JobStore { jobs.store }
@@ -126,6 +139,17 @@ final class SecretaryController {
     /// Closing finished todos on or off (a shell job running `hq autoclose` in the task root).
     func setAutoclose(on: Bool) async -> (Any?, String?) { await setShellJob(Self.closeJob, on: on) }
     func autocloseNow() async -> (Any?, String?) { await runShellJob(Self.closeJob) }
+
+    /// The duties' scan for work that comes in by itself: its job's state (no job: off).
+    func intakeStatus() -> (Any?, String?) { (jobStatus(Self.intakeJobID), nil) }
+    func setIntake(on: Bool) async -> (Any?, String?) {
+        let r = await setShellJob(Self.intakeJob, on: on)
+        return r.1 == nil ? intakeStatus() : r
+    }
+    func intakeNow() async -> (Any?, String?) {
+        let r = await runShellJob(Self.intakeJob)
+        return r.1 == nil ? intakeStatus() : r
+    }
 
     /// A shell job on or off. Made on first use; the user may change its schedule in Scheduled, and
     /// what makes it that job (its command, run in the task root) is put back.

@@ -160,12 +160,19 @@ if (REMOTE) document.documentElement.classList.add("remote");
 // The token: in this browser's storage, and in a cookie as well — iOS gives a web app added to
 // the Home Screen its own storage, and brings the site's cookies along, not the rest.
 const TOKEN_KEY = "hq-remote-token";
+// Answers already had, by request, with their tag (see api).
+const remoteMemo = new Map();
 function remoteToken() {
   const m = document.cookie.match(/(?:^|;\s*)hq-token=([\w-]+)/);
   return pref(TOKEN_KEY, "") || (m ? m[1] : "");
 }
 function setRemoteToken(tok) {
   try { if (tok) localStorage.setItem(TOKEN_KEY, tok); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
+  // Unpaired (or removed on the Mac): the board kept on this phone goes too.
+  if (!tok) {
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith("hq-kept:")) localStorage.removeItem(k); } catch (e) { /* storage off */ }
+    remoteMemo.clear();
+  }
   document.cookie = tok ? `hq-token=${tok}; max-age=31536000; path=/; SameSite=Strict` : "hq-token=; max-age=0; path=/";
 }
 // The pairing code from the Mac's QR code: #pair=<code>, taken out of the address bar and traded
@@ -185,7 +192,14 @@ async function claimPairing(code) {
   let msg;
   try {
     const { r, j } = await post(code, { op: "pair" });
-    if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
+    if (j.result && j.result.token) {
+      setRemoteToken(j.result.token);
+      // "Not paired yet", left by a read before the code was typed, would stay up until the
+      // board arrives — over a slow link, many seconds.
+      if ($("#error")) $("#error").hidden = true;
+      toast(T("Paired — loading the board…", "配对成功，正在加载看板…"));
+      return true;
+    }
     msg = r.status === 429 && j.error ? j.error
       : T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
   } catch (e) {
@@ -196,12 +210,12 @@ async function claimPairing(code) {
   if (box && !box.hidden && err) { err.textContent = msg; err.hidden = false; } else showPairing(msg);
   return false;
 }
-async function post(token, body) {
+async function post(token, body, have) {
   let r;
+  const headers = { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) };
+  if (have) headers["X-HQ-Have"] = have;
   try {
-    r = await fetch("/api", { method: "POST", cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
-      body: JSON.stringify(body) });
+    r = await fetch("/api", { method: "POST", cache: "no-store", headers, body: JSON.stringify(body) });
   } catch (e) {
     throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
   }
@@ -218,6 +232,24 @@ function deviceName() {
   if (/Android/.test(ua)) return "Android";
   return "";
 }
+// The board itself is also kept in the phone's storage: opened again, or reloaded, the page asks
+// whether it changed instead of fetching a megabyte first. (Only the board: the rest is small, or
+// changes every few seconds.)
+const KEPT_OPS = ["board"];
+const KEPT_PREFIX = "hq-kept:";
+function keptMemo(key) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return null;
+  try {
+    const m = JSON.parse(localStorage.getItem(KEPT_PREFIX + key) || "null");
+    if (m && m.tag) { remoteMemo.set(key, m); return m; }
+  } catch (e) { /* none kept, or storage off */ }
+  return null;
+}
+function keepMemo(key, tag, result) {
+  if (!KEPT_OPS.includes(JSON.parse(key)[0])) return;
+  try { localStorage.setItem(KEPT_PREFIX + key, JSON.stringify({ tag, result })); }
+  catch (e) { try { localStorage.removeItem(KEPT_PREFIX + key); } catch (e2) { /* storage off */ } }
+}
 async function api(op, args = {}) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
   if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
@@ -227,7 +259,19 @@ async function api(op, args = {}) {
   if (pairingClaim) await pairingClaim;
   const token = remoteToken();
   if (!token) { showPairing(""); throw new Error(T("This phone isn't paired yet", "这台手机还没配对")); }
-  const { r, j } = await post(token, Object.assign({ op }, args));
+  // The answer last time, by request: the Mac sends {same: true} when it hasn't changed — the
+  // board is polled every few seconds, and over Tailscale's relay or a phone's data plan the
+  // whole board each time is too much.
+  const key = JSON.stringify([op, args]);
+  const memo = remoteMemo.get(key) || keptMemo(key);
+  const { r, j } = await post(token, Object.assign({ op }, args), memo && memo.tag);
+  if (j.same && memo && r.ok) return memo.result;
+  if (j.tag && r.ok && !j.error) {
+    remoteMemo.delete(key);
+    remoteMemo.set(key, { tag: j.tag, result: j.result });
+    if (remoteMemo.size > 40) remoteMemo.delete(remoteMemo.keys().next().value);
+    keepMemo(key, j.tag, j.result);
+  }
   // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
   // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
   if (j.pair) { setRemoteToken(""); showPairing(j.error || ""); }
@@ -667,8 +711,20 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // element under the pointer, and the browser then fires no click at all — which is what "the
 // first click sometimes does nothing" was. So: skip rebuilds when nothing changed, and hold a
 // timed rebuild while a mouse button is down.
+// One read at a time for the timer: over a slow link (Tailscale's relay) a read takes longer than
+// the 4 seconds between them, and reads piling up on one another never finish.
 async function refresh(force) {
+  ui.reading = (ui.reading || 0) + 1;
+  try { return await readBoard(force); } finally { ui.reading--; }
+}
+async function readBoard(force) {
   let sig = null;
+  // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
+  if (REMOTE && !ui.board && !ui.loadNote) {
+    ui.loadNote = setTimeout(() => {
+      if (!ui.board && remoteToken()) toast(T("Loading the board from the Mac… over a slow connection this takes a while", "正在从 Mac 加载看板……网络慢时要等一会儿"));
+    }, 3000);
+  }
   const readNo = ++ui.readNo;
   try {
     const [boardText, sessionsText, agentsText, unreadText, jobsSig] = await Promise.all([api("board"), api("sessions"), api("agents"),
@@ -1223,6 +1279,46 @@ function askReply(t, asks) {
       <span class="tw">${open ? "▾" : "▸"}</span>${T("Claude's last reply", "Claude 的最后一段回复")}<span class="meta">${ago(a.ts)}${earlier
         ? T(` · ${earlier} of these came with an earlier reply — click its question`, ` · 其中 ${earlier} 条来自更早的回复，点问题文字看`) : ""}</span></button>
     ${open ? `<div class="md ask-reply-body" data-reply="${esc(key)}">${markdown(a.context)}</div>` : ""}
+  </div>`;
+}
+
+// A session's reply at the end of its last turn, under its row on its task: where it got to,
+// without opening Peek. (While a turn is going, the one before it: hq's lastReply.) Folded to a
+// line; it opens by itself for a session that finished a turn you have not looked at (its "new"
+// tag), and stays open for that reply until you fold it — so it does not snap shut under you when
+// a Peek clears the tag. Remembered per reply: the next one decides afresh. Not shown when an open
+// ask of this session came with it or later: that reply is above the asks already.
+const SESS_REPLY_KEY = "hq-sess-reply";
+const sessReplyOpen = (() => { try { return JSON.parse(localStorage.getItem(SESS_REPLY_KEY) || "{}") || {}; } catch (e) { return {}; } })();
+function setSessReply(key, open) {
+  delete sessReplyOpen[key];
+  sessReplyOpen[key] = open;     // newest last: the oldest are dropped
+  const ks = Object.keys(sessReplyOpen);
+  for (const k of ks.slice(0, Math.max(0, ks.length - 200))) delete sessReplyOpen[k];
+  try { localStorage.setItem(SESS_REPLY_KEY, JSON.stringify(sessReplyOpen)); } catch (e) { /* private mode */ }
+}
+// The line of its last words above that, unless they are what that reply says: idle, they
+// usually are; they aren't while a turn runs (unless it was just woken, say by a background task
+// ending), or after an API error, whose stand-in is no reply, so the reply below is an older one.
+function lastWordsShown(s) {
+  const w = plainText(s.lastText), r = s.lastReply;
+  if (!w) return false;
+  if (!r || !r.text) return true;
+  return !plainText(r.text).startsWith(w.slice(0, 80));
+}
+function sessReply(t, s) {
+  const r = s.lastReply;
+  if (!r || !r.text) return "";
+  const at = Date.parse(r.ts) || 0;
+  if (openAsks(t).some((a) => a.session === s.sessionId && a.context && (Date.parse(a.ts) || 0) >= at - 1000)) return "";
+  const key = replyKey(r.text);
+  if (!(key in sessReplyOpen) && ui.unread && ui.unread[s.sessionId]) setSessReply(key, true);
+  const open = sessReplyOpen[key] === true;
+  const first = plainText(r.text);
+  return `<div class="ask-reply sess-reply ${open ? "open" : ""}">
+    <button class="ask-reply-h" data-action="sess-reply" data-id="${esc(key)}" title="${open ? T("Fold", "收起") : T("Show the whole reply", "展开整段回复")}">
+      <span class="tw">${open ? "▾" : "▸"}</span><span class="sr-k">${r.prev ? T("Its reply before this turn", "上一轮的最后回复") : T("Claude's last reply", "Claude 的最后一段回复")}</span><span class="meta"><span data-ago="${esc(r.ts || "")}">${ago(r.ts)}</span></span>${open ? "" : `<span class="sr-first">${esc(first)}</span>`}</button>
+    ${open ? `<div class="md ask-reply-body" data-reply="${esc(key)}">${markdown(r.text)}</div>` : ""}
   </div>`;
 }
 
@@ -2327,7 +2423,7 @@ function renderTaskBody(t) {
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${outboxMark(s.sessionId)}${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
           <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
-          ${plainText(s.lastText) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
+          ${lastWordsShown(s) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
           ${s.background
@@ -2336,7 +2432,7 @@ function renderTaskBody(t) {
             : `${escButton(s)}<button class="icon" data-action="jump" data-session="${esc(s.sessionId)}" title="${T("Jump to its terminal", "Jump——跳到它的终端")}">${ICON.jump}</button>
                <button class="icon ${ui.stopArmed === s.sessionId ? "armed" : ""}" data-action="stop-session" data-session="${esc(s.sessionId)}" title="${T("Stop this session — ends its Claude Code process; the conversation is kept and Resume picks it up", "停止这个 session——结束它的 Claude Code 进程；对话保留，之后可以 Resume 续上")}">${ui.stopArmed === s.sessionId ? T("Stop?", "停止？") : ICON.stop}</button>`}
           <button class="icon" data-confirm="${T("Unbind?", "解绑？")}" data-action="unbind" data-session="${esc(s.sessionId)}" title="${T("Unbind from this task", "从这个任务解绑")}">✕</button>
-        </div></div>`;
+        </div>${sessReply(t, s)}</div>`;
   // Claude's open questions come first: they are what the task waits on you for.
   const asks = openAsks(t);
   const askSec = asks.length || laterAsks(t).length ? `<div class="dr-asks">
@@ -2721,8 +2817,9 @@ function renderSessionSettings() {
   </div>`;
 }
 
-// ---- Phone access (BoardServer): the board on a phone's browser over the local network. On the
-// Mac: turn it on, pair a phone with a QR code, see and remove the paired ones.
+// ---- Phone access (BoardServer): the board on a phone's browser over the local network, and over
+// Tailscale when that is on too. On the Mac: turn it on, pair a phone with a QR code, see and
+// remove the paired ones.
 const REMOTE_POLL_MS = 3000;
 function loadRemote(force) {
   if (REMOTE || ui.remoteLoading || (!force && Date.now() - (ui.remoteAt || 0) < REMOTE_POLL_MS)) return;
@@ -2748,6 +2845,14 @@ function renderPhoneAccess() {
   const urls = list(st.urls);
   const devs = list(st.devices);
   const pair = ui.remotePair;
+  const tn = st.tailnet || {};
+  // The code under the row whose button made it: a code pairs either way, only the link differs.
+  const pairPanel = (via) => (pair && (pair.via || "") === via ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
+        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
+          ${via === "tailnet" ? T(`The phone needs Tailscale on, logged in as ${esc(tn.login || "you")}. `, `手机上要开着 Tailscale，并登录 ${esc(tn.login || "你的账号")}。`) : ""}
+          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
+          <div class="pair-url"><code>${esc(pair.url)}</code></div>
+          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : "");
   return `<div class="set-h">${T("Phone access", "手机访问")}</div><div class="set-list">
     ${row(T("Open the board from a phone", "在手机上打开看板"),
       T("Serves this board to a phone or iPad on the same Wi-Fi, once paired. A paired phone can do anything this board can — start sessions, answer permission prompts — and the network carries it unencrypted: turn it on at home, not on a shared network", "让同一个 Wi-Fi 里的手机或 iPad 配对后打开这个看板。配对过的手机能做看板能做的一切——开 session、批准权限请求——而且网络上传的是明文：在家里打开，别在公共网络上开"),
@@ -2757,11 +2862,15 @@ function renderPhoneAccess() {
     ${on && st.running ? `<div class="set-row remote-pair"><div><b>${T("Address", "地址")}</b>
         <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
-      ${pair ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
-        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
-          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
-          <div class="pair-url"><code>${esc(pair.url)}</code></div>
-          <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : ""}` : ""}
+      ${pairPanel("")}
+      ${row(T("Also over Tailscale", "也通过 Tailscale 访问"),
+        T("For away from home: the board also answers your own devices on this Mac's tailnet — logged in as the same Tailscale user as this Mac, not tagged servers or other people's devices. Tailscale encrypts the way. A phone pairs once more for this address.", "出门在外用：看板也接受这台 Mac 所在 tailnet 上你自己的设备——和这台 Mac 登录同一个 Tailscale 用户的设备，不接受带标签的服务器或别人的设备。Tailscale 一路加密。这个地址要让手机再配对一次。"),
+        `<input type="checkbox" data-action="remote-tailnet" ${tn.on ? "checked" : ""}>`)}
+      ${tn.on && tn.problem ? `<div class="meta warn">${esc(tn.problem)}</div>` : ""}
+      ${tn.on && tn.url ? `<div class="set-row remote-pair"><div><b>${T("Tailscale address", "Tailscale 地址")}</b>
+        <div class="meta"><code>${esc(tn.url)}</code>${tn.login ? ` · ${T("for", "仅限")} ${esc(tn.login)}` : ""}</div></div>
+        <button class="btn small primary" data-action="remote-pair" data-via="tailnet">${T("Pair over Tailscale", "用 Tailscale 配对")}</button></div>
+      ${pairPanel("tailnet")}` : ""}` : ""}
     ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
       ${devs.map((x) => `<div class="dev"><span>${esc(x.name)}</span><span class="meta">${x.paired
         ? `${x.lastSeen ? T("last seen", "最近") + " " + ago(x.lastSeen) : ""}${x.lastAddress ? " · " + esc(x.lastAddress) : ""}`
@@ -2880,7 +2989,7 @@ async function refreshPeek(first) {
   // alone only redraws those lines, so the list you are reading or scrolling is left alone.
   const bodySig = JSON.stringify([msgs, act.items, s ? liveState(s) : null]);
   // (The secretary's window shows neither tokens nor todos: only the turn ending counts there.)
-  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, act.queued, s ? s.waitingOn || "" : null]);
+  const sig = bodySig + "\u0001" + JSON.stringify(m.secretary ? [act.turn && act.turn.done] : [act.turn, act.todos, act.queued, s ? s.waitingOn || "" : null, s ? s.phase || "" : null]);
   if (sig === m.sig && !changed) return;
   // Never rebuild under a selection the user is making or about to copy.
   const sel = window.getSelection();
@@ -2938,10 +3047,10 @@ function drawPeekLive() {
   // The queue box, only when it changed: rewriting it resets its own scroll. It sits under the
   // list, so the list's height changes with it — a reader at the bottom stays there.
   const q = $("#modal .pqueue-slot"), qh = peekQueue(m, s);
-  if (q && q.dataset.h !== qh) {
+  if (q && q.dataset.h !== slotSig(qh)) {
     const body = $("#modal .peek-body");
     const atBottom = body && body.scrollHeight - body.scrollTop - body.clientHeight < 12;
-    q.innerHTML = qh; q.dataset.h = qh;
+    q.innerHTML = qh; q.dataset.h = slotSig(qh);
     if (atBottom) body.scrollTop = body.scrollHeight;
   }
   $("#modal").querySelectorAll("[data-ago]").forEach((el) => { el.textContent = ago(el.dataset.ago); });
@@ -2994,10 +3103,10 @@ function drawPeek(toBottom) {
   let mi = 0;
   const list = msgs === null ? `<div class="empty">${T("Loading…", "加载中…")}</div>`
     : !blocks.length ? `<div class="empty">${m.found === false ? T("No transcript found for this session on this machine.", "这台机器上找不到这个 session 的对话记录。") : T("No messages yet.", "还没有消息。")}</div>`
-    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : x.kind === "event" ? peekEvent(x) : `<div class="pmsg ${x.role}">
+    : blocks.map((x) => x.kind === "group" ? `<div class="pmsg ptools">${toolGroup(x, m, run)}</div>` : x.kind === "event" ? peekEvent(x) : `<div class="pmsg ${x.role}${x.command ? " cmd" : ""}">
         <div class="pwho">${x.role === "user" ? T("You", "你") : "Claude"} · <span data-ago="${esc(x.ts)}">${ago(x.ts)}</span>
           <button class="btn small ghost" data-action="copy-msg" data-i="${mi++}" title="${T("Copy this message", "复制这条消息")}">${T("Copy", "复制")}</button></div>
-        <div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>
+        ${x.command ? `<div class="pcmd">${esc(x.text)}</div>` : `<div class="md">${markdown(x.text, `${x.role}|${x.ts}`)}</div>`}
       </div>`).join("");
   const keepDraft = box.querySelector(".pfoot textarea") ? null : draft("msg:" + key);
   const chip = m.live ? "" : m.starting ? ` <span class="chip">${T("starting…", "启动中…")}</span>` : ` <span class="chip">${T("ended", "已结束")}</span>`;
@@ -3016,7 +3125,7 @@ function drawPeek(toBottom) {
     </div>
     <div class="plive">${peekStatus(m, s, run)}${peekTodos(m)}</div>
     <div class="peek-body">${list}</div>
-    <div class="pqueue-slot" data-h="${esc(queue)}">${queue}</div>
+    <div class="pqueue-slot" data-h="${esc(slotSig(queue))}">${queue}</div>
     ${outboxHtml(key)}
     <div class="send pfoot ${canSend ? "" : "disabled"}" title="${canSend ? "" : m.starting ? T("Starting the session…", "session 正在启动…") : !m.live ? T("This session has ended.", "这个 session 已结束。") : T("Messaging isn't supported for this session's terminal yet — use Jump.", "还不支持给这个 session 的终端发消息——用 Jump。")}">
       <textarea class="grow" rows="1" data-key="msg:${esc(key)}" data-session="${esc(key)}" ${canSend ? "" : "disabled"}
@@ -3676,11 +3785,20 @@ function peekTodos(m) {
 // Messages waiting in Claude Code's queue (sent while it was busy, not taken in yet), oldest
 // first, just above the reply box: what it will read when this turn ends. Only while the session
 // is live and in a turn: a queue never outlives one.
+// Under the list, as the terminal shows it under the conversation: a compaction going on (nothing
+// of it is in the transcript until it is over: only the PreCompact hook says so, and the session's
+// state has not changed since, so its time is when that came), then what waits in the queue.
+// (The slot is rewritten only when this HTML changes, which would also reset the queue's scroll:
+// its running time is left out of that comparison — see slotSig — and ticks by itself.)
+const slotSig = (h) => h.replace(/(data-since="[^"]*">)[^<]*/g, "$1");
 function peekQueue(m, s) {
   const q = m.queued;
   const st = liveState(s);
-  if (!m.live || !q || !q.length || (st !== "busy" && st !== "waiting")) return "";
-  return `<div class="pqueue">
+  const compacting = m.live && st === "busy" && s.phase === "compacting"
+    ? `<div class="pcompacting"><span class="spin">✻</span> ${T("Compacting the context…", "正在压缩上下文…")}${s.updatedAt
+      ? ` <span class="faint" data-since="${esc(s.updatedAt)}">${fmtDur(secsSince(s.updatedAt))}</span>` : ""}</div>` : "";
+  if (!m.live || !q || !q.length || (st !== "busy" && st !== "waiting")) return compacting;
+  return compacting + `<div class="pqueue">
     <div class="pqueue-head">${T(`Queued · ${q.length} — it reads ${q.length === 1 ? "this" : "these"} when the turn ends`, `排队中 · ${q.length} 条——这一轮结束后它会读到`)}</div>
     ${q.map((x) => `<div class="pqueue-item"><span class="pqueue-text">${esc(x.text)}</span><span class="pqueue-at" data-ago="${esc(x.ts || "")}">${ago(x.ts)}</span></div>`).join("")}
   </div>`;
@@ -3718,6 +3836,10 @@ function drawContext() {
   const box = $("#modal");
   if (!t) { closePeek(); return toast(T("That task is gone", "这个任务已经不在了"), true); }
   const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
+  // The reply that raised it, as when the window opened: answered since (here, on a phone, in its
+  // session), the board's data no longer carries it (hq board --json), but this window still shows it.
+  if (ask && ask.context) m.context = ask.context;
+  const askContext = (ask && ask.context) || m.context || "";
   const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
   const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : T("Your todo", "你的待办");
   const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
@@ -3733,7 +3855,7 @@ function drawContext() {
       <div class="meta">${T(`Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}`,
         `${ask.session ? `在${askSession ? ` <b>${esc(askSession.title || askSession.project)}</b>（运行中）` : ` session ${esc(ask.session.slice(0, 8))}（已结束）`}里，` : ""}${ago(ask.ts)}提出`)}</div>
       ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, T("Open that conversation", "打开那段对话"), Boolean(askSession))}</div>` : ""}
-      ${ask.context ? `<div class="md quote">${markdown(ask.context)}</div>`
+      ${askContext ? `<div class="md quote">${markdown(askContext)}</div>`
         : `<div class="empty">${T("The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.", "提出这个问题的那条回复没有记录下来（这个功能加上之前的 ask）——打开上面的对话看。")}</div>`}
     </section>`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Context", "上下文")}">
@@ -4594,6 +4716,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "resolve-all": return resolveAll(d.task, String(d.ids || "").split(" ").filter(Boolean));
     case "ask-reply": toggleReplyFold(d.id); return render();
+    case "sess-reply": setSessReply(d.id, sessReplyOpen[d.id] !== true); return render();
     case "do-todo": return doTodo(d.task, d.text);
     case "tidy-todos": return tidyTodos(d.task);
     case "more-res": ui.moreRes.has(d.id) ? ui.moreRes.delete(d.id) : ui.moreRes.add(d.id); return render();
@@ -4725,7 +4848,7 @@ document.addEventListener("click", async (ev) => {
     case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
     case "pick-photo": return pickPhotos(d.session);
     case "remote-pair":
-      try { ui.remotePair = Object.assign(await apiObj("remote-pair"), { at: Date.now() }); } catch (e) { toast(String(e.message || e), true); }
+      try { ui.remotePair = Object.assign(await apiObj("remote-pair", { via: d.via || "" }), { at: Date.now(), via: d.via || "" }); } catch (e) { toast(String(e.message || e), true); }
       loadRemote(true);
       return renderSettings();
     case "remote-pair-close": {
@@ -5135,6 +5258,15 @@ document.addEventListener("change", (ev) => {
   if (el.type === "checkbox" && d.key) { ui.drafts[d.key] = el.checked; saveDrafts(); return; }
   if (d.action === "launch-place") { savePref("hq-launch", el.value); return render(); }
   if (d.action === "skip-perms") { savePref("hq-skip-perms", el.checked ? "1" : "0"); return render(); }
+  if (d.action === "remote-tailnet") {
+    // A Tailscale code shown unused is cancelled with it, as Hide the code would.
+    const id = ui.remotePair && ui.remotePair.via === "tailnet" ? ui.remotePair.id : "";
+    if (id) ui.remotePair = null;
+    (id ? apiObj("remote-revoke", { id }).catch(() => {}) : Promise.resolve())
+      .then(() => apiObj("remote-tailnet", { on: el.checked })).then((st) => { ui.remoteSt = st; renderSettings(); })
+      .catch((e) => toast(String(e.message || e), true));
+    return;
+  }
   if (d.action === "remote-enable") {
     ui.remotePair = null;
     apiObj("remote-enable", { on: el.checked }).then((st) => { ui.remoteSt = st; renderSettings(); })
@@ -5627,7 +5759,7 @@ document.addEventListener("drop", async (ev) => {
 });
 
 refresh();
-setInterval(() => { if (document.visibilityState === "visible" && !document.hidden) refresh("timer"); }, 4000);
+setInterval(() => { if (document.visibilityState === "visible" && !document.hidden && !ui.reading) refresh("timer"); }, 4000);
 // Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
 document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseover", (ev) => {
