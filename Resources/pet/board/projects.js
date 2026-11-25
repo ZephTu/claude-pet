@@ -435,6 +435,7 @@ function intake(pr) {
     ${AUTO_SOURCES.map(([k, label, what]) => `<div class="irow"><span class="t">${esc(label)}${auto.has(k) && INTAKE_READY.includes(k) ? intakeSummary(pr, k) : `<small>${esc(what)}</small>`}</span>
       <button class="switch ${auto.has(k) ? "on" : ""}" data-action="p-auto" data-p="${esc(name)}" data-k="${k}"><span></span></button></div>`).join("")}
     ${INTAKE_READY.some((k) => auto.has(k)) ? intakeScanRow() : ""}
+    ${Object.entries(pr.intake || {}).filter(([k]) => !INTAKE_READY.includes(k)).flatMap(([, c]) => c.problems || []).map((x) => `<div class="meta inote warn">${esc(x)}</div>`).join("")}
     <div class="meta inote">${T("QA Hub CI and Jira filter are switches only for now.", "QA Hub CI 和 Jira 过滤器目前只是开关。")}</div></div>`;
   const autoEdit = editing(name, "intake") ? `<div class="tpl-edit">${sectionEditor(name, "intake", INTAKE_SAMPLE())}
     <div class="meta">${T("A ### heading per source (github-review). repos: (comma-separated, * for any); workdir: where its session runs (default: the duty's first folder); run: yes starts a background session on each new task; permissions: skip lets it run without asking; done: manual (only you close the task) or auto; title: / goal: / prompt: (last: it takes the rest) can use {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.",
@@ -483,7 +484,7 @@ function intakeLog(name) {
   return `<div class="sec-h">${T("Came in by itself", "自动来活记录")}<span class="c">${ts.length}</span><span class="sub">${T("open, and closed in the last 14 days", "进行中的，和最近 14 天关掉的")}</span></div>
     <div class="donelist">${ts.map((t) => `<div class="dl" data-action="open-task" data-task="${esc(t.id)}" title="${esc((INTAKE_LABEL[t.intake] || t.intake) + " · " + (t.intake_key || ""))}"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span><span class="t">${esc(t.title)}</span>
       <span class="stag ${esc(t.status)}">${STATUS_SHORT[t.status] || esc(t.status)}</span>
-      ${isOpen(t) ? "" : `<span class="d">${t.intake_done === "auto" ? T("by its session · ", "session 自己关 · ") : ""}${esc(t.closed || t.updated || "")}</span>`}</div>`).join("")}</div>`;
+      ${isOpen(t) ? "" : `<span class="d">${t.intake_closed_by === "session" ? T("by its session · ", "session 自己关 · ") : ""}${esc(t.closed || t.updated || "")}</span>`}</div>`).join("")}</div>`;
 }
 const INTAKE_KEY = "hq-intake-open";
 const intakeOpen = (name) => { try { return JSON.parse(localStorage.getItem(INTAKE_KEY) || "[]").includes(name); } catch (e) { return false; } };

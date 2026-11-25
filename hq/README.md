@@ -802,39 +802,52 @@ the section names. The section holds a `### <source>` block of `key: value` line
 ## Auto intake
 ### github-review
 repos: tigergraph/bigtest, tigergraph/mit-devops   # comma-separated; * for any repository
-workdir: ~/code/bigtest     # where the task's work and its session happen (default: the duty's first path)
+workdir: ~/code/bigtest     # where the task's work and its session happen (default: the duty's first path;
+                            #   one written here must exist — never another folder instead)
 run: yes                    # start a background session on each new task (default: no)
 permissions: skip           # that session runs with --dangerously-skip-permissions (default: ask)
 done: manual                # only the user closes the task (default); auto: the session may
 focus: yes                  # the task joins Focus (default)
 title: Review {name}#{number}: {title}
 goal: {author} asked you to review {url} ({branch} → {base}) …
-prompt: Review {url} with /code-review …   # last: the lines after it are part of it
+prompt: Review {url} with /code-review …   # last: the lines after it, as written, up to the next `### <source>`
 ```
 
 Placeholders: `{repo}` (owner/name), `{name}`, `{number}`, `{title}`, `{url}`, `{author}`, `{branch}`,
-`{base}`. Unknown keys and bad values are listed as `problems` (the board shows them in red). The
+`{base}`. Unknown keys, bad values, a missing workdir and blocks for sources that make no tasks yet
+are listed as `problems` (the board shows them in red); `repos: *` with `permissions: skip` and
+`run: yes` is one too, and no session starts with it. Comments are skipped outside the prompt; a
+`## ` line inside the prompt still ends the section. The
 first active duty, in `hq.json`'s order, whose repos match takes the PR. Its task: `project` the
 duty, the PR as a ref (`PR owner/repo#n <url>`), a log line, and the frontmatter `intake:
 github-review`, `intake_key: owner/repo#n`, `intake_done: manual|auto`. Without `run: yes` it is
 waiting-on-me. With it, `hq intake` starts `claude --bg --name "<id> <title>"` in the workdir
-(plus `--dangerously-skip-permissions` with `permissions: skip`), telling the session to run `hq
+(plus `--dangerously-skip-permissions` with `permissions: skip`; in a session of its own, and without
+the pet job's `CLAUDE_PET_JOB` / `CLAUDE_PET_RUN`, so the pet sees it), telling the session to run `hq
 bind <id>` first — and, for `done: manual`, never to close the task — then the prompt, and binds
 the session itself once `claude agents --json --all` lists it. One that fails to start is logged on
 the card, which turns waiting-on-me, and counts as an error. The default prompt has the session
 review with /code-review, put its comments on the card and ask before posting anything.
 
-`done: manual` holds: an hq-update `status: done` or `abandoned` from a session on such a card is
-sent back by the Stop hook (not held over open asks either); the board's Done and `hq set` still
-close it. A PR whose task is open makes no other. Once that task is closed (or deleted), the PR
-makes a new one only when it asks for your review again with a different head commit.
+`done: manual` holds: a session bound to such a card is told so with the protocol; an hq-update
+`status: done` or `abandoned` from it is sent back by the Stop hook (not held over open asks
+either), and so is `hq set … status=done|abandoned` run with `CLAUDE_CODE_SESSION_ID` set; the
+board's Done and `hq set` from a terminal still close it. A closed card records `intake_closed_by`
+(`session` when a session closed it, for the board's list). `hq continue` carries `intake`,
+`intake_key` and `intake_done` to the new card. A PR with an open card of that `intake_key` makes
+no other, whatever the state file says (a scan stopped part-way). Once that task is closed (or
+deleted), the PR makes a new one only when it asked for your review again after that: a
+`review_requested` event (`gh api repos/O/R/issues/N/events`) for your login or a team, newer than
+the card's `closed_at` (or the task's making). A scan makes at most 3 new tasks; the rest wait for
+the next one. The state entry is written as soon as the card exists, before its session starts.
 
 `hq intake [scan] [--dry-run] [--json] [--claude PATH]` scans; `--dry-run` lists what it would make.
 The last line sums it up (`github-review: 3 waiting, 1 new task (T-112)`); it exits 1 when a source
 or a task failed. `hq intake status [--json]` shows each duty's setup, the last scan, and `recent`:
 the tasks that came in by themselves, open or closed in the last 14 days. State is
 `<root>/secretary/intake/state.json` (per source: `items` {key: {task, head, at, duty}},
-`last_scan`, `last`), written under a lock; a second scan while one runs exits at once. Claude
+`last_scan`, `last`), written under a lock; a second scan while one runs exits at once. Card ids
+are picked under a lock too, since the board, feeds and scans make cards unattended. Claude
 Pet runs it as the "Auto intake: scan GitHub" shell job, every 10 minutes, turned on from a duty's
 page (switching GitHub on does it too).
 

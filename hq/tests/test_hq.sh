@@ -2387,13 +2387,15 @@ cat > "$IK/bin/gh" <<'SH'
 case "$1 $2" in
   "search prs") echo "$*" > "$IK/search-args"; cat "$IK/search.json" ;;
   "pr view") printf '{"headRefOid":"%s","headRefName":"feat-%s","baseRefName":"main"}\n' "$(cat "$IK/head" 2>/dev/null || echo abc)" "$3" ;;
+  "api user") echo me ;;
+  api*) cat "$IK/events" 2>/dev/null ;;
   *) exit 1 ;;
 esac
 SH
 cat > "$IK/claude" <<'SH'
 #!/bin/sh
 if [ "$1" = agents ]; then echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-4000-8000-000000000001"}]'; exit 0; fi
-printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "Started background session abcd1234"
+printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "${CLAUDE_PET_JOB:-none}" > "$IK/claude-env"; echo "Started background session abcd1234"
 SH
 chmod +x "$IK/bin/gh" "$IK/claude"
 cat > "$IK/search.json" <<'JS'
@@ -2403,27 +2405,33 @@ cat > "$IK/search.json" <<'JS'
 JS
 ik() { env IK="$IK" PATH="$IK/bin:$PATH" "$HQ" "$@"; }
 "$HQ" project add rev --kind duty >/dev/null
-printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\nbogus: 1\nprompt: Review {url} by {author}.\n\nKeep it short.\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
+printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\n<!-- a note -->\nbogus: 1\ngoal: Look at it.\nNote: carefully\nprompt: Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short.\n### jira-filter\nrepos: x\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
 "$HQ" project show rev --json | python3 -c '
-import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]
+import json,sys; i=json.load(sys.stdin)["intake"]; c=i["github-review"]
 assert c["repos"]==["acme/web"] and c["run"] is True and c["permissions"]=="skip" and c["done"]=="manual" and c["focus"] is True, c
-assert c["prompt"]=="Review {url} by {author}.\n\nKeep it short." and "unknown key" in c["problems"][0], c' \
-  && grep -q "^## Auto intake" "$T/root/projects/rev/PROJECT.md" && ok "intake section: repos, switches, defaults, a prompt over several lines, unknown keys flagged" || fail "intake section"
+assert c["prompt"]=="Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short." and c["goal"]=="Look at it.\nNote: carefully", c
+assert len(c["problems"])==1 and "unknown key" in c["problems"][0], c
+assert "makes no tasks yet" in i["jira-filter"]["problems"][0], i' \
+  && grep -q "^## Auto intake" "$T/root/projects/rev/PROJECT.md" && ok "intake section: repos, switches, defaults, a prompt kept as written (### Steps, <…> lines) up to the next source, goal lines, unknown keys and sources flagged" || fail "intake section"
 ik intake | tail -1 | grep -q "github-review: no duty set up" && [ ! -f "$IK/search-args" ] && ok "intake: a section without the switch on asks GitHub nothing" || fail "intake off"
 "$HQ" project set rev auto=github-review >/dev/null
 N0="$(ls "$T/root/tasks" | wc -l)"
 ik intake --dry-run | tail -1 | grep -q "github-review: 1 waiting, 1 new" && [ "$(ls "$T/root/tasks" | wc -l)" = "$N0" ] && ok "intake --dry-run: drafts and other repos left out, nothing made" || fail "intake dry run"
-ik intake --claude "$IK/claude" --json > "$IK/out.json"
+CLAUDE_PET_JOB=intake-scan ik intake --claude "$IK/claude" --json > "$IK/out.json"
 IT="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["results"][0]; m=r["made"]; assert len(m)==1 and m[0]["session"].startswith("abcd1234"), r; print(m[0]["task"])' "$IK/out.json")"
 ITC="$(ls "$T"/root/tasks/$IT-*/TASK.md)"
 grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && grep -q '^intake_key: acme/web#12' "$ITC" && grep -q '^intake_done: manual' "$ITC" \
-  && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q 'ann asked you to review https://github.com/acme/web/pull/12 (feat-12 → main)' "$ITC" \
+  && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q '^Note: carefully$' "$ITC" \
   && grep -q 'title: "Review web#12: Fix login"' "$ITC" && grep -q '"abcd1234"' "$ITC" && grep -q "review-requested=@me" "$IK/search-args" \
-  && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref and the default title and goal" || fail "intake task: $(cat "$ITC")"
+  && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref, the default title and the section's goal" || fail "intake task: $(cat "$ITC")"
 grep -qx -- "--bg" "$IK/claude-args" && grep -qx -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
   && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
-  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] \
-  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule" || fail "intake launch: $(cat "$IK/claude-args")"
+  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = none ] \
+  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule, not as the pet's job" || fail "intake launch: $(cat "$IK/claude-args")"
+"$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
+mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"
+mv "$IK/state.bak" "$T/root/secretary/intake/state.json"
 ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 1 waiting, 0 new tasks" && ok "intake: a PR whose task is open makes no other" || fail "intake repeat"
 MSG='done\n\n```hq-update\nstatus: done\n```'
 hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
@@ -2431,19 +2439,38 @@ hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name
 "$HQ" ask add "$IT" "Post the comments?" >/dev/null
 hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
   && ok "…nor hold a close over open asks" || fail "intake manual done with asks"
+SETOUT="$(CLAUDE_CODE_SESSION_ID=sess-x "$HQ" set "$IT" status=done 2>&1 || true)"; echo "$SETOUT" | grep -q "the user closes it" && ! grep -q "^status: done" "$ITC" && ok "…nor hq set from inside a session" || fail "intake hq set guard"
 "$HQ" set "$IT" status=done >/dev/null
-ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and no new commits: no new task" || fail "intake closed same head"
-echo def > "$IK/head"
+echo "2020-01-01T00:00:00Z" > "$IK/events"; echo def > "$IK/head"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and not asked again since (new commits or not): no new task" || fail "intake closed not asked"
+python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))' >> "$IK/events"
 IT2="$(ik intake --claude "$IK/claude" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["made"][0]["task"])')"
-[ "$IT2" != "$IT" ] && ok "intake: asked again after new commits: a new task" || fail "intake new head"
+[ "$IT2" != "$IT" ] && ok "intake: asked again after it was closed: a new task" || fail "intake asked again"
 "$HQ" set "$IT2" intake_done=auto >/dev/null
 hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
-grep -q '^status: done' "$T"/root/tasks/$IT2-*/TASK.md && ok "done: auto — the session may close it" || fail "intake auto done"
+grep -q '^status: done' "$T"/root/tasks/$IT2-*/TASK.md && grep -q '^intake_closed_by: session' "$T"/root/tasks/$IT2-*/TASK.md && ok "done: auto — the session may close it, and it says so" || fail "intake auto done"
 "$HQ" intake status --json | python3 -c '
 import json,sys; s=json.load(sys.stdin); ids=[t["id"] for t in s["recent"]]
 assert ids==[sys.argv[2], sys.argv[1]] and all(t["status"]=="done" for t in s["recent"]), s["recent"]
 d=s["sources"]["github-review"]; assert d["last"]["made"]==[sys.argv[2]] and d["duties"][0]["name"]=="rev" and d["duties"][0]["problems"], d' "$IT" "$IT2" \
   && ok "intake status: recent tasks that came in by itself, done ones too, and the last scan" || fail "intake status"
+python3 - "$IK/search.json" <<'PY'
+import json, sys
+json.dump([{"repository": {"nameWithOwner": "acme/web"}, "number": n, "title": f"PR {n}", "url": f"https://github.com/acme/web/pull/{n}",
+            "author": {"login": "ann"}, "isDraft": False} for n in range(20, 25)], open(sys.argv[1], "w"))
+PY
+ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 3 new tasks (.*), 2 left for the next scan" \
+  && ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 2 new tasks" && ok "intake: at most 3 new tasks a scan; the rest come next time" || fail "intake cap"
+IC="$("$HQ" intake status --json | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["recent"] if t["status"]!="done"][0])')"
+ICN="$("$HQ" continue "$IC" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["to"])')"
+grep -q '^intake_key: acme/web#' "$T"/root/tasks/$ICN-*/TASK.md && grep -q '^intake_done: manual' "$T"/root/tasks/$ICN-*/TASK.md && ok "hq continue carries what came in by itself" || fail "intake continue"
+printf '### github-review\nrepos: acme/web\nworkdir: %s/nope\nrun: yes\n' "$T" | "$HQ" project section rev intake >/dev/null
+"$HQ" project show rev --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]; assert "no folder" in c["problems"][0], c' \
+  && python3 -c 'import json; print(json.dumps([{"repository":{"nameWithOwner":"acme/web"},"number":30,"title":"X","url":"https://github.com/acme/web/pull/30","author":{"login":"ann"},"isDraft":False}]))' > "$IK/search.json" \
+  && rm -f "$IK/claude-args" && ! ik intake --claude "$IK/claude" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
+  && IB="$(grep -l '^intake_key: acme/web#30' "$T"/root/tasks/*/TASK.md)" && grep -q '^status: waiting-on-me' "$IB" && grep -q 'could not start a background session: no folder to run in' "$IB" \
+  && grep -q 'ann asked you to review https://github.com/acme/web/pull/30 (feat-30 → main)' "$IB" \
+  && ok "intake: a workdir written wrong is flagged; no session starts anywhere else, the task (default goal) waits on you" || fail "intake bad workdir"
 "$HQ" project set rev auto= >/dev/null
 
 "$SRC/uninstall.sh" >/dev/null
