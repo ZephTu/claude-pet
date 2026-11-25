@@ -25,6 +25,9 @@ public enum RemoteAccess {
     /// Wrong tokens from one address before it is turned away for a while.
     public static let maxFailures = 20
     public static let lockout: TimeInterval = 10 * 60
+    /// Wrong tokens from anywhere while a pairing code waits: past this many, the code is
+    /// cancelled. Whatever addresses someone guesses from, a code's odds stay at 100 in 2^40.
+    public static let maxCodeFailures = 100
 
     // MARK: - Requests
 
@@ -154,12 +157,16 @@ public enum RemoteAccess {
     }
 
     /// What wrong tokens are counted against: the address, or for IPv6 its /64 — a phone, or
-    /// anyone, gets a new IPv6 address from its /64 whenever it likes.
+    /// anyone, gets a new IPv6 address from its /64 whenever it likes. Not for link-local ones
+    /// (fe80::/64 is every device's), which count by the whole address.
     public static func lockKey(_ bytes: [UInt8]) -> String {
         if bytes.count == 16, bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
             return lockKey(Array(bytes[12..<16]))
         }
         if bytes.count == 4 { return bytes.map(String.init).joined(separator: ".") }
+        if bytes.count == 16, bytes[0] == 0xfe, (bytes[1] & 0xc0) == 0x80 {
+            return bytes.map { String(format: "%02x", $0) }.joined()
+        }
         return bytes.prefix(8).map { String(format: "%02x", $0) }.joined() + "/64"
     }
 
@@ -262,6 +269,32 @@ public enum RemoteAccess {
         return Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// A pairing code: 8 characters to type on a phone where scanning won't do (a web app on the
+    /// Home Screen has storage of its own, and the camera opens Safari). It is one use, lapses in
+    /// pairWindow and shares the lockout, so 40 bits are plenty; the phone's own token is 256.
+    /// Crockford's base32: no I, L, O or U to misread.
+    public static let codeAlphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    public static func newPairingCode() -> String {
+        var g = SystemRandomNumberGenerator()
+        return String((0..<8).map { _ in codeAlphabet[Int.random(in: 0..<codeAlphabet.count, using: &g)] })
+    }
+
+    /// As typed: case, spaces and dashes don't matter, and O, I and L read as 0, 1 and 1.
+    /// nil for anything that isn't 8 code characters.
+    public static func normalizeCode(_ typed: String) -> String? {
+        let mapped = typed.uppercased().compactMap { c -> Character? in
+            switch c {
+            case " ", "-": return nil
+            case "O": return "0"
+            case "I", "L": return "1"
+            default: return c
+            }
+        }
+        guard mapped.count == 8, mapped.allSatisfy(codeAlphabet.contains) else { return nil }
+        return String(mapped)
     }
 
     /// The devices still valid: paired ones, and pairing codes not yet lapsed.
