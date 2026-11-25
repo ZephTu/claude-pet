@@ -26,4 +26,8 @@ a hint, not proof: any later `build-app.sh` in that worktree overwrites its `Cla
 - `./hq/tests/test_hq.sh`
 - Board layout: `.build/debug/ClaudePet --render-board out.png ["<js to run first>"]` renders the
   live board to a PNG (screen capture would need a permission this app should not ask for).
-  For the guide: `"location.href='guide.html'"`.
+  For the guide: `"location.href='guide.html'"`. Add `--size 390x844` for a phone's width.
+- Phone access (`BoardServer.swift`): `.build/debug/ClaudePet --serve-board 18790` serves the board
+  on its own and prints a pairing link; `.build/debug/ClaudePet --render-url "<that link>" out.png
+  ["<js>"]` renders it as a phone's browser does, over HTTP with no bridge. Static files come from
+  the build's resource bundle: `swift build` after editing them.
