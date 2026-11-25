@@ -391,7 +391,23 @@ function intake(pr) {
   const tplEdit = editing(name, "templates") ? `<div class="tpl-edit">${sectionEditor(name, "templates",
     T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"))}
     <div class="meta">${T("A ### heading per template: title: (with {date} / {week}), goal:, and - [ ] @owner todo lines.", "每个模板一个 ### 标题：title:（可用 {date} / {week}）、goal:，以及 - [ ] @owner 待办 行。")}</div></div>` : "";
-  return `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}`;
+  // Folded under the tasks unless opened (remembered per duty) or a template is being edited: the
+  // page is for the tasks; its one line says what there is.
+  const open2 = intakeOpen(name) || Boolean(tplEdit) || open;
+  const on = [...auto].filter((k) => AUTO_SOURCES.some(([x]) => x === k)).length;
+  const sum = [T(`${tpls.length} common`, `常见的活 ${tpls.length}`), T(`${jobs.length} recurring`, `定期 ${jobs.length}`),
+    T(`${on} by itself on`, `自动来活开了 ${on} 个`)].join(" · ");
+  return `<div class="sec-h fold ${open2 ? "open" : ""}" data-action="p-intake" data-p="${esc(name)}"
+      title="${T("Where its work comes from: templates, recurring jobs, sources", "活从哪来：模板、定期任务、自动来源")}">${T("How work comes in", "来活方式")}<span class="sub">${esc(sum)}${open2 ? "" : T(" · click to show", " · 点击展开")}</span></div>
+    ${open2 ? `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}` : ""}`;
+}
+const INTAKE_KEY = "hq-intake-open";
+const intakeOpen = (name) => { try { return JSON.parse(localStorage.getItem(INTAKE_KEY) || "[]").includes(name); } catch (e) { return false; } };
+function toggleIntake(name) {
+  try {
+    const l = JSON.parse(localStorage.getItem(INTAKE_KEY) || "[]");
+    localStorage.setItem(INTAKE_KEY, JSON.stringify(l.includes(name) ? l.filter((x) => x !== name) : l.concat([name])));
+  } catch (e) { /* private mode: stays as it is */ }
 }
 
 // The template a recurring-job form is on: its draft, unless that template is gone since.
@@ -422,10 +438,11 @@ function projDetail(name) {
       <button class="btn small primary" data-action="p-create" data-k="task" data-p="${esc(name)}">${T("＋ New task", "＋ 新任务")}</button></div></div>`;
   let main = "";
   if (duty) {
-    main += intake(pr) + addLine(name);
+    // Its tasks first; then the projects under it, and how its work comes in (folded).
+    main += addLine(name) + `<div class="sec-h">${T("Tasks", "任务")}<span class="c">${items.length}</span></div>` + board4(items);
     const kids = goalsUnder(name);
     if (kids.length) main += `<div class="sec-h k-goal"><i class="ki goal">◆</i>${T("Projects under it", "归在它下面的项目")}<span class="c">${kids.length}</span></div><div class="pgrid">${kids.map((k) => projCard(k, true)).join("")}</div>`;
-    main += `<div class="sec-h">${T("Tasks", "任务")}<span class="c">${items.length}</span></div>` + board4(items);
+    main += intake(pr);
   } else {
     const phases = pr.phases || [];
     main += addLine(name, phases);
@@ -606,6 +623,7 @@ async function projAction(d) {
   switch (d.action) {
     case "p-open": return goToProject(name);
     case "p-closed": pui.closedOpen = !pui.closedOpen; return render();
+    case "p-intake": toggleIntake(d.p); return render();
     case "p-create": return openCreate(d.k, d.p);
     case "p-ckind": ui.modal.kind = d.k; drawCreate(); { const f = $("#modal [data-first]"); if (f) f.focus(); } return;
     case "p-ccancel": {

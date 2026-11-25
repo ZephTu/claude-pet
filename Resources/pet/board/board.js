@@ -14,9 +14,12 @@ const LABEL = {
   "waiting-on-me": T("Waiting on you", "等你处理"), blocked: T("Blocked", "阻塞中"), active: T("Active", "进行中"),
   done: T("Done", "已完成"), abandoned: T("Abandoned", "已放弃"),
 };
-// How an ask can be answered. Most asks are "should I?" or "A or B — I suggest A", so Yes ("go
-// ahead / as you suggest", or with a note: "my answer is the note") comes first. "Later" keeps the
-// ask open and out of sight until tomorrow. "No context" is rare and sits behind ⋯.
+// How an ask can be answered. An ask is answered in words: you write in its box and send it
+// (⌘Enter). Sent empty it is Yes — "go ahead / as you suggested"; with words, the words are the
+// answer. ✕ makes it a No (the words say why, or what instead), and the rest — Later (the ask
+// stays open, out of sight until tomorrow), To todo, Yes always, No context — sit behind ⋯.
+// (Of 285 answers given on the board by 2026-11, 93% were Yes, most of them with a note; 6% No;
+// To todo and No context were never used.)
 const RESOLUTIONS = [
   ["do", T("Yes", "可以"), T("Yes — go ahead, or as you suggested. With a note, the note is your answer (\"A+C\", \"run it once\")", "可以——去做，或按你的建议来。写了说明，说明就是你的回答（如“A+C”“跑一次”）")],
   ["always", T("Yes, always", "以后都可以"), T("Yes — and from now on, sessions on this task do this kind of thing without asking. You word the standing grant before it's sent; revoke it any time under the task's Grants", "可以——而且以后这个任务的 session 遇到这类事情直接做，不再问。发出前你来定授权的措辞；随时可以在任务的「授权」里撤销")],
@@ -25,6 +28,15 @@ const RESOLUTIONS = [
   ["snooze", T("Later", "稍后"), T("Not now — keep the question, but hide it until tomorrow: it leaves Needs you and the cat's badge, and the session is told you'll answer later", "先不答——问题留着，但藏到明天：它会离开 Needs you 和小猫的角标，session 会被告知你稍后再答")],
 ];
 const MORE_RESOLUTIONS = [["archive", T("No context", "不了解背景"), T("I can't answer this — park it", "我答不了——先归档")]];
+const ASK_MENU = ["snooze", "todo", "always", "archive"];   // the answers behind an ask's ⋯
+const resInfo = (r) => RESOLUTIONS.concat(MORE_RESOLUTIONS).find((x) => x[0] === r) || [r, r, ""];
+// The answer an ask has been given a pick for (✕ or one from ⋯); none means Yes. ("do" is what a
+// pick was before T-108, still in a saved draft: no pick either.)
+const askPick = (id) => (ui.picks[id] && ui.picks[id] !== "do" ? ui.picks[id] : "");
+// What an ask goes out as, which its tag and Send button say: its pick, else your words, else
+// Claude's suggestion.
+const askVerdict = (id) => askPick(id) || (answerNote(id) ? "answer" : "suggested");
+const verdictLabel = (v) => (v === "suggested" ? T("As suggested", "按建议") : v === "answer" ? T("Your answer", "你的回答") : resInfo(v)[1]);
 // Standing grants the user says yes to most (from the asks answered Yes on this board, 2026-11).
 const GRANT_PRESETS = [
   T("Fix the review findings as suggested and push them to the same PR", "review 出的问题按建议全修，推到同一个 PR"),
@@ -125,7 +137,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, autoPicked: new Set(), moreRes: new Set(), granting: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -1084,22 +1096,24 @@ function renderAsks() {
   return head + `<div class="group-title">${T("Claude is asking", "Claude 在问")} <span class="meta">${items.length}</span></div>` + filterNote(items.length, total) + [...byTask].map(([t, asks]) => renderAskGroup(t, asks)).join("") + laterHtml;
 }
 
-// A task with several open asks answers them together: each answer button only picks, and one
-// Send at the bottom records them all and types a single message into the session.
+// A task's open asks, under the reply that raised them. With several, each is answered in its own
+// box and one Send at the bottom (⌘Enter in any of the boxes) records them all and types a single
+// message into the session; one left empty goes as Yes — as suggested, which the button counts.
+// ids: the asks shown (a search can hide some): Send answers only those.
 function renderAskGroup(t, asks, extra = {}) {
-  if (asks.length < 2) return asks.map((a) => askCard(t, a, extra)).join("");
+  if (asks.length < 2) return `<div class="askset">${askReply(t, asks)}${asks.map((a) => askCard(t, a, extra)).join("")}</div>`;
   const target = groupTarget(asks);
-  const picked = asks.filter((a) => ui.picks[a.id]).length;
   const sending = asks.some((a) => ui.resolving.has(a.id));
   const allPush = target && asks.every((a) => wantPush(a));
-  return `<div class="askgroup">${asks.map((a) => askCard(t, a, { ...extra, group: true, sharedTarget: Boolean(target) })).join("")}
+  const sug = asks.filter((a) => askVerdict(a.id) === "suggested").length;
+  return `<div class="askgroup">${askReply(t, asks)}${asks.map((a) => askCard(t, a, { ...extra, group: true, sharedTarget: Boolean(target) })).join("")}
     <div class="askbar">
-      <span class="meta">${T(`${picked} of ${asks.length} answered`, `已选 ${picked} / ${asks.length}`)}</span>
       ${target ? `<label class="push" title="${T("Type all the answers into that session as one message, so it carries on now", "把所有回答合成一条消息发给那个 session，让它马上接着干")}">
         <input type="checkbox" data-action="push-group" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${allPush ? "checked" : ""}>
         ${T("send to", "现在发给")} <b>${esc(target.title || target.project)}</b>${T(" now", "")}${target.state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>` : `<span style="flex:1"></span>`}
-      <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" ${picked && !sending ? "" : "disabled"}
-        title="${T(`Record every answer you picked${target ? " and send them in one message" : ""}`, `记下你选好的每个回答${target ? "，并合成一条消息发出" : ""}`)}">${sending ? T("Sending…", "发送中…") : picked ? T(`Send ${picked} answer${picked === 1 ? "" : "s"}`, `发送 ${picked} 个回答`) : T("Send answers", "发送回答")}</button>
+      <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${sending ? "disabled" : ""}
+        title="${T(`Record every answer${target ? " and send them in one message" : ""}; an empty box goes as Yes — as Claude suggested (⌘Enter)`, `记下每个回答${target ? "，并合成一条消息发出" : ""}；空着的按 Claude 的建议回答（⌘回车）`)}">${sending ? T("Sending…", "发送中…")
+          : T(`Send ${asks.length} answers`, `发送 ${asks.length} 个回答`) + (sug ? `<span class="sug">${T(` · ${sug} as suggested`, ` · ${sug} 个按建议`)}</span>` : "")}<kbd>⌘↩</kbd></button>
     </div></div>`;
 }
 // The one live session every ask in a group came from, if the board can type into it.
@@ -1108,34 +1122,65 @@ function groupTarget(asks) {
   return ts[0] && ts.every((x) => x && x.sessionId === ts[0].sessionId) ? ts[0] : null;
 }
 
+// The reply that raised a task's asks, above them, so you answer with what Claude said in front
+// of you instead of opening its terminal to read it. hq keeps it with each ask (`context`, the
+// reply without its hq blocks, up to 6000 characters); this is the newest ask's. Open unless you
+// fold it — remembered per reply, so the next reply opens again.
+const REPLY_FOLD_KEY = "hq-reply-fold";
+const replyFold = (() => { try { return JSON.parse(localStorage.getItem(REPLY_FOLD_KEY) || "[]"); } catch (e) { return []; } })();
+function toggleReplyFold(id) {
+  const i = replyFold.indexOf(id);
+  if (i >= 0) replyFold.splice(i, 1); else replyFold.push(id);
+  if (replyFold.length > 200) replyFold.splice(0, replyFold.length - 200);
+  try { localStorage.setItem(REPLY_FOLD_KEY, JSON.stringify(replyFold)); } catch (e) { /* private mode */ }
+}
+function askReply(t, asks) {
+  const withCtx = asks.filter((a) => a.context);
+  if (!withCtx.length) return "";
+  const a = withCtx.reduce((x, y) => (String(y.ts) > String(x.ts) ? y : x));
+  const earlier = withCtx.filter((x) => x.context !== a.context).length;
+  const open = !replyFold.includes(a.id);
+  return `<div class="ask-reply ${open ? "open" : ""}">
+    <button class="ask-reply-h" data-action="ask-reply" data-id="${esc(a.id)}" title="${open ? T("Fold", "收起") : T("Show what Claude said when it asked", "看 Claude 提问时说了什么")}">
+      <span class="tw">${open ? "▾" : "▸"}</span>${T("Claude's last reply", "Claude 的最后一段回复")}<span class="meta">${ago(a.ts)}${earlier
+        ? T(` · ${earlier} of these came with an earlier reply — click its question`, ` · 其中 ${earlier} 条来自更早的回复，点问题文字看`) : ""}</span></button>
+    ${open ? `<div class="md ask-reply-body">${markdown(a.context)}</div>` : ""}
+  </div>`;
+}
+
 // The secretary's asks are labeled as its own and open its window, not its (hidden) card.
 const secChip = () => `<span class="chip link sec" data-action="open-secretary" title="${T("Open the secretary", "打开秘书")}">${T("Secretary", "秘书")}</span>`;
-// No "Yes, always" for the secretary: a standing grant is never for it. opt.peek: in its window,
-// which doesn't redraw for ⋯ or pasted images either: those stay in Needs you.
+// An ask: its question, a box for your answer, ✕ (No), ⋯ (the rare answers) and, on its own, Send
+// — whose words say what goes out. In a group the tag on the right says it instead, and the group's
+// Send sends. No "Yes, always" for the secretary: a standing grant is never for it.
 function askCard(t, a, opt = {}) {
-  const pick = ui.picks[a.id];
+  const pick = askPick(a.id);
+  const v = askVerdict(a.id);
   const attKey = "ask:" + a.id;
   const sec = t.id === secId();
-  const meta = opt.peek ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
-    : sec ? `${secChip()}<span class="chip link" data-action="open-secretary">${esc(a.id)}</span>${ago(a.ts)}`
+  const meta = sec ? `${secChip()}<span class="chip link" data-action="open-secretary">${esc(a.id)}</span>${ago(a.ts)}`
     : opt.inTask ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
-  const res = opt.peek || sec ? RESOLUTIONS.filter(([r]) => r !== "always")
-    : RESOLUTIONS.concat(ui.moreRes.has(a.id) || pick === "archive" ? MORE_RESOLUTIONS : []);
+  const menu = ASK_MENU.filter((r) => !(sec && r === "always"));
+  const sendWord = v === "suggested" ? T("✓ Go ahead as suggested", "✓ 按建议做") : v === "answer" ? T("Send answer", "发送回答")
+    : v === "always" ? T("Yes, and grant it", "可以，并授权") : `${T("Send: ", "发送：")}${resInfo(v)[1]}`;
   return `
-    <div class="card ask ${pick ? "picked" : ""}">
+    <div class="card ask v-${v}" data-ask="${esc(a.id)}">
       <div class="meta">${meta}</div>
-      ${opt.peek ? `<div class="ask-text">${esc(a.text)}</div>`
-        : `<div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>`}
+      <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
+      <textarea class="note grow ask-note" rows="2" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${esc(T("Your answer… sent empty, it's Yes — as Claude suggested · paste images too", "写你的回答……留空发送 = 按 Claude 的建议 · 可以粘贴图片"))}"
+        title="${T("Your answer in words — anything goes. Left empty, it goes as Yes, as Claude suggested. ⌘Enter sends; Enter is a new line", "用文字回答，怎么写都行。留空发送就是按 Claude 的建议。⌘回车发送，回车换行")}">${esc(draft("note:" + a.id))}</textarea>
+      ${attachStrip(attKey)}
       <div class="row askrow">
-        <textarea class="note grow" rows="1" data-key="note:${esc(a.id)}" ${opt.peek ? "" : `data-att="${esc(attKey)}"`} placeholder="${opt.peek ? T("note", "说明") : T("note · paste images", "说明 · 可粘贴图片")}" title="${T("Optional note — your answer in words, or why; paste or drop screenshots too", "可选的说明——用文字写你的回答或原因；也可以粘贴或拖入截图")}">${esc(draft("note:" + a.id))}</textarea>
-        ${res.map(([r, label, tip]) => opt.group
-          ? `<button class="btn small res-${r} ${pick === r ? "on" : ""}" title="${esc(tip)}${T(" — pick, then Send below", "——先选，再点下面的发送")}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`
-          : `<button class="btn small res-${r} ${r === "always" && ui.granting.has(a.id) ? "on" : ""}" title="${esc(tip)}" data-action="${r === "always" ? "grant-open" : "resolve"}" data-id="${esc(a.id)}" data-res="${r}">${label}</button>`).join("")}
-        ${opt.peek || sec || ui.moreRes.has(a.id) || pick === "archive" ? "" : `<button class="btn small ghost res-more" title="${T("More answers: No context — I can't answer this, park it", "更多回答：不了解背景——我答不了，先归档")}" data-action="more-res" data-id="${esc(a.id)}">⋯</button>`}
+        ${opt.group ? `<span class="ask-tag v-${v}" title="${T("What this one goes out as when you send", "发送时这一条会怎么回答")}">${esc(verdictLabel(v))}</span>` : ""}
+        <span class="spacer"></span>
+        <button class="btn small ghost res-drop ${pick === "drop" ? "on" : ""}" data-action="pick" data-id="${esc(a.id)}" data-res="drop" title="${esc(resInfo("drop")[2])}${T(" — click again to take it back", "——再点一下取消")}">${T("✕ No", "✕ 不要")}</button>
+        <button class="btn small ghost res-more ${pick && pick !== "drop" ? "on" : ""}" data-action="more-res" data-id="${esc(a.id)}" title="${T("More answers: Later, To todo, Yes always, No context", "更多回答：稍后、转待办、以后都可以、不了解背景")}">⋯</button>
+        ${opt.group ? "" : `<button class="btn small primary ask-send" data-action="resolve" data-id="${esc(a.id)}" data-res="${pick || "do"}" ${ui.resolving.has(a.id) ? "disabled" : ""}
+          title="${esc(pick ? resInfo(pick)[2] : resInfo("do")[2])} (⌘Enter)">${sendWord}<kbd>⌘↩</kbd></button>`}
       </div>
-      ${opt.peek ? "" : attachStrip(attKey)}
-      ${!opt.peek && (opt.group ? pick === "always" : ui.granting.has(a.id)) ? grantBox(t, a, opt) : ""}
+      ${ui.moreRes.has(a.id) ? `<div class="ask-menu">${menu.map((r) => `<button class="btn small res-${r} ${pick === r ? "on" : ""}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}" title="${esc(resInfo(r)[2])}">${resInfo(r)[1]}</button>`).join("")}</div>` : ""}
+      ${pick === "always" ? grantBox(t, a) : ""}
       ${pushTarget(a) && !opt.sharedTarget ? `<label class="push" title="${T("Type your answer into that session so it carries on now, instead of waiting for your next message there", "把回答直接发给那个 session，让它马上接着干，不用等你在那边发下一条消息")}">
         <input type="checkbox" data-key="push:${esc(a.id)}" ${wantPush(a) ? "checked" : ""}>
         ${T("send to", "现在发给")} <b>${esc(pushTarget(a).title || pushTarget(a).project)}</b>${T(" now", "")}${pushTarget(a).state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>`
@@ -1144,17 +1189,17 @@ function askCard(t, a, opt = {}) {
 }
 
 // "Yes, always": word the standing grant before it goes on the card. The session may have
-// suggested one with the ask ([grant: …]); presets are the kinds you said yes to most.
-function grantBox(t, a, opt) {
+// suggested one with the ask ([grant: …]); presets are the kinds you said yes to most. Send (the
+// ask's, or the group's) answers Yes and adds it.
+function grantBox(t, a) {
   const have = (t.grants || []).some((g) => grantKey(g.text) === grantKey(grantWording(a)));
   return `<div class="grantbox">
     <div class="meta">${T("From now on, without asking — sessions on", "以后不用问，直接做——")} ${esc(t.id)}${T(":", " 的 session：")}</div>
     <textarea class="note grow" rows="1" data-key="grant:${esc(a.id)}" placeholder="${T("the kind of step, e.g. rerun a verification with the same parameters", "这一类事情，如：用和上次相同的参数重跑验证")}">${esc(grantWording(a))}</textarea>
     ${have ? `<div class="meta">${T("Already granted on this task — this just answers Yes.", "这个任务已经有这条授权——这次只是回答可以。")}</div>` : ""}
     ${grantPresets("grant-preset", `data-id="${esc(a.id)}"`)}
-    ${opt.group ? "" : `<div class="row" style="justify-content:flex-end">
-      <button class="btn small ghost" data-action="grant-cancel" data-id="${esc(a.id)}">${T("Cancel", "取消")}</button>
-      <button class="btn small primary" data-action="resolve" data-id="${esc(a.id)}" data-res="always">${T("Yes, and grant it", "可以，并授权")}</button></div>`}
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn small ghost" data-action="pick" data-id="${esc(a.id)}" data-res="always" title="${T("Back to a plain answer", "回到普通回答")}">${T("No grant", "不授权")}</button></div>
   </div>`;
 }
 
@@ -1195,7 +1240,7 @@ async function answerAsk(a, res, note) {
     if (!wording) throw new Error(T("Word the grant first", "先写好授权的措辞"));
     // hq says whether the grant was already on the card: then an Undo leaves it there.
     const r = await apiObj("resolve", { id: a.id, resolution: "do", note, grant: wording });
-    delete ui.drafts["grant:" + a.id]; ui.granting.delete(a.id);
+    delete ui.drafts["grant:" + a.id];
     return { task, granted: r.granted || wording, existed: Boolean(r.existed) };
   }
   if (res !== "todo") { await api("resolve", { id: a.id, resolution: res, note }); return null; }
@@ -1237,18 +1282,13 @@ function pushMessageAll(answers) {
   return "[HQ board] Answers:\n" +
     answers.map(({ a, res, note, made }) => `- ${a.id} "${gist(a.text)}": ${resText(res, note, made && made.granted)}`).join("\n");
 }
-// An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
-// Writing a note on one of several asks means you're answering it: Do is picked for you. Only
-// a pick made this way is taken back when the note is emptied again; one you clicked stays.
-function autoPick(id, hasNote) {
-  const t = taskById(id.replace(/\.\d+$/, ""));
-  if (!t || openAsks(t).length < 2) return;        // a lone ask's buttons answer at once
-  if (!openAsks(t).some((a) => a.id === id)) return;   // a put-off ask (for later) isn't in the group
-  if (hasNote && !ui.picks[id]) { ui.picks[id] = "do"; ui.autoPicked.add(id); render(); }
-  else if (!hasNote && ui.autoPicked.has(id) && !(ui.atts["ask:" + id] || []).length) {
-    delete ui.picks[id]; ui.autoPicked.delete(id); render();
-  }
+// Writing in an ask's box (or pasting an image) turns its "As suggested" into "Your answer", and
+// emptying it turns it back: redraw when what its tag and Send say no longer holds.
+function noteFlip(id) {
+  const v = askVerdict(id);
+  if ([...document.querySelectorAll(`.card.ask[data-ask="${CSS.escape(id)}"]`)].some((c) => !c.classList.contains("v-" + v))) render();
 }
+// An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
 function answerNote(id) {
   const text = (ui.drafts["note:" + id] || "").trim();
   const imgs = (ui.atts["ask:" + id] || []).map((x) => x.path);
@@ -4008,7 +4048,7 @@ async function addImages(sid, files) {
       added++;
     } catch (e) { toast(String(e.message || e), true); }
   }
-  if (added && sid.startsWith("ask:")) autoPick(sid.slice(4), true);   // an image is an answer too
+  if (added && sid.startsWith("ask:")) noteFlip(sid.slice(4));   // an image is an answer too
   if (added) { if (!sid.startsWith("ask:")) ui.msgOpen.add(sid); render(); if (ui.modal && ui.modal.type === "peek" && peekKey(ui.modal) === sid) drawPeek(false); }
 }
 // On a phone there is nothing to paste or drop a screenshot from: a button picks photos instead
@@ -4264,12 +4304,13 @@ async function saveField(el) {
 
 const NO_EXPAND = "input, textarea, select, label, a, .card, .askgroup, .bsess, .atts";
 
-// Record every answer picked on a task's asks, then type them into their session as one message.
-async function resolveAll(taskId) {
+// Record the answers to a task's asks (the ones shown: ids), then type them into their session as
+// one message. An ask with no pick is a Yes: its words, or "as you suggested" when it has none.
+async function resolveAll(taskId, ids) {
   const t = taskById(taskId);
-  const asks = t ? openAsks(t).filter((a) => ui.picks[a.id] && !ui.resolving.has(a.id)) : [];
+  const asks = t ? openAsks(t).filter((a) => ids.includes(a.id) && !ui.resolving.has(a.id)) : [];
   if (!asks.length) return;
-  const answers = asks.map((a) => ({ a, res: ui.picks[a.id], note: answerNote(a.id),
+  const answers = asks.map((a) => ({ a, res: askPick(a.id) || "do", note: answerNote(a.id),
     draft: ui.drafts["note:" + a.id], imgs: ui.atts["ask:" + a.id],
     // Taken now: a refresh during the awaits below can drop the session from ui.sessions.
     target: pushTarget(a), push: Boolean(pushTarget(a)) && wantPush(a) }));
@@ -4281,7 +4322,7 @@ async function resolveAll(taskId) {
       try {
         x.made = await answerAsk(x.a, x.res, x.note);
         done.push(x);
-        delete ui.picks[x.a.id]; delete ui.drafts["push:" + x.a.id];
+        delete ui.picks[x.a.id]; ui.moreRes.delete(x.a.id); delete ui.drafts["push:" + x.a.id];
         if (x.res !== "snooze") { delete ui.drafts["note:" + x.a.id]; delete ui.atts["ask:" + x.a.id]; }
       } catch (e) { toast(`${x.a.id}: ${e.message || e}`, true); }
     }
@@ -4318,7 +4359,7 @@ async function resolveAll(taskId) {
       for (const x of done) {
         ui.drafts["note:" + x.a.id] = x.draft || "";
         if (x.imgs) ui.atts["ask:" + x.a.id] = x.imgs;
-        ui.picks[x.a.id] = x.res;
+        if (x.res !== "do") ui.picks[x.a.id] = x.res;
       }
       toast(sent.length ? T("Reopened — the message already sent stays in the session", "已重新打开——已经发出的消息还留在 session 里") : T("Reopened", "已重新打开"));
       refresh();
@@ -4386,7 +4427,7 @@ document.addEventListener("click", async (ev) => {
       ui.resolving.add(d.id);
       // A card's one-click Yes / No sends no note: the card doesn't show the draft one.
       const note = d.quick ? "" : answerNote(d.id);
-      const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id];
+      const draftNote = ui.drafts["note:" + d.id], imgs = ui.atts["ask:" + d.id], pickWas = ui.picks[d.id];
       // Later leaves the ask open, so a half-written note and its images stay for tomorrow.
       if (d.res !== "snooze") { delete ui.drafts["note:" + d.id]; delete ui.atts["ask:" + d.id]; }
       const a = tasks().flatMap((t) => t.asks || []).find((x) => x.id === d.id);
@@ -4395,6 +4436,7 @@ document.addEventListener("click", async (ev) => {
       delete ui.drafts["push:" + d.id];
       try {
         const made = await answerAsk(a, d.res, note);
+        delete ui.picks[d.id]; ui.moreRes.delete(d.id);
         let msg = T(`${d.id} → ${d.res === "todo" ? "@me todo" : d.res === "always" ? "yes, and granted" : d.res}`, `${d.id} → ${(RESOLUTIONS.concat(MORE_RESOLUTIONS).find((r) => r[0] === d.res) || [])[1] || d.res}`);
         if (push) {
           // Mark first: the message starts a turn at once, and that turn's hook must not inject
@@ -4417,6 +4459,7 @@ document.addEventListener("click", async (ev) => {
             else { await api("reopen", { id: d.id }); await dropMadeTodo(made); }
             ui.drafts["note:" + d.id] = draftNote || "";
             if (imgs) ui.atts["ask:" + d.id] = imgs;
+            if (pickWas) ui.picks[d.id] = pickWas;
             toast(push ? T(`${d.id} reopened — the message already sent stays in the session`, `${d.id} 已重新打开——已经发出的消息还留在 session 里`) : T(`${d.id} reopened`, `${d.id} 已重新打开`));
           } catch (e) { toast(String(e.message || e), true); }
           await refresh();
@@ -4430,25 +4473,26 @@ document.addEventListener("click", async (ev) => {
       try { await refresh(); } finally { ui.resolving.delete(d.id); }
       return;
     }
-    case "pick":
-      ui.autoPicked.delete(d.id);    // the user chose; typing no longer changes it
-      if (ui.picks[d.id] === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
-      return render();
-    case "resolve-all": return resolveAll(d.task);
-    case "do-todo": return doTodo(d.task, d.text);
-    case "tidy-todos": return tidyTodos(d.task);
-    case "more-res": ui.moreRes.add(d.id); return render();
-    case "grant-open": {
-      // The box by the button clicked: Needs you, the drawer and the conversation window can each
-      // have one. (Asked before render() replaces the button.)
+    case "pick": {
+      // ✕ or an answer from ⋯: picked, or back to a plain answer when picked again.
+      if (askPick(d.id) === d.res) delete ui.picks[d.id]; else ui.picks[d.id] = d.res;
+      if (d.res !== "drop") ui.moreRes.delete(d.id);
+      if (d.res === "always" && ui.picks[d.id] !== "always") delete ui.drafts["grant:" + d.id];
+      saveDrafts();
       const where = el.closest("#drawer, #modal");
-      ui.granting.has(d.id) ? ui.granting.delete(d.id) : ui.granting.add(d.id); render();
-      { const box = [...document.querySelectorAll(`[data-key="${CSS.escape("grant:" + d.id)}"]`)]
+      render();
+      if (ui.picks[d.id] === "always") {   // word the grant: the box by the button clicked
+        const box = [...document.querySelectorAll(`[data-key="${CSS.escape("grant:" + d.id)}"]`)]
           .find((x) => x.closest("#drawer, #modal") === where && x.getClientRects().length);
-        if (box) { box.focus(); box.select(); } }
+        if (box) { box.focus(); box.select(); }
+      }
       return;
     }
-    case "grant-cancel": ui.granting.delete(d.id); delete ui.drafts["grant:" + d.id]; return render();
+    case "resolve-all": return resolveAll(d.task, String(d.ids || "").split(" ").filter(Boolean));
+    case "ask-reply": toggleReplyFold(d.id); return render();
+    case "do-todo": return doTodo(d.task, d.text);
+    case "tidy-todos": return tidyTodos(d.task);
+    case "more-res": ui.moreRes.has(d.id) ? ui.moreRes.delete(d.id) : ui.moreRes.add(d.id); return render();
     case "grant-preset": ui.drafts["grant:" + d.id] = d.text; saveDrafts(); return render();
     case "grant-preset-task": ui.drafts["addgrant:" + d.for] = d.text; saveDrafts(); return render();
     case "add-grant": {
@@ -5073,7 +5117,7 @@ document.addEventListener("input", (ev) => {
   if (el.dataset.key) { ui.drafts[el.dataset.key] = el.value; saveDrafts(); }
   if (ui.modal && ui.modal.type === "prompt" && el.closest("#modal")) syncPromptButtons(el);
   const note = /^note:(.+)$/.exec(el.dataset.key || "");
-  if (note) autoPick(note[1], el.value.trim() !== "");
+  if (note) noteFlip(note[1]);
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA" && el.classList.contains("grow")) fitGrow(el);
   if (el.tagName === "TEXTAREA" && el.dataset.session) slashUpdate(el);
@@ -5259,6 +5303,11 @@ function submitButtonOf(el) {
   if (el.dataset.session) return el.parentElement.querySelector('[data-action="send"]');   // never a busy secretary's Stop
   if (el.closest(".prompt-foot")) return near(".prompt-foot", "plan-feedback");
   if (el.classList.contains("logbox")) return near(".addbox", "add-log");
+  // An ask's box (or its grant's): the group's Send answers, else the ask's own Send.
+  if (/^(?:note|grant):/.test(el.dataset.key || "")) {
+    const g = el.closest(".askgroup");
+    return g ? g.querySelector('[data-action="resolve-all"]') : near(".card.ask", "resolve");
+  }
   return null;
 }
 document.addEventListener("keydown", async (ev) => {
@@ -5279,9 +5328,10 @@ document.addEventListener("keydown", async (ev) => {
   if (ev.key !== "Enter" || ev.isComposing) return;  // isComposing: IME (e.g. Pinyin) candidate selection
   if (el.id === "capture") { ev.preventDefault(); return captureSubmit(); }   // focus stays: jot the next one
   // ⌘Enter (or Ctrl+Enter) presses the box's own button: Send under a message box (a session's,
-  // Peek's, the secretary's), Keep planning under a plan, Save note under the log. Enter alone
-  // stays a new line there. Not an ask's note: it has two answers, and no one is the obvious one.
-  if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && el.tagName === "TEXTAREA" && !ui.composing && ev.keyCode !== 229) {
+  // Peek's, the secretary's), Keep planning under a plan, Save note under the log, Send (or Send
+  // answers, with several) under an ask — where ⌥Enter does too. Enter alone stays a new line.
+  const askBox = /^(?:note|grant):/.test(el.dataset.key || "");
+  if ((ev.metaKey || ev.ctrlKey || (askBox && ev.altKey)) && !(ev.altKey && !askBox) && !ev.shiftKey && el.tagName === "TEXTAREA" && !ui.composing && ev.keyCode !== 229) {
     const btn = submitButtonOf(el);
     if (btn) { ev.preventDefault(); if (!btn.disabled) btn.click(); return; }
   }
