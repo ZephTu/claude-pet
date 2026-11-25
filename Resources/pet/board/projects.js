@@ -12,7 +12,7 @@
 // criteria, and work that comes in: tasks made from its templates ("常见的活"), recurring jobs that
 // make them on a timetable ("定期来活"), and sources that make them by themselves ("自动来活":
 // GitHub review requests so far, set up in PROJECT.md's Auto intake section and scanned by the
-// `intake-scan` job, `hq intake`; the other sources are switches only). A goal can sit under a
+// `intake-scan` job, `hq intake`; the others make nothing yet and aren't shown). A goal can sit under a
 // duty. Tasks in no project are "Not in a project".
 //
 // ui.proj: "" the list page, a project's name its page, "(none)" the tasks in no project.
@@ -31,6 +31,19 @@ const AUTO_SOURCES = [
 ];
 // The sources that make tasks (hq's INTAKE_SOURCES); the others are switches only, for now.
 const INTAKE_READY = ["github-review"];
+// The sources the board shows: those that make tasks, and one switched on before (so it can be
+// switched off).
+const shownSources = (on) => AUTO_SOURCES.filter(([k]) => INTAKE_READY.includes(k) || (on && on.has(k)));
+// What a new Common work section starts as, and the hint in an empty one.
+const TPL_SAMPLE = () => T(`### Weekly meeting
+title: Weekly meeting {week}
+goal: Gather this week's work and the topics to raise
+- [ ] @claude sum up this week's PRs and Jira progress
+- [ ] @me read it through and add topics`, `### 周会准备
+title: 周会 {week}
+goal: 整理本周的产出，准备周会议题
+- [ ] @claude 汇总本周的 PR 和 Jira 进展
+- [ ] @me 过一遍，补充要讨论的事`);
 const INTAKE_JOB = "intake-scan";
 const intakeJob = () => ((typeof jui !== "undefined" && jui.data && jui.data.jobs) || []).find((j) => j.id === INTAKE_JOB) || null;
 // What a new Auto intake section starts as: every key, with what it does in the hint under it.
@@ -410,7 +423,8 @@ function intake(pr) {
   const tplBox = `<div class="ibox"><h4>${T("Common work", "常见的活")}<span class="c">${tpls.length}</span>${editBtn(name, "templates")}</h4>
     ${tpls.length ? tpls.map((x) => `<div class="irow"><span class="t">${esc(x.name)}<small>${esc(x.title || x.goal || "")}${x.todos.length ? T(` · ${x.todos.length} todos`, ` · ${x.todos.length} 条待办`) : ""}</small></span>
       <button class="btn small" data-action="p-tpl-new" data-p="${esc(name)}" data-t="${esc(x.name)}" title="${T("Make a task from it now", "马上用它建一个任务")}">${T("＋ Make", "＋ 建")}</button></div>`).join("")
-      : `<div class="empty">${T("Kinds of task that come up again and again. ✎ to write some.", "反复会来的几类活。点 ✎ 写几条。")}</div>`}</div>`;
+      : `<div class="empty">${T("Kinds of task that come up again and again, written once as a template: ＋ Make then gives a card with its title, goal and todos filled in. Say a weekly meeting: \"Weekly meeting {week}\", with Claude summing up the week first. ✎ to write one.",
+        "反复会来的几类活，写一次模板，以后点 ＋ 建 就得到一张写好标题、目标和待办的卡。比如周会准备：标题「周会 {week}」，Claude 先汇总本周进展。点 ✎ 写一个。")}</div>`}</div>`;
   const jobs = recurJobs(name);
   const open = pui.recur === name;
   const v = (k, d) => ui.drafts[`pr:${name}:${k}`] ?? d;
@@ -429,19 +443,17 @@ function intake(pr) {
     ${jobs.map((j) => `<div class="irow"><span class="t">${esc(j.recur.template)}<small>${esc(scheduleText(j.schedule))}${j.enabled && (j.next || [])[0] ? ` · ${T("next", "下次")} ${esc(jwhen(j.next[0]))}` : ""}</small>${tpls.some((x) => x.name === j.recur.template) ? "" : `<small class="warn">${T("This common work is gone: the job will fail until it is back (or delete the job)", "这个常见的活已经不在了：在它回来之前这个定期任务会失败（或者删掉这个任务）")}</small>`}</span>
       <button class="switch ${j.enabled ? "on" : ""}" data-action="p-job-toggle" data-id="${esc(j.id)}" data-on="${j.enabled ? "" : "1"}" title="${j.enabled ? T("On — click to pause", "开着——点击暂停") : T("Paused — click to switch on", "暂停中——点击打开")}"><span></span></button>
       <button class="icon x" data-confirm="${T("Delete?", "删除？")}" data-action="p-job-del" data-id="${esc(j.id)}" title="${T("Delete this recurring job", "删掉这个定期任务")}">✕</button></div>`).join("")}
-    ${form || (jobs.length ? "" : `<div class="empty">${tpls.length ? T("None. ＋ makes a task from a template on a timetable (a job on the Scheduled page).", "没有。点 ＋ 按时间表用模板建任务（在定时任务页里是一个 job）。") : T("Write a template first; a recurring job makes tasks from one.", "先写一个常见的活；定期来活就是按时用它建任务。")}</div>`)}</div>`;
+    ${form || (jobs.length ? "" : `<div class="empty">${tpls.length ? T("None. ＋ picks a common work and a time — say Mondays at 09:00 — and its card is made then (a card only, no session; a job on the Scheduled page).", "没有。点 ＋ 选一个常见的活和时间，比如每周一 09:00，到点自动建出这张卡（只建卡，不起 session；在定时任务页里是一个 job）。") : T("Makes a task from a common work on a timetable — say \"Weekly meeting {week}\" every Monday at 09:00. Write a common work first.", "到点自动用一个常见的活建任务，比如每周一 09:00 建「周会 {week}」。先写一个常见的活。")}</div>`)}</div>`;
   const auto = new Set(pr.auto || []);
   const autoBox = `<div class="ibox"><h4>${T("Comes in by itself", "自动来活")}${editBtn(name, "intake")}</h4>
-    ${AUTO_SOURCES.map(([k, label, what]) => `<div class="irow"><span class="t">${esc(label)}${auto.has(k) && INTAKE_READY.includes(k) ? intakeSummary(pr, k) : `<small>${esc(what)}</small>`}</span>
+    ${shownSources(auto).map(([k, label, what]) => `<div class="irow"><span class="t">${esc(label)}${auto.has(k) && INTAKE_READY.includes(k) ? intakeSummary(pr, k) : `<small class="full">${esc(what)}</small>`}</span>
       <button class="switch ${auto.has(k) ? "on" : ""}" data-action="p-auto" data-p="${esc(name)}" data-k="${k}"><span></span></button></div>`).join("")}
     ${INTAKE_READY.some((k) => auto.has(k)) ? intakeScanRow() : ""}
-    ${Object.entries(pr.intake || {}).filter(([k]) => !INTAKE_READY.includes(k)).flatMap(([, c]) => c.problems || []).map((x) => `<div class="meta inote warn">${esc(x)}</div>`).join("")}
-    <div class="meta inote">${T("QA Hub CI and Jira filter are switches only for now.", "QA Hub CI 和 Jira 过滤器目前只是开关。")}</div></div>`;
+    ${Object.entries(pr.intake || {}).filter(([k]) => !INTAKE_READY.includes(k)).flatMap(([, c]) => c.problems || []).map((x) => `<div class="meta inote warn">${esc(x)}</div>`).join("")}</div>`;
   const autoEdit = editing(name, "intake") ? `<div class="tpl-edit">${sectionEditor(name, "intake", INTAKE_SAMPLE())}
     <div class="meta">${T("A ### heading per source (github-review). repos: (comma-separated, * for any); workdir: where its session runs (default: the duty's first folder); run: yes starts a background session on each new task; permissions: skip lets it run without asking; done: manual (only you close the task) or auto; title: / goal: / prompt: (last: it takes the rest) can use {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.",
       "每个来源一个 ### 标题（github-review）。repos:（逗号分隔，* 表示任意仓库）；workdir: session 在哪个目录跑（默认职责的第一个目录）；run: yes 每建一个任务就在后台起一个 session；permissions: skip 让它不问权限直接跑；done: manual（只能你来关）或 auto；title: / goal: / prompt:（放最后，后面的行都算它的）可以用 {repo}（owner/name）{name} {number} {title} {url} {author} {branch} {base}。")}</div></div>` : "";
-  const tplEdit = editing(name, "templates") ? `<div class="tpl-edit">${sectionEditor(name, "templates",
-    T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"))}
+  const tplEdit = editing(name, "templates") ? `<div class="tpl-edit">${sectionEditor(name, "templates", TPL_SAMPLE())}
     <div class="meta">${T("A ### heading per template: title: (with {date} / {week}), goal:, and - [ ] @owner todo lines.", "每个模板一个 ### 标题：title:（可用 {date} / {week}）、goal:，以及 - [ ] @owner 待办 行。")}</div></div>` : "";
   // Folded under the tasks unless opened (remembered per duty) or a template is being edited: the
   // page is for the tasks; its one line says what there is.
@@ -625,10 +637,10 @@ function createProject(kind) {
     + fld(T("Healthy when", "健康标准"), tarea("nd:crit", T("One per line", "一行一条"), 3), "", T("one per line", "一行一条"))
     + fld(T("Brief", "简报"), tarea("nd:brief", T("Given to every session on its tasks", "交给它每个任务的 session"), 3), "", T("optional", "可不填"))
     + dirField("nd:"),
-  fld(T("Common work", "常见的活"), tarea("nd:tpl", T("### Triage\ntitle: Triage {date}\ngoal: Go through today's failures\n- [ ] @claude list the new failures", "### 值班\ntitle: 值班 {date}\ngoal: 过一遍今天的失败\n- [ ] @claude 列出新的失败"), 7),
+  fld(T("Common work", "常见的活"), tarea("nd:tpl", TPL_SAMPLE(), 7),
     T("A ### heading per kind of task; its page then has a ＋ for each, and can make them on a timetable", "每类活一个 ### 标题；它的页面上每类都有一个「＋ 建」，也能按时间表自动建"), T("optional", "可不填"))
-    + fld(T("Comes in by itself", "自动来活"), AUTO_SOURCES.map(([k, label, what]) => `<label class="toggle cm-check" title="${esc(what)}"><input type="checkbox" data-key="nd:auto:${k}" ${dv("nd:auto:" + k, false) ? "checked" : ""}> ${esc(label)}</label>`).join(""),
-      T("Only switches for now: nothing makes tasks from these sources yet", "目前只是开关：接上信息来源之后才会自动建任务"))];
+    + fld(T("Comes in by itself", "自动来活"), shownSources(null).map(([k, label, what]) => `<label class="toggle cm-check" title="${esc(what)}"><input type="checkbox" data-key="nd:auto:${k}" ${dv("nd:auto:" + k, false) ? "checked" : ""}> ${esc(label)}</label>`).join(""),
+      T("Set it up once the duty is made: ✎ in its How work comes in", "建好以后在它的「来活方式」里点 ✎ 配置"))];
 }
 function drawCreate() {
   const m = ui.modal;
@@ -688,8 +700,12 @@ async function submitCreate() {
     for (const [k, text] of secs) if (String(text).trim()) await api("project", { action: "section", names: [name, k, String(text).trim()] });
     const set = [];
     if (m.kind === "goal" && dv("ng:phases").trim()) set.push("phases=" + dv("ng:phases").split(/[,，]/).map((x) => x.trim()).filter(Boolean).join(","));
-    if (m.kind === "duty") { const on = AUTO_SOURCES.map(([k]) => k).filter((k) => dv("nd:auto:" + k, false)); if (on.length) set.push("auto=" + on.join(",")); }
+    // Only the sources the form shows: a draft from before one was hidden doesn't switch it on.
+    const on = m.kind === "duty" ? shownSources(null).map(([k]) => k).filter((k) => dv("nd:auto:" + k, false)) : [];
+    if (on.length) set.push("auto=" + on.join(","));
     if (set.length) await api("project", { action: "set", names: [name, ...set] });
+    // As the page's switch does: a source that makes tasks needs the scan.
+    if (on.some((k) => INTAKE_READY.includes(k)) && !(intakeJob() || {}).enabled) await api("intake-job-set", { on: true });
     if (m.kind === "goal") for (const sub of lines(dv("ng:subs"))) await api("new", { title: sub, project: name, focus: false });
     clearDrafts(p);
     toast(m.kind === "goal" ? T(`Project ${name} created`, `已建项目 ${name}`) : T(`Duty ${name} created`, `已建职责 ${name}`));
@@ -747,7 +763,7 @@ async function projAction(d) {
       }
       if (part === "meta") for (const k of META_KEYS(pr)) ui.drafts[`pm:${name}:${k}`] = metaVal(pr, k);
       // The section as written in PROJECT.md, comments and all (the parsed one drops details).
-      else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || (part === "intake" ? INTAKE_SAMPLE() : "");
+      else ui.drafts[`pe:${name}:${part}`] = (pr.raw || {})[part] || (part === "intake" ? INTAKE_SAMPLE() : part === "templates" ? TPL_SAMPLE() : "");
       render();
       const el = document.querySelector(`#proj-view [data-key="${CSS.escape(part === "meta" ? `pm:${name}:title` : `pe:${name}:${part}`)}"]`);
       if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
