@@ -377,6 +377,8 @@ rest moves to `HISTORY.md` beside it on every write (`enforce_budget`; nothing i
 `hq board --json` gives each task `history` (`log`, `links`, `todos` as parsed todos) and
 `historyInfo` (counts and path); the board merges them back in — log by time, history todos
 read-only among the finished ones, process links folded in a last **Process** group with ↑ (pin).
+A closed todo (on the card or in HISTORY.md) also carries `closed`: when its latest done/drop tick
+was logged (null when it was closed by editing the card); the board lists the latest closed first.
 A starting session gets one line saying how much history there is and where. `hq ref remove`
 removes the link from HISTORY.md too and prints `{"removed": […], "history": […]}` ("history" only
 when any went from there); `hq ref restore` puts both back. Over 16 KB, 30 links or 30 todos is

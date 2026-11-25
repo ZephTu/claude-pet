@@ -657,6 +657,22 @@ rm "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker has ended, the next session on the task takes the answer"
 rm -rf "$HOME/.claude/pet"
 
+# Closed todos carry when they were closed (their latest tick), so the board lists the latest first.
+CT=$("$HQ" new "Close order" | sed -n 's#.*/\(T-[0-9]*\)-.*#\1#p')
+"$HQ" addtodo "$CT" "first" >/dev/null; "$HQ" addtodo "$CT" "second" >/dev/null; "$HQ" addtodo "$CT" "third" >/dev/null
+"$HQ" todo "$CT" 2 done >/dev/null; sleep 1.1; "$HQ" todo "$CT" 1 drop >/dev/null; sleep 1.1
+"$HQ" todo "$CT" 3 done >/dev/null; "$HQ" todo "$CT" 3 open >/dev/null
+"$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$CT"'"][0]
+c={x["text"]: x.get("closed") for x in t["todos"]}
+assert c["first"] and c["second"] and c["first"] > c["second"], c
+assert c["third"] is None, c' && ok "board --json: a closed todo has its closing time; a reopened one none" || fail "todo closed times"
+# Two todos with one text: reopening one takes back only its own close.
+"$HQ" addtodo "$CT" "dup" >/dev/null; "$HQ" addtodo "$CT" "dup" >/dev/null
+"$HQ" todo "$CT" 4 done --text dup >/dev/null; sleep 1.1; "$HQ" todo "$CT" 5 done --text dup >/dev/null; "$HQ" todo "$CT" 5 open --text dup >/dev/null
+"$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$CT"'"][0]
+d=[x for x in t["todos"] if x["text"]=="dup"]
+assert d[0]["state"]=="done" and d[0]["closed"] and "+" in d[0]["closed"] or "-" in d[0]["closed"][19:], d
+assert d[1]["state"]=="open" and d[1].get("closed") is None, d' && ok "todos sharing a text keep their own closing times, with an offset" || fail "dup todo closed times"
 # A turn held open only by a background command that looks like a wait (the pet labels it
 # "shell") runs for 20 minutes at most; one held by an agent runs as long as the agent does.
 mkdir -p "$HOME/.claude/pet/sessions"

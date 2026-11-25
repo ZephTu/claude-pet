@@ -928,6 +928,11 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 .btn.armed { box-shadow: none; }
 .icon { border: 0; border-radius: 7px; }
 .icon:hover { border: 0; background: var(--panel-2); }
+/* An armed button stays red under the pointer — the hover above used to turn it grey there, so
+   it read as red only once the pointer had moved off it. */
+.icon.armed:hover { background: var(--red); color: #fff; filter: brightness(1.12); }
+.btn.ghost.armed, .btn.ghost.armed:hover { color: #fff; }
+.btn.ghost.armed:hover { background: var(--red); filter: brightness(1.12); }
 .icon.x { opacity: 0; transition: opacity .12s; }
 :is(.todo, .fhead, .ref-i, .it, .grant):hover .icon.x, .icon.x:focus-visible, .icon.x.armed { opacity: 1; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }

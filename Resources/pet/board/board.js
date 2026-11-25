@@ -877,10 +877,19 @@ function ensureHistory(taskId) {
     .finally(() => { ui.historyLoading.delete(taskId); render(); });
 }
 // Ended sessions of a task, newest first (a live one is listed with the live sessions instead).
+// Live is what the sessions list says now, not what the history read said up to a minute ago: a
+// session just stopped from here (or closed in its terminal) was missing from both lists until
+// that read expired — no Resume for it. Such a row also brings the read forward, for its last words.
 function earlierSessions(t) {
   ensureHistory(t.id);
   const live = new Set(ui.sessions.map((s) => s.sessionId));
-  return ((ui.history[t.id] || {}).rows || []).filter((r) => !r.live && !live.has(r.sessionId));
+  const h = ui.history[t.id];
+  const rows = (h || {}).rows || [];
+  if (h && Date.now() - h.at > 5000 && rows.some((r) => r.live && !live.has(r.sessionId))) {
+    h.at = 0;
+    ensureHistory(t.id);
+  }
+  return rows.filter((r) => !live.has(r.sessionId));
 }
 const resumeTip = (r) => T(`Resume it: claude --resume in ${r.cwd || "its directory"}${skipPerms() ? " (skipping permissions)" : ""}, in ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`,
   `续上它：在 ${r.cwd || "它原来的目录"} 里 claude --resume${skipPerms() ? "（跳过权限确认）" : ""}，开在 ${PLACES[launchPlace() === "bg" ? "terminal" : launchPlace()]}`);
@@ -1114,8 +1123,14 @@ function render() {
     const el = [...document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`)]
       .find((x) => regionOf(x) === activeRegion && x.getClientRects().length);
     if (el) {
-      el.focus();
+      // Without moving anything: focusing a box (and putting its caret back) scrolls it into view,
+      // so a task's drawer read further down, with the cursor left in an ask's answer box at its
+      // top, jumped back up to that box on every refresh.
+      const held = [];
+      for (let p = el.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight) held.push([p, p.scrollTop]);
+      el.focus({ preventScroll: true });
       if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]);
+      for (const [p, top] of held) p.scrollTop = top;
     }
   }
   restoreTextScrolls(document, taScrolls);
@@ -2297,12 +2312,22 @@ function renderTaskBody(t) {
   // Open todos first — yours, then Claude's, then anyone else's. Finished ones follow; past
   // FINISHED_SHOWN of them they fold behind "Show N finished" — except ones ticked in the last
   // hour, which stay for an easy undo.
-  const isRecent = (x) => ui.recent.some((r) => r.task === t.id && r.i === x.i && Date.now() - r.at < RECENT_MS);
+  // By number and text: a tick can renumber the card (the budget moves its oldest closed todo out).
+  const tickOf = (x) => ui.recent.find((r) => r.task === t.id && r.i === x.i && (!r.text || r.text === x.text));
+  const isRecent = (x) => { const r = tickOf(x); return Boolean(r && Date.now() - r.at < RECENT_MS); };
   const ownerRank = (x) => (x.owner === "me" ? 0 : x.owner === "claude" ? 1 : x.owner ? 2 : 3);
   const openTodos = t.todos.filter((x) => x.state === "open").sort((a, b) => ownerRank(a) - ownerRank(b));
   // Closed todos the card budget moved to HISTORY.md follow the card's own, read-only.
   const histDone = list(t.history && t.history.todos).map((x) => ({ ...x, hist: true }));
-  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse());
+  // Latest closed first, by the time hq read from the tick log (`closed`), or until hq has read it
+  // back, the tick made here a moment ago; ones with no time (closed by hand on the card) last,
+  // in the card's order.
+  const closedAt = (x) => {
+    const r = !x.hist && !x.closed && tickOf(x);
+    return Date.parse(x.closed || "") || (r && r.at) || 0;
+  };
+  const finished = t.todos.filter((x) => x.state !== "open").concat(histDone.slice().reverse())
+    .map((x, k) => [x, k]).sort((a, b) => closedAt(b[0]) - closedAt(a[0]) || a[1] - b[1]).map(([x]) => x);
   const anyTodos = t.todos.length + histDone.length;
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
   const shownDone = foldDone ? finished.filter(isRecent) : finished;
