@@ -1941,10 +1941,10 @@ def cmd_board(args):
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],
                             "todos": [todo_fields(x) for x in (TODO_RE.match(i.split("\n", 1)[0]) for i in h["Todos"]) if x]}
             # When each closed todo was closed, so the board lists the latest first.
-            closed = todo_closed_times(m)
-            for x in d["todos"] + d["history"]["todos"]:
+            closed = todo_closed_times(m, h["Log"])
+            for x in reversed(d["history"]["todos"] + d["todos"]):
                 if x["state"] != "open":
-                    x["closed"] = closed.get(" ".join(x["text"].split()))
+                    x["closed"] = closed_time(closed, x["text"])
             d["historyInfo"] = history_info(m["path"])
             d["lastActive"] = last_active(m, h)
             out.append(d)
@@ -2376,10 +2376,11 @@ def log_entries(body):
     return out
 
 
-def history_log_entries(card):
-    """The Log lines of a card's HISTORY.md, as log_entries gives them: ticks and older entries."""
+def history_log_entries(card, items=None):
+    """The Log lines of a card's HISTORY.md, as log_entries gives them: ticks and older entries.
+    items: that Log, when the caller has read HISTORY.md already."""
     out = []
-    for item in read_history(card)["Log"]:
+    for item in read_history(card)["Log"] if items is None else items:
         x = LOG_LINE_RE.match(item.split("\n", 1)[0].strip())
         t = naive(x.group(1)) if x else None
         if t:
@@ -2390,20 +2391,30 @@ def history_log_entries(card):
 TICK_RE = re.compile(r"^todo #\d+ → (done|drop|open) \(([^)]*)\): (.*)$")
 
 
-def todo_closed_times(meta):
-    """When each closed todo was closed: its plain text → the time of its latest done or drop tick,
-    from the Log of the card and of HISTORY.md (the card's lines carry no such time). A reopen
-    after it clears it; a todo closed by hand on the card has none."""
+def todo_closed_times(meta, hist_log=None):
+    """When closed todos were closed: plain text → the times of its done or drop ticks still
+    standing, oldest first, from the Log of the card and of HISTORY.md (the card's lines carry no
+    such time). A reopen takes back the latest one; a todo closed by hand on the card has none.
+    Several todos with one text each take one of that text's times (see closed_time)."""
     out = {}
-    for t, text in sorted(log_entries(meta["body"]) + history_log_entries(meta["path"]), key=lambda e: e[0]):
+    for t, text in sorted(log_entries(meta["body"]) + history_log_entries(meta["path"], hist_log),
+                          key=lambda e: e[0]):
         tick = TICK_RE.match(text)
         if tick:
-            key = todo_plain(tick.group(3))
+            times = out.setdefault(todo_plain(tick.group(3)), [])
             if tick.group(1) == "open":
-                out.pop(key, None)
+                times[-1:] = []
             else:
-                out[key] = iso(t)
+                times.append(t.astimezone().isoformat(timespec="seconds"))   # with its offset: a phone may be elsewhere
     return out
+
+
+def closed_time(times, text):
+    """The closing time of a todo with this text, newest first: the board asks for the card's own
+    todos, last first, before HISTORY.md's (closed earliest). None once that text's times are used
+    up (more todos of that text than ticks: the rest were closed by hand)."""
+    left = times.get(todo_plain(text))
+    return left.pop() if left else None
 
 
 def pr_states(urls, timeout=20):

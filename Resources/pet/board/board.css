@@ -931,6 +931,7 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 /* An armed button stays red under the pointer — the hover above used to turn it grey there, so
    it read as red only once the pointer had moved off it. */
 .icon.armed:hover { background: var(--red); color: #fff; filter: brightness(1.12); }
+.btn.ghost.armed, .btn.ghost.armed:hover { color: #fff; }
 .btn.ghost.armed:hover { background: var(--red); filter: brightness(1.12); }
 .icon.x { opacity: 0; transition: opacity .12s; }
 :is(.todo, .fhead, .ref-i, .it, .grant):hover .icon.x, .icon.x:focus-visible, .icon.x.armed { opacity: 1; }

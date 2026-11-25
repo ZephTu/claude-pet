@@ -614,6 +614,13 @@ CT=$("$HQ" new "Close order" | sed -n 's#.*/\(T-[0-9]*\)-.*#\1#p')
 c={x["text"]: x.get("closed") for x in t["todos"]}
 assert c["first"] and c["second"] and c["first"] > c["second"], c
 assert c["third"] is None, c' && ok "board --json: a closed todo has its closing time; a reopened one none" || fail "todo closed times"
+# Two todos with one text: reopening one takes back only its own close.
+"$HQ" addtodo "$CT" "dup" >/dev/null; "$HQ" addtodo "$CT" "dup" >/dev/null
+"$HQ" todo "$CT" 4 done --text dup >/dev/null; sleep 1.1; "$HQ" todo "$CT" 5 done --text dup >/dev/null; "$HQ" todo "$CT" 5 open --text dup >/dev/null
+"$HQ" board --json | python3 -c 'import json,sys; t=[x for x in json.load(sys.stdin)["tasks"] if x["id"]=="'"$CT"'"][0]
+d=[x for x in t["todos"] if x["text"]=="dup"]
+assert d[0]["state"]=="done" and d[0]["closed"] and "+" in d[0]["closed"] or "-" in d[0]["closed"][19:], d
+assert d[1]["state"]=="open" and d[1].get("closed") is None, d' && ok "todos sharing a text keep their own closing times, with an offset" || fail "dup todo closed times"
 
 # history: the sessions that worked on a task, with what resuming one needs.
 HSID=0a1b2c3d-1111-2222-3333-444455556666
