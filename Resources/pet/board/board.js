@@ -3762,6 +3762,10 @@ function drawContext() {
   const box = $("#modal");
   if (!t) { closePeek(); return toast(T("That task is gone", "这个任务已经不在了"), true); }
   const ask = m.kind === "ask" ? (t.asks || []).find((a) => a.id === m.id) : null;
+  // The reply that raised it, as when the window opened: answered since (here, on a phone, in its
+  // session), the board's data no longer carries it (hq board --json), but this window still shows it.
+  if (ask && ask.context) m.context = ask.context;
+  const askContext = (ask && ask.context) || m.context || "";
   const todo = m.kind === "todo" ? t.todos.find((x) => x.i === m.i) : null;
   const heading = m.kind === "ask" ? `Ask ${esc(m.id)}` : T("Your todo", "你的待办");
   const text = ask ? ask.text : todo ? todo.text : t.waiting_on_me;
@@ -3777,7 +3781,7 @@ function drawContext() {
       <div class="meta">${T(`Raised ${ago(ask.ts)}${ask.session ? ` in ${askSession ? `<b>${esc(askSession.title || askSession.project)}</b> (live)` : `session ${esc(ask.session.slice(0, 8))} (ended)`}` : ""}`,
         `${ask.session ? `在${askSession ? ` <b>${esc(askSession.title || askSession.project)}</b>（运行中）` : ` session ${esc(ask.session.slice(0, 8))}（已结束）`}里，` : ""}${ago(ask.ts)}提出`)}</div>
       ${ask.session ? `<div class="row" style="margin:6px 0">${sessBtn(ask.session, T("Open that conversation", "打开那段对话"), Boolean(askSession))}</div>` : ""}
-      ${ask.context ? `<div class="md quote">${markdown(ask.context)}</div>`
+      ${askContext ? `<div class="md quote">${markdown(askContext)}</div>`
         : `<div class="empty">${T("The reply that asked this wasn't recorded (asks from before this was added) — open the conversation above.", "提出这个问题的那条回复没有记录下来（这个功能加上之前的 ask）——打开上面的对话看。")}</div>`}
     </section>`;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Context", "上下文")}">
