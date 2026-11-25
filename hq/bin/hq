@@ -5587,6 +5587,29 @@ def message_text(o):
     return None
 
 
+COMMAND_NAME = re.compile(r"<command-name>\s*(/?[^<\s]+)\s*</command-name>")
+COMMAND_ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+
+
+def command_text(o):
+    """A slash command the user ran ("/compact", "/task T-108"), as typed, else None. Claude Code
+    writes it as a user entry of <command-name>/<command-args> tags, which message_text leaves out
+    with the rest of its markup; its output (<local-command-stdout>) is a separate entry, not this."""
+    if o.get("type") != "user" or o.get("isSidechain") or o.get("isMeta"):
+        return None
+    c = (o.get("message") or {}).get("content")
+    if isinstance(c, list):
+        c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+    if not isinstance(c, str) or "<command-name>" not in c[:400]:
+        return None
+    m = COMMAND_NAME.search(c)
+    if not m:
+        return None
+    name = m.group(1) if m.group(1).startswith("/") else "/" + m.group(1)
+    a = COMMAND_ARGS.search(c)
+    return f"{name} {a.group(1).strip()}".strip() if a else name
+
+
 def ts_seconds(ts):
     try:
         return dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
@@ -5875,6 +5898,18 @@ def peek_timeline(entries):
             for it in [tools.get(m.group(1).strip()) if m else None] + [by_bg.get(k.strip()) for k in NOTE_TASK.findall(note)]:
                 if it and it["status"] == "background":
                     it.update(status=note_status(st), endTs=ts, bg=st or "done")
+            continue
+        cmd = command_text(o)
+        if cmd:
+            # /compact is written once the compaction is over, after the line saying it happened
+            # (its own timestamp is from when it was typed): it goes before that line, as it ran.
+            row = {"kind": "msg", "role": "user", "text": cmd, "ts": ts, "command": True}
+            k, at_s = len(items), ts_seconds(ts)
+            while k and items[k - 1]["kind"] == "event" and items[k - 1]["event"] == "compact" \
+                    and at_s is not None and (ts_seconds(items[k - 1]["ts"]) or 0) > at_s:
+                k -= 1
+            items.insert(k, row)
+            last_user = {"text": cmd, "ts": ts}
             continue
         t = message_text(o)
         if not t:
@@ -6180,7 +6215,7 @@ def live_sessions():
         if not isinstance(d, dict) or not pid_alive(d.get("pid")):
             continue
         sid = d.get("sessionId") or name[:-5]
-        last = None
+        last, reply = None, None
         # Screenshots and big tool results can fill the tail; widen once if needed.
         for nbytes in (300_000, 3_000_000):
             entries = transcript_tail(d.get("transcript"), nbytes)
@@ -6193,6 +6228,12 @@ def live_sessions():
                         break
             if last:
                 break
+        # The reply its last turn ended on. Idle, that is the end of the transcript; while a turn
+        # runs, it is what the Stop hook saved (the transcript only if it has none, and is near).
+        turn_open = d.get("state") in ("busy", "waiting")
+        saved = saved_reply(sid) if turn_open else None
+        reply = {"text": saved["text"], "ts": saved.get("ts"), "prev": True} if saved \
+            else last_reply(entries, turn_open) or (None if turn_open else saved_reply(sid))
         out.append({
             "sessionId": sid,
             "title": session_title(entries),
@@ -6208,9 +6249,65 @@ def live_sessions():
             # Set when this session's own hq-update finished its task: {task, status, at}.
             "finished": state.get(sid, {}).get("finished"),
             "lastText": (last or "")[:400],
+            "lastReply": reply,
         })
     out.sort(key=lambda s: s.get("updatedAt") or "", reverse=True)
     return out
+
+
+LAST_REPLY_MAX = 6000   # as much as an ask keeps of the reply that raised it
+REPLIES = os.path.join(HOME_DIR, "state", "replies")   # <session id>.json: its last turn's reply
+REPLIES_KEEP_DAYS = 14
+
+
+def save_reply(sid, text):
+    """At a bound session's Stop: what its turn ended on, for the board to show while the next turn
+    runs — by then the reply may sit megabytes back in the transcript, under the turn's screenshots
+    and tool output, too far for a poll every few seconds to read. A reply holding only HQ's blocks
+    keeps the one before it. Files untouched for REPLIES_KEEP_DAYS go (their sessions are long over)."""
+    t = strip_hq_blocks(text or "").strip()
+    if not sid or not t or "/" in sid:
+        return
+    os.makedirs(REPLIES, exist_ok=True)
+    old = time.time() - REPLIES_KEEP_DAYS * 86400
+    for name in os.listdir(REPLIES):
+        try:
+            if os.path.getmtime(os.path.join(REPLIES, name)) < old:
+                os.remove(os.path.join(REPLIES, name))
+        except OSError:
+            pass
+    atomic_write(os.path.join(REPLIES, sid + ".json"),
+                 json.dumps({"text": t[:LAST_REPLY_MAX], "ts": now_iso()}, ensure_ascii=False))
+
+
+def saved_reply(sid):
+    d = load_json(os.path.join(REPLIES, sid + ".json"), None) if sid and "/" not in sid else None
+    return d if isinstance(d, dict) and d.get("text") else None
+
+
+def last_reply(entries, turn_open):
+    """What the session said at the end of its last finished turn: {text, ts, prev}, or None. Its
+    last reply without HQ's blocks (a reply that was only those says nothing: the one before it
+    counts); Claude Code's own stand-ins (model <synthetic>) and compaction summaries are not
+    replies. While a turn is going (turn_open), what it says mid-turn is not where it got to: the
+    reply is the one before the turn's prompt, and prev says so."""
+    # A turn starts with a user entry: a prompt, a slash command, or a background task's
+    # notification reaching an idle session. Not an attachment: a prompt queued while Claude
+    # works, or a notification arriving then, is folded into the turn already going.
+    def starts(o):
+        return o.get("type") == "user" and not o.get("isSidechain") and not o.get("isMeta") \
+            and bool(message_text(o) or notification_text(o) or command_text(o))
+    hi = len(entries)
+    if turn_open:
+        hi = next((i for i in range(len(entries) - 1, -1, -1) if starts(entries[i])), 0)
+    for o in reversed(entries[:hi]):
+        if o.get("type") != "assistant" or o.get("isSidechain") \
+                or (o.get("message") or {}).get("model") == "<synthetic>":
+            continue
+        t = strip_hq_blocks(message_text(o) or "").strip()
+        if t:
+            return {"text": t[:LAST_REPLY_MAX], "ts": entry_ts(o), "prev": bool(turn_open)}
+    return None
 
 
 # ---------------------------------------------------------------- onboarding scan
@@ -8256,6 +8353,7 @@ def _hook_main():
 
     elif event == "Stop":
         text = last_assistant_text(payload)
+        save_reply(sid, text)
         problems = []
         blocks = hq_blocks(text)
         # A status the reply wrote itself (and that was applied) wins over the automatic moves,

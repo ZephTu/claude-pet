@@ -459,7 +459,43 @@ stop sess-1 "$(printf 'still done\n```hq-update\nstatus: done\nlog: tidy\n```')"
 [ "$(fin)" = "$first" ] && ok "a task already done is not finished again" || fail "re-finished: $(fin)"
 mkdir -p "$HOME/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"sess-1\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
 "$HQ" sessions --json | python3 -c 'import json,sys; s=[x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]; assert s["finished"]["status"]=="done" and s["task"]=="T-001", s' && ok "hq sessions --json carries the finished mark" || fail "sessions --json finished"
+# Its last turn's reply, saved at Stop for the board's session row (the transcript is not here).
+lr() { "$HQ" sessions --json | python3 -c 'import json,sys; print(json.dumps([x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]["lastReply"]))'; }
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["ts"], r' && ok "hq sessions --json carries the reply its last turn ended on, without HQ blocks" || fail "lastReply: $(lr)"
+stop sess-1 "$(printf '```hq-update\ntouch\n```')" >/dev/null
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "a reply holding only HQ blocks keeps the one before it" || fail "lastReply bookkeeping: $(lr)"
+echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
+lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["prev"] is True, r' && ok "while a turn runs, the reply is the last turn's, marked prev" || fail "lastReply busy: $(lr)"
 rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null
+
+# Peek shows the slash commands you ran (/compact before the line saying it compacted, as it ran),
+# and a session's last reply skips Claude Code's stand-ins and, mid-turn, the turn going on.
+python3 - "$HQ" <<'PY' && ok "slash commands in Peek; last_reply picks the finished turn's reply" || fail "commands / last_reply"
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+def u(text, ts, **kw): return {"type": "user", "message": {"role": "user", "content": text}, "timestamp": ts, **kw}
+def a(text, ts, model="claude"): return {"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": text}]}, "timestamp": ts}
+T = lambda s: f"2026-01-01T00:00:{s:02d}Z"
+cmd = "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"
+entries = [u("hi", T(1)), a("Hello.\n```hq-update\ntouch\n```", T(2)),
+           {"type": "system", "subtype": "compact_boundary", "compactMetadata": {"trigger": "manual", "preTokens": 9, "postTokens": 1}, "timestamp": T(9)},
+           u("summary", T(8), isCompactSummary=True), u(cmd, T(5)),
+           u("<local-command-stdout>Compacted</local-command-stdout>", T(9)),
+           u("<command-name>/task</command-name><command-args>T-108</command-args>", T(10)),
+           u("skill body", T(10), isMeta=True), a("No response requested.", T(11), model="<synthetic>")]
+items = hq.peek_timeline(entries)
+kinds = [(i["kind"], i.get("text") or i.get("event")) for i in items]
+assert kinds == [("msg", "hi"), ("msg", "Hello.\n```hq-update\ntouch\n```"), ("msg", "/compact"), ("event", "compact"), ("msg", "/task T-108"), ("msg", "No response requested.")], kinds
+assert items[2]["command"] and items[4]["command"]
+r = hq.last_reply(entries, False)
+assert r["text"] == "Hello." and r["prev"] is False, r
+busy = [u("do it", T(1)), a("Done: all of it.", T(2)), u("next", T(3)), a("Looking at the code…", T(4)),
+        {"type": "attachment", "attachment": {"type": "queued_command", "prompt": "also this", "origin": {"kind": "human"}}, "timestamp": T(5)}]
+r = hq.last_reply(busy, True)
+assert r["text"] == "Done: all of it." and r["prev"] is True, r
+assert hq.last_reply(busy, False)["text"] == "Looking at the code…"
+PY
 stop sess-1 "$(printf 'reopened\n```hq-update\nstatus: blocked\n```')" >/dev/null
 stop sess-1 "$(printf 'gave up\n```hq-update\nstatus: abandoned\n```')" >/dev/null
 fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="abandoned", d' && ok "reopened and abandoned: a new finished mark" || fail "abandoned mark: $(fin)"
