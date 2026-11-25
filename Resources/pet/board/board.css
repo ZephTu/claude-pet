@@ -713,6 +713,7 @@ main { height: calc(100% - 46px - 30px); }
 .sgroup { display: inline-flex; align-items: center; gap: 6px; }
 .sgroup + .sgroup { padding-left: 18px; border-left: 1px solid var(--line); }
 .sgroup .dot { margin: 0 2px 0 0; }
+.sgroup .np { display: inline-flex; align-items: center; gap: 6px; }   /* a number and its word, spaced as the group's items */
 .sp { color: var(--faint); } .sp::before { content: "· "; }
 .sp.warn b, .sp.warn { color: var(--amber); } .sp.bad b, .sp.bad { color: var(--red); }
 .sgroup.jump { cursor: pointer; } .sgroup.jump:hover { color: var(--text); }
@@ -1927,10 +1928,11 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
   #statusbar .spacer { display: none; }
   #statusbar #counts { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; column-gap: 16px; white-space: normal; overflow: visible; }
   .sgroup { flex-wrap: wrap; }
+  .sgroup .np { white-space: nowrap; }   /* a number stays with its word */
   .sgroup + .sgroup { padding-left: 0; border-left: 0; }   /* on a line of its own it would start with a bar */
   #quota { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
   #quota:empty { display: none; }
-  #toast { bottom: calc(44px + env(safe-area-inset-bottom)); max-width: calc(100% - 24px); }
+  #toast { bottom: calc(var(--statusbar-h, calc(32px + env(safe-area-inset-bottom))) + 12px); max-width: calc(100% - 24px); }   /* over the status bar, however tall */
 
   /* Fingers, not a pointer. */
   .icon { min-width: 34px; min-height: 34px; }
