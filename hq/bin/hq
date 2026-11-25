@@ -6229,11 +6229,15 @@ def live_sessions():
             if last:
                 break
         # The reply its last turn ended on. Idle, that is the end of the transcript; while a turn
-        # runs, it is what the Stop hook saved (the transcript only if it has none, and is near).
+        # runs, it is what the Stop hook saved, unless the transcript's tail reaches a newer one:
+        # a turn ended with Esc, or run while the session was unbound, never reached that hook.
         turn_open = d.get("state") in ("busy", "waiting")
+        found = last_reply(entries, turn_open)
         saved = saved_reply(sid) if turn_open else None
-        reply = {"text": saved["text"], "ts": saved.get("ts"), "prev": True} if saved \
-            else last_reply(entries, turn_open) or (None if turn_open else saved_reply(sid))
+        if saved and not (found and (ts_seconds(found.get("ts")) or 0) > (ts_seconds(saved.get("ts")) or 0)):
+            reply = {"text": saved["text"], "ts": saved.get("ts"), "prev": True}
+        else:
+            reply = found or (None if turn_open else saved_reply(sid))
         out.append({
             "sessionId": sid,
             "title": session_title(entries),
@@ -8353,7 +8357,10 @@ def _hook_main():
 
     elif event == "Stop":
         text = last_assistant_text(payload)
-        save_reply(sid, text)
+        try:
+            save_reply(sid, text)
+        except OSError as e:   # a full disk must not cost the reply its hq-update and asks
+            print(f"hq hook: saving the reply: {e}", file=sys.stderr)
         problems = []
         blocks = hq_blocks(text)
         # A status the reply wrote itself (and that was applied) wins over the automatic moves,

@@ -466,6 +466,20 @@ stop sess-1 "$(printf '```hq-update\ntouch\n```')" >/dev/null
 lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "a reply holding only HQ blocks keeps the one before it" || fail "lastReply bookkeeping: $(lr)"
 echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
 lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["prev"] is True, r' && ok "while a turn runs, the reply is the last turn's, marked prev" || fail "lastReply busy: $(lr)"
+# A turn ended with Esc never reached the Stop hook: a newer reply in the transcript wins over the saved one.
+esc_turn() { python3 - "$T/tr.jsonl" "$1" <<'PY'
+import json, sys
+row = lambda o: json.dumps(o)
+y = sys.argv[2]
+with open(sys.argv[1], "w") as f:
+    f.write(row({"type": "user", "message": {"role": "user", "content": "go"}, "timestamp": f"{y}-01-01T00:00:00Z"}) + "\n")
+    f.write(row({"type": "assistant", "message": {"model": "claude", "content": [{"type": "text", "text": "cut short"}]}, "timestamp": f"{y}-01-01T00:00:05Z"}) + "\n")
+    f.write(row({"type": "user", "message": {"role": "user", "content": "next"}, "timestamp": f"{y}-01-01T00:00:09Z"}) + "\n")
+PY
+echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\", \"transcript\": \"$T/tr.jsonl\"}" > "$HOME/.claude/pet/sessions/sess-1.json"; }
+esc_turn 2099; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="cut short" and r["prev"] is True, r' && ok "mid-turn, a reply newer than the saved one (an Esc-ended turn) wins" || fail "stale saved reply: $(lr)"
+esc_turn 2001; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "an older one in the transcript doesn't" || fail "older transcript reply won: $(lr)"
+rm "$T/tr.jsonl"
 rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" "$HOME/.claude/pet" 2>/dev/null
 
 # Peek shows the slash commands you ran (/compact before the line saying it compacted, as it ran),

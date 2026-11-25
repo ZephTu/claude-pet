@@ -1226,13 +1226,14 @@ function setSessReply(key, open) {
   for (const k of ks.slice(0, Math.max(0, ks.length - 200))) delete sessReplyOpen[k];
   try { localStorage.setItem(SESS_REPLY_KEY, JSON.stringify(sessReplyOpen)); } catch (e) { /* private mode */ }
 }
-// The line of its last words above that: only while a turn runs (idle, they are that reply), and
-// not when they are what that reply says (a turn just woken, say by a background task ending).
+// The line of its last words above that, unless they are what that reply says: idle, they
+// usually are; they aren't while a turn runs (unless it was just woken, say by a background task
+// ending), or after an API error, whose stand-in is no reply, so the reply below is an older one.
 function lastWordsShown(s) {
   const w = plainText(s.lastText), r = s.lastReply;
   if (!w) return false;
   if (!r || !r.text) return true;
-  return r.prev && !plainText(r.text).startsWith(w.slice(0, 80));
+  return !plainText(r.text).startsWith(w.slice(0, 80));
 }
 function sessReply(t, s) {
   const r = s.lastReply;
