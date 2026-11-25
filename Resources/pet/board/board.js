@@ -1182,15 +1182,21 @@ function renderCounts() {
   const loose = unsortedNotes().length;
   // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
   // you (click → Needs you), and the quota on the right.
+  const np = (n, label) => `<span class="np"><b>${n}</b> ${label}</span>`;   // wraps as one on a phone
   $("#counts").innerHTML =
-    `<span class="sgroup jump" data-action="open-sessions" title="${T("Live Claude Code sessions — click for the list", "正在运行的 Claude Code session——点击看列表")}"><b>${ui.sessions.length}</b> ${T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session")}` +
+    `<span class="sgroup jump" data-action="open-sessions" title="${T("Live Claude Code sessions — click for the list", "正在运行的 Claude Code session——点击看列表")}">${np(ui.sessions.length, T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session"))}` +
       `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
     (asks || mine || later || loose ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
-      [asks ? `<b>${asks}</b> ${T(`ask${asks === 1 ? "" : "s"}`, "个问题")}` : "", mine ? `<b>${mine}</b> ${T(`todo${mine === 1 ? "" : "s"}`, "条待办")}` : "",
-       loose ? `<b>${loose}</b> ${T(`unsorted note${loose === 1 ? "" : "s"}`, "条未分拣")}` : ""].filter(Boolean).join(" · ") +
+      [asks ? np(asks, T(`ask${asks === 1 ? "" : "s"}`, "个问题")) : "", mine ? np(mine, T(`todo${mine === 1 ? "" : "s"}`, "条待办")) : "",
+       loose ? np(loose, T(`unsorted note${loose === 1 ? "" : "s"}`, "条未分拣")) : ""].filter(Boolean).join(" · ") +
       `${later ? `<span class="sp">${T(`${later} for later`, `${later} 条稍后再答`)}</span>` : ""}</span>` : "");
   $("#quota").innerHTML = usageChips();
 }
+// The page leaves room under it for the status bar, which on a phone can take a few lines.
+try {
+  new ResizeObserver(([e]) => document.body.style.setProperty("--statusbar-h", `${Math.ceil(e.target.offsetHeight)}px`))
+    .observe(document.getElementById("statusbar"));
+} catch (e) { /* no ResizeObserver: the CSS fallback */ }
 // The subscription's 5-hour and weekly limits — percent used and when each resets — as the
 // statusline last saw them (see BoardBridge.usageSnapshot). Nothing when there is no fresh copy.
 function untilText(iso) {
