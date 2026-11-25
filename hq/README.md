@@ -427,9 +427,10 @@ status: active             # active | paused | done | abandoned (a duty: active 
 due: 2026-12-19            # a goal's deadline
 parent: qa-oncall          # a goal can sit under a duty (only a goal, only under a duty)
 phases: ["Design", "Build", "Ship"]   # a goal's phases, in order; a card's `phase:` picks one
-auto: ["qahub-ci"]         # a duty's switches for work that comes in by itself:
+auto: ["github-review"]    # a duty's switches for work that comes in by itself:
                            #   qahub-ci | github-review | jira-filter (github-review makes
-                           #   tasks, set up in Auto intake; the others are switches only)
+                           #   tasks, set up in Auto intake; the others make nothing yet,
+                           #   and the board doesn't show them)
 jira: ["QA-9397"]          # epics it tracks
 fixVersions: ["4.2.7"]
 updated: 2026-11-23
