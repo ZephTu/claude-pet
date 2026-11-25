@@ -28,6 +28,17 @@ enum RemoteAccessTests {
         t.check("garbage is refused", req("hello\r\n\r\n") == .reject(400))
         t.check("endless headers are refused (431)",
                 RemoteAccess.parse(Data(("GET / HTTP/1.1\r\nX: " + String(repeating: "a", count: 40_000)).utf8)) == .reject(431))
+        // The head is read alone first: the server decides before taking a body.
+        if case .head(let h, let length, let start) = RemoteAccess.head(Data(post.utf8)) {
+            t.check("a head is read without its body: its length, and where the body starts",
+                    h.path == "/api" && h.body.isEmpty && length == 13 && start == post.utf8.count - 12)
+        } else {
+            t.check("a head is read without its body", false)
+        }
+        t.check("a GET with a body, where none is allowed, is refused (413)",
+                RemoteAccess.parse(Data("GET / HTTP/1.1\r\nContent-Length: 5\r\n\r\n".utf8), maxBody: 0) == .reject(413))
+        t.check("two different lengths are refused",
+                req("POST /api HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab") == .reject(400))
 
         // Who may connect: the local network only.
         t.check("192.168.x, 10.x, 172.16–31.x and loopback are local",
@@ -41,6 +52,34 @@ enum RemoteAccessTests {
         let linkLocal: [UInt8] = [0xfe, 0x80] + Array(repeating: 0, count: 13) + [1]
         let ula: [UInt8] = [0xfd, 0x12] + Array(repeating: 0, count: 14)
         let global: [UInt8] = [0x20, 0x01, 0x0d, 0xb8] + Array(repeating: 0, count: 12)
+        let tailnet: [UInt8] = [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0, 0xab, 0x12] + Array(repeating: 0, count: 7) + [9]
+        t.check("Tailscale's IPv6 addresses are not local (they reach across the internet)", !RemoteAccess.isLocal(tailnet))
+        let net6: [UInt8] = [0x24, 0x09, 0x89, 0x20, 0x11, 0x00, 0xab, 0xcd] + Array(repeating: 0, count: 8)
+        let mask64: [UInt8] = Array(repeating: 0xff, count: 8) + Array(repeating: 0, count: 8)
+        let sameNet = Array(net6.prefix(8)) + [1, 2, 3, 4, 5, 6, 7, 8]
+        let otherNet = [0x24, 0x09, 0x89, 0x20, 0x11, 0x00, 0xab, 0xce] + [1, 2, 3, 4, 5, 6, 7, 8] as [UInt8]
+        t.check("a public IPv6 address in the Mac's own /64 is on its network; one next door is not",
+                RemoteAccess.inSubnet(sameNet, net: net6, mask: mask64) && !RemoteAccess.inSubnet(otherNet, net: net6, mask: mask64))
+        t.check("a zero mask, or IPv4 against IPv6, is no network",
+                !RemoteAccess.inSubnet(sameNet, net: net6, mask: Array(repeating: 0, count: 16))
+                && !RemoteAccess.inSubnet([192, 168, 0, 2], net: net6, mask: mask64))
+        t.check("wrong tokens count against an address, for IPv6 its /64",
+                RemoteAccess.lockKey([192, 168, 0, 9]) == "192.168.0.9" && RemoteAccess.lockKey(mapped) == "192.168.0.9"
+                && RemoteAccess.lockKey(sameNet) == "240989201100abcd/64"
+                && RemoteAccess.lockKey(sameNet) == RemoteAccess.lockKey(Array(net6.prefix(8)) + Array(repeating: 9, count: 8)))
+        var lock = RemoteAccess.Lockout()
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        for k in 0..<(RemoteAccess.maxFailures - 1) { lock.fail("a", now: t0.addingTimeInterval(Double(k))) }
+        t.check("below the limit, an address isn't shut out", !lock.locked("a", now: t0.addingTimeInterval(30)))
+        let last = t0.addingTimeInterval(500)
+        lock.fail("a", now: last)
+        t.check("at the limit it is, for 10 minutes from its last wrong token",
+                lock.locked("a", now: last.addingTimeInterval(RemoteAccess.lockout - 1))
+                && !lock.locked("a", now: last.addingTimeInterval(RemoteAccess.lockout)) && !lock.locked("b", now: last))
+        lock.fail("a", now: last.addingTimeInterval(RemoteAccess.lockout + 1))
+        t.check("a count older than the lockout starts again", !lock.locked("a", now: last.addingTimeInterval(RemoteAccess.lockout + 2)))
+        lock.clear("a")
+        t.check("a right token clears the count", !lock.locked("a", now: last))
         t.check("IPv6: mapped private, link-local, ULA and ::1 are local; global and mapped public are not",
                 RemoteAccess.isLocal(mapped) && RemoteAccess.isLocal(linkLocal) && RemoteAccess.isLocal(ula)
                 && RemoteAccess.isLocal(Array(repeating: 0, count: 15) + [1])

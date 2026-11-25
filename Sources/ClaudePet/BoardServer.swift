@@ -44,8 +44,10 @@ final class BoardServer {
     private var listener: NWListener?
     private let bridge = BoardBridge()
     private var lastError: String?
-    /// Wrong tokens by address: how many, and since when.
-    private var failures: [String: (count: Int, since: Date)] = [:]
+    private var lockout = RemoteAccess.Lockout()
+    /// Connections open now. A phone opens a handful at once; many more is someone flooding.
+    private var open = 0
+    private static let maxOpen = 48
     private var root: URL? { Bundle.module.url(forResource: "pet", withExtension: nil)?.standardizedFileURL }
 
     var enabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
@@ -206,14 +208,51 @@ final class BoardServer {
 
     private func accept(_ conn: NWConnection) {
         // Turned away before a byte is read: a peer outside the local network.
-        guard let address = Self.peerBytes(conn.endpoint), RemoteAccess.isLocal(address) else {
+        guard let address = Self.peerBytes(conn.endpoint),
+              RemoteAccess.isLocal(address) || Self.onLink(address), open < Self.maxOpen else {
             conn.cancel()
             return
         }
-        let c = Connection(conn: conn, peer: Self.peerName(conn.endpoint)) { [weak self] req, peer in
-            await self?.respond(to: req, from: peer) ?? RemoteAccess.response(status: 500, type: "text/plain", body: Data())
-        }
+        open += 1
+        let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address))
+        let c = Connection(conn: conn, peer: peer,
+                           admit: { [weak self] req, peer in self?.admit(req, from: peer) ?? .refuse(Data()) },
+                           handler: { [weak self] req, peer in
+                               await self?.respond(to: req, from: peer)
+                                   ?? RemoteAccess.response(status: 500, type: "text/plain", body: Data())
+                           },
+                           closed: { [weak self] in self?.open -= 1 })
         c.start()
+    }
+
+    /// A peer in a network the Mac is on itself — a public IPv6 address from the home router, say.
+    /// Tunnels (Tailscale, VPNs: utun…) don't count: their peers are anywhere.
+    private static func onLink(_ peer: [UInt8]) -> Bool {
+        let mapped = peer.count == 16 && peer[0..<10].allSatisfy { $0 == 0 } && peer[10] == 0xff && peer[11] == 0xff
+        let address = mapped ? Array(peer[12..<16]) : peer
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return false }
+        defer { freeifaddrs(head) }
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let ifa = ptr.pointee
+            let name = String(cString: ifa.ifa_name)
+            guard (ifa.ifa_flags & UInt32(IFF_UP)) != 0, (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0,
+                  (ifa.ifa_flags & UInt32(IFF_POINTOPOINT)) == 0,
+                  !["utun", "ipsec", "ppp", "gif", "stf", "awdl", "llw"].contains(where: name.hasPrefix),
+                  let sa = ifa.ifa_addr, let nm = ifa.ifa_netmask else { continue }
+            let net: [UInt8], mask: [UInt8]
+            switch Int32(sa.pointee.sa_family) {
+            case AF_INET6:
+                net = sa.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { p in withUnsafeBytes(of: p.pointee.sin6_addr) { Array($0) } }
+                mask = nm.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { p in withUnsafeBytes(of: p.pointee.sin6_addr) { Array($0) } }
+            case AF_INET:
+                net = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { p in withUnsafeBytes(of: p.pointee.sin_addr) { Array($0) } }
+                mask = nm.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { p in withUnsafeBytes(of: p.pointee.sin_addr) { Array($0) } }
+            default: continue
+            }
+            if RemoteAccess.inSubnet(address, net: net, mask: mask) { return true }
+        }
+        return false
     }
 
     private static func peerBytes(_ endpoint: NWEndpoint) -> [UInt8]? {
@@ -234,16 +273,43 @@ final class BoardServer {
         }
     }
 
-    private func respond(to req: RemoteAccess.Request, from peer: String) async -> Data {
+    /// Decided on a request's head, before its body is read: everything that turns a request away
+    /// without running anything — so only a paired phone gets to send a body (a pasted picture).
+    fileprivate func admit(_ req: RemoteAccess.Request, from peer: Peer) -> Admit {
         let names = [(SCDynamicStoreCopyLocalHostName(nil) as String?) ?? ""].filter { !$0.isEmpty }
         guard RemoteAccess.hostAllowed(req.headers["host"], names: names) else {
-            return text(403, "This address can't be used for the board.")
+            return .refuse(text(403, "This address can't be used for the board."))
         }
-        if req.path == "/api" {
-            guard req.method == "POST" else { return text(405, "POST only") }
-            return await api(req, from: peer)
+        guard req.path == "/api" else {
+            guard req.method == "GET" || req.method == "HEAD" else { return .refuse(text(405, "GET only")) }
+            return .read(maxBody: 0)
         }
-        guard req.method == "GET" || req.method == "HEAD" else { return text(405, "GET only") }
+        guard req.method == "POST" else { return .refuse(text(405, "POST only")) }
+        guard RemoteAccess.originAllowed(req.headers["origin"], host: req.headers["host"]) else {
+            return .refuse(text(403, "cross-origin request refused"))
+        }
+        let now = Date()
+        if lockout.locked(peer.key, now: now) {
+            return .refuse(json(429, ["error": L("Too many wrong tokens from this address — try again in 10 minutes",
+                                                 "这个地址试错 token 的次数太多——10 分钟后再试")]))
+        }
+        guard RemoteAccess.match(req.headers[RemoteAccess.tokenHeader], in: devices, now: now) != nil else {
+            lockout.fail(peer.key, now: now)
+            return .refuse(unpaired())
+        }
+        lockout.clear(peer.key)
+        return .read(maxBody: RemoteAccess.maxBody)
+    }
+
+    private func unpaired() -> Data {
+        json(401, ["error": L("This phone isn't paired, or was removed — pair it again from the Mac's board: Settings → Phone access",
+                              "这台手机还没配对，或已被移除——到 Mac 上的看板「设置 → 手机访问」重新配对"),
+                   "pair": true])
+    }
+
+    fileprivate func respond(to req: RemoteAccess.Request, from peer: Peer) async -> Data {
+        // admit has turned away a foreign Host, a wrong method, and an /api request without a token.
+        if req.path == "/api" { return await api(req, from: peer.name) }
         if req.path == "/" || req.path == "/board" || req.path == "/board/" {
             return RemoteAccess.response(status: 302, type: "text/plain", body: Data(),
                                          extra: ["Location": "/board/board.html"])
@@ -302,39 +368,32 @@ final class BoardServer {
 
     /// `POST /api` with `{op, …}`: answered `{result}` or `{error}`, as the window's messages are.
     private func api(_ req: RemoteAccess.Request, from peer: String) async -> Data {
-        guard RemoteAccess.originAllowed(req.headers["origin"], host: req.headers["host"]) else {
-            return text(403, "cross-origin request refused")
-        }
         let now = Date()
-        if let f = failures[peer], f.count >= RemoteAccess.maxFailures {
-            if now.timeIntervalSince(f.since) < RemoteAccess.lockout {
-                return json(429, ["error": L("Too many wrong tokens from this address — try again in 10 minutes",
-                                             "这个地址试错 token 的次数太多——10 分钟后再试")])
-            }
-            failures[peer] = nil
-        }
         var all = devices
-        guard let i = RemoteAccess.match(req.headers[RemoteAccess.tokenHeader], in: all, now: now) else {
-            let f = failures[peer]
-            failures[peer] = (count: (f?.count ?? 0) + 1, since: f?.since ?? now)
-            return json(401, ["error": L("This phone isn't paired, or was removed — pair it again from the Mac's board: Settings → Phone access",
-                                         "这台手机还没配对，或已被移除——到 Mac 上的看板「设置 → 手机访问」重新配对"),
-                              "pair": true])
-        }
-        failures[peer] = nil
+        // Matched in admit; gone since only if removed while the body arrived.
+        guard let i = RemoteAccess.match(req.headers[RemoteAccess.tokenHeader], in: all, now: now) else { return unpaired() }
+        guard var body = (try? JSONSerialization.jsonObject(with: req.body)) as? [String: Any],
+              let op = body["op"] as? String else { return json(400, ["error": "bad request"]) }
+        // A pairing code buys the phone its own token, once, and nothing else.
         if all[i].paired == nil {
+            guard op == RemoteAccess.claimOp else { return unpaired() }
+            let token = RemoteAccess.newToken()
+            all[i].hash = RemoteAccess.hash(token)
             all[i].paired = now
             all[i].name = RemoteAccess.deviceName(given: req.headers[RemoteAccess.deviceHeader]?.removingPercentEncoding,
                                                   userAgent: req.headers["user-agent"])
+            all[i].lastSeen = now
+            all[i].lastAddress = peer
+            devices = all
+            return json(200, ["result": ["token": token]])
         }
+        if op == RemoteAccess.claimOp { return json(200, ["error": L("This phone is paired already", "这台手机已经配对过了")]) }
         // Written at most once a minute: the board asks every few seconds.
         if all[i].lastSeen.map({ now.timeIntervalSince($0) > 60 }) ?? true || all[i].lastAddress != peer {
             all[i].lastSeen = now
             all[i].lastAddress = peer
             devices = all
         }
-        guard var body = (try? JSONSerialization.jsonObject(with: req.body)) as? [String: Any],
-              let op = body["op"] as? String else { return json(400, ["error": "bad request"]) }
         guard RemoteAccess.allowed(op: op) else {
             return json(200, ["error": L("Only on the Mac", "只能在 Mac 上做")])
         }
@@ -348,43 +407,77 @@ final class BoardServer {
     }
 }
 
-/// One request on one connection: read it whole, answer, close.
+/// Who sent a request: the address to show, and what wrong tokens count against (lockKey).
+private struct Peer: Sendable {
+    let name: String
+    let key: String
+}
+
+/// What to do with a request once its head has arrived.
+private enum Admit {
+    /// Answer this and close, the body unread.
+    case refuse(Data)
+    /// Read a body of up to this many bytes, then respond.
+    case read(maxBody: Int)
+}
+
+/// One request on one connection: read its head, decide whether to read the rest, answer, close.
 @MainActor
 private final class Connection {
     private let conn: NWConnection
-    private let peer: String
-    private let handler: (RemoteAccess.Request, String) async -> Data
+    private let peer: Peer
+    private let admit: (RemoteAccess.Request, Peer) -> Admit
+    private let handler: (RemoteAccess.Request, Peer) async -> Data
+    private let closed: () -> Void
     private var buffer = Data()
+    /// Set once the head is admitted.
+    private var maxBody: Int?
     private var done = false
+    private var counted = true
 
-    init(conn: NWConnection, peer: String, handler: @escaping (RemoteAccess.Request, String) async -> Data) {
+    init(conn: NWConnection, peer: Peer, admit: @escaping (RemoteAccess.Request, Peer) -> Admit,
+         handler: @escaping (RemoteAccess.Request, Peer) async -> Data, closed: @escaping () -> Void) {
         self.conn = conn
         self.peer = peer
+        self.admit = admit
         self.handler = handler
+        self.closed = closed
     }
 
     func start() {
         conn.stateUpdateHandler = { [self] state in
             MainActor.assumeIsolated {
                 switch state {
-                case .failed, .cancelled: done = true
+                case .failed, .cancelled: finish()
                 default: break
                 }
             }
         }
         conn.start(queue: .main)
         // A request that never finishes arriving doesn't hold the connection forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in
-            if !done { conn.cancel() }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in finish() }
         receive()
     }
 
     private func receive() {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [self] data, _, isComplete, error in
             MainActor.assumeIsolated {
+                guard !done else { return }
                 if let data { buffer.append(data) }
-                switch RemoteAccess.parse(buffer) {
+                if maxBody == nil {
+                    switch RemoteAccess.head(buffer) {
+                    case .incomplete:
+                        return isComplete || error != nil ? finish() : receive()
+                    case .reject(let status):
+                        return send(RemoteAccess.response(status: status, type: "text/plain", body: Data()))
+                    case .head(let req, _, _):
+                        switch admit(req, peer) {
+                        case .refuse(let out): return send(out)
+                        case .read(let n): maxBody = n
+                        }
+                    }
+                }
+                switch RemoteAccess.parse(buffer, maxBody: maxBody ?? 0) {
                 case .request(let req):
                     Task { @MainActor in
                         var out = await handler(req, peer)
@@ -403,14 +496,18 @@ private final class Connection {
     }
 
     private func send(_ data: Data) {
+        buffer = Data()
         conn.send(content: data, completion: .contentProcessed { [self] _ in
             MainActor.assumeIsolated { finish() }
         })
     }
 
     private func finish() {
+        guard !done else { return }
         done = true
+        buffer = Data()
         conn.cancel()
+        if counted { counted = false; closed() }
     }
 }
 

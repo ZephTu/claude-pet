@@ -156,13 +156,41 @@ function setRemoteToken(tok) {
   try { if (tok) localStorage.setItem(TOKEN_KEY, tok); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* private mode */ }
   document.cookie = tok ? `hq-token=${tok}; max-age=31536000; path=/; SameSite=Strict` : "hq-token=; max-age=0; path=/";
 }
-// The pairing code from the Mac's QR code: #pair=<token>. Kept, then taken out of the address bar.
+// The pairing code from the Mac's QR code: #pair=<code>, taken out of the address bar and traded
+// for this phone's own token (the Mac spends the code: a copy of the link pairs nothing). Every
+// request waits for the trade.
+let pairingClaim = null;
 (function takePairing() {
   const m = location.hash.match(/[#&]pair=([\w-]+)/);
   if (!m) return;
-  setRemoteToken(m[1]);
   history.replaceState(null, "", location.pathname + location.search);
+  if (REMOTE) pairingClaim = claimPairing(m[1]);
 })();
+async function claimPairing(code) {
+  try {
+    const { j } = await post(code, { op: "pair" });
+    if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
+    // Used already (by this phone, or someone who had the link) or lapsed. A phone paired
+    // already keeps its own token.
+    if (!remoteToken()) showPairing(T("That pairing link was used already, or has lapsed — make a new one on the Mac", "这个配对链接已经用过或过期了——在 Mac 上重新生成一个"));
+  } catch (e) {
+    showPairing(e.message);
+  }
+  return false;
+}
+async function post(token, body) {
+  let r;
+  try {
+    r = await fetch("/api", { method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
+      body: JSON.stringify(body) });
+  } catch (e) {
+    throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
+  }
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* not JSON: a status line says enough */ }
+  return { r, j };
+}
 // What the Mac's list of phones calls this one. iPadOS Safari says "Macintosh"; its touch screen
 // gives it away.
 function deviceName() {
@@ -178,18 +206,10 @@ async function api(op, args = {}) {
   // What happens on the phone itself rather than on the Mac.
   const local = remoteLocal(op, args);
   if (local) return local;
+  if (pairingClaim) await pairingClaim;
   const token = remoteToken();
   if (!token) { showPairing(""); throw new Error(T("This phone isn't paired yet", "这台手机还没配对")); }
-  let r;
-  try {
-    r = await fetch("/api", { method: "POST", cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-HQ-Token": token, "X-HQ-Device": encodeURIComponent(deviceName()) },
-      body: JSON.stringify(Object.assign({ op }, args)) });
-  } catch (e) {
-    throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
-  }
-  let j = {};
-  try { j = await r.json(); } catch (e) { /* not JSON: a status line says enough */ }
+  const { r, j } = await post(token, Object.assign({ op }, args));
   // A token the Mac doesn't know (removed, or never paired): forget it, so the page stops asking
   // with it every few seconds — the Mac shuts out an address that keeps trying wrong tokens.
   if (j.pair) { setRemoteToken(""); showPairing(j.error || ""); }
@@ -207,7 +227,12 @@ function remoteLocal(op, args) {
   }
   // Opening a file or a terminal happens on the Mac's screen, where no one is looking.
   if (["open", "openPath", "attach"].includes(op)) return Promise.reject(new Error(T("That opens on the Mac — not from the phone", "这个要在 Mac 上打开，手机上打不开")));
-  if (op === "openURL") { window.open(args.url, "_blank", "noopener"); return Promise.resolve({ ok: true }); }
+  if (op === "openURL") {
+    // As the Mac opens them: the web and mail only, nothing that runs script.
+    if (!/^\s*(https?:|mailto:)/i.test(args.url || "")) return Promise.reject(new Error(T("Not a web link", "不是网页链接")));
+    window.open(args.url, "_blank", "noopener");
+    return Promise.resolve({ ok: true });
+  }
   if (op === "pick-folder") {
     const p = window.prompt(args.message || T("Folder on the Mac (e.g. ~/code/app)", "Mac 上的目录（比如 ~/code/app）"), args.path || "");
     return Promise.resolve({ path: (p || "").trim() });
@@ -243,15 +268,17 @@ function showPairing(why) {
       <li>${T("On the Mac, open the board's <b>Settings → Phone access</b> and turn it on.", "在 Mac 上打开看板的 <b>设置 → 手机访问</b>，打开它。")}</li>
       <li>${T("Press <b>Pair a phone</b> and scan the QR code with this phone's camera.", "点 <b>配对手机</b>，用这台手机的相机扫二维码。")}</li>
     </ol>
-    <p class="meta">${T("Added the board to the Home Screen? Scanning opens Safari: or paste the pairing link here.", "已经添加到主屏幕了？扫码会打开 Safari——也可以把配对链接粘贴到这里。")}</p>
+    <p class="meta">${T("Added the board to the Home Screen? Scanning opens Safari: make a new code on the Mac and paste its link here instead.", "已经添加到主屏幕了？扫码会打开 Safari——可以在 Mac 上新生成一个码，把它的链接粘贴到这里。")}</p>
     <div class="row"><input id="pair-link" type="url" placeholder="http://…#pair=…" autocomplete="off">
       <button class="btn primary" data-action="pair-paste">${T("Pair", "配对")}</button></div></div>`;
   box.hidden = false;
 }
-function pairFromLink(text) {
+async function pairFromLink(text) {
   const m = String(text || "").match(/pair=([\w-]+)/);
   if (!m) return toast(T("That isn't a pairing link", "这不是配对链接"), true);
-  setRemoteToken(m[1]);
+  setRemoteToken("");
+  pairingClaim = claimPairing(m[1]);
+  if (!(await pairingClaim)) return;
   const box = $("#pairing");
   if (box) box.hidden = true;
   refresh();

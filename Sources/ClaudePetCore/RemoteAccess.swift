@@ -51,39 +51,62 @@ public enum RemoteAccess {
         case reject(Int)
     }
 
-    /// Reads one HTTP/1.1 request from the bytes received so far.
-    public static func parse(_ data: Data, maxBody: Int = maxBody) -> Parse {
+    /// A request's head, read before its body: what the server decides on before it accepts a
+    /// body at all (BoardServer.admit) — a stranger doesn't get to make the pet hold megabytes.
+    public enum Head: Equatable, Sendable {
+        case incomplete
+        /// `request.body` is empty; the body is `length` bytes from `bodyStart` (an offset into
+        /// the data read).
+        case head(Request, length: Int, bodyStart: Int)
+        /// The status to answer with before closing: 400 or 431.
+        case reject(Int)
+    }
+
+    public static func head(_ data: Data) -> Head {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)) else {
             return data.count > maxHeader ? .reject(431) : .incomplete
         }
-        guard end.lowerBound <= maxHeader else { return .reject(431) }
-        guard let head = String(data: data[data.startIndex..<end.lowerBound], encoding: .utf8) else { return .reject(400) }
-        var lines = head.components(separatedBy: "\r\n")
+        guard data.distance(from: data.startIndex, to: end.lowerBound) <= maxHeader else { return .reject(431) }
+        guard let text = String(data: data[data.startIndex..<end.lowerBound], encoding: .utf8) else { return .reject(400) }
+        var lines = text.components(separatedBy: "\r\n")
         let first = lines.removeFirst().split(separator: " ", omittingEmptySubsequences: true)
         guard first.count == 3, first[2].hasPrefix("HTTP/1.") else { return .reject(400) }
         var headers: [String: String] = [:]
         for line in lines {
             guard let colon = line.firstIndex(of: ":") else { return .reject(400) }
             let name = line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()
-            headers[name] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            // Two different lengths: which one the body has is anyone's guess.
+            if name == "content-length", let had = headers[name], had != value { return .reject(400) }
+            headers[name] = value
         }
         // Chunked bodies are not something a browser sends with fetch(); refusing them keeps the
         // reader to one shape.
         if headers["transfer-encoding"] != nil { return .reject(400) }
-        let length: Int
+        var length = 0
         if let raw = headers["content-length"] {
             guard let n = Int(raw), n >= 0 else { return .reject(400) }
             length = n
-        } else {
-            length = 0
         }
-        guard length <= maxBody else { return .reject(413) }
-        let bodyStart = end.upperBound
-        guard data.distance(from: bodyStart, to: data.endIndex) >= length else { return .incomplete }
         let target = String(first[1])
         let path = String(target.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
-        let body = Data(data[bodyStart..<data.index(bodyStart, offsetBy: length)])
-        return .request(Request(method: String(first[0]), path: path, headers: headers, body: body))
+        return .head(Request(method: String(first[0]), path: path, headers: headers, body: Data()),
+                     length: length, bodyStart: data.distance(from: data.startIndex, to: end.upperBound))
+    }
+
+    /// Reads one HTTP/1.1 request from the bytes received so far: a body longer than `maxBody`
+    /// is refused (413) before it arrives.
+    public static func parse(_ data: Data, maxBody: Int = maxBody) -> Parse {
+        switch head(data) {
+        case .incomplete: return .incomplete
+        case .reject(let status): return .reject(status)
+        case .head(var req, let length, let bodyStart):
+            guard length <= maxBody else { return .reject(413) }
+            guard data.count - bodyStart >= length else { return .incomplete }
+            let from = data.index(data.startIndex, offsetBy: bodyStart)
+            req.body = Data(data[from..<data.index(from, offsetBy: length)])
+            return .request(req)
+        }
     }
 
     /// A whole response, `Connection: close` (one request per connection keeps the reader simple;
@@ -116,7 +139,56 @@ public enum RemoteAccess {
             return isLocal(Array(bytes[12..<16]))
         }
         if bytes[0..<15].allSatisfy({ $0 == 0 }) && bytes[15] == 1 { return true }   // ::1
+        // Tailscale's addresses (fd7a:115c:a1e0::/48) are unique-local in form, but they reach
+        // across the internet — as its 100.x IPv4 ones do, which the rule above already turns away.
+        if bytes[0..<6] == [0xfd, 0x7a, 0x11, 0x5c, 0xa1, 0xe0] { return false }
         return (bytes[0] & 0xfe) == 0xfc || (bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80)
+    }
+
+    /// Whether `address` is in the network `net`/`mask` (same length, IPv4 or IPv6). A home network
+    /// with IPv6 from the provider gives the phone a public address: it is on the Mac's own network
+    /// when it shares the prefix of one of the Mac's interfaces (BoardServer.onLink).
+    public static func inSubnet(_ address: [UInt8], net: [UInt8], mask: [UInt8]) -> Bool {
+        guard address.count == net.count, net.count == mask.count, !mask.allSatisfy({ $0 == 0 }) else { return false }
+        return zip(zip(address, net), mask).allSatisfy { ($0.0 & $1) == ($0.1 & $1) }
+    }
+
+    /// What wrong tokens are counted against: the address, or for IPv6 its /64 — a phone, or
+    /// anyone, gets a new IPv6 address from its /64 whenever it likes.
+    public static func lockKey(_ bytes: [UInt8]) -> String {
+        if bytes.count == 16, bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
+            return lockKey(Array(bytes[12..<16]))
+        }
+        if bytes.count == 4 { return bytes.map(String.init).joined(separator: ".") }
+        return bytes.prefix(8).map { String(format: "%02x", $0) }.joined() + "/64"
+    }
+
+    /// Wrong tokens by lockKey. An address that reaches maxFailures is turned away until
+    /// `lockout` has passed since its last wrong token; a count older than that starts again.
+    public struct Lockout {
+        struct Entry { var count: Int; var last: Date }
+        private var entries: [String: Entry] = [:]
+
+        public init() {}
+
+        public func locked(_ key: String, now: Date) -> Bool {
+            guard let e = entries[key] else { return false }
+            return e.count >= RemoteAccess.maxFailures && now.timeIntervalSince(e.last) < RemoteAccess.lockout
+        }
+
+        public mutating func fail(_ key: String, now: Date) {
+            // Forgotten once they no longer count, so the list doesn't grow without end.
+            if entries.count > 1000 { entries = entries.filter { now.timeIntervalSince($0.value.last) < RemoteAccess.lockout } }
+            var e = entries[key] ?? Entry(count: 0, last: now)
+            if now.timeIntervalSince(e.last) >= RemoteAccess.lockout { e.count = 0 }
+            e.count += 1
+            e.last = now
+            entries[key] = e
+        }
+
+        public mutating func clear(_ key: String) { entries[key] = nil }
+
+        var count: Int { entries.count }
     }
 
     /// The host part of a Host header or an origin: no port, no brackets, lower-cased.
@@ -161,7 +233,8 @@ public enum RemoteAccess {
         /// pairing code the Mac showed).
         public var hash: String
         public var created: Date
-        /// nil until the phone first uses its token: an unused pairing code lapses (pairWindow).
+        /// nil while `hash` is a pairing code's: the code is good for one thing, claiming the
+        /// phone's own token (op "pair"), and lapses after pairWindow. Set when it is claimed.
         public var paired: Date?
         public var lastSeen: Date?
         public var lastAddress: String?
@@ -234,6 +307,11 @@ public enum RemoteAccess {
     public static let macOnly: Set<String> = ["remote", "remote-enable", "remote-pair", "remote-revoke", "pick-folder"]
 
     public static func allowed(op: String) -> Bool { !macOnly.contains(op) }
+
+    /// A phone opening its pairing link trades the code for a token of its own: the code — seen in
+    /// a QR code, maybe pasted somewhere — is spent, and the token never leaves the phone.
+    public static let claimOp = "pair"
+
 
     // MARK: - Pages
 
