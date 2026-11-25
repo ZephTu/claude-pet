@@ -1573,10 +1573,31 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .kvs b { color: var(--dim); font-weight: 600; }
 .pd { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); }
 .pd.solo { grid-template-columns: minmax(0, 1fr); }
-.pd-info { overflow-y: auto; padding: 4px 18px 24px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 50%, transparent); font-size: 12.5px; min-width: 0; }
+.pd-info { overflow-y: auto; padding: 12px 16px 24px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 50%, transparent); font-size: 12.5px; min-width: 0; }
 .pd-info .pi-sec { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .pd-info .pi-sec:last-child { border-bottom: 0; }
 .pd-info h4 { margin: 0 0 6px; font-size: 12px; color: var(--dim); font-weight: 650; display: flex; align-items: center; gap: 6px; }
+.pd-info h4 .c { color: var(--faint); font-weight: 500; }
+/* Groups: a small label over a card holding its sections. */
+.pi-group { margin-top: 14px; }
+.pi-label { font-size: 11px; font-weight: 650; letter-spacing: .04em; color: var(--faint); margin: 0 2px 6px; }
+.pi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 2px 12px; }
+.pi-card .pi-sec:first-child { padding-top: 10px; }
+/* The goal / scope leads: the one thing to read first. */
+.pi-lead .md, .pi-lead > .empty { font-size: 13.5px; line-height: 1.65; color: var(--text); }
+.pi-out .md, .pi-out > .empty { color: var(--dim); }
+/* ✎ stays quiet until the section is pointed at. */
+.pd-info .icon.pe { opacity: .45; }
+.pd-info :is(.pi-sec, .pmeta):hover .icon.pe, .pd-info .icon.pe:focus-visible { opacity: 1; }
+@media (hover: none) { .pd-info .icon.pe { opacity: .8; } }
+/* Details as one line of what is set. */
+.pmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; padding: 2px 2px 0; }
+.pmeta .pm { display: inline-flex; gap: 5px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.pmeta .k { color: var(--faint); }
+.pmeta.none .pm { color: var(--faint); }
+.pbrief.clamp { max-height: 210px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.pd-info .addrow { padding-top: 2px; }
+.pi-setup { border-bottom: 0 !important; }
 .pd-info p { margin: 0 0 4px; line-height: 1.6; }
 .pd-info .dim { color: var(--dim); }
 .pd-info .md p:first-child { margin-top: 0; }
@@ -1588,9 +1609,6 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .crit { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; line-height: 1.5; }
 .crit .box { border-color: var(--teal); cursor: pointer; display: grid; place-items: center; font-size: 10px; color: #fff; }
 .crit .sig { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--violet); }
-.pkv > div { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
-.pkv .k { color: var(--faint); width: 72px; flex: none; }
-.pkv .v { min-width: 0; overflow-wrap: anywhere; }
 .pmeta-form .field { grid-template-columns: 72px 1fr; }
 .pmeta-form .field input, .pmeta-form .field select { width: 100%; box-sizing: border-box; min-width: 0; }
 .pdir { display: flex; gap: 6px; align-items: center; padding: 2px 0; }
@@ -1601,6 +1619,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .premove .row { margin-top: 6px; align-items: center; gap: 6px; }
 .premove select { min-width: 0; max-width: 150px; }
 .premove > .btn { color: var(--faint); }
+.pd-info > .premove { margin-top: 10px; border-bottom: 0; }
 .pd-main { overflow-y: auto; padding: 12px 18px 24px; min-width: 0; }
 .pd-main .board { padding: 0; overflow: visible; min-height: 220px; }
 .pd-main .lane-body { overflow: visible; }

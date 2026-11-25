@@ -21,7 +21,7 @@
 ui.proj = pref("hq-proj", "");
 // Which part of a project's page is being edited ("<name>|<part>"), and whose recurring-job form
 // is open.
-const pui = { edit: null, recur: null, doneAll: new Set(), closedOpen: false, busy: false, removing: null };
+const pui = { edit: null, recur: null, doneAll: new Set(), briefOpen: new Set(), closedOpen: false, busy: false, removing: null };
 
 const AUTO_SOURCES = [
   ["qahub-ci", T("QA Hub CI failures", "QA Hub 的 CI 失败"), T("a failed CI job of yours becomes a task", "你的 CI job 失败了就建一个任务")],
@@ -208,9 +208,6 @@ function sectionEditor(name, part, hint) {
       <button class="btn small ghost" data-action="p-cancel">${T("Cancel", "取消")}</button>
       <button class="btn small primary" data-action="p-save" data-p="${esc(name)}" data-part="${part}">${T("Save", "保存")}</button></div>`;
 }
-function infoSec(name, part, title, body, hint) {
-  return `<section class="pi-sec"><h4>${title}${part ? editBtn(name, part) : ""}</h4>${part && editing(name, part) ? sectionEditor(name, part, hint) : body}</section>`;
-}
 const mdOr = (text, none) => (text ? `<div class="md">${markdown(text)}</div>` : `<div class="empty">${none}</div>`);
 
 function criteriaHTML(pr) {
@@ -240,44 +237,68 @@ function metaHTML(pr) {
   }
   const refs = (vals) => vals.map((v) => { const r = resolveRef(v); return r.url
     ? `<a href="#" class="ref chip" data-action="link" data-url="${esc(r.url)}" title="${esc(r.url)}">${esc(v)}</a>` : `<span class="chip">${esc(v)}</span>`; }).join(" ");
-  const rows = [];
-  if (!pr.kind) return `<div class="pkv"><div><span class="k">${META_LABEL.name}</span><span class="v">${esc(name)}</span></div></div>`;
+  // A line of what is set, each a label and its value; nothing for what isn't — ✎ adds it.
+  const items = [];
   if (pr.kind === "goal") {
-    rows.push([META_LABEL.due, pr.due ? (projectClosed(pr) ? esc(pr.due) : dueText(pr.due)) : "—"]);
-    rows.push([META_LABEL.parent, pr.parent ? `<span class="link" data-action="p-open" data-p="${esc(pr.parent)}">↻ ${esc(ptitle(pr.parent))}</span>` : "—"]);
-    rows.push([META_LABEL.phases, (pr.phases || []).length ? pr.phases.map(esc).join(" → ") : "—"]);
+    if (pr.due) items.push([META_LABEL.due, projectClosed(pr) ? esc(pr.due) : dueText(pr.due)]);
+    if (pr.parent) items.push([T("Under", "归在"), `<span class="link" data-action="p-open" data-p="${esc(pr.parent)}">↻ ${esc(ptitle(pr.parent))}</span>`]);
+    if ((pr.phases || []).length) items.push([META_LABEL.phases, pr.phases.map(esc).join(" → ")]);
   }
-  rows.push(["Jira", (pr.jira || []).length ? refs(pr.jira) : "—"]);
-  if ((pr.fixVersions || []).length) rows.push(["Fix versions", pr.fixVersions.map(esc).join(", ")]);
-  return `<div class="pkv">${rows.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${v}</span></div>`).join("")}</div>`;
+  if ((pr.jira || []).length) items.push(["Jira", refs(pr.jira)]);
+  if ((pr.fixVersions || []).length) items.push(["Fix", pr.fixVersions.map(esc).join(", ")]);
+  if (!pr.kind) items.push([META_LABEL.name, esc(name)]);
+  if (!items.length) {
+    const unset = pr.kind === "goal" ? T("No due date, phases or Jira", "截止、阶段、Jira 都没填") : T("No Jira", "没填 Jira");
+    return `<div class="pmeta none"><span class="pm"><span class="k">${T("Details", "详情")}</span>${unset}</span>${editBtn(name, "meta")}</div>`;
+  }
+  return `<div class="pmeta">${items.map(([k, v]) => `<span class="pm"><span class="k">${k}</span>${v}</span>`).join("")}${editBtn(name, "meta")}</div>`;
 }
+
+// A section inside a group: its heading (✎ to edit in place) and its body.
+function infoSec(name, part, title, body, hint, extra = "") {
+  return `<section class="pi-sec ${extra}"><h4>${title}${part ? editBtn(name, part) : ""}</h4>${part && editing(name, part) ? sectionEditor(name, part, hint) : body}</section>`;
+}
+// A labelled group of sections, as a card.
+const piGroup = (label, body, cls = "") => `<div class="pi-group ${cls}"><div class="pi-label">${label}</div><div class="pi-card">${body}</div></div>`;
+// A long brief is shown in part until opened (per project, until the board reloads).
+const BRIEF_FOLD = 200;
+function briefHTML(pr) {
+  if (!pr.brief) return `<div class="empty">${T("Empty: sessions are told nothing about this project.", "空的：session 不会收到这个项目的任何说明。")}</div>`;
+  const long = pr.brief.length > BRIEF_FOLD || pr.brief.split("\n").length > 6;
+  if (!long) return `<div class="md">${markdown(pr.brief)}</div>`;
+  const open = pui.briefOpen.has(pr.name);
+  return `<div class="md pbrief ${open ? "open" : "clamp"}">${markdown(pr.brief)}</div>
+    <button class="addrow" data-action="p-brief" data-p="${esc(pr.name)}">${open ? T("Show less", "收起") : T("Show all", "展开全部")}</button>`;
+}
+// A path as it is shown: the home folder as ~ (the full path stays in its title).
+const homeShort = (x) => String(x).replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 
 function projAside(pr) {
   const name = pr.name, duty = pr.kind === "duty";
-  const details = `<section class="pi-sec"><h4>${T("Details", "详情")}${editBtn(name, "meta")}</h4>${metaHTML(pr)}</section>`;
+  const details = editing(name, "meta") ? piGroup(T("Details", "详情"), metaHTML(pr)) : metaHTML(pr);
   if (!pr.defined || !pr.kind) {
-    return `<section class="pi-sec"><h4>${T("Not set up yet", "还没定类型")}</h4>
+    return `<section class="pi-sec pi-setup"><h4>${T("Not set up yet", "还没定类型")}</h4>
       <p class="dim">${T("Say what this is, and it gets a PROJECT.md with a goal, criteria and a brief to fill in.", "先说它是什么，就会有一份 PROJECT.md，可以填目标、标准和简报。")}</p>
       <div class="row"><button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="goal">${T("◆ It's a project", "◆ 设为项目")}</button>
         <button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div></section>`
       + details + dirsSec(pr) + removeSec(pr);
   }
-  const grants = (pr.grants || []).length
+  const ng = (pr.grants || []).length;
+  const grants = ng
     ? `<div class="grants">${pr.grants.map((g) => `<div class="grant"><span class="t">${esc(g.text)}</span>
         <button class="icon x" title="${T("Revoke — sessions ask again before this kind of step", "撤销——之后 session 遇到这类事情会重新问")}" data-confirm="${T("Revoke?", "撤销？")}" data-action="pgrant-revoke" data-p="${esc(name)}" data-i="${g.i}" data-text="${esc(g.text)}">✕</button></div>`).join("")}</div>`
-    : `<div class="empty">${T("None. A session's ask answered with a project grant lands here.", "没有。回答问题时选了项目授权的，会出现在这里。")}</div>`;
-  return [
-    infoSec(name, "goal", duty ? T("Scope", "职责范围") : T("Goal", "目标"), mdOr(pr.goal, T("Not written yet.", "还没写。")),
-      duty ? T("What this duty covers", "这个职责管什么") : T("What this project is for", "这个项目要做成什么")),
-    infoSec(name, "out", T("Out of scope", "不管"), mdOr(pr.out, T("Nothing said.", "没写。")), T("What it leaves to others", "哪些事不归它")),
-    infoSec(name, "done_when", duty ? T("Healthy when", "健康标准") : T("Done when", "完成标准"), criteriaHTML(pr), T("- one criterion per line", "- 一行一条")),
-    details,
-    infoSec(name, "brief", T("Brief — given to every session on its tasks", "简报——交给它每个任务的 session"), mdOr(pr.brief, T("Empty: sessions are told nothing about this project.", "空的：session 不会收到这个项目的任何说明。")),
-      T("Repos, branches, rules every session here should know", "仓库、分支、每个 session 都该知道的规矩")),
-    `<section class="pi-sec"><h4>${T("Grants — hold for every task in it", "授权——对它的每个任务都有效")}</h4>${grants}</section>`,
-    dirsSec(pr),
-    removeSec(pr),
-  ].join("");
+    : `<div class="empty">${T("None. An ask answered “Yes always” for the project lands here.", "没有。回答问题时选「可以，并授权」给整个项目的，会出现在这里。")}</div>`;
+  const what = infoSec(name, "goal", duty ? T("Scope", "职责范围") : T("Goal", "目标"), mdOr(pr.goal, T("Not written yet.", "还没写。")),
+      duty ? T("What this duty covers", "这个职责管什么") : T("What this project is for", "这个项目要做成什么"), "pi-lead")
+    + infoSec(name, "out", T("Out of scope", "不管"), mdOr(pr.out, T("Nothing said.", "没写。")), T("What it leaves to others", "哪些事不归它"), "pi-out")
+    + infoSec(name, "done_when", duty ? T("Healthy when", "健康标准") : T("Done when", "完成标准"), criteriaHTML(pr), T("- one criterion per line", "- 一行一条"));
+  const forSessions = infoSec(name, "brief", T("Brief", "简报"), briefHTML(pr), T("Repos, branches, rules every session here should know", "仓库、分支、每个 session 都该知道的规矩"))
+    + `<section class="pi-sec"><h4 title="${T("Hold for every task in it", "对它的每个任务都有效")}">${T("Grants", "授权")}${ng ? `<span class="c">${ng}</span>` : ""}</h4>${grants}</section>`
+    + dirsSec(pr);
+  return details
+    + piGroup(duty ? T("What it is", "这个职责管什么") : T("What it is", "这个项目要做什么"), what)
+    + piGroup(T("Given to its sessions", "交给它的 session"), forSessions)
+    + removeSec(pr);
 }
 
 // Its default directories: a task started in one, with no project yet, joins it. ✎ to add or remove.
@@ -285,11 +306,11 @@ function projAside(pr) {
 function dirsSec(pr) {
   if (!projectByName(pr.name)) return "";
   const name = pr.name, on = editing(name, "dirs"), paths = pr.paths || [];
-  const rows = paths.map((x) => `<div class="pdir"><code>${esc(x)}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
+  const rows = paths.map((x) => `<div class="pdir"><code title="${esc(x)}">${esc(homeShort(x))}</code>${on ? `<button class="icon x" title="${T("Remove this directory", "删掉这个目录")}" data-confirm="${T("Remove?", "删除？")}" data-action="p-dir-remove" data-p="${esc(name)}" data-path="${esc(x)}">✕</button>` : ""}</div>`).join("");
   const add = on ? `<div class="row nowrap pdir-add"><input class="note" list="pdir-list" data-key="${esc("pdir:" + name)}" data-pdir="${esc(name)}" value="${esc(draft("pdir:" + name))}" placeholder="${T("a directory whose tasks belong here", "一个目录，在里面做的任务归到这里")}">${dirList("pdir-list")}
       <button class="btn small" data-action="p-dir-add" data-p="${esc(name)}">${T("Add", "添加")}</button></div>` : "";
-  return `<section class="pi-sec"><h4>${T("Default directories", "默认目录")}${editBtn(name, "dirs")}</h4>
-    <div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>
+  return `<section class="pi-sec"><h4 title="${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}">${T("Default directories", "默认目录")}${paths.length ? `<span class="c">${paths.length}</span>` : ""}${editBtn(name, "dirs")}</h4>
+    ${on ? `<div class="meta">${T("A new task started here, with no project yet, joins this one.", "在这些目录里新建、还没有项目的任务，默认归到这里。")}</div>` : ""}
     ${rows || (on ? "" : `<div class="empty">${T("None — tasks only join it by hand.", "没有——任务只能手动归到这里。")}</div>`)}${add}</section>`;
 }
 
@@ -723,6 +744,7 @@ async function projAction(d) {
       }, T(`Deleted ${name}; its tasks moved to ${to || "(no project)"}`, `已删除 ${name}；任务移到了${to || "（不归项目）"}`));
     }
     case "p-add": return addTask(name);
+    case "p-brief": pui.briefOpen.has(name) ? pui.briefOpen.delete(name) : pui.briefOpen.add(name); return render();
     case "p-done-all": pui.doneAll.has(name) ? pui.doneAll.delete(name) : pui.doneAll.add(name); return render();
     case "p-tpl-new": {
       try {
