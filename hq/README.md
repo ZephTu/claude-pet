@@ -190,8 +190,11 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
    that fits only one open todo). `change: <open todo's text> => <new text>` rewrites an open
    todo in place — same line, same owner unless the new text names one, same creation stamp — and
-   logs `todo #N → changed (session): old ⇒ new` to HISTORY.md; a change already made (old text
-   gone, new one open) is a no-op, and a todo can't be changed and ticked in one block.
+   logs `todo #N → changed (session): old ⇒ new` to HISTORY.md (reports skip that line). A todo's
+   own text may hold an arrow: the split whose old part is an open todo wins. A change already
+   made (the old text no longer open, the new one on the card — open or closed since — or in
+   HISTORY.md), or one that changes nothing, is a no-op; a change into another open todo's text,
+   to the template's placeholder, or of a todo also ticked in the block is refused.
    A `todo: @me …` from a session that repeats an open `@me` todo refuses the block, naming the
    open one: both about installing from main (`install`/`安装`/`重装` with `main` or `install.sh`),
    both about reviewing or merging (the autoclose PR verbs) a `#N` / PR link they share, or the

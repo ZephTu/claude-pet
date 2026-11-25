@@ -1112,6 +1112,30 @@ echo "$o" | grep -q "also changed in this block\|already ticked, dropped or chan
 o="$(upd 'todo!: @me review 并合并 #129，在手机上点一遍')"
 [ -z "$o" ] && grep -q "@me review 并合并 #129，在手机上点一遍" "$MC" && ok "todo!: adds a todo that looks like a repeat" || fail "todo!: $o"
 "$HQ" addtodo "$MT" "@me review 并合并 PR #110 again" && grep -q "PR #110 again" "$MC" && ok "hq addtodo is not checked for repeats" || fail "addtodo refused"
+"$HQ" addtodo "$MT" "@me map a => b in the table" >/dev/null
+o="$(upd 'change: map a => b in the table => map a => c in the table')"
+[ -z "$o" ] && grep -q -- "- \[ \] @me map a => c in the table" "$MC" && ok "change: finds the split whose old text is an open todo, arrows in the text and all" || fail "arrow in text: $o"
+"$HQ" addtodo "$MT" "@me Deploy the fix" >/dev/null
+upd 'change: Deploy the fix => deploy the fix' >/dev/null; o="$(upd 'change: Deploy the fix => deploy the fix')"
+[ -z "$o" ] && [ "$(grep -c "Deploy the fix ⇒ @me deploy the fix" "$(dirname "$MC")/HISTORY.md")" = 1 ] && ok "a case-only change sent twice is written once" || fail "case change repeated: $o"
+upd 'change: @me deploy the fix => @claude deploy the fix' >/dev/null; o="$(upd 'change: @me deploy the fix => @claude deploy the fix')"
+[ -z "$o" ] && grep -q -- "- \[ \] @claude deploy the fix" "$MC" && ok "an owner change sent again does nothing" || fail "owner change repeated: $o"
+upd 'done: @claude deploy the fix' >/dev/null; o="$(upd 'change: @me deploy the fix => @claude deploy the fix')"
+[ -z "$o" ] && ok "a change whose new todo has closed since does nothing" || fail "change after close: $o"
+o="$(upd 'change: map a => c in the table => <its new text>')"
+echo "$o" | grep -q "placeholder" && ! grep -q "<its new text>" "$MC" && ok "a change to the template's placeholder is refused" || fail "placeholder change: $o"
+o="$(upd 'change: map a => c in the table => review 并合并 PR #111')"
+echo "$o" | grep -q 'is the open todo \\"review 并合并 PR #111\\" already' && ok "a change into another open todo's text is refused" || fail "change into twin: $o"
+o="$(upd 'todo！: @me 全角感叹号也认')"
+[ -z "$o" ] && grep -q "全角感叹号也认" "$MC" && ok "todo！: with a full-width mark works" || fail "full-width todo!: $o"
+python3 - "$HQ" "$MC" <<'PY' && ok "a changed todo is not a report note" || fail "changed tick in the report"
+import sys, json, datetime as dt, importlib.machinery, importlib.util
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+a = hq.task_activity(hq.parse_card(sys.argv[2]), dt.datetime(2000, 1, 1), dt.datetime(2100, 1, 1))
+s = json.dumps(a, ensure_ascii=False)
+assert "deploy the fix" in s and "→ changed" not in s, s[:600]
+PY
 "$HQ" unbind --session sess-me >/dev/null
 
 # Refs are keyed by the thing a link points to: a PR's /files or /commits is the PR, a Jira board

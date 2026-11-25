@@ -2451,6 +2451,7 @@ def history_log_entries(card, items=None):
 
 
 TICK_RE = re.compile(r"^todo #\d+ → (done|drop|open) \(([^)]*)\): (.*)$")
+CHANGED_TICK_RE = re.compile(r"^todo #\d+ → changed \(")
 
 
 def todo_closed_times(meta, hist_log=None):
@@ -2509,6 +2510,8 @@ def task_activity(meta, start, end, reported_closed=()):
         if not inw(t):
             continue
         tick = TICK_RE.match(text)
+        if CHANGED_TICK_RE.match(text):
+            continue                    # a todo reworded: neither news nor a closing
         if tick:
             (done if tick.group(1) == "done" else dropped if tick.group(1) == "drop" else []).append(
                 {"at": iso(t), "text": todo_plain(tick.group(3)), "via": tick.group(2)})
@@ -5861,7 +5864,7 @@ def update_lines(block):
         line = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", raw).strip()
         if not line:
             continue
-        m = re.match(r"^([A-Za-z]+!?)\s*(?:[:：]\s*(.*))?$", line)
+        m = re.match(r"^([A-Za-z]+[!！]?)\s*(?:[:：]\s*(.*))?$", line)
         if not m:
             out.append((None, line))
             continue
@@ -5870,7 +5873,7 @@ def update_lines(block):
             if len(v) >= 2 and v[0] == a and v[-1] == b:
                 v = v[1:-1].strip()
                 break
-        out.append((m.group(1).lower(), v))
+        out.append((m.group(1).lower().replace("！", "!"), v))
     return out
 
 
@@ -5958,16 +5961,30 @@ def match_todo(todos, kind, want, settled=()):
 
 def plan_change(todos, settled, v, picked, changes):
     """A `change: <open todo> => <new text>` line: queues ((todo), new line text) on `changes`, or
-    returns what is wrong. The new text keeps the todo's owner unless it names one. A repeat of a
-    change already made (the old text gone, the new one open) does nothing."""
-    parts = re.split(r"\s*(?:=>|⇒)\s*", v, maxsplit=1)
-    if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
-        return f"`change: {v}` — write it as `change: <text of an open todo> => <its new text>`"
-    old, new = parts[0].strip(), " ".join(parts[1].split())
+    returns what is wrong. The new text keeps the todo's owner unless it names one. A change already
+    made — the old text no longer an open todo, the new one on the card (open or closed since) or in
+    HISTORY.md — does nothing, so a resent block is never refused over it."""
     key = lambda t: " ".join(todo_plain(t).split()).casefold()
-    if (not any(x[3].casefold() == key(old) for x in todos)
-            and any(x[2].group(2) == " " and x[3].casefold() == key(new) for x in todos)):
+    is_open = lambda x: x[2].group(2) == " "
+    # Every split at an arrow: a todo's own text may hold one ("map a => b"). The one whose old
+    # part is an open todo's text wins; else one already made; else the first.
+    splits = [(v[:m.start()].strip(), " ".join(v[m.end():].split())) for m in re.finditer(r"\s*(?:=>|⇒)\s*", v)]
+    splits = [(o, n) for o, n in splits if o and n]
+    if not splits:
+        return f"`change: {v}` — write it as `change: <text of an open todo> => <its new text>`"
+    closed = {x[3].casefold() for x in todos if not is_open(x)} | {t for _, t in settled}
+
+    def has(text):    # an open todo with exactly this text — and this owner, when it names one
+        o, p = todo_owner(text), " ".join(todo_plain(text).split())
+        return any(is_open(x) and x[3] == p and (o is None or todo_owner(x[2].group(3)) == o) for x in todos)
+
+    made = lambda o, n: not has(o) and (has(n) or key(n) in closed)
+    old, new = next(((o, n) for o, n in splits if any(is_open(x) and x[3].casefold() == key(o) for x in todos)),
+                    next(((o, n) for o, n in splits if made(o, n)), splits[0]))
+    if made(old, new):
         return None
+    if is_placeholder(new):
+        return f"`change: {old} => {new}` — the new text is the template's placeholder, not a value"
     pick, problem = match_todo(todos, "change", old, settled)
     if problem:
         return problem
@@ -5979,6 +5996,14 @@ def plan_change(todos, settled, v, picked, changes):
         o = re.match(r"(@\S+)\s", TODO_TIME_RE.sub("", pick[2].group(3)).strip() + " ")
         if o:
             new = f"{o.group(1)} {new}"
+    if new == TODO_TIME_RE.sub("", pick[2].group(3)).strip():
+        return None                     # nothing to change
+    owner = todo_owner(new)
+    twin = next((x for x in todos if is_open(x) and x[0] != pick[0] and x[3].casefold() == key(new)
+                 and todo_owner(x[2].group(3)) == owner), None)
+    if twin:
+        return (f"`change: {old} => {new}` — that is the open todo \"{twin[3]}\" already; "
+                f"drop one of them with `drop:` instead")
     changes.append((pick, new))
     return None
 
