@@ -2380,6 +2380,72 @@ tail -1 "$AC/out" | grep -q "pr: gh can't reach GitHub" && ok "autoclose: gh log
 "$HQ" set "$A1" status=done >/dev/null
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null || true
 
+# ---- intake: a duty's Auto intake makes tasks from GitHub review requests
+IK="$T/intake"; mkdir -p "$IK/bin" "$T/work-rev"
+cat > "$IK/bin/gh" <<'SH'
+#!/bin/sh
+case "$1 $2" in
+  "search prs") echo "$*" > "$IK/search-args"; cat "$IK/search.json" ;;
+  "pr view") printf '{"headRefOid":"%s","headRefName":"feat-%s","baseRefName":"main"}\n' "$(cat "$IK/head" 2>/dev/null || echo abc)" "$3" ;;
+  *) exit 1 ;;
+esac
+SH
+cat > "$IK/claude" <<'SH'
+#!/bin/sh
+if [ "$1" = agents ]; then echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-4000-8000-000000000001"}]'; exit 0; fi
+printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "Started background session abcd1234"
+SH
+chmod +x "$IK/bin/gh" "$IK/claude"
+cat > "$IK/search.json" <<'JS'
+[{"repository":{"nameWithOwner":"acme/web"},"number":12,"title":"Fix login","url":"https://github.com/acme/web/pull/12","author":{"login":"ann"},"isDraft":false},
+ {"repository":{"nameWithOwner":"acme/web"},"number":13,"title":"WIP","url":"https://github.com/acme/web/pull/13","author":{"login":"ann"},"isDraft":true},
+ {"repository":{"nameWithOwner":"other/lib"},"number":5,"title":"Bump","url":"https://github.com/other/lib/pull/5","author":{"login":"bob"},"isDraft":false}]
+JS
+ik() { env IK="$IK" PATH="$IK/bin:$PATH" "$HQ" "$@"; }
+"$HQ" project add rev --kind duty >/dev/null
+printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\nbogus: 1\nprompt: Review {url} by {author}.\n\nKeep it short.\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
+"$HQ" project show rev --json | python3 -c '
+import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]
+assert c["repos"]==["acme/web"] and c["run"] is True and c["permissions"]=="skip" and c["done"]=="manual" and c["focus"] is True, c
+assert c["prompt"]=="Review {url} by {author}.\n\nKeep it short." and "unknown key" in c["problems"][0], c' \
+  && grep -q "^## Auto intake" "$T/root/projects/rev/PROJECT.md" && ok "intake section: repos, switches, defaults, a prompt over several lines, unknown keys flagged" || fail "intake section"
+ik intake | tail -1 | grep -q "github-review: no duty set up" && [ ! -f "$IK/search-args" ] && ok "intake: a section without the switch on asks GitHub nothing" || fail "intake off"
+"$HQ" project set rev auto=github-review >/dev/null
+N0="$(ls "$T/root/tasks" | wc -l)"
+ik intake --dry-run | tail -1 | grep -q "github-review: 1 waiting, 1 new" && [ "$(ls "$T/root/tasks" | wc -l)" = "$N0" ] && ok "intake --dry-run: drafts and other repos left out, nothing made" || fail "intake dry run"
+ik intake --claude "$IK/claude" --json > "$IK/out.json"
+IT="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["results"][0]; m=r["made"]; assert len(m)==1 and m[0]["session"].startswith("abcd1234"), r; print(m[0]["task"])' "$IK/out.json")"
+ITC="$(ls "$T"/root/tasks/$IT-*/TASK.md)"
+grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && grep -q '^intake_key: acme/web#12' "$ITC" && grep -q '^intake_done: manual' "$ITC" \
+  && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q 'ann asked you to review https://github.com/acme/web/pull/12 (feat-12 → main)' "$ITC" \
+  && grep -q 'title: "Review web#12: Fix login"' "$ITC" && grep -q '"abcd1234"' "$ITC" && grep -q "review-requested=@me" "$IK/search-args" \
+  && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref and the default title and goal" || fail "intake task: $(cat "$ITC")"
+grep -qx -- "--bg" "$IK/claude-args" && grep -qx -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
+  && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
+  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] \
+  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule" || fail "intake launch: $(cat "$IK/claude-args")"
+ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 1 waiting, 0 new tasks" && ok "intake: a PR whose task is open makes no other" || fail "intake repeat"
+MSG='done\n\n```hq-update\nstatus: done\n```'
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
+  && grep -q '^status: active' "$ITC" && ok "a session can't close a task that came in by itself (done: manual)" || fail "intake manual done: $(grep status: "$ITC")"
+"$HQ" ask add "$IT" "Post the comments?" >/dev/null
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
+  && ok "…nor hold a close over open asks" || fail "intake manual done with asks"
+"$HQ" set "$IT" status=done >/dev/null
+ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and no new commits: no new task" || fail "intake closed same head"
+echo def > "$IK/head"
+IT2="$(ik intake --claude "$IK/claude" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["made"][0]["task"])')"
+[ "$IT2" != "$IT" ] && ok "intake: asked again after new commits: a new task" || fail "intake new head"
+"$HQ" set "$IT2" intake_done=auto >/dev/null
+hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
+grep -q '^status: done' "$T"/root/tasks/$IT2-*/TASK.md && ok "done: auto — the session may close it" || fail "intake auto done"
+"$HQ" intake status --json | python3 -c '
+import json,sys; s=json.load(sys.stdin); ids=[t["id"] for t in s["recent"]]
+assert ids==[sys.argv[2], sys.argv[1]] and all(t["status"]=="done" for t in s["recent"]), s["recent"]
+d=s["sources"]["github-review"]; assert d["last"]["made"]==[sys.argv[2]] and d["duties"][0]["name"]=="rev" and d["duties"][0]["problems"], d' "$IT" "$IT2" \
+  && ok "intake status: recent tasks that came in by itself, done ones too, and the last scan" || fail "intake status"
+"$HQ" project set rev auto= >/dev/null
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

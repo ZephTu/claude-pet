@@ -1644,6 +1644,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .irow .t { flex: 1; min-width: 0; }
 .irow .t small { display: block; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .irow .t small.warn { color: var(--red); white-space: normal; }
+.irow .t small.full { white-space: normal; }
 .irow .icon.x { opacity: .6; }
 .recur-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 6px; border-top: 1px solid var(--line); }
 .recur-form select, .recur-form input { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 3px 5px; }
@@ -1652,6 +1653,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 .donelist .dl:hover { color: var(--text); }
 .donelist .dl .id { color: var(--faint); flex: none; font: 600 11.5px var(--round); }
 .donelist .dl .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.donelist .dl .stag { flex: none; }
 .donelist .dl .d { margin-left: auto; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
 .addrow { background: none; border: 0; color: var(--blue); cursor: pointer; font-size: 12px; padding: 6px 0 0; }
 .mstone { border: 1.5px dashed var(--line); border-radius: 10px; padding: 7px 11px; color: var(--faint); font-size: 12px; margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
