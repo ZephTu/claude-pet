@@ -300,11 +300,16 @@ enum HookEmit {
         // turn's Stop is a pause, and the turn that the agent wakes will fire
         // its own Stop with nothing left in flight. Recording both put a red dot
         // on a session nine minutes before it had anything to show.
-        if event == "Stop", waitingForWork.isEmpty {
+        // A turn held only by a command that looks like a wait is recorded too,
+        // marked held: that hold is a guess, and a wrong one must not lose the
+        // finish. The app keeps it out of sight while the session is busy.
+        let held = BackgroundWork.onlyWaits(waitingForWork)
+        if event == "Stop", waitingForWork.isEmpty || held {
             recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
                              turnKey: promptId.isEmpty ? String(turn) : promptId, at: now,
                              summary: TurnSummary.headline(
-                                hook["last_assistant_message"] as? String ?? ""))
+                                hook["last_assistant_message"] as? String ?? ""),
+                             held: held)
         }
     }
 
@@ -631,13 +636,17 @@ enum HookEmit {
     /// two rows. Failure here is silent by design: the pet may never break the
     /// hook chain, and a missing record is better than a broken session.
     private static func recordCompletion(sessionID: String, project: String,
-                                         turnKey: String, at now: String, summary: String) {
+                                         turnKey: String, at now: String, summary: String,
+                                         held: Bool = false) {
         guard let finishedAt = CompletionQueue.parseDate(now) else { return }
         var event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
                                     project: project, displayName: project,
-                                    finishedAt: finishedAt, summary: summary)
+                                    finishedAt: finishedAt, summary: summary, held: held)
         let directory = eventsDirectory
         let file = directory.appending(path: CompletionQueue.fileName(for: event))
+        // The wait came back and the session finished for real: the finish it
+        // was holding is this one, not a second.
+        if !held { dropHeld(sessionID: sessionID, except: file, in: directory) }
         // The same turn ending again — HQ's Stop hook sent the reply back to be
         // corrected, and the corrected reply holds only that block — says nothing
         // of its own: the line the turn first ended with stays.
@@ -645,10 +654,25 @@ enum HookEmit {
            let before = CompletionQueue.decode([data]).first, !before.summary.isEmpty {
             event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
                                     project: project, displayName: project,
-                                    finishedAt: finishedAt, summary: before.summary)
+                                    finishedAt: finishedAt, summary: before.summary, held: held)
         }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writeAtomically(CompletionQueue.encode(event), to: file)
+    }
+
+    /// Removes this session's held finishes — see `CompletionEvent.held`.
+    private static func dropHeld(sessionID: String, except keep: URL, in directory: URL) {
+        let prefix = CompletionQueue.fileName(for: CompletionEvent(
+            sessionId: sessionID, turnKey: "x", project: "", displayName: "",
+            finishedAt: Date())).dropLast("x.json".count)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix(prefix)
+            && file.lastPathComponent != keep.lastPathComponent {
+            guard let data = try? Data(contentsOf: file),
+                  CompletionQueue.decode([data]).first?.held == true else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     /// Records this session's last finished tool call, replacing the one before

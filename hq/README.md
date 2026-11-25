@@ -42,6 +42,8 @@ recent messages from their transcripts under `~/.claude/projects`. Nothing leave
 `hq sessions --json` gives each one's `phase` (`"compacting"` while its context is being compacted, else empty) and `finished` — `{task, status, at}` once that session's own
 hq-update moved its task from open to done or abandoned (the board then applies its
 "Finishing a task" setting to the task's sessions; the next prompt to that session clears it), else null.
+Its `state` is the pet's, except that a turn held open only by a background command that looks
+like a wait (the pet's `backgroundAgents` all `"shell"`) reads `idle` once 20 minutes have passed.
 `hq peek <sid> --meta --json` also returns `items` (messages and one-line tool calls in order —
 `{kind:"tool", id, name, title, label, stat, status: ok|error|pending|background|stopped, ts, endTs}`,
 and events: `{kind:"event", event:"compact", trigger: manual|auto, pre, post, ts}` for a compaction,

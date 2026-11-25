@@ -605,6 +605,20 @@ rm "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker has ended, the next session on the task takes the answer"
 rm -rf "$HOME/.claude/pet"
 
+# A turn held open only by a background command that looks like a wait (the pet labels it
+# "shell") runs for 20 minutes at most; one held by an agent runs as long as the agent does.
+mkdir -p "$HOME/.claude/pet/sessions"
+old=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+new=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+held() { echo "{\"pid\": $$, \"sessionId\": \"$1\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": $2, \"updatedAt\": \"$3\"}" > "$HOME/.claude/pet/sessions/$1.json"; }
+held w-old '["shell"]' "$old"; held w-new '["shell"]' "$new"; held a-old '["shell", "auditor"]' "$old"
+"$HQ" sessions --json | python3 -c 'import json,sys; s={x["sessionId"]: x for x in json.load(sys.stdin)}
+assert s["w-old"]["state"]=="idle" and s["w-old"]["phase"]=="", s["w-old"]
+assert s["w-new"]["state"]=="busy" and s["w-new"]["phase"]=="awaiting-agent", s["w-new"]
+assert s["a-old"]["state"]=="busy", s["a-old"]' \
+  && ok "a wait-only hold runs 20 minutes; an agent's runs until it reports" || fail "wait-only hold limit"
+rm -rf "$HOME/.claude/pet"
+
 # history: the sessions that worked on a task, with what resuming one needs.
 HSID=0a1b2c3d-1111-2222-3333-444455556666
 mkdir -p "$HOME/.claude/projects/-tmp-repo"

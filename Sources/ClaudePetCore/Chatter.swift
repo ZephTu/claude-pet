@@ -330,7 +330,9 @@ public enum Chatter {
     /// in one render must not read as "nothing happened".
     ///
     /// Stopping on a permission prompt or a question is not finishing: the turn
-    /// goes on once it is answered. Callers pass states through
+    /// goes on once it is answered. Nor is a compaction ending: Claude Code
+    /// starts the session over as idle, and the turn it interrupted carries on
+    /// in its own time — a `/compact` typed by hand has no turn to finish. Callers pass states through
     /// `StateAggregator.settled`, so a turn that resumes within seconds of its
     /// Stop never counts.
     public static func justFinished(previous: GlobalState, current: GlobalState) -> [SessionState] {
@@ -338,7 +340,7 @@ public enum Chatter {
             current.sessions.filter { $0.state == .busy || $0.state == .waiting }.map(\.sessionId)
         )
         return previous.sessions
-            .filter { $0.state == .busy && !nowBusy.contains($0.sessionId) }
+            .filter { $0.state == .busy && $0.phase != "compacting" && !nowBusy.contains($0.sessionId) }
             // A session that vanished entirely (closed, muted) did not "finish".
             .filter { p in current.sessions.contains { $0.sessionId == p.sessionId } }
     }

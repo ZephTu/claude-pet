@@ -5510,6 +5510,21 @@ def cmd_asks(args):
 
 # ---------------------------------------------------------------- live sessions
 PET_SESSIONS = os.path.expanduser("~/.claude/pet/sessions")
+# How long a turn held open only by background commands that look like waits (the pet's
+# BackgroundWork.isWait: labelled "shell") still counts as running. The pet lets the finish
+# through after this; so does the board, or a wrong guess would keep a task in Running all day.
+SHELL_WAIT_LIMIT = 20 * 60
+
+
+def pet_activity(d):
+    """A pet session file's state, with that limit applied."""
+    st = d.get("state")
+    agents = d.get("backgroundAgents") or []
+    if st == "busy" and d.get("phase") == "awaiting-agent" and agents and all(a == "shell" for a in agents):
+        at = local_dt(d.get("updatedAt"))
+        if at and (dt.datetime.now().astimezone() - at).total_seconds() > SHELL_WAIT_LIMIT:
+            return "idle"
+    return st
 
 
 def pid_alive(pid):
@@ -6198,9 +6213,10 @@ def live_sessions():
             "title": session_title(entries),
             "project": d.get("project") or os.path.basename(d.get("cwd", "")),
             "cwd": d.get("cwd"),
-            "state": d.get("state"),
+            "state": pet_activity(d),
             "waitingOn": d.get("waitingOn"),
-            "phase": d.get("phase") or "",   # "compacting" while the context is being compacted
+            # "compacting" while the context is being compacted
+            "phase": (d.get("phase") or "") if pet_activity(d) == d.get("state") else "",
             "updatedAt": d.get("updatedAt"),
             "terminal": d.get("terminal"),
             "transcript": d.get("transcript"),
@@ -7246,7 +7262,7 @@ def session_status(sid, path, now, n_msgs):
     # From the whole transcript, not the tail: a run launched long ago may still be going.
     background = [one_line(f"{it['title']}: {it['label']}", 80) for it in peek_timeline(background_entries(path))
                   if it["kind"] == "tool" and it["status"] == "background"] if live else []
-    st = {"busy": "working", "waiting": "waiting-on-you", "idle": "idle"}.get((rec or {}).get("state"), "idle") \
+    st = {"busy": "working", "waiting": "waiting-on-you", "idle": "idle"}.get(pet_activity(rec), "idle") \
         if live else "ended"
     # Context: the last real reply's request, as the pet counts it (an API error has no tokens),
     # unless a compaction came after it: then the size the boundary gives, until the next reply.

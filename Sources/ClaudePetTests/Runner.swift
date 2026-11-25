@@ -1155,6 +1155,19 @@ struct Runner {
         t.check("a session already idle before is left alone",
                 StateAggregator.settled(justStopped, previous: justStopped,
                                         now: stopAt.addingTimeInterval(1)).sessions.first?.state == .idle)
+        // Claude Code restarts a compacted session as idle; the turn it broke
+        // into may take its time to go on, and a /compact typed by hand has no
+        // turn to finish at all
+        let compacting = GlobalState(mood: .busy, sessions: [
+            SessionState(sessionId: "a", project: "p", cwd: "/tmp", state: .busy, tool: "",
+                         detail: "", since: t0, updatedAt: t0, phase: "compacting")],
+                                     waitingProject: nil)
+        let afterCompact = StateAggregator.settled(justStopped, previous: compacting,
+                                                   now: stopAt.addingTimeInterval(1))
+        t.check("a compaction ending is not a finish",
+                Chatter.justFinished(previous: compacting, current: afterCompact).isEmpty)
+        t.check("…and is not held either: there is nothing to wait for",
+                afterCompact.sessions.first?.state == .idle)
         t.check("a session seen for the first time is not held",
                 StateAggregator.settled(justStopped, previous: nil,
                                         now: stopAt.addingTimeInterval(1)).sessions.first?.state == .idle)
@@ -2253,6 +2266,12 @@ struct Runner {
              "description": "Start the dev server", "command": "npm run dev"],
             ["id": "s2", "type": "shell", "status": "running",
              "description": "Watcher", "command": "tsc --watch"],
+            ["id": "s3", "type": "shell", "status": "running",
+             "description": "rebuild loop", "command": "while true; do make; sleep 2; done"],
+            ["id": "s4", "type": "shell", "status": "running",
+             "description": "serve and open", "command": "npm run dev & sleep 3 && open http://localhost:3000"],
+            ["id": "s5", "type": "shell", "status": "running",
+             "description": "Watch for file changes and rebuild", "command": "fswatch . | xargs make"],
         ]
         let waitTasks = BackgroundWork.parse(waitRaw)
         t.check("waits are told from servers by description or a sleep",
@@ -2261,6 +2280,11 @@ struct Runner {
                 BackgroundWork.waking(waitTasks).allSatisfy { $0.label == BackgroundWork.shellLabel })
         t.check("one waiting command is phrased as a command, not an agent",
                 BackgroundWork.phrase(["shell"]) == "waiting for a background command")
+        t.check("a command and an agent together are tasks, not two agents",
+                BackgroundWork.phrase(["shell", "auditor"]) == "waiting for 2 background tasks")
+        t.check("a hold made only of waits is told apart: it is the one that is a guess",
+                BackgroundWork.onlyWaits(waitTasks) && !BackgroundWork.onlyWaits(bgTasks)
+                && !BackgroundWork.onlyWaits(waitTasks + bgTasks))
 
         func parked(_ labels: [String], stoppedAt at: Date) -> SessionState {
             SessionState(sessionId: "park", project: "p", cwd: "/tmp", state: .busy, tool: "",
@@ -2282,6 +2306,34 @@ struct Runner {
                                                   now: t0, isLive: { _, _ in true })
         t.check("an agent still running holds it however long it takes",
                 agentLong.sessions.first?.state == .busy)
+
+        // ---- The Finished list keeps pace with the bubble ----
+        func record(_ sid: String, _ turn: String, held: Bool = false) -> CompletionEvent {
+            CompletionEvent(sessionId: sid, turnKey: turn, project: "p", displayName: "p",
+                            finishedAt: t0, summary: "done", held: held)
+        }
+        func live(_ sid: String, _ act: SessionActivity, prompt: String) -> SessionState {
+            SessionState(sessionId: sid, project: "p", cwd: "/tmp", state: act, tool: "",
+                         detail: "", since: t0, updatedAt: t0, promptId: prompt)
+        }
+        let recs = [record("a", "p1"), record("b", "p1"), record("c", "p0"), record("d", "p1", held: true)]
+        let shownNow = CompletionQueue.shown(recs, sessions: [
+            live("a", .busy, prompt: "p1"),   // its Stop is seconds old, or hq sent it back
+            live("b", .idle, prompt: "p1"),   // at rest
+            live("c", .busy, prompt: "p1"),   // an earlier turn finished; this is a new one
+            live("d", .busy, prompt: "p1"),   // held by a wait
+        ])
+        t.check("a record of the turn a busy session is still in waits; others show",
+                shownNow.map(\.sessionId) == ["b", "c"])
+        t.check("a held record shows once its session is at rest, or gone",
+                CompletionQueue.shown([record("d", "p1", held: true)],
+                                      sessions: [live("d", .idle, prompt: "p1")]).count == 1
+                && CompletionQueue.shown([record("d", "p1", held: true)], sessions: []).count == 1)
+        let heldBack = CompletionQueue.decode([CompletionQueue.encode(record("d", "p1", held: true))])
+        t.check("held survives the trip to disk", heldBack.first?.held == true)
+        t.check("an ordinary record is written as before, with no held key",
+                !(String(data: CompletionQueue.encode(record("a", "p1")), encoding: .utf8) ?? "")
+                    .contains("held"))
 
         // ---- One figure, several sessions: which phase does the pet show ----
         func phased(_ phase: String, running: [RunningTool] = []) -> SessionState {

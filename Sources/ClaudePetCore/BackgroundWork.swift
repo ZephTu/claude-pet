@@ -46,11 +46,15 @@ public enum BackgroundWork {
     /// neither is kept (see `Task.label`).
     static func isWait(description: String, command: String) -> Bool {
         let d = description.trimmingCharacters(in: .whitespaces)
-        if d.range(of: #"^(wait|waiting|poll|polling|watch for|check (again|back|once))\b"#,
+        if d.range(of: #"^(wait|waiting|poll|polling|check (again|back|once))\b"#,
                    options: [.regularExpression, .caseInsensitive]) != nil { return true }
         if d.hasPrefix("等") { return true }
-        // `sleep 600 && check`, `until …; do sleep 30; done`, `while …; sleep …`
-        return command.range(of: #"\bsleep\s+\d"#, options: .regularExpression) != nil
+        // `sleep 600 && gh run view …` or `until gh …; do sleep 30; done`. Not any
+        // `sleep`: `while true; do make; sleep 2; done` is a watcher, and
+        // `npm run dev & sleep 3 && open …` a server — both for the afternoon.
+        let c = command.trimmingCharacters(in: .whitespaces)
+        return c.range(of: #"^sleep\s+\d"#, options: .regularExpression) != nil
+            || c.range(of: #"(?s)^until\b.*\bsleep\s+\d"#, options: .regularExpression) != nil
     }
 
     /// The label a waiting shell goes by: it has no structural name of its own.
@@ -115,6 +119,12 @@ public enum BackgroundWork {
         return trimmed.isEmpty ? type : trimmed
     }
 
+    /// Held open only by waiting shells: the one hold that is a guess.
+    public static func onlyWaits(_ tasks: [Task]) -> Bool {
+        let waking = waking(tasks)
+        return !waking.isEmpty && waking.allSatisfy { $0.waits }
+    }
+
     /// The subset that will produce another turn on its own.
     public static func waking(_ tasks: [Task]) -> [Task] {
         tasks.filter(\.wakesSession)
@@ -133,7 +143,10 @@ public enum BackgroundWork {
         switch labels.count {
         case 0: return ""
         case 1: return L("waiting for \(labels[0])", "在等 \(labels[0])")
-        default: return L("waiting for \(labels.count) background agents", "在等 \(labels.count) 个后台 agent")
+        default:
+            return labels.contains(shellLabel)
+                ? L("waiting for \(labels.count) background tasks", "在等 \(labels.count) 个后台任务")
+                : L("waiting for \(labels.count) background agents", "在等 \(labels.count) 个后台 agent")
         }
     }
 }

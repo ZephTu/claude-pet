@@ -252,10 +252,13 @@ extension StateAggregator {
     ///
     /// `Stop` is not always the end. HQ's own Stop hook can send the reply back
     /// to be corrected, and Claude carries on within a few seconds (18 such
-    /// cases since 2026-11-21, all within 1–8 s); a compaction ends in an idle
-    /// SessionStart and the turn goes on. Each one flashed "done" on a session
-    /// that was still working. Ten seconds covers them, at the cost of every
-    /// real "done" arriving that much later (plus up to one tick).
+    /// cases since 2026-11-21, all within 1–8 s), and each one flashed "done"
+    /// on a session that was still working. Ten seconds covers them, at the
+    /// cost of every real "done" arriving that much later (plus up to one
+    /// tick). (A compaction's idle SessionStart is not held but ignored — see
+    /// Chatter.justFinished — since the turn can take longer than that to go on.)
+    /// The 10 s also lets a resumed turn's Stop be told from a new one;
+    /// `CompletionQueue.shown` keeps the list in step.
     public static let settleAfter: TimeInterval = 10
 
     /// The state as finish detection reads it: a session that was busy and is
@@ -269,7 +272,10 @@ extension StateAggregator {
     /// never busy, and must not "finish" ten seconds after it appears.
     public static func settled(_ state: GlobalState, previous: GlobalState?, now: Date) -> GlobalState {
         guard let previous else { return state }
-        let wasBusy = Set(previous.sessions.filter { $0.state == .busy }.map(\.sessionId))
+        // A compaction ending is not a finish at all (Chatter.justFinished), so
+        // there is nothing to hold back.
+        let wasBusy = Set(previous.sessions.filter { $0.state == .busy && $0.phase != "compacting" }
+            .map(\.sessionId))
         func settling(_ s: SessionState) -> Bool {
             guard s.state == .idle, wasBusy.contains(s.sessionId) else { return false }
             let quiet = now.timeIntervalSince(s.updatedAt)
