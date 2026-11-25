@@ -22,15 +22,21 @@ public struct CompletionEvent: Sendable, Equatable {
     /// The first line of what Claude said last — see `TurnSummary`. Empty for
     /// records written before it existed, and for a turn that ended in silence.
     public let summary: String
+    /// The turn ended with a background command that looks like a wait still
+    /// running (see `BackgroundWork.isWait`). It is recorded all the same — a
+    /// wrong guess must not lose the finish — but it is kept out of sight while
+    /// the session is busy, and the session's next recorded finish replaces it.
+    public let held: Bool
 
     public init(sessionId: String, turnKey: String, project: String,
-                displayName: String, finishedAt: Date, summary: String = "") {
+                displayName: String, finishedAt: Date, summary: String = "", held: Bool = false) {
         self.sessionId = sessionId
         self.turnKey = turnKey
         self.project = project
         self.displayName = displayName
         self.finishedAt = finishedAt
         self.summary = summary
+        self.held = held
     }
 
     /// Stable across redeliveries of the same turn, and distinct between turns.
@@ -84,7 +90,8 @@ public enum CompletionQueue {
         let name = d["displayName"] as? String ?? project
         return CompletionEvent(sessionId: sessionId, turnKey: turnKey, project: project,
                                displayName: name, finishedAt: finishedAt,
-                               summary: d["summary"] as? String ?? "")
+                               summary: d["summary"] as? String ?? "",
+                               held: d["held"] as? Bool ?? false)
     }
 
     public static func encode(_ e: CompletionEvent) -> Data {
@@ -96,7 +103,26 @@ public enum CompletionQueue {
             "finishedAt": format(e.finishedAt),
         ]
         if !e.summary.isEmpty { doc["summary"] = e.summary }
+        if e.held { doc["held"] = true }
         return (try? JSONSerialization.data(withJSONObject: doc)) ?? Data()
+    }
+
+    /// The finishes that may be shown now: not one whose session is, as far as
+    /// the pet can tell, still at it.
+    ///
+    /// `Stop` writes the record at once, but the turn is not always over — HQ's
+    /// Stop hook can hand the same turn its next instruction, and a held turn
+    /// waits on a background command. Pass the settled sessions
+    /// (`StateAggregator.settled`), so the list, the badge and the bubble agree:
+    /// a record of the turn a busy session is in (same prompt) waits, as does a
+    /// held one; both appear when the session comes to rest.
+    public static func shown(_ events: [CompletionEvent], sessions: [SessionState]) -> [CompletionEvent] {
+        let busy = Dictionary(sessions.filter { $0.state == .busy }.map { ($0.sessionId, $0) },
+                              uniquingKeysWith: { a, _ in a })
+        return events.filter { e in
+            guard let s = busy[e.sessionId] else { return true }
+            return !(e.held || (!s.promptId.isEmpty && s.promptId == e.turnKey))
+        }
     }
 
     /// Collapses redeliveries of one turn, keeping the newest reading of it.

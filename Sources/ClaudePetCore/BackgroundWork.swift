@@ -35,6 +35,36 @@ public enum BackgroundWork {
     /// the pet agrees with the terminal the user is looking at.
     public static let wakingTypes: Set<String> = ["subagent", "workflow"]
 
+    /// …with one kind of shell added: one that is plainly a wait. Claude often
+    /// ends a turn on "the build is queued, I'll check once it has a number",
+    /// leaving a shell that sleeps or polls until then — and its finishing wakes
+    /// the session for the next round. Counted on the pet since 2026-11-21: 82
+    /// turns started that way, 55 of their shells described as "Wait …"; one
+    /// release run flashed "done" five times. A dev server or a watcher left for
+    /// the afternoon is not described or written like this, so it still counts
+    /// as finished. Read from the description and command only to decide this —
+    /// neither is kept (see `Task.label`).
+    static func isWait(description: String, command: String) -> Bool {
+        let d = description.trimmingCharacters(in: .whitespaces)
+        if d.range(of: #"^(wait|waiting|poll|polling|check (again|back|once))\b"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil { return true }
+        if d.hasPrefix("等") { return true }
+        // `sleep 600 && gh run view …` or `until gh …; do sleep 30; done`. Not any
+        // `sleep`: `while true; do make; sleep 2; done` is a watcher, and
+        // `npm run dev & sleep 3 && open …` a server — both for the afternoon.
+        let c = command.trimmingCharacters(in: .whitespaces)
+        return c.range(of: #"^sleep\s+\d"#, options: .regularExpression) != nil
+            || c.range(of: #"(?s)^until\b.*\bsleep\s+\d"#, options: .regularExpression) != nil
+    }
+
+    /// The label a waiting shell goes by: it has no structural name of its own.
+    public static let shellLabel = "shell"
+
+    /// How long a waiting shell may hold a session's finish. A wait that never
+    /// returns must not hide the finish forever — that is the one failure this
+    /// project cares about most — so past this the session counts as idle.
+    public static let shellWaitLimit: TimeInterval = 20 * 60
+
     public struct Task: Sendable, Equatable {
         public let id: String
         public let type: String
@@ -45,14 +75,18 @@ public enum BackgroundWork {
         /// rule applied to tool calls.
         public let label: String
 
-        public init(id: String, type: String, status: String, label: String) {
+        /// A shell that is waiting for something this turn is to pick up.
+        public let waits: Bool
+
+        public init(id: String, type: String, status: String, label: String, waits: Bool = false) {
             self.id = id
             self.type = type
             self.status = status
             self.label = label
+            self.waits = waits
         }
 
-        public var wakesSession: Bool { wakingTypes.contains(type) }
+        public var wakesSession: Bool { wakingTypes.contains(type) || waits }
     }
 
     /// Reads the raw `background_tasks` value out of a hook payload.
@@ -65,11 +99,14 @@ public enum BackgroundWork {
         return rows.compactMap { row in
             let type = (row["type"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !type.isEmpty else { return nil }
+            let waits = type == "shell" && isWait(description: row["description"] as? String ?? "",
+                                                  command: row["command"] as? String ?? "")
             return Task(
                 id: row["id"] as? String ?? "",
                 type: type,
                 status: row["status"] as? String ?? "",
-                label: label(type: type, row: row))
+                label: waits ? shellLabel : label(type: type, row: row),
+                waits: waits)
         }
     }
 
@@ -80,6 +117,12 @@ public enum BackgroundWork {
             ?? ""
         let trimmed = structural.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? type : trimmed
+    }
+
+    /// Held open only by waiting shells: the one hold that is a guess.
+    public static func onlyWaits(_ tasks: [Task]) -> Bool {
+        let waking = waking(tasks)
+        return !waking.isEmpty && waking.allSatisfy { $0.waits }
     }
 
     /// The subset that will produce another turn on its own.
@@ -93,10 +136,17 @@ public enum BackgroundWork {
     /// background agent to finish" — rather than inventing a second vocabulary
     /// for the same thing.
     public static func phrase(_ labels: [String]) -> String {
+        if !labels.isEmpty, labels.allSatisfy({ $0 == shellLabel }) {
+            return labels.count == 1 ? L("waiting for a background command", "在等后台命令")
+                : L("waiting for \(labels.count) background commands", "在等 \(labels.count) 个后台命令")
+        }
         switch labels.count {
         case 0: return ""
         case 1: return L("waiting for \(labels[0])", "在等 \(labels[0])")
-        default: return L("waiting for \(labels.count) background agents", "在等 \(labels.count) 个后台 agent")
+        default:
+            return labels.contains(shellLabel)
+                ? L("waiting for \(labels.count) background tasks", "在等 \(labels.count) 个后台任务")
+                : L("waiting for \(labels.count) background agents", "在等 \(labels.count) 个后台 agent")
         }
     }
 }
