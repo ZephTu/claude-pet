@@ -397,8 +397,10 @@ function intake(pr) {
   const on = [...auto].filter((k) => AUTO_SOURCES.some(([x]) => x === k)).length;
   const sum = [T(`${tpls.length} common`, `常见的活 ${tpls.length}`), T(`${jobs.length} recurring`, `定期 ${jobs.length}`),
     T(`${on} by itself on`, `自动来活开了 ${on} 个`)].join(" · ");
-  return `<div class="sec-h fold ${open2 ? "open" : ""}" data-action="p-intake" data-p="${esc(name)}"
-      title="${T("Where its work comes from: templates, recurring jobs, sources", "活从哪来：模板、定期任务、自动来源")}">${T("How work comes in", "来活方式")}<span class="sub">${esc(sum)}${open2 ? "" : T(" · click to show", " · 点击展开")}</span></div>
+  // Held open while a template or recurring job is being edited: the header doesn't fold it then.
+  const held = Boolean(tplEdit) || open;
+  return `<div class="sec-h ${held ? "" : "fold"} ${open2 ? "open" : ""}" ${held ? "" : `data-action="p-intake" data-p="${esc(name)}"`}
+      title="${T("Where its work comes from: templates, recurring jobs, sources", "活从哪来：模板、定期任务、自动来源")}">${T("How work comes in", "来活方式")}<span class="sub">${esc(sum)}${held ? "" : open2 ? T(" · click to fold", " · 点击收起") : T(" · click to show", " · 点击展开")}</span></div>
     ${open2 ? `<div class="intake">${tplBox}${recurBox}${autoBox}</div>${tplEdit}` : ""}`;
 }
 const INTAKE_KEY = "hq-intake-open";

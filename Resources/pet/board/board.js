@@ -959,6 +959,8 @@ function render() {
   const regionOf = (x) => (x.closest("#modal, #drawer") || {}).id || "";
   const activeRegion = active && active.closest ? regionOf(active) : "";
   const taScrolls = textScrolls(document);
+  const replyScrolls = [...document.querySelectorAll(".ask-reply-body[data-reply]")].filter((x) => x.scrollTop > 0)
+    .map((x) => [x.dataset.reply, regionOf(x), x.scrollTop]);
   // Peek panes are rebuilt every refresh; keep where the reader was (bottom = newest by default).
   const scrolls = {};
   document.querySelectorAll(".peek[data-sid]").forEach((p) => {
@@ -1018,6 +1020,9 @@ function render() {
     }
   }
   restoreTextScrolls(document, taScrolls);
+  for (const [k, region, top] of replyScrolls) {
+    document.querySelectorAll(`.ask-reply-body[data-reply="${CSS.escape(k)}"]`).forEach((x) => { if (regionOf(x) === region) x.scrollTop = top; });
+  }
   slashPlace();
 }
 
@@ -1105,16 +1110,23 @@ function renderAskGroup(t, asks, extra = {}) {
   const target = groupTarget(asks);
   const sending = asks.some((a) => ui.resolving.has(a.id));
   const allPush = target && asks.every((a) => wantPush(a));
-  const sug = asks.filter((a) => askVerdict(a.id) === "suggested").length;
   return `<div class="askgroup">${askReply(t, asks)}${asks.map((a) => askCard(t, a, { ...extra, group: true, sharedTarget: Boolean(target) })).join("")}
     <div class="askbar">
       ${target ? `<label class="push" title="${T("Type all the answers into that session as one message, so it carries on now", "把所有回答合成一条消息发给那个 session，让它马上接着干")}">
         <input type="checkbox" data-action="push-group" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${allPush ? "checked" : ""}>
         ${T("send to", "现在发给")} <b>${esc(target.title || target.project)}</b>${T(" now", "")}${target.state === "busy" ? T(" (busy — it will queue)", "（正忙——会排队）") : ""}</label>` : `<span style="flex:1"></span>`}
       <button class="btn small primary" data-action="resolve-all" data-task="${esc(t.id)}" data-ids="${esc(asks.map((a) => a.id).join(" "))}" ${sending ? "disabled" : ""}
-        title="${T(`Record every answer${target ? " and send them in one message" : ""}; an empty box goes as Yes — as Claude suggested (⌘Enter)`, `记下每个回答${target ? "，并合成一条消息发出" : ""}；空着的按 Claude 的建议回答（⌘回车）`)}">${sending ? T("Sending…", "发送中…")
-          : T(`Send ${asks.length} answers`, `发送 ${asks.length} 个回答`) + (sug ? `<span class="sug">${T(` · ${sug} as suggested`, ` · ${sug} 个按建议`)}</span>` : "")}<kbd>⌘↩</kbd></button>
+        title="${T(`Record every answer${target ? " and send them in one message" : ""}; an empty box goes as Yes — as Claude suggested (⌘Enter)`, `记下每个回答${target ? "，并合成一条消息发出" : ""}；空着的按 Claude 的建议回答（⌘回车）`)}">${sending ? T("Sending…", "发送中…") : groupSendWords(asks.map((a) => a.id))}</button>
     </div></div>`;
+}
+// The words on a group's Send, and on a lone ask's: what goes out. noteFlip() redraws them in place.
+function groupSendWords(ids) {
+  const sug = ids.filter((id) => askVerdict(id) === "suggested").length;
+  return T(`Send ${ids.length} answers`, `发送 ${ids.length} 个回答`) + (sug ? `<span class="sug">${T(` · ${sug} as suggested`, ` · ${sug} 个按建议`)}</span>` : "") + "<kbd>⌘↩</kbd>";
+}
+function askSendWords(v) {
+  return (v === "suggested" ? T("✓ Go ahead as suggested", "✓ 按建议做") : v === "answer" ? T("Send answer", "发送回答")
+    : v === "always" ? T("Yes, and grant it", "可以，并授权") : `${T("Send: ", "发送：")}${esc(resInfo(v)[1])}`) + "<kbd>⌘↩</kbd>";
 }
 // The one live session every ask in a group came from, if the board can type into it.
 function groupTarget(asks) {
@@ -1125,7 +1137,8 @@ function groupTarget(asks) {
 // The reply that raised a task's asks, above them, so you answer with what Claude said in front
 // of you instead of opening its terminal to read it. hq keeps it with each ask (`context`, the
 // reply without its hq blocks, up to 6000 characters); this is the newest ask's. Open unless you
-// fold it — remembered per reply, so the next reply opens again.
+// fold it — remembered per reply, so the next reply opens again. A redraw keeps where you had
+// scrolled it to (render()).
 const REPLY_FOLD_KEY = "hq-reply-fold";
 const replyFold = (() => { try { return JSON.parse(localStorage.getItem(REPLY_FOLD_KEY) || "[]"); } catch (e) { return []; } })();
 function toggleReplyFold(id) {
@@ -1134,17 +1147,24 @@ function toggleReplyFold(id) {
   if (replyFold.length > 200) replyFold.splice(0, replyFold.length - 200);
   try { localStorage.setItem(REPLY_FOLD_KEY, JSON.stringify(replyFold)); } catch (e) { /* private mode */ }
 }
+// A reply's key for its fold and scroll: a hash of its text, the same whichever of its asks is shown.
+function replyKey(text) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+  return "r" + h.toString(36) + "." + text.length;
+}
 function askReply(t, asks) {
   const withCtx = asks.filter((a) => a.context);
   if (!withCtx.length) return "";
   const a = withCtx.reduce((x, y) => (String(y.ts) > String(x.ts) ? y : x));
   const earlier = withCtx.filter((x) => x.context !== a.context).length;
-  const open = !replyFold.includes(a.id);
+  const key = replyKey(a.context);
+  const open = !replyFold.includes(key);
   return `<div class="ask-reply ${open ? "open" : ""}">
-    <button class="ask-reply-h" data-action="ask-reply" data-id="${esc(a.id)}" title="${open ? T("Fold", "收起") : T("Show what Claude said when it asked", "看 Claude 提问时说了什么")}">
+    <button class="ask-reply-h" data-action="ask-reply" data-id="${esc(key)}" title="${open ? T("Fold", "收起") : T("Show what Claude said when it asked", "看 Claude 提问时说了什么")}">
       <span class="tw">${open ? "▾" : "▸"}</span>${T("Claude's last reply", "Claude 的最后一段回复")}<span class="meta">${ago(a.ts)}${earlier
         ? T(` · ${earlier} of these came with an earlier reply — click its question`, ` · 其中 ${earlier} 条来自更早的回复，点问题文字看`) : ""}</span></button>
-    ${open ? `<div class="md ask-reply-body">${markdown(a.context)}</div>` : ""}
+    ${open ? `<div class="md ask-reply-body" data-reply="${esc(key)}">${markdown(a.context)}</div>` : ""}
   </div>`;
 }
 
@@ -1162,8 +1182,6 @@ function askCard(t, a, opt = {}) {
     : opt.inTask ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
   const menu = ASK_MENU.filter((r) => !(sec && r === "always"));
-  const sendWord = v === "suggested" ? T("✓ Go ahead as suggested", "✓ 按建议做") : v === "answer" ? T("Send answer", "发送回答")
-    : v === "always" ? T("Yes, and grant it", "可以，并授权") : `${T("Send: ", "发送：")}${resInfo(v)[1]}`;
   return `
     <div class="card ask v-${v}" data-ask="${esc(a.id)}">
       <div class="meta">${meta}</div>
@@ -1177,7 +1195,7 @@ function askCard(t, a, opt = {}) {
         <button class="btn small ghost res-drop ${pick === "drop" ? "on" : ""}" data-action="pick" data-id="${esc(a.id)}" data-res="drop" title="${esc(resInfo("drop")[2])}${T(" — click again to take it back", "——再点一下取消")}">${T("✕ No", "✕ 不要")}</button>
         <button class="btn small ghost res-more ${pick && pick !== "drop" ? "on" : ""}" data-action="more-res" data-id="${esc(a.id)}" title="${T("More answers: Later, To todo, Yes always, No context", "更多回答：稍后、转待办、以后都可以、不了解背景")}">⋯</button>
         ${opt.group ? "" : `<button class="btn small primary ask-send" data-action="resolve" data-id="${esc(a.id)}" data-res="${pick || "do"}" ${ui.resolving.has(a.id) ? "disabled" : ""}
-          title="${esc(pick ? resInfo(pick)[2] : resInfo("do")[2])} (⌘Enter)">${sendWord}<kbd>⌘↩</kbd></button>`}
+          title="${esc(pick ? resInfo(pick)[2] : resInfo("do")[2])} (⌘Enter)">${askSendWords(v)}</button>`}
       </div>
       ${ui.moreRes.has(a.id) ? `<div class="ask-menu">${menu.map((r) => `<button class="btn small res-${r} ${pick === r ? "on" : ""}" data-action="pick" data-id="${esc(a.id)}" data-res="${r}" title="${esc(resInfo(r)[2])}">${resInfo(r)[1]}</button>`).join("")}</div>` : ""}
       ${pick === "always" ? grantBox(t, a) : ""}
@@ -1283,10 +1301,20 @@ function pushMessageAll(answers) {
     answers.map(({ a, res, note, made }) => `- ${a.id} "${gist(a.text)}": ${resText(res, note, made && made.granted)}`).join("\n");
 }
 // Writing in an ask's box (or pasting an image) turns its "As suggested" into "Your answer", and
-// emptying it turns it back: redraw when what its tag and Send say no longer holds.
+// emptying it turns it back. Its edge, tag and Send (and its group's) change in place: rebuilding
+// the box under your typing would lose its ⌘Z history.
 function noteFlip(id) {
   const v = askVerdict(id);
-  if ([...document.querySelectorAll(`.card.ask[data-ask="${CSS.escape(id)}"]`)].some((c) => !c.classList.contains("v-" + v))) render();
+  for (const c of document.querySelectorAll(`.card.ask[data-ask="${CSS.escape(id)}"]`)) {
+    if (c.classList.contains("v-" + v)) continue;
+    c.className = c.className.replace(/\bv-\S+/g, "").trim() + " v-" + v;
+    const tag = c.querySelector(".ask-tag");
+    if (tag) { tag.className = "ask-tag v-" + v; tag.textContent = verdictLabel(v); }
+    const send = c.querySelector(".ask-send");
+    if (send) send.innerHTML = askSendWords(v);
+    const all = c.closest(".askgroup") && c.closest(".askgroup").querySelector('[data-action="resolve-all"]');
+    if (all && !all.disabled) all.innerHTML = groupSendWords(String(all.dataset.ids || "").split(" ").filter(Boolean));
+  }
 }
 // An ask's note with any pasted images: Claude Code reads an image from a path in the prompt.
 function answerNote(id) {
