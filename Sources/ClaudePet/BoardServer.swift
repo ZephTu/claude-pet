@@ -133,18 +133,19 @@ final class BoardServer {
         }
     }
 
-    /// A pairing code for one more phone: the address to open, with a fresh token after `#` (a
-    /// fragment never leaves the phone's browser — not in a request, not in a log), and the same
-    /// as a QR code to scan. The token is kept only as its hash.
+    /// A pairing code for one more phone: the address to open, with the code after `#` (a
+    /// fragment never leaves the phone's browser — not in a request, not in a log), the same as a
+    /// QR code to scan, and the code alone to type. The code is kept only as its hash.
     func pair() -> (Any?, String?) {
         guard listener != nil else { return (nil, L("turn phone access on first", "先打开手机访问")) }
-        let token = RemoteAccess.newToken()
+        let token = RemoteAccess.newPairingCode()
         var all = RemoteAccess.live(devices, now: Date())
         all.append(RemoteAccess.Device(id: UUID().uuidString.prefix(8).lowercased(), name: L("New phone", "新手机"),
                                        hash: RemoteAccess.hash(token), created: Date()))
         devices = all
         let url = "\(baseURLs().first ?? "http://localhost:\(port)")/board/board.html#pair=\(token)"
-        return (["url": url, "qr": Self.qrCode(url) ?? ""], nil)
+        let shown = "\(token.prefix(4))-\(token.suffix(4))"
+        return (["url": url, "qr": Self.qrCode(url) ?? "", "code": shown], nil)
     }
 
     func revoke(_ id: String) -> (Any?, String?) {
@@ -167,7 +168,7 @@ final class BoardServer {
     }
 
     /// How a phone reaches this Mac: its Bonjour name (stays the same when the router hands out
-    /// another address), then each private IPv4 address it has.
+    /// another address), then each private IPv4 address it has on a real network — not a VPN's.
     private func baseURLs() -> [String] {
         var hosts: [String] = []
         if let name = SCDynamicStoreCopyLocalHostName(nil) as String?, !name.isEmpty { hosts.append("\(name).local") }
@@ -183,7 +184,8 @@ final class BoardServer {
         for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let ifa = ptr.pointee
             guard let sa = ifa.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET),
-                  (ifa.ifa_flags & UInt32(IFF_UP)) != 0, (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0 else { continue }
+                  (ifa.ifa_flags & UInt32(IFF_UP)) != 0, (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0,
+                  !Self.isTunnel(ifa) else { continue }
             let addr = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
             let bytes = withUnsafeBytes(of: addr.s_addr) { Array($0) }
             // Private ones only: a phone on this network can reach those; and not 169.254 (no DHCP).
@@ -225,6 +227,14 @@ final class BoardServer {
         c.start()
     }
 
+    /// A VPN's interface (Tailscale, a company VPN: utun…, point-to-point): its addresses are for
+    /// the far end, not for a phone on the Wi-Fi.
+    private static func isTunnel(_ ifa: ifaddrs) -> Bool {
+        let name = String(cString: ifa.ifa_name)
+        return (ifa.ifa_flags & UInt32(IFF_POINTOPOINT)) != 0
+            || ["utun", "ipsec", "ppp", "gif", "stf", "awdl", "llw"].contains(where: name.hasPrefix)
+    }
+
     /// A peer in a network the Mac is on itself — a public IPv6 address from the home router, say.
     /// Tunnels (Tailscale, VPNs: utun…) don't count: their peers are anywhere.
     private static func onLink(_ peer: [UInt8]) -> Bool {
@@ -235,11 +245,8 @@ final class BoardServer {
         defer { freeifaddrs(head) }
         for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let ifa = ptr.pointee
-            let name = String(cString: ifa.ifa_name)
             guard (ifa.ifa_flags & UInt32(IFF_UP)) != 0, (ifa.ifa_flags & UInt32(IFF_LOOPBACK)) == 0,
-                  (ifa.ifa_flags & UInt32(IFF_POINTOPOINT)) == 0,
-                  !["utun", "ipsec", "ppp", "gif", "stf", "awdl", "llw"].contains(where: name.hasPrefix),
-                  let sa = ifa.ifa_addr, let nm = ifa.ifa_netmask else { continue }
+                  !isTunnel(ifa), let sa = ifa.ifa_addr, let nm = ifa.ifa_netmask else { continue }
             let net: [UInt8], mask: [UInt8]
             switch Int32(sa.pointee.sa_family) {
             case AF_INET6:

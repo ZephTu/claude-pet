@@ -30,4 +30,7 @@ a hint, not proof: any later `build-app.sh` in that worktree overwrites its `Cla
 - Phone access (`BoardServer.swift`): `.build/debug/ClaudePet --serve-board 18790` serves the board
   on its own and prints a pairing link; `.build/debug/ClaudePet --render-url "<that link>" out.png
   ["<js>"]` renders it as a phone's browser does, over HTTP with no bridge. Static files come from
-  the build's resource bundle: `swift build` after editing them.
+  the build's resource bundle: `swift build` after editing them. The Mac's Phone access settings
+  with a QR code: `defaults write ClaudePet boardServerEnabled -bool true` and `boardServerPort -int
+  18791` (not the installed pet's 8790), then `--render-board` clicking open-settings and
+  remote-pair; delete those defaults (and `boardServerDevices`) afterwards.

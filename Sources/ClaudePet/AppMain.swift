@@ -49,6 +49,8 @@ struct AppMain {
             }
             let script = rest.first ?? ""
             MainActor.assumeIsolated {
+                // Phone access as the app has it (a development copy: set its own boardServerPort).
+                BoardServer.shared.startIfEnabled()
                 let window = BoardWindow()
                 if let size { window.setContentSize(size) }
                 window.renderPreview(to: arguments[i + 1], script: script) { exit($0 ? 0 : 1) }

@@ -264,6 +264,32 @@ public enum RemoteAccess {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// A pairing code: 8 characters to type on a phone where scanning won't do (a web app on the
+    /// Home Screen has storage of its own, and the camera opens Safari). It is one use, lapses in
+    /// pairWindow and shares the lockout, so 40 bits are plenty; the phone's own token is 256.
+    /// Crockford's base32: no I, L, O or U to misread.
+    public static let codeAlphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+    public static func newPairingCode() -> String {
+        var g = SystemRandomNumberGenerator()
+        return String((0..<8).map { _ in codeAlphabet[Int.random(in: 0..<codeAlphabet.count, using: &g)] })
+    }
+
+    /// As typed: case, spaces and dashes don't matter, and O, I and L read as 0, 1 and 1.
+    /// nil for anything that isn't 8 code characters.
+    public static func normalizeCode(_ typed: String) -> String? {
+        let mapped = typed.uppercased().compactMap { c -> Character? in
+            switch c {
+            case " ", "-": return nil
+            case "O": return "0"
+            case "I", "L": return "1"
+            default: return c
+            }
+        }
+        guard mapped.count == 8, mapped.allSatisfy(codeAlphabet.contains) else { return nil }
+        return String(mapped)
+    }
+
     /// The devices still valid: paired ones, and pairing codes not yet lapsed.
     public static func live(_ devices: [Device], now: Date) -> [Device] {
         devices.filter { $0.paired != nil || now.timeIntervalSince($0.created) < pairWindow }

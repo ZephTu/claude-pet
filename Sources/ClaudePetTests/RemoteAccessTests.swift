@@ -113,6 +113,16 @@ enum RemoteAccessTests {
         t.check("a paired phone's token matches it", RemoteAccess.match(tok, in: all, now: now) == 0)
         t.check("a pairing code works within its window", RemoteAccess.match("fresh", in: all, now: now) == 1)
         t.check("an unused pairing code lapses", RemoteAccess.match("old", in: all, now: now) == nil)
+        let codes = (0..<50).map { _ in RemoteAccess.newPairingCode() }
+        t.check("a pairing code is 8 characters to type, without I, L, O or U, and new each time",
+                codes.allSatisfy { $0.count == 8 && !$0.contains(where: "ILOU".contains) && RemoteAccess.normalizeCode($0) == $0 }
+                && Set(codes).count == codes.count)
+        t.check("a code reads as typed: any case, spaces and dashes, O/I/L for 0/1/1",
+                RemoteAccess.normalizeCode("k7qm-3xpa") == "K7QM3XPA" && RemoteAccess.normalizeCode(" K7QM 3XPA ") == "K7QM3XPA"
+                && RemoteAccess.normalizeCode("O1LI-2345") == "01112345")
+        t.check("anything else isn't a code",
+                RemoteAccess.normalizeCode("K7QM3XP") == nil && RemoteAccess.normalizeCode("K7QM3XPU") == nil
+                && RemoteAccess.normalizeCode("http://192.168.0.2:8790") == nil)
         t.check("a wrong or missing token matches nothing",
                 RemoteAccess.match("nope", in: all, now: now) == nil && RemoteAccess.match(nil, in: all, now: now) == nil
                 && RemoteAccess.match("", in: all, now: now) == nil)

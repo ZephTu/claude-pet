@@ -172,7 +172,7 @@ async function claimPairing(code) {
     if (j.result && j.result.token) { setRemoteToken(j.result.token); return true; }
     // Used already (by this phone, or someone who had the link) or lapsed. A phone paired
     // already keeps its own token.
-    if (!remoteToken()) showPairing(T("That pairing link was used already, or has lapsed — make a new one on the Mac", "这个配对链接已经用过或过期了——在 Mac 上重新生成一个"));
+    if (!remoteToken()) showPairing(T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」"));
   } catch (e) {
     showPairing(e.message);
   }
@@ -263,21 +263,41 @@ function showPairing(why) {
   box.dataset.why = why;
   box.innerHTML = `<div class="panel">
     <h2>${T("Pair this phone with the Mac", "把这台手机和 Mac 配对")}</h2>
-    ${why ? `<p class="meta">${esc(why)}</p>` : ""}
+    ${why ? `<p class="meta warn">${esc(why)}</p>` : ""}
     <ol>
       <li>${T("On the Mac, open the board's <b>Settings → Phone access</b> and turn it on.", "在 Mac 上打开看板的 <b>设置 → 手机访问</b>，打开它。")}</li>
-      <li>${T("Press <b>Pair a phone</b> and scan the QR code with this phone's camera.", "点 <b>配对手机</b>，用这台手机的相机扫二维码。")}</li>
+      <li>${T("Press <b>Pair a phone</b>, then type the 8-character code shown under the QR code here — or scan the QR code with the camera (that pairs Safari, not a Home Screen app).", "点 <b>配对手机</b>，把二维码下面的 8 位配对码输到这里——或者用相机扫二维码（扫码配对的是 Safari，不是主屏幕上的 App）。")}</li>
     </ol>
-    <p class="meta">${T("Added the board to the Home Screen? Scanning opens Safari: make a new code on the Mac and paste its link here instead.", "已经添加到主屏幕了？扫码会打开 Safari——可以在 Mac 上新生成一个码，把它的链接粘贴到这里。")}</p>
-    <div class="row"><input id="pair-link" type="url" placeholder="http://…#pair=…" autocomplete="off">
-      <button class="btn primary" data-action="pair-paste">${T("Pair", "配对")}</button></div></div>`;
+    <div class="row"><input id="pair-link" type="text" placeholder="${T("Pairing code, e.g. K7QM-3XPA", "配对码，比如 K7QM-3XPA")}" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+      <button class="btn primary" data-action="pair-paste">${T("Pair", "配对")}</button></div>
+    <p class="meta warn" id="pair-err" hidden></p></div>`;
   box.hidden = false;
 }
+// Return in the code box pairs, as the button does.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && ev.target && ev.target.id === "pair-link") { ev.preventDefault(); pairFromLink(ev.target.value); }
+});
+// A pairing code as typed: case, spaces and dashes don't matter; O, I and L read as 0, 1, 1
+// (RemoteAccess.normalizeCode). Or the whole link, pasted.
+function pairingCode(text) {
+  const s = String(text || "");
+  const m = s.match(/pair=([\w-]+)/);
+  if (m) return m[1];
+  const c = s.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  return /^[0-9A-HJKMNP-TV-Z]{8}$/.test(c) ? c : "";
+}
 async function pairFromLink(text) {
-  const m = String(text || "").match(/pair=([\w-]+)/);
-  if (!m) return toast(T("That isn't a pairing link", "这不是配对链接"), true);
+  const code = pairingCode(text);
+  const err = $("#pair-err");
+  const fail = (msg) => { if (err) { err.textContent = msg; err.hidden = false; } else toast(msg, true); };
+  if (!code) {
+    return fail(/^\s*(https?:\/\/|\d+\.\d+\.)/i.test(String(text || ""))
+      ? T("That's the Mac's address, not a pairing code: press Pair a phone on the Mac and type the 8-character code under the QR code.", "这是 Mac 的地址，不是配对码：在 Mac 上点「配对手机」，输入二维码下面的 8 位配对码。")
+      : T("A pairing code has 8 letters and digits, like K7QM-3XPA", "配对码是 8 位字母和数字，比如 K7QM-3XPA"));
+  }
+  if (err) err.hidden = true;
   setRemoteToken("");
-  pairingClaim = claimPairing(m[1]);
+  pairingClaim = claimPairing(code);
   if (!(await pairingClaim)) return;
   const box = $("#pairing");
   if (box) box.hidden = true;
@@ -2618,7 +2638,8 @@ function renderPhoneAccess() {
         <div class="meta">${urls.map((u) => `<code>${esc(u)}</code>`).join(" · ") || T("no network", "没有网络")}</div></div>
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
       ${pair ? `<div class="pair-qr"><img src="${esc(pair.qr)}" alt="">
-        <div class="meta">${T("Scan it with the phone's camera and open the link. The code pairs one phone and lapses in 15 minutes if unused. Then, in Safari: Share → Add to Home Screen.", "用手机相机扫码，打开链接。这个码只配对一台手机，15 分钟内不用就失效。之后在 Safari 里：分享 → 添加到主屏幕。")}
+        <div class="meta">${pair.code ? `<div class="pair-code">${esc(pair.code)}</div>` : ""}
+          ${T("Scan it with the phone's camera to pair Safari. In the board added to the Home Screen, type the code above instead. A code pairs one phone, once, and lapses in 15 minutes if unused.", "用手机相机扫码，配对的是 Safari；已经添加到主屏幕的看板 App 里，输入上面这个配对码。一个码只能配对一台手机、用一次，15 分钟内不用就失效。")}
           <div class="pair-url"><code>${esc(pair.url)}</code></div>
           <button class="btn small ghost" data-action="remote-pair-close">${T("Hide the code", "收起二维码")}</button></div></div>` : ""}` : ""}
     ${devs.length ? `<div class="set-row devs"><div style="flex:1"><b>${T("Paired phones", "已配对的手机")}</b>
