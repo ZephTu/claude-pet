@@ -124,9 +124,28 @@ h3 { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
 .grant:hover { background: var(--panel-2); }
 .grant .t { flex: 1; min-width: 0; }
 .grant .meta { flex: none; white-space: nowrap; line-height: 1.6; }
-/* several asks on one task: answers are picked, then sent together */
-.askgroup .card.ask { margin-bottom: 6px; }
-.askgroup .card.ask.picked { border-left-color: var(--teal); }
+/* An ask is answered in its box: empty is "as suggested". Its tag (in a group) and its Send
+   say what goes out; the left edge takes the same colour. */
+.card.ask .ask-note { display: block; width: 100%; box-sizing: border-box; min-height: 44px; padding: 5px 8px; line-height: 1.45; resize: none; }
+.card.ask .askrow { margin-top: 6px; }
+.ask-tag { font-size: 11.5px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--faint); white-space: nowrap; }
+.ask-tag.v-answer, .ask-tag.v-always { color: var(--teal); border-color: var(--teal); background: var(--wash-teal); }
+.ask-tag.v-drop { color: var(--red); border-color: var(--red); background: var(--wash-red); }
+.ask-tag.v-snooze { color: var(--amber); border-color: var(--amber); background: var(--wash-amber); }
+.ask-tag.v-todo { color: var(--blue); border-color: var(--blue); background: var(--wash-blue); }
+.btn.res-more.on { border-color: var(--accent); color: var(--accent); }
+.ask-menu { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; margin-top: 6px; }
+.btn kbd { font: inherit; font-size: 10.5px; font-weight: 400; opacity: .7; margin-left: 6px; }
+.askbar .sug { font-weight: 400; }
+/* The reply that raised the asks, above them */
+.ask-reply { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); margin-bottom: 8px; }
+.ask-reply-h { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 6px 11px; cursor: pointer; font-size: 12px; color: var(--dim); }
+.ask-reply-h:hover { color: var(--text); }
+.ask-reply-h .tw { width: 10px; color: var(--faint); }
+.ask-reply-h .meta { margin-left: 4px; }
+.ask-reply-body { max-height: 320px; overflow-y: auto; padding: 0 12px 8px 27px; border-top: 1px solid var(--line); }
+/* several asks on one task: each answered in its box, then sent together */
+.askgroup .card.ask, .askset .card.ask { margin-bottom: 6px; }
 .askbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 2px 10px; }
 .askbar { flex-wrap: nowrap; }
 .askbar .push { margin-top: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1138,7 +1157,10 @@ main.single { grid-template-columns: 1fr; }
 .calm { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--panel); color: var(--dim); margin-bottom: 22px; }
 .calm svg { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--teal); stroke-width: 1.8; }
 .card.ask { border: 0; box-shadow: inset 3px 0 0 var(--amber); padding: 12px 14px; }
-.askgroup .card.ask.picked { border: 0; box-shadow: inset 3px 0 0 var(--teal); }
+.card.ask.v-answer, .card.ask.v-always { box-shadow: inset 3px 0 0 var(--teal); }
+.card.ask.v-drop { box-shadow: inset 3px 0 0 var(--red); }
+.card.ask.v-todo { box-shadow: inset 3px 0 0 var(--blue); }
+.card.ask.v-archive { box-shadow: inset 3px 0 0 var(--faint); }
 .ask-text { font: 600 14.5px/1.5 var(--round); }
 #mytodos .group-title, #notes .group-title { margin-top: 26px; }
 .inbox-list { display: flex; flex-direction: column; }
@@ -1355,7 +1377,7 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .cell:empty { border-color: var(--line); background: none; }
 
 /* the drawer: a task's details, over the right of the board */
-.drawer { position: fixed; top: 52px; right: 0; bottom: 32px; width: min(560px, 94vw); background: var(--panel); border-left: 1px solid var(--line);
+.drawer { position: fixed; top: 52px; right: 0; bottom: 32px; width: min(680px, 94vw); background: var(--panel); border-left: 1px solid var(--line);
   box-shadow: var(--shadow); z-index: 20; display: flex; flex-direction: column; animation: dr-in .18s ease-out; }
 .drawer[hidden] { display: none; }
 @keyframes dr-in { from { transform: translateX(40px); opacity: 0; } }
@@ -1658,7 +1680,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
   box-shadow: -10px 0 30px rgba(0,0,0,.18); }
 #reader[hidden] { display: none; }
 body.reading > main { margin-right: var(--reader-w); }
-body.reading .drawer { right: var(--reader-w); width: min(560px, calc(100vw - var(--reader-w) - 24px)); }
+body.reading .drawer { right: var(--reader-w); width: min(680px, calc(100vw - var(--reader-w) - 24px)); }
 body.reading #modal, body.reading #settings, body.reading #confirm { right: var(--reader-w); }
 body.reading #statusbar { right: var(--reader-w); }
 body.rd-resizing { cursor: col-resize; user-select: none; }
