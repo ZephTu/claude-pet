@@ -633,13 +633,22 @@ enum HookEmit {
     private static func recordCompletion(sessionID: String, project: String,
                                          turnKey: String, at now: String, summary: String) {
         guard let finishedAt = CompletionQueue.parseDate(now) else { return }
-        let event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
+        var event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
                                     project: project, displayName: project,
                                     finishedAt: finishedAt, summary: summary)
         let directory = eventsDirectory
+        let file = directory.appending(path: CompletionQueue.fileName(for: event))
+        // The same turn ending again — HQ's Stop hook sent the reply back to be
+        // corrected, and the corrected reply holds only that block — says nothing
+        // of its own: the line the turn first ended with stays.
+        if summary.isEmpty, let data = try? Data(contentsOf: file),
+           let before = CompletionQueue.decode([data]).first, !before.summary.isEmpty {
+            event = CompletionEvent(sessionId: sessionID, turnKey: turnKey,
+                                    project: project, displayName: project,
+                                    finishedAt: finishedAt, summary: before.summary)
+        }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        writeAtomically(CompletionQueue.encode(event),
-                        to: directory.appending(path: CompletionQueue.fileName(for: event)))
+        writeAtomically(CompletionQueue.encode(event), to: file)
     }
 
     /// Records this session's last finished tool call, replacing the one before

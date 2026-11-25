@@ -1123,6 +1123,41 @@ struct Runner {
         let oneGone = GlobalState(mood: .busy, sessions: [sess("b", .busy)], waitingProject: nil)
         t.check("a session that disappeared is not reported as finished",
                 Chatter.justFinished(previous: wasBusy, current: oneGone).isEmpty)
+        // A permission prompt or a question is the turn pausing for the user —
+        // the pet says so in its own way; it is not "done"
+        let oneAsks = GlobalState(mood: .waiting, sessions: [sess("a", .waiting), sess("b", .busy)],
+                                  waitingProject: "p")
+        t.check("a session stopping to ask is not reported as finished",
+                Chatter.justFinished(previous: wasBusy, current: oneAsks).isEmpty)
+
+        // ---- A finish is announced once it has held for a moment ----
+        // hq's Stop hook sends a reply back and the session resumes within
+        // 1–8 s; a compaction ends on an idle SessionStart. Neither is done.
+        func stoppedAt(_ id: String, _ act: SessionActivity, _ at: Date) -> SessionState {
+            SessionState(sessionId: id, project: "p", cwd: "/tmp", state: act, tool: "",
+                         detail: "", since: at, updatedAt: at)
+        }
+        let stopAt = t0
+        let busyBefore = GlobalState(mood: .busy, sessions: [stoppedAt("a", .busy, t0)],
+                                     waitingProject: nil)
+        let justStopped = StateAggregator.aggregate([stoppedAt("a", .idle, stopAt)], now: stopAt,
+                                                    isLive: { _, _ in true })
+        let early = StateAggregator.settled(justStopped, previous: busyBefore,
+                                            now: stopAt.addingTimeInterval(4))
+        t.check("a stop seconds old still reads as working",
+                early.sessions.first?.state == .busy && early.mood == .busy)
+        t.check("…so nothing is announced yet",
+                Chatter.justFinished(previous: busyBefore, current: early).isEmpty)
+        let later = StateAggregator.settled(justStopped, previous: early,
+                                            now: stopAt.addingTimeInterval(StateAggregator.settleAfter + 1))
+        t.check("a stop that held is announced as a finish",
+                Chatter.justFinished(previous: early, current: later).map(\.sessionId) == ["a"])
+        t.check("a session already idle before is left alone",
+                StateAggregator.settled(justStopped, previous: justStopped,
+                                        now: stopAt.addingTimeInterval(1)).sessions.first?.state == .idle)
+        t.check("a session seen for the first time is not held",
+                StateAggregator.settled(justStopped, previous: nil,
+                                        now: stopAt.addingTimeInterval(1)).sessions.first?.state == .idle)
         // justStarted is what retires the sticky "done" bubble: the user typing
         // at any session again means they are past needing to be told
         t.check("a session going back to work is spotted",
@@ -2202,6 +2237,51 @@ struct Runner {
         t.check("several are counted",
                 BackgroundWork.phrase(["a", "b"]) == "waiting for 2 background agents")
         t.check("none says nothing at all", BackgroundWork.phrase([]).isEmpty)
+
+        // A shell that is plainly waiting for something holds the turn too: a
+        // poll on a CI build wakes the session for the next round of work.
+        let waitRaw: [[String: Any]] = [
+            ["id": "w1", "type": "shell", "status": "running",
+             "description": "Wait for CORE-16919 build to finish", "command": "gh run watch 42"],
+            ["id": "w2", "type": "shell", "status": "running",
+             "description": "check build", "command": "until done; do sleep 30; done"],
+            ["id": "w3", "type": "shell", "status": "running",
+             "description": "等 MIT 结果", "command": "./poll.sh"],
+            ["id": "w4", "type": "shell", "status": "running",
+             "description": "Waiting on release run", "command": "./poll.sh"],
+            ["id": "s1", "type": "shell", "status": "running",
+             "description": "Start the dev server", "command": "npm run dev"],
+            ["id": "s2", "type": "shell", "status": "running",
+             "description": "Watcher", "command": "tsc --watch"],
+        ]
+        let waitTasks = BackgroundWork.parse(waitRaw)
+        t.check("waits are told from servers by description or a sleep",
+                BackgroundWork.waking(waitTasks).map(\.id) == ["w1", "w2", "w3", "w4"])
+        t.check("a waiting shell is labelled structurally, never by its description",
+                BackgroundWork.waking(waitTasks).allSatisfy { $0.label == BackgroundWork.shellLabel })
+        t.check("one waiting command is phrased as a command, not an agent",
+                BackgroundWork.phrase(["shell"]) == "waiting for a background command")
+
+        func parked(_ labels: [String], stoppedAt at: Date) -> SessionState {
+            SessionState(sessionId: "park", project: "p", cwd: "/tmp", state: .busy, tool: "",
+                         detail: "", since: at, updatedAt: at, phase: "awaiting-agent",
+                         backgroundAgents: labels)
+        }
+        let longAgo = t0.addingTimeInterval(-BackgroundWork.shellWaitLimit - 60)
+        let outlived = StateAggregator.aggregate([parked(["shell"], stoppedAt: longAgo)], now: t0,
+                                                 isLive: { _, _ in true })
+        t.check("a wait past its limit lets the finish through",
+                outlived.sessions.first?.state == .idle && outlived.sessions.first?.phase == ""
+                && outlived.mood == .idle)
+        let recent = StateAggregator.aggregate(
+            [parked(["shell"], stoppedAt: t0.addingTimeInterval(-60))], now: t0,
+            isLive: { _, _ in true })
+        t.check("a wait within its limit still holds it",
+                recent.sessions.first?.state == .busy)
+        let agentLong = StateAggregator.aggregate([parked(["shell", "auditor"], stoppedAt: longAgo)],
+                                                  now: t0, isLive: { _, _ in true })
+        t.check("an agent still running holds it however long it takes",
+                agentLong.sessions.first?.state == .busy)
 
         // ---- One figure, several sessions: which phase does the pet show ----
         func phased(_ phase: String, running: [RunningTool] = []) -> SessionState {

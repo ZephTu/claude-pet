@@ -328,9 +328,14 @@ public enum Chatter {
     ///
     /// Matched by session id rather than by count: two sessions swapping states
     /// in one render must not read as "nothing happened".
+    ///
+    /// Stopping on a permission prompt or a question is not finishing: the turn
+    /// goes on once it is answered. Callers pass states through
+    /// `StateAggregator.settled`, so a turn that resumes within seconds of its
+    /// Stop never counts.
     public static func justFinished(previous: GlobalState, current: GlobalState) -> [SessionState] {
         let nowBusy = Set(
-            current.sessions.filter { $0.state == .busy }.map(\.sessionId)
+            current.sessions.filter { $0.state == .busy || $0.state == .waiting }.map(\.sessionId)
         )
         return previous.sessions
             .filter { $0.state == .busy && !nowBusy.contains($0.sessionId) }

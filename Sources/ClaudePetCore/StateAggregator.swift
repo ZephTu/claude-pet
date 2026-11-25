@@ -170,6 +170,7 @@ public enum StateAggregator {
     ) -> GlobalState {
         let live = all.filter { isLive($0, now) }
             .map { approved($0) ? $0.approvedNow() : ended($0) ?? $0 }
+            .map { waitOutlived($0, now: now) ? $0.stoppedWaiting() : $0 }
         let alive = live.filter { !HiddenSessions.isHidden($0, marks: hidden) }
         let hiddenCount = live.count - alive.count
 
@@ -246,7 +247,74 @@ public enum StateAggregator {
     }
 }
 
+extension StateAggregator {
+    /// How long a turn's end must hold before it counts as a finish.
+    ///
+    /// `Stop` is not always the end. HQ's own Stop hook can send the reply back
+    /// to be corrected, and Claude carries on within a few seconds (18 such
+    /// cases since 2026-11-21, all within 1–8 s); a compaction ends in an idle
+    /// SessionStart and the turn goes on. Each one flashed "done" on a session
+    /// that was still working. Ten seconds covers them, at the cost of every
+    /// real "done" arriving that much later (plus up to one tick).
+    public static let settleAfter: TimeInterval = 10
+
+    /// The state as finish detection reads it: a session that was busy and is
+    /// now idle counts as still busy until it has stayed idle `settleAfter`.
+    /// Going busy again inside that window was no finish at all; another Stop
+    /// starts the window again. Only for deciding "it finished" — the bubble,
+    /// the flash, the "all done" line — never for what the rows or the figure
+    /// show, which stay the truth.
+    ///
+    /// Needs the previous settled state: a session idle since it started was
+    /// never busy, and must not "finish" ten seconds after it appears.
+    public static func settled(_ state: GlobalState, previous: GlobalState?, now: Date) -> GlobalState {
+        guard let previous else { return state }
+        let wasBusy = Set(previous.sessions.filter { $0.state == .busy }.map(\.sessionId))
+        func settling(_ s: SessionState) -> Bool {
+            guard s.state == .idle, wasBusy.contains(s.sessionId) else { return false }
+            let quiet = now.timeIntervalSince(s.updatedAt)
+            return quiet < settleAfter
+        }
+        guard state.sessions.contains(where: settling) else { return state }
+        return GlobalState(
+            mood: state.mood == .idle ? .busy : state.mood,
+            sessions: state.sessions.map { settling($0) ? $0.moved(to: .busy, at: $0.since, detail: $0.detail) : $0 },
+            waitingProject: state.waitingProject, hiddenCount: state.hiddenCount,
+            waitingOn: state.waitingOn, waitingSessionId: state.waitingSessionId,
+            waitingAskId: state.waitingAskId)
+    }
+}
+
+extension StateAggregator {
+    /// A turn held open only by background commands that look like waits, for
+    /// longer than `BackgroundWork.shellWaitLimit`.
+    ///
+    /// Subagents and workflows report back, so they hold a finish as long as
+    /// they run. A waiting shell is a guess from its description; if the guess
+    /// was wrong — a `sleep` in front of a server, a poll that never ends — the
+    /// session would sit "busy" for the rest of the day, hiding the very finish
+    /// the pet exists to show. Twenty minutes covers the waits counted (a CI
+    /// build, a release run) and then lets the finish through.
+    public static func waitOutlived(_ s: SessionState, now: Date) -> Bool {
+        s.state == .busy && s.phase == "awaiting-agent"
+            && !s.backgroundAgents.isEmpty
+            && s.backgroundAgents.allSatisfy { $0 == BackgroundWork.shellLabel }
+            && now.timeIntervalSince(s.updatedAt) > BackgroundWork.shellWaitLimit
+    }
+}
+
 private extension SessionState {
+    /// The same session, finished: what it was waiting on is no longer counted.
+    func stoppedWaiting() -> SessionState {
+        SessionState(
+            sessionId: sessionId, project: project, cwd: cwd, state: .idle, tool: tool,
+            detail: detail, since: updatedAt, updatedAt: updatedAt, terminal: terminal,
+            pid: pid, lastPromptAt: lastPromptAt, waitingOn: "", running: running,
+            promptId: promptId, phase: "", troubleAt: troubleAt,
+            backgroundAgents: [], askId: "",
+            failStreak: failStreak, failTarget: failTarget, transcript: transcript)
+    }
+
     /// The same session, working on the command it was given permission for.
     func approvedNow() -> SessionState {
         moved(to: .busy, at: since, detail: detail)
