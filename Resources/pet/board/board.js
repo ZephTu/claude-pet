@@ -106,6 +106,9 @@ const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.termina
 // (BoardPrefs), and the "pet" read brings it with every refresh.
 const SHARED_PREFS = ["hq-skip-perms", "hq-launch", "hq-finish-stop"];
 let sharedPrefs = null;   // null until the first read
+// A choice just made, until a read started after its save brings it back (one sent before has the
+// old value): key → { value, after: the last read started when the save landed }.
+const prefsSaving = {};
 function pref(key, dflt) {
   if (sharedPrefs && SHARED_PREFS.includes(key) && key in sharedPrefs) return sharedPrefs[key];
   try { return localStorage.getItem(key) ?? dflt; } catch (e) { return dflt; }
@@ -114,13 +117,20 @@ function savePref(key, value) {
   try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
   if (SHARED_PREFS.includes(key)) {
     (sharedPrefs ||= {})[key] = value;
-    api("board-prefs", { prefs: { [key]: value } }).catch((e) => toast(String(e.message || e), true));
+    const mine = prefsSaving[key] = { value };
+    api("board-prefs", { prefs: { [key]: value } })
+      .catch((e) => toast(String(e.message || e), true))
+      .finally(() => { if (prefsSaving[key] === mine) mine.after = ui.readNo; });
   }
 }
 // The first read: a choice made on this Mac before the app kept it moves to the app.
-function takeSharedPrefs(prefs) {
+function takeSharedPrefs(prefs, readNo) {
   const first = sharedPrefs === null;
   sharedPrefs = Object.assign({}, prefs || {});
+  for (const [k, p] of Object.entries(prefsSaving)) {
+    if (p.after !== undefined && readNo > p.after) delete prefsSaving[k];
+    else sharedPrefs[k] = p.value;
+  }
   if (!first || REMOTE) return;
   const missing = {};
   for (const k of SHARED_PREFS) {
@@ -749,7 +759,7 @@ async function readBoard(force) {
     ui.clickTarget = pet.clickTarget || "";   // empty: no pet behind this board (--render-board)
     ui.skin = pet.skin || ui.skin || "cat";    // the secretary wears the pet's face
     ui.secGlance = pet.secretary || null;
-    if (pet.prefs) takeSharedPrefs(pet.prefs);
+    if (pet.prefs) takeSharedPrefs(pet.prefs, readNo);
     if ($("#pairing")) $("#pairing").hidden = true;
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
@@ -2634,7 +2644,14 @@ function drawFinishAsk() {
   const live = a ? liveFor(a.task) : [];
   const t = a && taskById(a.task);
   // Nothing left to stop, or the task is open again (picked back before the save landed).
-  if (!a || !live.length || (t && isOpen(t))) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; return; }
+  if (!a || !live.length || (t && isOpen(t))) { ui.finishAsk = null; box.hidden = true; box.innerHTML = ""; delete box.dataset.ask; return; }
+  // Drawn again over itself (its list brought up to date after a read): the tick and the focus
+  // you left in it stay.
+  const key = `${a.task}|${a.status}`;
+  const again = !box.hidden && box.dataset.ask === key;
+  const ticked = again && $("#cf-remember") && $("#cf-remember").checked;
+  const had = again && box.contains(document.activeElement) ? document.activeElement : null;
+  const hadSel = had ? (had.id ? "#" + had.id : had.dataset.action ? `[data-action=${had.dataset.action}]` : null) : null;
   const word = esc(STATUS_SHORT[a.status] || a.status);
   const n = live.length;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Stop its sessions?", "停掉它的 session？")}">
@@ -2646,6 +2663,9 @@ function drawFinishAsk() {
       <button class="btn primary" data-action="finish-stop">${n === 1 ? T("Stop it", "停掉") : T("Stop all", "全部停掉")}</button></div>
   </div>`;
   box.hidden = false;
+  box.dataset.ask = key;
+  if (ticked) $("#cf-remember").checked = true;
+  if (again) { const el = hadSel && box.querySelector(hadSel); if (el) el.focus(); return; }
   // Opened by a refresh, not by your click: Return or Space meant for the box you were typing in
   // must not stop anything, so the safe button takes the focus.
   box.querySelector(a.auto ? "[data-action=finish-keep]" : "[data-action=finish-stop]").focus();

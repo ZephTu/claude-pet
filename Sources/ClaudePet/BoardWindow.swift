@@ -884,7 +884,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
               let pid = (obj["pid"] as? NSNumber)?.int32Value, pid > 1 else {
             return (nil, L("no process recorded for this session", "没有记录这个 session 的进程"))
         }
-        guard ProcessProbe.isClaude(pid: pid) else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
+        // Already ended (by hand, or by another board — the Mac's and a phone's both stop a task's
+        // sessions when it is finished): stopped is what was asked for.
+        guard ProcessProbe.isClaude(pid: pid) else { return (["ok": true, "gone": true], nil) }
         // Claude Code's own file for the pid names the session it is on now (it follows /clear,
         // and a reused pid has its new owner's file); the command line is the fallback.
         let sessionsFile = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/sessions/\(pid).json")
