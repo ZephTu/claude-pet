@@ -178,6 +178,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    state: build is green; waiting on the token
    todo: @me send the token request
    done: rerun the suite
+   change: merge #12 => merge #12 and #13
    log: picked plan v2 because it is cheaper
    ref: PR #9 https://github.com/org/repo/pull/9
    workdir: /abs/path/it/started/working/in
@@ -187,7 +188,17 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    Only the lines that changed. `todo` / `done` / `drop` / `log` / `ref` / `workdir` may
    repeat; `state` lines replace the card's Status (当前状态) section; `done` / `drop` match an
    open todo by its text (exactly — a todo already ticked is then a no-op — or else a substring
-   that fits only one open todo). A `ref:` to one build, run or comment (a process link) goes to
+   that fits only one open todo). `change: <open todo's text> => <new text>` rewrites an open
+   todo in place — same line, same owner unless the new text names one, same creation stamp — and
+   logs `todo #N → changed (session): old ⇒ new` to HISTORY.md; a change already made (old text
+   gone, new one open) is a no-op, and a todo can't be changed and ticked in one block.
+   A `todo: @me …` from a session that repeats an open `@me` todo refuses the block, naming the
+   open one: both about installing from main (`install`/`安装`/`重装` with `main` or `install.sh`),
+   both about reviewing or merging (the autoclose PR verbs) a `#N` / PR link they share, or the
+   same `#N` / `ABC-12` names and text at least 80% alike (character-pair Dice). Different PRs
+   with the same words are not repeats. `todo!:` adds it anyway; the same text again is skipped
+   as before; todos closed or changed in the same block don't count; `@claude` and other owners,
+   the board and `hq addtodo` are not checked. A `ref:` to one build, run or comment (a process link) goes to
    the task's HISTORY.md, not the card; `ref!:` keeps it on the card. `project: NAME` moves the task to an existing project — a
    name not in `hq.json` refuses the whole block, since only the user makes projects. A block holding just `touch` stamps the card when nothing
    changed. Only a block at the end of the reply counts, at the start of a line and outside any
@@ -243,9 +254,10 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    abandoned is never reopened to hold a close. A status written outright — another `hq-update`
    status, `hq set`, the board — drops `closing`.
 
-   **Claude's open todos come along at session start.** SessionStart — for every source:
-   `startup`, `resume`, `clear` and `compact` — appends the card's open `@claude` todos to the
-   context, each exactly as written on the card, with the instruction to check them against how
+   **The card's open todos come along at session start.** SessionStart — for every source:
+   `startup`, `resume`, `clear` and `compact` — appends the card's open `@me` todos (to tick one
+   seen done, or `change:` it rather than add a near-copy) and then its open `@claude` todos to the
+   context, each exactly as written on the card (each list capped as below); for the `@claude` ones with the instruction to check them against how
    things stand and tick finished ones with `done: <text>` / drop obsolete ones with
    `drop: <text>` in the next `hq-update` (after a compaction it adds that the list is the card's,
    not the session's memory of it). At most 20 todos and 2000 characters of todo text: the newest
