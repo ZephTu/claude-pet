@@ -700,8 +700,12 @@ async function submitCreate() {
     for (const [k, text] of secs) if (String(text).trim()) await api("project", { action: "section", names: [name, k, String(text).trim()] });
     const set = [];
     if (m.kind === "goal" && dv("ng:phases").trim()) set.push("phases=" + dv("ng:phases").split(/[,，]/).map((x) => x.trim()).filter(Boolean).join(","));
-    if (m.kind === "duty") { const on = AUTO_SOURCES.map(([k]) => k).filter((k) => dv("nd:auto:" + k, false)); if (on.length) set.push("auto=" + on.join(",")); }
+    // Only the sources the form shows: a draft from before one was hidden doesn't switch it on.
+    const on = m.kind === "duty" ? shownSources(null).map(([k]) => k).filter((k) => dv("nd:auto:" + k, false)) : [];
+    if (on.length) set.push("auto=" + on.join(","));
     if (set.length) await api("project", { action: "set", names: [name, ...set] });
+    // As the page's switch does: a source that makes tasks needs the scan.
+    if (on.some((k) => INTAKE_READY.includes(k)) && !(intakeJob() || {}).enabled) await api("intake-job-set", { on: true });
     if (m.kind === "goal") for (const sub of lines(dv("ng:subs"))) await api("new", { title: sub, project: name, focus: false });
     clearDrafts(p);
     toast(m.kind === "goal" ? T(`Project ${name} created`, `已建项目 ${name}`) : T(`Duty ${name} created`, `已建职责 ${name}`));

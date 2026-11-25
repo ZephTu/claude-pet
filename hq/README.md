@@ -476,8 +476,8 @@ hq project show NAME [--json]               # the file, plus task counts: open, 
 hq project brief NAME
 hq project add NAME [--kind goal|duty] [--title T] [--due YYYY-MM-DD] [--parent DUTY] [--path DIR]
 hq project set NAME kind=duty status=paused due= title="…" jira=QA-1,QA-2 fixVersions=4.2.7
-                    parent=DUTY phases=Design,Build auto=qahub-ci,jira-filter
-hq project section NAME goal|out|done_when|templates|brief [TEXT]   # no TEXT: stdin; a missing
+                    parent=DUTY phases=Design,Build auto=github-review
+hq project section NAME goal|out|done_when|templates|intake|brief [TEXT]   # no TEXT: stdin; a missing
                                             #   section is made, in the file's language
 hq project check NAME N [done|open]         # tick criterion N (1-based) of done-when; logged
 hq project paths NAME DIR…                  # replace its directories
