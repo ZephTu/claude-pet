@@ -1039,9 +1039,11 @@ assert "Open @claude todos on '"$CT"' (2)" in c, c
 lines = c.splitlines()
 assert "- comment the #34019 result on PR #3262, then \"ask\" `x`" in lines, c
 assert "- delete the cluster  of #3260" in lines, c
-for no in ("review the PR", "finished thing", "dropped thing", "send the dataset", "<!--t:"):
+for no in ("finished thing", "dropped thing", "send the dataset", "<!--t:"):
     assert no not in c, no
-assert "done: <text>" in c and "drop: <text>" in c' && ok "SessionStart lists the open @claude todos, text exactly as on the card" || fail "SessionStart todo list: $c"
+assert "Open @me todos on '"$CT"' (1)" in c and "- review the PR" in lines, c
+assert c.index("Open @me todos") < c.index("Open @claude todos"), c
+assert "done: <text>" in c and "drop: <text>" in c' && ok "SessionStart lists the open @me and @claude todos, text exactly as on the card" || fail "SessionStart todo list: $c"
 "$HQ" board --json | python3 -c 'import json,sys; t=[t for t in json.load(sys.stdin)["tasks"] if t["id"]=="'"$CT"'"][0]; o=[x["owner"] for x in t["todos"] if "delete the cluster" in x["text"]]; assert o==["claude"], o' && ok "@Claude is Claude's on the board too" || fail "@Claude owner not normalised"
 for src in resume clear compact; do startctx $src | grep -q "^- delete the cluster  of #3260$" || fail "no todo list on SessionStart source=$src"; done; ok "resume, clear and compact get the list too"
 startctx compact | grep -q "just compacted" && ok "after a compaction the session is told the list is the card's" || fail "compact note missing"
@@ -1072,6 +1074,69 @@ import sys; c = sys.stdin.read(); l = [x for x in c.splitlines() if x.startswith
 assert 1 <= len(l) < 10 and sum(len(x) for x in l) <= 2000 + 2 * len(l) and l[-1].startswith("- long 10 "), l
 assert f"- … {10 - len(l)} older ones not shown" in c, c' && ok "and stays within about 2000 characters" || fail "character cap"
 "$HQ" unbind --session sess-todo >/dev/null
+
+# The user's todos: a new @me todo that repeats an open one is refused with the open one's text,
+# `change:` rewrites one in place (same spot, owner and creation time), `todo!:` adds one anyway.
+MT="$("$HQ" new "me todos" | head -1)"; MC="$(ls "$T"/root/tasks/$MT-*/TASK.md)"
+printf '\n## 待办\n- [ ] @me review 并合并 #127、#129 <!--t:2026-11-22T08:00:00+08:00-->\n- [ ] @me 合并后从 main 运行 scripts/install.sh\n- [ ] @me review 并合并 PR #110\n' >> "$MC"
+"$HQ" bind "$MT" --session sess-me >/dev/null
+upd() { stop sess-me "$(printf 'ok\n```hq-update\n%s\n```' "$1")"; }
+o="$(upd 'todo: @me review 并合并 #126、#127、#129')"
+echo "$o" | grep -q 'repeats the open todo \\"review 并合并 #127、#129\\"' && echo "$o" | grep -q "change: review 并合并 #127、#129 => " && echo "$o" | grep -q 'todo!: @me' \
+  && ! grep -q "#126" "$MC" && ok "an @me todo about a PR an open one merges is refused, naming the open one" || fail "PR repeat not refused: $o"
+o="$(upd 'todo: @me 三个 PR 合并后从 main 跑 scripts/install.sh，再跑 hq/install.sh --yes')"
+echo "$o" | grep -q "installing from main" && ! grep -q "三个 PR" "$MC" && ok "a second install-from-main todo is refused" || fail "install repeat not refused: $o"
+o="$(upd 'todo: @me review 并合并 PR #111')"
+[ -z "$o" ] && grep -q -- "- \[ \] @me review 并合并 PR #111" "$MC" && ok "another PR with the same words is a todo of its own" || fail "#111 refused: $o"
+o="$(upd "$(printf 'todo: @me review 并合并 PR #111\ntodo: @claude review 并合并 #127 的 review 修复')")"
+[ -z "$o" ] && [ "$(grep -c "review 并合并 PR #111" "$MC")" = 1 ] && grep -q "@claude review 并合并 #127 的" "$MC" && ok "the same text again is skipped, and @claude todos are not checked" || fail "exact repeat / claude: $o"
+o="$(upd 'change: review 并合并 #127、#129 => review 并合并 #126、#127、#129')"
+python3 - "$MC" "$o" <<'PY' && ok "change: rewrites the todo in place, keeping its owner and creation time" || fail "change: $o"
+import sys, re
+s = open(sys.argv[1], encoding="utf-8").read(); assert not sys.argv[2], sys.argv[2]
+todos = re.findall(r"^- \[.\] .*$", s, re.M)
+assert todos[0] == "- [ ] @me review 并合并 #126、#127、#129 <!--t:2026-11-22T08:00:00+08:00-->", todos
+assert "#127、#129 " not in s.replace("#126、#127、#129", ""), s
+PY
+grep -q "→ changed (session): @me review 并合并 #127、#129 ⇒ @me review 并合并 #126、#127、#129" "$(dirname "$MC")/HISTORY.md" && ok "the change is in HISTORY.md" || fail "no change tick in HISTORY.md"
+o="$(upd 'change: review 并合并 #127、#129 => review 并合并 #126、#127、#129')"
+[ -z "$o" ] && [ "$(grep -c "#126、#127、#129" "$MC")" = 1 ] && ok "the same change again does nothing" || fail "repeated change: $o"
+o="$(upd 'change: review 并合并 #126、#127、#129 to something')"
+echo "$o" | grep -q "write it as \`change: <text of an open todo> => <its new text>\`" && ok "a change without => says how to write it" || fail "bad change: $o"
+o="$(upd "$(printf 'done: 合并后从 main 运行 scripts/install.sh\ntodo: @me 从 main 安装（scripts/install.sh 和 hq/install.sh --yes）')")"
+[ -z "$o" ] && grep -q -- "- \[x\] @me 合并后从 main" "$MC" && grep -q -- "- \[ \] @me 从 main 安装" "$MC" && ok "closing the old one in the same block lets the new one in" || fail "done + todo: $o"
+o="$(upd 'change: 合并后从 main 运行 scripts/install.sh => 再装一次')"
+echo "$o" | grep -q "already closed" && ok "a closed todo can't be changed" || fail "changed a closed todo: $o"
+o="$(upd "$(printf 'change: review 并合并 PR #110 => review 并合并 PR #110、#112\ndone: review 并合并 PR #110')")"
+echo "$o" | grep -q "also changed in this block\|already ticked, dropped or changed" && ok "a todo can't be changed and ticked in one block" || fail "change + done: $o"
+o="$(upd 'todo!: @me review 并合并 #129，在手机上点一遍')"
+[ -z "$o" ] && grep -q "@me review 并合并 #129，在手机上点一遍" "$MC" && ok "todo!: adds a todo that looks like a repeat" || fail "todo!: $o"
+"$HQ" addtodo "$MT" "@me review 并合并 PR #110 again" && grep -q "PR #110 again" "$MC" && ok "hq addtodo is not checked for repeats" || fail "addtodo refused"
+"$HQ" addtodo "$MT" "@me map a => b in the table" >/dev/null
+o="$(upd 'change: map a => b in the table => map a => c in the table')"
+[ -z "$o" ] && grep -q -- "- \[ \] @me map a => c in the table" "$MC" && ok "change: finds the split whose old text is an open todo, arrows in the text and all" || fail "arrow in text: $o"
+"$HQ" addtodo "$MT" "@me Deploy the fix" >/dev/null
+upd 'change: Deploy the fix => deploy the fix' >/dev/null; o="$(upd 'change: Deploy the fix => deploy the fix')"
+[ -z "$o" ] && [ "$(grep -c "Deploy the fix ⇒ @me deploy the fix" "$(dirname "$MC")/HISTORY.md")" = 1 ] && ok "a case-only change sent twice is written once" || fail "case change repeated: $o"
+upd 'change: @me deploy the fix => @claude deploy the fix' >/dev/null; o="$(upd 'change: @me deploy the fix => @claude deploy the fix')"
+[ -z "$o" ] && grep -q -- "- \[ \] @claude deploy the fix" "$MC" && ok "an owner change sent again does nothing" || fail "owner change repeated: $o"
+upd 'done: @claude deploy the fix' >/dev/null; o="$(upd 'change: @me deploy the fix => @claude deploy the fix')"
+[ -z "$o" ] && ok "a change whose new todo has closed since does nothing" || fail "change after close: $o"
+o="$(upd 'change: map a => c in the table => <its new text>')"
+echo "$o" | grep -q "placeholder" && ! grep -q "<its new text>" "$MC" && ok "a change to the template's placeholder is refused" || fail "placeholder change: $o"
+o="$(upd 'change: map a => c in the table => review 并合并 PR #111')"
+echo "$o" | grep -q 'is the open todo \\"review 并合并 PR #111\\" already' && ok "a change into another open todo's text is refused" || fail "change into twin: $o"
+o="$(upd 'todo！: @me 全角感叹号也认')"
+[ -z "$o" ] && grep -q "全角感叹号也认" "$MC" && ok "todo！: with a full-width mark works" || fail "full-width todo!: $o"
+python3 - "$HQ" "$MC" <<'PY' && ok "a changed todo is not a report note" || fail "changed tick in the report"
+import sys, json, datetime as dt, importlib.machinery, importlib.util
+loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
+spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+a = hq.task_activity(hq.parse_card(sys.argv[2]), dt.datetime(2000, 1, 1), dt.datetime(2100, 1, 1))
+s = json.dumps(a, ensure_ascii=False)
+assert "deploy the fix" in s and "→ changed" not in s, s[:600]
+PY
+"$HQ" unbind --session sess-me >/dev/null
 
 # Refs are keyed by the thing a link points to: a PR's /files or /commits is the PR, a Jira board
 # page the issue, a Jenkins console or test report the build. A link to one comment, and any other
