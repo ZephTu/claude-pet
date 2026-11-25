@@ -706,8 +706,8 @@ function finishedRowHTML(f) {
 // Task statuses worth a word on a session row; "active" is the normal case and says nothing.
 // Keyed by the card's status id; only the value is shown. Same words as the board's status names.
 const TASK_STATUS_WORD = {
-  "waiting-on-me": T("needs you", "等你处理"),
-  blocked: T("blocked", "阻塞"),
+  "waiting-on-me": T("needs you", "等你"),
+  blocked: T("blocked", "卡住"),
   done: T("done", "已完成"),
   abandoned: T("dropped", "已放弃"),
 };

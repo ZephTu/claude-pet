@@ -4468,7 +4468,7 @@ def cmd_set(args):
             die(f"expected key=value, got {kv}")
         k, v = kv.split("=", 1)
         if k == "status":
-            v = STATUS_ALIASES.get(v.lower(), v)
+            v = STATUS_ALIASES.get(v.lower(), v.lower())
             if v not in STATUSES:
                 die(f"status must be one of {', '.join(STATUSES)} (or {', '.join(STATUS_ALIASES)})")
         if k == "category" and v:

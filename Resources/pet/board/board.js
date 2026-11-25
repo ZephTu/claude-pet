@@ -1897,7 +1897,8 @@ function laneWhy(t, ln) {
   if (ln === "run") return T("a session is working on it", "有 session 在干活");
   if (ln !== "you") return "";
   if (liveFor(t.id).some((s) => liveState(s) === "waiting")) return T("a session stopped to wait on you (a permission or a question)", "有 session 停下来等你（授权或提问）");
-  return T("it has an open ask or a todo of yours", "它有没答的问题或你的待办");
+  if (openAsks(t).length || myTodos(t).length) return T("it has an open ask or a todo of yours", "它有没答的问题或你的待办");
+  return T("its card says it waits on you", "任务卡上写着在等你");
 }
 function drawerStatus(t, ln) {
   const open = isOpen(t);
@@ -1908,16 +1909,17 @@ function drawerStatus(t, ln) {
     const set = why && s === t.status;
     const name = l === "done" ? T("Done", "完成") : LANE_NAME[l];
     const title = set ? T(`Your status is ${name}; it sits in ${LANE_NAME[ln]} because ${why}`, `你设的状态是「${name}」；它在「${LANE_NAME[ln]}」是因为${why}`)
-      : on ? T("The column it is in now", "它现在所在的列") : T(`Set the status to ${name}`, `把状态改成「${name}」`);
-    return `<button class="l-${l} ${on ? "on" : ""} ${set ? "set" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}" title="${esc(title)}">${name}</button>`;
+      : on ? (why ? T(`The column it is in now: ${why}`, `它现在所在的列：${why}`) : T("The column it is in now", "它现在所在的列"))
+      : T(`Set the status to ${name}`, `把状态改成「${name}」`);
+    return `<button class="l-${l} ${on ? "on" : ""} ${set ? "set" : ""}" data-action="drawer-status" data-task="${esc(t.id)}" data-s="${s}" ${on ? `data-on="1"` : ""} title="${esc(title)}">${name}</button>`;
   };
   const n = liveFor(t.id).filter((s) => liveState(s) === "busy" || bgRunning(s)).length;
   const run = ln === "run" ? `<span class="run-now" title="${esc(T("Running is up to its sessions: it shows while one is working", "「在跑」由 session 决定：有 session 在干活时就是在跑"))}">● ${T(`Running · ${n} session${n === 1 ? "" : "s"}`, `在跑 · ${n} 个 session`)}</span>` : "";
   const more = ui.statusMore === t.id;
   return `<div class="dr-status">${run}${DRAWER_STATUS.map(btn).join("")}
     ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>`
-      : more ? `<button class="give-up" data-action="drawer-status" data-task="${esc(t.id)}" data-s="abandoned" title="${T("Close it without finishing", "不做了，关掉这个任务")}">${T("Abandon", "放弃")}</button>` : ""}
-    ${t.status === "abandoned" ? "" : `<button class="more ${more ? "on" : ""}" data-action="status-more" data-task="${esc(t.id)}" title="${T("More", "更多")}">⋯</button>`}</div>`;
+      : `<button class="more ${more ? "on" : ""}" data-action="status-more" data-task="${esc(t.id)}" title="${T("More", "更多")}">⋯</button>`
+        + (more ? `<button class="give-up" data-action="drawer-status" data-task="${esc(t.id)}" data-s="abandoned" title="${T("Close it without finishing", "不做了，关掉这个任务")}">${T("Abandon", "放弃")}</button>` : "")}</div>`;
 }
 function renderDrawer() {
   const el = $("#drawer");
@@ -1925,7 +1927,7 @@ function renderDrawer() {
   const keep = body0 && el.dataset.for === ui.drawer ? body0.scrollTop : 0;
   const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
   if (ui.drawer && ui.drawer !== "@sessions" && !t) ui.drawer = null;
-  if (!ui.drawer) { el.hidden = true; el.innerHTML = ""; el.dataset.for = ""; return; }
+  if (!ui.drawer) { el.hidden = true; el.innerHTML = ""; el.dataset.for = ""; ui.statusMore = null; return; }
   el.hidden = false;
   el.dataset.for = ui.drawer;
   const close = `<button class="icon x" data-action="drawer-close" title="${T("Close (Esc)", "关闭（Esc）")}">✕</button>`;
@@ -1953,6 +1955,7 @@ function renderDrawer() {
 function openDrawer(id) {
   ui.drawer = id;
   ui.launchMenu = null;
+  ui.statusMore = null;
   render();
   const node = document.getElementById("kc-" + id);
   if (node) flashCard(node);
@@ -4693,9 +4696,17 @@ document.addEventListener("click", async (ev) => {
     case "drawer-close": ui.drawer = null; return render();
     case "open-sessions": ui.drawer = ui.drawer === "@sessions" ? null : "@sessions"; return render();
     case "drawer-status": {
+      // The lit button is where the task is, not a status to save: in Needs you only because of an
+      // ask or a waiting session, saving waiting-on-me would lose a Blocked for good (as a drag
+      // within its own column changes nothing). Neither does the status it already has.
       const t = taskById(d.task);
       ui.statusMore = null;
-      if (!t || t.status === d.s) return render();
+      if (!t) return render();
+      if (d.on || t.status === d.s) {
+        const ln = lane(t), why = isOpen(t) && LANE_OF_STATUS[t.status] !== ln ? laneWhy(t, ln) : "";
+        if (why) toast(T(`${t.id} stays in ${LANE_NAME[ln]}: ${why}`, `${t.id} 留在「${LANE_NAME[ln]}」：${why}`));
+        return render();
+      }
       return setStatus(d.task, d.s);
     }
     case "status-more": ui.statusMore = ui.statusMore === d.task ? null : d.task; return render();

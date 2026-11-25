@@ -301,11 +301,11 @@ h2.big { font-size: 18px; letter-spacing: 0; text-transform: none; color: var(--
 .empty-today { color: var(--dim); }
 .star { background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; }
 .star:hover, .star.on { color: var(--amber); }
-/* task ids coloured by status */
+/* task ids coloured by status: the colour of the column of the same name (done is grey) */
 .chip[data-st="waiting-on-me"], .tid[data-st="waiting-on-me"] { color: var(--amber); border-color: transparent; }
 .chip[data-st="blocked"], .tid[data-st="blocked"] { color: var(--red); border-color: transparent; }
-.chip[data-st="active"], .tid[data-st="active"] { color: var(--teal); border-color: transparent; }
-.chip[data-st="done"], .tid[data-st="done"] { color: var(--blue); border-color: transparent; }
+.chip[data-st="active"], .tid[data-st="active"] { color: var(--blue); border-color: transparent; }
+.chip[data-st="done"], .tid[data-st="done"] { color: var(--dim); border-color: transparent; }
 .chip[data-st="abandoned"], .tid[data-st="abandoned"] { color: var(--faint); text-decoration: line-through; }
 /* projects */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; text-transform: none; letter-spacing: 0; }
@@ -995,10 +995,10 @@ main.single { grid-template-columns: 1fr; }
 .task { position: relative; background: transparent; border: 0; border-radius: 10px; margin-bottom: 2px; }
 .task::before, .fcard::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
   border-radius: 2px; background: var(--faint); }
-:is(.task, .fcard)[data-st="active"]::before { background: var(--teal); }
+:is(.task, .fcard)[data-st="active"]::before { background: var(--blue); }
 :is(.task, .fcard)[data-st="waiting-on-me"]::before { background: var(--amber); }
 :is(.task, .fcard)[data-st="blocked"]::before { background: var(--red); }
-:is(.task, .fcard)[data-st="done"]::before { background: var(--blue); opacity: .6; }
+:is(.task, .fcard)[data-st="done"]::before { background: var(--dim); opacity: .6; }
 .task-head { grid-template-columns: 50px minmax(0, 1fr) auto; padding: 9px 12px 9px 14px; border-radius: 10px; align-items: baseline; }
 .task-head:hover { background: var(--panel); border-radius: 10px; }
 .tid { font: 600 12px var(--round); color: var(--faint); width: auto; }
@@ -1097,7 +1097,7 @@ main.single { grid-template-columns: 1fr; }
 .props .path .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
 .pill { display: inline-flex; align-items: center; gap: 6px; }
 .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.pill[data-st="active"]::before { background: var(--teal); }
+.pill[data-st="active"]::before { background: var(--blue); }
 .pill[data-st="waiting-on-me"]::before { background: var(--amber); }
 .pill[data-st="blocked"]::before { background: var(--red); }
 .ref-i { display: flex; align-items: center; gap: 4px; min-width: 0; }

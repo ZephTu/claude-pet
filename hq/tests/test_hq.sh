@@ -85,7 +85,9 @@ hook '{"session_id":"sess-2","hook_event_name":"UserPromptSubmit","prompt":"hi"}
 st2() { grep "^status:" "$T"/root/tasks/T-002-*/TASK.md; }
 was=$(st2)
 "$HQ" set T-002 status=needs-you >/dev/null && [ "$(st2)" = "status: waiting-on-me" ] \
-  && "$HQ" set T-002 status=Ready >/dev/null && [ "$(st2)" = "status: active" ] && ok "set status=needs-you / ready are waiting-on-me / active" || fail "status aliases: $(st2)"
+  && "$HQ" set T-002 status=Ready >/dev/null && [ "$(st2)" = "status: active" ] \
+  && "$HQ" set T-002 status=BLOCKED >/dev/null && [ "$(st2)" = "status: blocked" ] \
+  && "$HQ" set T-002 status=ready >/dev/null && ok "set status=needs-you / ready are waiting-on-me / active, any case" || fail "status aliases: $(st2)"
 rc=0; "$HQ" set T-002 status=running 2>/dev/null || rc=$?; [ "$rc" = 1 ] && [ "$(st2)" = "status: active" ] && ok "Running is no status" || fail "status=running took"
 "$HQ" set T-002 "status=${was#status: }" >/dev/null
 # categories: generic defaults, add / rename / guarded remove
