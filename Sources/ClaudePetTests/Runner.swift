@@ -2764,6 +2764,7 @@ struct Runner {
         RemoteAccessTests.run(t)
         QuickPhraseTests.run(t)
         SharedReadsTests.run(t)
+        BoardPushTests.run(t)
         PetLaunchTests.run(t)
 
         print("\n-- language")

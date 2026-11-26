@@ -72,6 +72,15 @@ final class BoardWindow: NSWindow {
         webView.configuration.userContentController.installLanguageScript()
         center()
         setFrameAutosaveName("HQBoard")
+        // Told when what the board shows may have changed (BoardPush): the page reads again
+        // then, and polls only now and then.
+        NotificationCenter.default.addObserver(forName: BoardEvents.changed, object: nil, queue: .main) { [weak self] note in
+            let n = note.userInfo?["n"] as? Int ?? 0
+            MainActor.assumeIsolated {
+                guard let self, self.loaded else { return }
+                self.webView.evaluateJavaScript("window.hqPush && window.hqPush(\(n));")
+            }
+        }
         if let url = PetSchemeHandler.url(path: "board/board.html") {
             webView.load(URLRequest(url: url))
         } else {
@@ -1630,6 +1639,8 @@ extension BoardWindow: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
+        // Changes are pushed to this page: its timer can slow down (see BoardEvents).
+        if BoardEvents.shared.running { webView.evaluateJavaScript("window.hqPushOn && window.hqPushOn();") }
         if let script = pending {
             pending = nil
             webView.evaluateJavaScript(script)

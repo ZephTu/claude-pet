@@ -299,6 +299,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                     "source": u.source]
         }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
+        // The board's window and phones are told when its files change, rather than polling.
+        BoardEvents.shared.start()
         // Phone access to the board, if it was left on (Settings → Phone access).
         BoardServer.shared.startIfEnabled()
         panel.showOnDesktop()
