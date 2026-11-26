@@ -153,17 +153,40 @@ public enum ProcessProbe {
     ///
     /// Only a tool shell counts. Claude starts other children while a prompt is
     /// up — the Notification hook it fires a few seconds in, `caffeinate` — and
-    /// none of those mean the prompt was answered.
-    public static func startedToolShell(under pid: Int32, since: Date) -> Bool {
-        childPIDs(of: pid).contains { child in
+    /// none of those mean the prompt was answered. Nor does a shell running some
+    /// other command: a subagent, or another call of the main thread, starts its
+    /// own while the prompt stays up. So the shell must be running `command`, the
+    /// one asked about; a prompt that names none is never answered this way.
+    public static func startedToolShell(under pid: Int32, since: Date, running command: String) -> Bool {
+        guard !command.isEmpty else { return false }
+        return childPIDs(of: pid).contains { child in
             guard let started = startTime(pid: child), started >= since,
                   let arguments = arguments(pid: child)
             else { return false }
-            return isToolShell(arguments: arguments)
+            return isToolShell(arguments: arguments, running: command)
         }
     }
 
-    /// Pure half of `startedToolShell`: Claude Code runs every Bash tool call as
+    /// Pure half of `startedToolShell(under:since:running:)`. Claude Code hands the command to
+    /// the shell as `eval '<command>'`, each `'` written `'"'"'`, and the whole quoted command
+    /// must be there, closing quote included: `git push` is not `git push --dry-run`, and
+    /// `npm test` is not another agent's `cd web && npm test`. Only a command cut to
+    /// `commandLimit` is matched by its start.
+    public static func isToolShell(arguments: String, running command: String) -> Bool {
+        guard isToolShell(arguments: arguments) else { return false }
+        let cut = command.count >= commandLimit
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return Set([command, trimmed]).contains { c in
+            let quoted = "eval '" + c.replacingOccurrences(of: "'", with: #"'"'"'"#)
+            return arguments.contains(cut ? quoted : quoted + "'")
+        }
+    }
+
+    /// How much of an asked command is kept for `isToolShell(arguments:running:)`.
+    public static let commandLimit = 2000
+
+    /// Claude Code runs every Bash tool call as
     /// `<shell> -c source <config>/shell-snapshots/snapshot-… && <command>`.
     public static func isToolShell(arguments: String) -> Bool {
         arguments.contains("/shell-snapshots/snapshot-")

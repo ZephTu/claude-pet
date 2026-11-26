@@ -581,6 +581,28 @@ struct Runner {
                 !ProcessProbe.isToolShell(arguments: "/bin/sh -c /Users/u/.claude/pet/bin/pet-emit"))
         t.check("caffeinate is not a tool shell",
                 !ProcessProbe.isToolShell(arguments: "caffeinate -i -t 300"))
+        // A subagent's own Bash call starts a tool shell too: only the shell running the command
+        // that was asked about means the prompt was approved.
+        let shell = #"/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1-x.sh 2>/dev/null || true && eval 'echo "it'"'"'s" && tf apply' < /dev/null && pwd -P >| /tmp/claude-1-cwd"#
+        t.check("the shell running the asked command counts as its approval",
+                ProcessProbe.isToolShell(arguments: shell, running: #"echo "it's" && tf apply"#))
+        let cutCommand = String(repeating: "x", count: 2100)
+        t.check("...when only the start of a long command was kept",
+                ProcessProbe.isToolShell(
+                    arguments: "/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'echo \(cutCommand)' < /dev/null",
+                    running: String("echo \(cutCommand)".prefix(2000))))
+        func toolShell(_ c: String) -> String {
+            "/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval '\(c)' < /dev/null && pwd -P >| /tmp/claude-1-cwd"
+        }
+        t.check("a shell running a longer command is not the asked one's",
+                !ProcessProbe.isToolShell(arguments: toolShell("git push --dry-run"), running: "git push")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("cd web && npm test"), running: "npm test")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("cmake --build ."), running: "make")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("echo rm -rf build"), running: "rm -rf build"))
+        t.check("another command's shell does not",
+                !ProcessProbe.isToolShell(arguments: shell, running: "rm -rf build/"))
+        t.check("nor does any shell for a prompt that names no command",
+                !ProcessProbe.isToolShell(arguments: shell, running: ""))
         let me = ProcessInfo.processInfo.processIdentifier
         t.check("this test runner can read its own arguments",
                 ProcessProbe.arguments(pid: me)?.contains("ClaudePetTests") == true)
@@ -594,7 +616,7 @@ struct Runner {
             t.check("a spawned child is listed under its parent",
                     ProcessProbe.childPIDs(of: me).contains(child.processIdentifier))
             t.check("a child that is not a tool shell does not count as approval",
-                    !ProcessProbe.startedToolShell(under: me, since: beforeChild))
+                    !ProcessProbe.startedToolShell(under: me, since: beforeChild, running: "5"))
             child.terminate()
         } else {
             t.check("could spawn /bin/sleep", false)
@@ -617,6 +639,11 @@ struct Runner {
                                           approved: { _ in false }).mood == .urgent)
         t.check("waiting without a permission request is never treated as approved",
                 !StateAggregator.wasApproved(mk("q", .waiting)))
+        t.check("a prompt that is not a shell command is never approved by a shell",
+                !StateAggregator.wasApproved(SessionState(
+                    sessionId: "e", project: "p", cwd: "/tmp", state: .waiting, tool: "Edit",
+                    detail: "", since: t0, updatedAt: t0, pid: ProcessInfo.processInfo.processIdentifier,
+                    waitingOn: "edit a.swift")))
 
         // ---- Turns, counted from the transcript ----
         func human(_ prompt: String) -> String {
@@ -2556,6 +2583,15 @@ struct Runner {
                     && PermissionDecision.isStale(askId: "a1", sessionDocument: nil))
         t.check("...and keeps waiting while it is still up",
                 !PermissionDecision.isStale(askId: "a1", sessionDocument: ["state": "waiting", "askId": "a1"]))
+        // Several prompts can be up at once (subagents): a hold is stale only once ITS ask has left
+        // the table, whichever prompt the top-level fields show.
+        let table: [String: Any] = ["state": "waiting", "askId": "a2",
+                                    "asks": [["id": "a2"], ["id": "a1"]]]
+        t.check("a hold behind another prompt keeps waiting",
+                !PermissionDecision.isStale(askId: "a1", sessionDocument: table))
+        t.check("...and stops once its own ask leaves the table",
+                PermissionDecision.isStale(askId: "a1", sessionDocument:
+                    ["state": "waiting", "askId": "a2", "asks": [["id": "a2"]]]))
         t.check("the wait ends before the hook's own timeout would kill it",
                 PermissionDecision.wait < 600)
 

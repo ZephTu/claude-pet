@@ -112,11 +112,13 @@ public enum StateAggregator {
     ///
     /// No hook says so — see `ProcessProbe.startedToolShell` — so this asks
     /// the kernel whether Claude has since started the shell that runs the
-    /// approved command. `waitingOn` is only ever set by PermissionRequest, so a
-    /// question to the user (or any other kind of waiting) is never cleared here.
+    /// approved command: that command, not any shell, since a subagent's own
+    /// Bash calls start shells while the prompt stays up. Only a Bash prompt
+    /// names one (`askCommand`), so any other prompt — an edit, a question — is
+    /// never cleared here; its PostToolUse comes as soon as it is answered.
     public static func wasApproved(_ s: SessionState) -> Bool {
-        guard s.state == .waiting, !s.waitingOn.isEmpty, let pid = s.pid else { return false }
-        return ProcessProbe.startedToolShell(under: pid, since: s.since)
+        guard s.state == .waiting, !s.askCommand.isEmpty, let pid = s.pid else { return false }
+        return ProcessProbe.startedToolShell(under: pid, since: s.since, running: s.askCommand)
     }
 
     /// What a waiting session has moved on to, when Claude Code says the wait

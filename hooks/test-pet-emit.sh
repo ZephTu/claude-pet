@@ -509,6 +509,120 @@ wait $pid
 check "sending a plan back denies it with the user's words" \
   "$(qjson "$PET_HOME/sPL.out" "[d['hookSpecificOutput']['decision'][k] for k in ('behavior','message')]")" '["deny", "keep it smaller"]'
 
+# ---- a prompt while other agents keep working ----------------------------------
+# PermissionRequest carries no tool_use_id; the ask is tied to the PreToolUse of the same call
+# (same agent, same tool and input) and stays up until THAT call's PostToolUse. Tool events of
+# a subagent, or of the main thread's other calls, must not wash it out.
+agent_call() {  # agent_call <event> <session> <agent|-> <tool_use_id> <command>
+  local agent=""; [ "$3" != "-" ] && agent="\"agent_id\":\"$3\",\"agent_type\":\"general-purpose\","
+  printf '{"hook_event_name":"%s","session_id":"%s","cwd":"/tmp/a",%s"tool_name":"Bash","tool_use_id":"%s","tool_input":{"command":"%s"},"tool_response":{}}' \
+    "$1" "$2" "$agent" "$4" "$5" | "$EMIT"
+}
+agent_ask() {  # agent_ask <session> <agent|-> <command> — a PermissionRequest, not held
+  local agent=""; [ "$2" != "-" ] && agent="\"agent_id\":\"$2\",\"agent_type\":\"general-purpose\","
+  printf '{"hook_event_name":"PermissionRequest","session_id":"%s","cwd":"/tmp/a",%s"tool_name":"Bash","tool_input":{"command":"%s"}}' \
+    "$1" "$agent" "$3" | "$EMIT"
+}
+emit UserPromptSubmit sSA /tmp/a
+agent_call PreToolUse sSA a1 u1 "rm -rf build/"
+agent_ask sSA a1 "rm -rf build/"
+ask1="$(field sSA askId)"
+check "a subagent's prompt makes the session wait" "$(field sSA state)|$([ -n "$ask1" ] && echo ask)" "waiting|ask"
+agent_call PreToolUse sSA a2 u2 "ls"
+agent_call PostToolUse sSA a2 u2 "ls"
+check "another subagent's tool calls leave the prompt up" \
+  "$(field sSA state)|$(field sSA askId)|$(field sSA waitingOnFull)" "waiting|$ask1|rm -rf build/"
+agent_call PreToolUse sSA - m1 "git status"
+agent_call PostToolUse sSA - m1 "git status"
+check "...and so do the main thread's" "$(field sSA state)|$(field sSA askId)" "waiting|$ask1"
+agent_call PreToolUse sSA a3 u3 "make deploy"
+agent_ask sSA a3 "make deploy"
+ask2="$(field sSA askId)"
+check "a second prompt queues behind the first" "$(field sSA askId)" "$ask1"
+agent_call PostToolUse sSA a1 u1 "rm -rf build/"
+check "the first call finishing shows the next prompt" \
+  "$(field sSA state)|$([ "$(field sSA askId)" != "$ask1" ] && [ -n "$(field sSA askId)" ] && echo next)|$(field sSA waitingOnFull)" \
+  "waiting|next|make deploy"
+agent_call PostToolUseFailure sSA a3 u3 "make deploy"
+check "the last call ending stops the wait" "$(field sSA state)|$(field sSA askId)|$(field sSA waitingOn)" "busy||"
+
+emit UserPromptSubmit sSB /tmp/a
+agent_call PreToolUse sSB a1 u1 "rm -rf build/"
+agent_ask sSB a1 "rm -rf build/"
+emit Stop sSB /tmp/a
+check "a turn ending clears its prompts" "$(field sSB state)|$(field sSB askId)" "idle|"
+
+emit UserPromptSubmit sSQ /tmp/a
+agent_ask sSQ - "rm -rf build/"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sSQ","cwd":"/tmp/a","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"a?"}]}}' | "$EMIT"
+check "a question after a permission prompt carries no permission phrase" \
+  "$(field sSQ askKind)|$(field sSQ waitingOn)|$(field sSQ askCommand)" "question||"
+
+# Held: another agent's work must not make the hold give up, and the click still lands.
+emit UserPromptSubmit sSH /tmp/a
+agent_call PreToolUse sSH a1 h1 "rm -rf build/"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sSH","cwd":"/tmp/a","agent_id":"a1","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sSH.out" &
+pid=$!; id="$(await_ask sSH)"
+agent_call PreToolUse sSH a2 h2 "ls"; agent_call PostToolUse sSH a2 h2 "ls"
+sleep 0.4
+answer sSH "$id" allow; wait $pid
+check "a held prompt outlasts another agent's tool calls" "$(decision sSH)" "allow"
+
+# Denied from the pet (or a plan sent back): Claude Code fires no PostToolUse and the turn goes
+# on, so the hold itself takes its prompt down — else it hid the next prompt until Stop.
+emit UserPromptSubmit sDN /tmp/a
+agent_call PreToolUse sDN - d1 "rm -rf build/"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sDN","cwd":"/tmp/a","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sDN.out" &
+pid=$!; id="$(await_ask sDN)"
+answer sDN "$id" deny; wait $pid
+check "a prompt denied from the pet comes down at once" \
+  "$(decision sDN)|$(field sDN state)|$(field sDN askId)|$(qjson "$PET_HOME/sessions/sDN.json" "[c['id'] for c in d['running']]")" "deny|busy||[]"
+agent_call PreToolUse sDN - d2 "make deploy"
+agent_ask sDN - "make deploy"
+check "...and the next prompt is the one shown" \
+  "$(field sDN waitingOnFull)|$(qjson "$PET_HOME/sessions/sDN.json" "len(d['asks'])")" "make deploy|1"
+
+# Denied in the terminal, the same: no PostToolUse. An agent has one prompt up at a time, so
+# its next prompt replaces the one before.
+emit UserPromptSubmit sDT /tmp/a
+agent_call PreToolUse sDT a1 e1 "rm -rf build/"
+agent_ask sDT a1 "rm -rf build/"
+agent_call PreToolUse sDT a1 e2 "make deploy"
+agent_ask sDT a1 "make deploy"
+check "an agent's next prompt replaces the one it was denied" \
+  "$(field sDT waitingOnFull)|$(qjson "$PET_HOME/sessions/sDT.json" "len(d['asks'])")" "make deploy|1"
+agent_ask sDT a1 "make deploy"
+check "...and the same call asking again is still one prompt" \
+  "$(qjson "$PET_HOME/sessions/sDT.json" "[(a.get('toolUseId'), a.get('agent')) for a in d['asks']]")" '[["e2", "a1"]]'
+
+# A subagent's PermissionRequest may come without agent_id: the call it matched names the agent,
+# so a Stop that leaves the agent running keeps its prompt.
+emit UserPromptSubmit sNA /tmp/a
+agent_call PreToolUse sNA a7 n1 "rm -rf build/"
+agent_ask sNA - "rm -rf build/"
+emit_json '{"hook_event_name":"Stop","session_id":"sNA","cwd":"/tmp/a","background_tasks":[{"id":"t1","type":"subagent","status":"running","description":"x","agent_type":"general-purpose"}]}'
+check "a subagent's prompt without agent_id outlasts the main thread's Stop" \
+  "$(field sNA state)|$(qjson "$PET_HOME/sessions/sNA.json" "[a.get('agent') for a in d.get('asks', [])]")" 'waiting|["a7"]'
+
+# ---- hooks of one session running at once ----------------------------------------
+# Parallel tool calls fire their hooks together; every read-modify-write of the session file
+# must see the one before it.
+emit UserPromptSubmit sCC /tmp/c
+lost=0
+for round in 1 2 3; do
+  for i in 1 2 3 4 5 6 7 8; do agent_call PreToolUse sCC - "c$round$i" "true $i" & done; wait
+  n="$(qjson "$PET_HOME/sessions/sCC.json" "len(d['running'])")"
+  [ "$n" = "8" ] || lost=$((lost + 1))
+  for i in 1 2 3 4 5 6 7 8; do agent_call PostToolUse sCC - "c$round$i" "true $i" & done; wait
+  n="$(qjson "$PET_HOME/sessions/sCC.json" "len(d['running'])")"
+  [ "$n" = "0" ] || lost=$((lost + 1))
+done
+check "parallel hooks lose no update to the running list" "$lost" "0"
+emit SessionEnd sCC /tmp/c
+check "a session ending takes its lock with it" "$([ -e "$PET_HOME/sessions/.sCC.lock" ] && echo left || echo gone)" "gone"
+
 # ---- an editor's integrated terminal ------------------------------------------
 terminal() {  # terminal <session_id> → "kind handle"
   /usr/bin/python3 -c "import json,sys;t=json.load(open(sys.argv[1])).get('terminal') or {};print(t.get('kind',''),t.get('handle',''))" \
