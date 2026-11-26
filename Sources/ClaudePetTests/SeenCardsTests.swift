@@ -11,8 +11,14 @@ enum SeenCardsTests {
         let one = SeenCards.merge([:], ["T-1": a])
         t.check("a record is kept under its task", (one["T-1"] as? [String: Any])?["s"] as? String == "active")
         let two = SeenCards.merge(one, ["T-1": b, "T-2": a])
-        t.check("a record replaces the task's, others are added",
+        t.check("a record's fields replace the task's, others are added",
                 (two["T-1"] as? [String: Any])?["s"] as? String == "blocked" && two.count == 2)
+        let patched = SeenCards.merge(one, ["T-1": ["a": ["T-1.2"]]])["T-1"] as? [String: Any]
+        t.check("a patch leaves the fields it doesn't name",
+                patched?["s"] as? String == "active" && patched?["a"] as? [String] == ["T-1.2"])
+        t.check("a null inside a record is left out (UserDefaults can't keep it)",
+                SeenCards.merge(one, ["T-1": ["a": [NSNull()]], "T-2": ["s": NSNull()]]).count == 1
+                && ((SeenCards.merge(one, ["T-1": ["a": [NSNull()]]])["T-1"] as? [String: Any])?["a"] as? [String]) == ["T-1.1"])
         t.check("null removes a record", SeenCards.merge(two, ["T-1": NSNull()]).keys.sorted() == ["T-2"])
         t.check("a record that isn't an object is left out",
                 SeenCards.merge(one, ["T-1": "x", "T-3": 5]).count == 1

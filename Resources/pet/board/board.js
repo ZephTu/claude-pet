@@ -182,7 +182,7 @@ const ui = {
   // boards show a column of recently finished tasks.
   drawer: null, diffOpen: new Set(),
   // What changed on each card since it was last opened (see cardChanges).
-  seenCards: null, seenWrites: [], ownEdits: [], drawerChg: null, showDone: pref("hq-show-done", "0") === "1",
+  seenCards: null, seenWrites: [], ownEdits: [], drawerChg: null, chgMemo: new Map(), showDone: pref("hq-show-done", "0") === "1",
   sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", shown: {}, hover: new Set(), heldBack: false,
   // Tasks whose open @claude todos are unfolded (folded by default).
@@ -291,8 +291,10 @@ function keepMemo(key, tag, result) {
   try { localStorage.setItem(KEPT_PREFIX + key, JSON.stringify({ tag, result })); }
   catch (e) { try { localStorage.removeItem(KEPT_PREFIX + key); } catch (e2) { /* storage off */ } }
 }
-// Changes made from this board (an answer, a tick, a log line) are yours: the first read after
-// one counts what it added to the card as read — what was already unread before it stays so.
+// Changes made from this board (an answer, a tick, a status, a log line) are yours: what each one
+// did is read from the moment it is made (ownPatch), and recorded once the read after it is in
+// (absorbOwn). Only what the change itself names — not whatever else differs from the last read,
+// which may be old (a phone left locked) — so what someone else changed meanwhile stays marked.
 const OWN_OPS = new Set(["resolve", "reopen", "snooze", "delivered", "todo", "set", "log", "ref", "workdir", "addtodo"]);
 function ownTask(op, args) {
   if (!OWN_OPS.has(op) || !args) return "";
@@ -300,15 +302,21 @@ function ownTask(op, args) {
   const m = String(args.id || "").match(/^(.+)\.\d+$/);
   return m ? m[1] : "";
 }
-// A change to a card made here: what it adds is read (absorbOwn) — once the read after it is in.
 async function api(op, args = {}) {
-  const own = ownTask(op, args), t = own && ui.seenCards && taskById(own);
-  if (!t) return apiCall(op, args);
-  const e = { task: own, before: cardSnap(t) };
-  const r = await apiCall(op, args);
-  e.after = ui.readNo;
+  const own = ownTask(op, args);
+  if (!own) return apiCall(op, args);
+  const e = { task: own, op, args };
   ui.ownEdits.push(e);
-  return r;
+  ui.chgMemo.clear();
+  try {
+    const r = await apiCall(op, args);
+    e.after = ui.readNo;
+    return r;
+  } catch (err) {
+    ui.ownEdits = ui.ownEdits.filter((x) => x !== e);
+    ui.chgMemo.clear();
+    throw err;
+  }
 }
 async function apiCall(op, args) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
@@ -1222,6 +1230,7 @@ function render() {
   // long lane back to its top.
   grabLaneScrolls();
 
+  ui.chgMemo.clear();   // the board may have changed since the last drawing
   markDrawerSeen();   // before anything is drawn: the tags it clears don't show
   renderCounts();
   renderUnreadPop();
@@ -1521,24 +1530,67 @@ const boardInFront = () => document.visibilityState === "visible" && document.ha
 const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
 const todoKey = (x) => fnv(`${x.state}|${x.owner || ""}|${x.text}`);
 const logKey = (l) => `${l.date}|${l.text}`;
-function cardSnap(t) {
-  const logs = logEntries(t);
+function cardSnap(t, logs = logEntries(t)) {
   return {
-    s: t.status || "", n: fnv(t.next || ""), a: pendingAsks(t).map((a) => a.id),
-    t: t.todos.map(todoKey), l: logs.length ? logs[logs.length - 1].date : "", r: mergeRefs(list(t.refs)).map(fnv),
+    s: t.status || "", n: fnv(t.next || ""), a: pendingAsks(t).map((a) => a.id), t: t.todos.map(todoKey),
+    l: logs.length ? logs[logs.length - 1].date : "", lx: [], r: mergeRefs(list(t.refs)).map(fnv),
   };
 }
+// Log lines hq writes for what was done on the board — a tick ("todo #3 → done (board)"), a status
+// it changed on its own ("(auto, board)") — are never new: they are yours.
+const BOARD_LOG = /\((?:auto, )?board\)/;
+// What one of your changes (ui.ownEdits) did to the card, as a patch to its record: only what the
+// change names, and only once the card shows it.
+function ownPatch(seen, t, e, now) {
+  const p = {}, a = e.args || {};
+  const add = (k, xs) => { const have = list(p[k] || seen[k]); const more = xs.filter((x) => !have.includes(x)); if (more.length) p[k] = have.concat(more); };
+  for (const f of e.op === "set" ? list(a.fields) : []) {
+    const i = String(f).indexOf("="), k = String(f).slice(0, i), v = String(f).slice(i + 1);
+    if (k === "status" && now.s === v) p.s = now.s;
+    if (k === "next" && (t.next || "") === v) p.n = now.n;
+  }
+  if (e.op === "todo") add("t", t.todos.filter((x) => x.text === a.text).map(todoKey));
+  if (e.op === "addtodo") add("t", t.todos.filter((x) => x.text && String(a.text || "").includes(x.text)).map(todoKey));
+  if (e.op === "resolve" || e.op === "reopen") add("a", now.a.filter((id) => id === a.id));
+  if (e.op === "log") add("lx", logEntries(t).filter((l) => l.text.trim() === String(a.message || "").trim()).map(logKey));
+  if (e.op === "ref") {
+    const r = String(a.ref || "");
+    add("r", mergeRefs(list(t.refs)).filter((x) => r && (r.includes(unmarkedRef(x)) || unmarkedRef(x).includes(r))).map(fnv));
+  }
+  // An answer or a tick can move the status by itself: hq logs that as "(auto, board)".
+  const st = logEntries(t).filter((l) => /^status\b.*→/.test(l.text)).pop();
+  const m = st && st.text.match(/→\s*([\w-]+)\s*\(auto, board\)/);
+  if (m && m[1] === now.s && e.op !== "set") p.s = now.s;
+  return p;
+}
+function withOwn(seen, t, edits, now) {
+  let r = seen;
+  for (const e of edits) r = Object.assign({}, r, ownPatch(r, t, e, now));
+  return r;
+}
 const NO_CHANGE = { any: false, status: null, next: false, asks: [], todos: [], logs: [], refs: [] };
-// What differs between the card now and the record of it; null when there is no record (nothing
-// to compare with) — the secretary's card isn't opened in a drawer, so it is never marked.
+// What differs between the card now and the record of it (your own changes taken as read); null
+// when there is no record — the secretary's card isn't opened in a drawer, so it is never marked.
+// Worked out once per card per drawing (ui.chgMemo, emptied by render and whenever the record or
+// your changes move).
 function cardChanges(t) {
-  const seen = ui.seenCards && ui.seenCards[t.id];
-  if (!seen || t.id === secId()) return null;
-  const now = cardSnap(t), had = (k) => new Set(list(seen[k]));
+  if (ui.chgMemo.has(t.id)) return ui.chgMemo.get(t.id);
+  const c = cardChangesNow(t);
+  ui.chgMemo.set(t.id, c);
+  return c;
+}
+function cardChangesNow(t) {
+  const rec = ui.seenCards && ui.seenCards[t.id];
+  if (!rec || t.id === secId()) return null;
+  const logs = logEntries(t), now = cardSnap(t, logs);
+  const mine = ui.ownEdits.filter((e) => e.task === t.id);
+  const seen = mine.length ? withOwn(rec, t, mine, now) : rec;
+  const had = (k) => new Set(list(seen[k])), A = had("a"), Tt = had("t"), R = had("r"), X = had("lx");
   const c = {
     status: (seen.s || "") !== now.s ? seen.s || "" : null, next: seen.n !== now.n,
-    asks: now.a.filter((x) => !had("a").has(x)), todos: now.t.filter((x) => !had("t").has(x)),
-    logs: logEntries(t).filter((l) => l.date > (seen.l || "")).map(logKey), refs: now.r.filter((x) => !had("r").has(x)),
+    asks: now.a.filter((x) => !A.has(x)), todos: now.t.filter((x) => !Tt.has(x)),
+    logs: logs.filter((l) => l.date > (seen.l || "") && !BOARD_LOG.test(l.text)).map(logKey).filter((k) => !X.has(k)),
+    refs: now.r.filter((x) => !R.has(x)),
   };
   c.any = c.status !== null || c.next || c.asks.length + c.todos.length + c.logs.length + c.refs.length > 0;
   return c;
@@ -1563,15 +1615,21 @@ const askNew = (t, a) => shownChanges(t).asks.includes(a.id);
 const askNewTag = (t, a) => (askNew(t, a) ? `<span class="newtag chg" title="${T("New since you last opened its task", "你上次打开这个任务之后新来的")}">${T("new", "新")}</span>` : "");
 
 // The record, as the "pet" read brings it, with this board's own writes on top until a read
-// started after they were saved brings them back (as takeSharedPrefs does).
+// started after they were saved brings them back (as takeSharedPrefs does). A write is a patch:
+// the app merges its fields into the card's record (SeenCards.merge), so two boards writing
+// different fields of one card don't undo each other.
 function takeSeen(store, readNo) {
   if (!store || typeof store !== "object" || Array.isArray(store)) return;   // a failed read says nothing about it
   ui.seenWrites = ui.seenWrites.filter((w) => !(w.after !== undefined && readNo > w.after));
-  ui.seenCards = Object.assign({}, store, ...ui.seenWrites.map((w) => w.cards));
+  const all = Object.assign({}, store);
+  for (const w of ui.seenWrites) for (const [id, p] of Object.entries(w.cards)) all[id] = p && all[id] ? Object.assign({}, all[id], p) : p;
+  ui.seenCards = all;
+  ui.chgMemo.clear();
 }
 function putSeen(cards) {
   if (!ui.seenCards || !Object.keys(cards).length) return;
-  Object.assign(ui.seenCards, cards);
+  for (const [id, p] of Object.entries(cards)) ui.seenCards[id] = p && ui.seenCards[id] ? Object.assign({}, ui.seenCards[id], p) : p;
+  ui.chgMemo.clear();
   const w = { cards };
   ui.seenWrites.push(w);
   api("card-seen", { cards }).catch(() => {}).finally(() => { w.after = ui.readNo; });
@@ -1585,20 +1643,20 @@ function baselineSeen() {
   for (const id of Object.keys(ui.seenCards)) if (ui.seenCards[id] && !taskById(id)) put[id] = null;
   putSeen(put);
 }
+// The first read after one of your changes has been saved: what it did goes into the record.
 function absorbOwn(readNo) {
-  if (!ui.seenCards) { ui.ownEdits = []; return; }
+  const done = ui.ownEdits.filter((e) => e.after !== undefined && readNo > e.after);
+  if (!done.length) return;
+  ui.ownEdits = ui.ownEdits.filter((e) => !done.includes(e));
+  ui.chgMemo.clear();
+  if (!ui.seenCards) return;
   const put = {};
-  ui.ownEdits = ui.ownEdits.filter((e) => {
-    if (e.after === undefined || readNo <= e.after) return true;
+  for (const e of done) {
     const t = taskById(e.task), seen = ui.seenCards[e.task];
-    if (t && seen) {
-      const now = cardSnap(t), b = e.before;
-      const set = (k) => list(seen[k]).filter((x) => now[k].includes(x)).concat(now[k].filter((x) => !b[k].includes(x) && !list(seen[k]).includes(x)));
-      put[e.task] = { s: seen.s === b.s ? now.s : seen.s, n: seen.n === b.n ? now.n : seen.n,
-        l: (seen.l || "") >= b.l ? now.l : seen.l, a: set("a"), t: set("t"), r: set("r") };
-    }
-    return false;
-  });
+    if (!t || !seen) continue;
+    const p = ownPatch(Object.assign({}, seen, put[e.task] || {}), t, e, cardSnap(t));
+    if (Object.keys(p).length) put[e.task] = Object.assign(put[e.task] || {}, p);
+  }
   putSeen(put);
 }
 // The drawer open on a card, with the board in front (markDrawerSeen): the card is read. What had
@@ -1624,7 +1682,7 @@ function markPeekSeen(sid) {
     const seen = ui.seenCards[t.id];
     if (!seen) continue;
     const ids = pendingAsks(t).filter((a) => a.session === sid && !list(seen.a).includes(a.id)).map((a) => a.id);
-    if (ids.length) put[t.id] = Object.assign({}, seen, { a: list(seen.a).concat(ids) });
+    if (ids.length) put[t.id] = { a: list(seen.a).concat(ids) };
   }
   putSeen(put);
 }
@@ -2941,11 +2999,15 @@ async function setStatus(id, status) {
   const t = taskById(id);
   if (t) t.status = status;
   const pend = ui.statusPending[id] = { status };
+  // Yours, from the moment it shows: not "updated" (see ownPatch). api() adds its own once it runs.
+  const own = { task: id, op: "set", args: { fields: [`status=${status}`] } };
+  ui.ownEdits.push(own);
   render();
   const save = (ui.statusQ[id] || Promise.resolve()).then(() => api("set", { task: id, fields: [`status=${status}`] }));
   ui.statusQ[id] = save.catch(() => {});
-  try { await save; }
+  try { await save; own.after = ui.readNo; }
   catch (e) {
+    ui.ownEdits = ui.ownEdits.filter((x) => x !== own);
     toast(String(e.message || e), true);
     if (ui.statusPending[id] === pend) { delete ui.statusPending[id]; await refresh(); }   // a newer pick is still on its way otherwise
     return false;

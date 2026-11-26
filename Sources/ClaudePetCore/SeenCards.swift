@@ -14,19 +14,26 @@ public enum SeenCards {
     /// Records kept at most. The page drops the ones whose task has left the board.
     public static let maxCards = 2000
 
-    /// `stored` with `changes` applied: a record replaces the task's, null (NSNull) removes it.
-    /// What is out of bounds — a long id, a record that isn't an object or is too big, past the
-    /// most cards — is left out, not fixed up.
+    /// `stored` with `changes` applied. A record is a patch: its fields replace the card's (the
+    /// others stay), so two boards writing different fields of one card don't undo each other;
+    /// null (NSNull) removes the card's record. What is out of bounds is left out, not fixed up:
+    /// a long id, a patch that isn't an object or holds anything UserDefaults can't keep (a null
+    /// inside it would make saving the store throw), a record past the size limit, a new card
+    /// past the most cards.
     public static func merge(_ stored: [String: Any], _ changes: [String: Any]) -> [String: Any] {
         var out = stored
         for (id, record) in changes {
             guard !id.isEmpty, id.count <= maxIDLength else { continue }
             if record is NSNull { out[id] = nil; continue }
-            guard let dict = record as? [String: Any], JSONSerialization.isValidJSONObject(dict),
-                  let data = try? JSONSerialization.data(withJSONObject: dict),
+            guard let patch = record as? [String: Any] else { continue }
+            var merged = out[id] as? [String: Any] ?? [:]
+            for (k, v) in patch { merged[k] = v }
+            guard PropertyListSerialization.propertyList(merged, isValidFor: .binary),
+                  JSONSerialization.isValidJSONObject(merged),
+                  let data = try? JSONSerialization.data(withJSONObject: merged),
                   data.count <= maxRecordBytes else { continue }
             guard out[id] != nil || out.count < maxCards else { continue }
-            out[id] = dict
+            out[id] = merged
         }
         return out
     }
