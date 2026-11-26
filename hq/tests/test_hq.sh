@@ -28,6 +28,14 @@ H2="$T/home2"; mkdir -p "$H2/.claude"; echo '{}' > "$H2/.claude/settings.json"
 HOME="$H2" "$SRC/install.sh" --root "$T/root2" --yes --no-hooks --no-commands >/dev/null
 grep -q hq "$H2/.claude/settings.json" && fail "--no-hooks touched settings" || ok "--no-hooks leaves settings.json alone"
 [ ! -e "$H2/.claude/commands/task.md" ] && ok "--no-commands skips slash commands"
+H3="$T/home3"; mkdir -p "$H3/.claude" "$H3/dotfiles"; echo '{"model":"m"}' > "$H3/dotfiles/settings.json"
+ln -s ../dotfiles/settings.json "$H3/.claude/settings.json"
+HOME="$H3" "$SRC/install.sh" --root "$T/root3" --yes --no-commands >/dev/null
+[ -L "$H3/.claude/settings.json" ] && grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" \
+  && ok "a symlinked settings.json stays a link; the hooks go into the file it points at" || fail "install through a symlink"
+HOME="$H3" "$SRC/uninstall.sh" >/dev/null
+[ -L "$H3/.claude/settings.json" ] && ! grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" && grep -q '"model"' "$H3/dotfiles/settings.json" \
+  && ok "uninstall works through the link too" || fail "uninstall through a symlink"
 
 out="$("$HQ" new "Benchmark vs Neo4j" --category benchmark --workdir "$T")"
 TID="$(echo "$out" | head -1)"; [ "$TID" = "T-001" ] && ok "new task gets T-001"

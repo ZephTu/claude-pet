@@ -151,12 +151,15 @@ if os.path.exists(path):
     backup = f"{path}.hq-backup-{time.strftime('%Y%m%d-%H%M%S')}"
     shutil.copy2(path, backup)
     print(f"    backup: {backup}")
-tmp = path + ".hq-tmp"
+# A settings.json that is a symlink (dotfiles) is written through to its file: replacing
+# the link itself would cut it off from the repo, and leave the pet's hooks stranded there.
+real = os.path.realpath(path)
+tmp = real + ".hq-tmp"
 with open(tmp, "w") as f:
     json.dump(s, f, indent=2, ensure_ascii=False)
     f.write("\n")
 json.load(open(tmp))  # parse-back check before replacing
-os.replace(tmp, path)
+os.replace(tmp, real)
 print("    wired: " + ", ".join(EVENTS))
 PY
 fi

@@ -13,17 +13,24 @@ PLIST="$HOME/Library/LaunchAgents/local.claudepet.plist"
 # A statusline wrapped in `pet-emit --statusline` (docs/pet.md) would break the moment
 # pet-emit is gone, in every session, with nothing pointing back here. The installer never
 # writes it, so neither does this: stop before touching anything and say what to change.
-statusline="$(plutil -extract statusLine.command raw -o - "$SETTINGS" 2>/dev/null || true)"
-case "$statusline" in
-  *pet-emit*)
-    echo "!! your statusline still runs pet-emit, which uninstalling removes:" >&2
-    echo "     $statusline" >&2
-    echo "   In $SETTINGS, take the 'pet-emit --statusline --' part out of statusLine.command" >&2
-    echo "   (or remove statusLine if pet-emit was all it ran), then run this again." >&2
-    echo "   Nothing has been changed." >&2
-    exit 1
-    ;;
-esac
+# Both user settings files count; one plutil cannot parse is searched as text instead of
+# being taken for one with no statusline.
+for file in "$SETTINGS" "$CLAUDE_DIR/settings.local.json"; do
+  [ -f "$file" ] || continue
+  if statusline="$(plutil -extract statusLine.command raw -o - "$file" 2>/dev/null)"; then
+    case "$statusline" in *pet-emit*) ;; *) continue ;; esac
+  elif ! plutil -lint "$file" >/dev/null 2>&1 && statusline="$(grep -o 'pet-emit[^"]*--statusline' "$file")"; then
+    :
+  else
+    continue
+  fi
+  echo "!! your statusline still runs pet-emit, which uninstalling removes:" >&2
+  echo "     $statusline" >&2
+  echo "   In $file, take the 'pet-emit --statusline --' part out of statusLine.command" >&2
+  echo "   (or remove statusLine if pet-emit was all it ran), then run this again." >&2
+  echo "   Nothing has been changed." >&2
+  exit 1
+done
 
 pkill -x ClaudePet 2>/dev/null || true
 
