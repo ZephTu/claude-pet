@@ -83,7 +83,7 @@ loaded() { echo "$1" | python3 -X importtime "$HQ" hook 2>&1 >/dev/null | sed -n
 got="$(loaded '{"session_id":"s-unbound","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
 [ "$got" = "hqlib hqlib.core hqlib.hooks hqlib.sessions " ] && ok "an unbound session's hook loads only core and sessions" || fail "unbound hook loads: $got"
 got="$(loaded '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-[ -n "$got" ] && [ -z "$(echo "$got" | tr ' ' '\n' | grep -vxE 'hqlib(\.(core|sessions|hooks|cards|refs|history|projects|asks|protocol|update))?|')" ] \
+[ -n "$got" ] && [ -z "$(echo "$got" | tr ' ' '\n' | grep -v '^$' | grep -vxE 'hqlib(\.(core|sessions|hooks|cards|refs|history|projects|asks|protocol|update))?')" ] \
   && ok "a bound session's hook loads no command line, subprocess or unrelated module" || fail "bound hook loads: $got"
 
 MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n```'

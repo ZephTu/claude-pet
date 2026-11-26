@@ -17,7 +17,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 if __name__ == "__main__":
     try:
         if sys.argv[1:] == ["hook"]:
-            from hqlib.hooks import hook_main
+            try:
+                from hqlib.hooks import hook_main
+            except ImportError as e:   # hqlib mid-swap by install.sh: hook_main's rule, a line and no traceback
+                sys.exit(print(f"hq hook: {type(e).__name__}: {e}", file=sys.stderr))
             hook_main()
         else:
             from hqlib.cli import main
