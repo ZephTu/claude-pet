@@ -27,6 +27,11 @@ public enum TerminalTarget {
     ///   to, and tty is the one field both sides agree on.
     public static func identify(environment env: [String: String], cwd: String = "",
                                 tty: String = "") -> TerminalRef? {
+        // A background session (`claude --bg`) runs under Claude Code's daemon, in no terminal
+        // at all, yet keeps the environment of whatever started it. Started by the pet, that is
+        // the pet's own, which holds the terminal the pet was last launched from: a handle that
+        // has nothing to do with the session, and is soon gone.
+        if env["CLAUDE_CODE_SESSION_KIND"] == "bg" { return nil }
         let program = env["TERM_PROGRAM"] ?? ""
         let orca = env["ORCA_TERMINAL_HANDLE"] ?? ""
         let iterm = env["ITERM_SESSION_ID"] ?? ""
@@ -60,6 +65,17 @@ public enum TerminalTarget {
         if !orca.isEmpty { return TerminalRef(kind: "orca", handle: orca) }
         if !iterm.isEmpty { return TerminalRef(kind: "iterm2", handle: iterm) }
         return nil
+    }
+
+    /// The variables that tie a process to the terminal tab it was started in. An app opened
+    /// from a terminal (`open`, as scripts/install.sh does) inherits them, and so does everything
+    /// it starts: a session the pet starts would point at the tab the pet was installed from.
+    /// The pet drops them at launch.
+    public static func inheritedTerminalKeys(_ env: [String: String]) -> [String] {
+        let exact: Set<String> = ["TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID",
+                                  "ITERM_SESSION_ID", "ITERM_PROFILE", "LC_TERMINAL", "LC_TERMINAL_VERSION"]
+        let prefixes = ["ORCA_", "GHOSTTY_", "VSCODE_", "KITTY_"]
+        return env.keys.filter { k in exact.contains(k) || prefixes.contains { k.hasPrefix($0) } }.sorted()
     }
 
     /// Kinds this build knows how to act on. Anything else — including a kind

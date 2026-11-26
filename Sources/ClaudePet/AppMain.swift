@@ -4,6 +4,10 @@ import ClaudePetCore
 @main
 struct AppMain {
     static func main() {
+        // Opened from a terminal, the pet inherits that tab's variables, and so would every
+        // session it starts: the board would type messages for them into that tab, or into
+        // nothing once it is closed (TerminalTarget.inheritedTerminalKeys).
+        for key in TerminalTarget.inheritedTerminalKeys(ProcessInfo.processInfo.environment) { unsetenv(key) }
         let app = NSApplication.shared
         // Layout check for the connection panel, used during development
         // because screen capture needs a permission this app should not ask for.

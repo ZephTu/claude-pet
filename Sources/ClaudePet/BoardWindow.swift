@@ -1172,8 +1172,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, L("give it a model: /model opus, /model sonnet, … — alone it opens a menu in the terminal",
                            "要带上模型名：/model opus、/model sonnet……——不带参数会在终端里打开一个菜单"))
         }
+        // `claude agents` lists it as a background session: it is in no terminal, whatever its
+        // record says (one started by a pet opened from a terminal inherited that tab's handle).
+        if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
         guard let t = terminal(of: session) else {
-            if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
         }
         // Typing into a tab whose session has ended would hand the message to the shell as a

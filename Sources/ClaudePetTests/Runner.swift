@@ -433,6 +433,16 @@ struct Runner {
         t.check("TERM_PROGRAM wins when a stale handle from another terminal is inherited",
                 TerminalTarget.identify(environment: both) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
         // With TERM_PROGRAM absent, bare presence is all there is — better than nothing
+        t.check("a background session is in no terminal, whatever handle it inherited",
+                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x",
+                                                      "CLAUDE_CODE_SESSION_KIND": "bg"]) == nil
+                && TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x",
+                                                         "CLAUDE_CODE_SESSION_KIND": "interactive"])?.kind == "orca")
+        t.check("the pet drops the variables of the terminal it was opened from, and keeps the rest",
+                TerminalTarget.inheritedTerminalKeys(["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "t", "ORCA_TAB_ID": "x",
+                                                      "ITERM_SESSION_ID": "w0", "TERM_SESSION_ID": "s", "GHOSTTY_SURFACE_ID": "1",
+                                                      "PATH": "/bin", "HOME": "/h", "TERM": "xterm", "HQ_ROOT": "/r"])
+                    == ["GHOSTTY_SURFACE_ID", "ITERM_SESSION_ID", "ORCA_TAB_ID", "ORCA_TERMINAL_HANDLE", "TERM_PROGRAM", "TERM_SESSION_ID"])
         t.check("a missing TERM_PROGRAM falls back to whichever handle exists",
                 TerminalTarget.identify(environment: ["ORCA_TERMINAL_HANDLE": "term_y"])
                 == TerminalRef(kind: "orca", handle: "term_y"))

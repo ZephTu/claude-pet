@@ -2525,7 +2525,7 @@ SH
 cat > "$IK/claude" <<'SH'
 #!/bin/sh
 if [ "$1" = agents ]; then echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-4000-8000-000000000001"}]'; exit 0; fi
-printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "${CLAUDE_PET_JOB:-none}" > "$IK/claude-env"; echo "Started background session abcd1234"
+printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "${CLAUDE_PET_JOB:-none} ${ORCA_TERMINAL_HANDLE:-none} ${TERM_PROGRAM:-none} ${ITERM_SESSION_ID:-none}" > "$IK/claude-env"; echo "Started background session abcd1234"
 SH
 chmod +x "$IK/bin/gh" "$IK/claude"
 cat > "$IK/search.json" <<'JS'
@@ -2547,7 +2547,7 @@ ik intake | tail -1 | grep -q "github-review: no duty set up" && [ ! -f "$IK/sea
 "$HQ" project set rev auto=github-review >/dev/null
 N0="$(ls "$T/root/tasks" | wc -l)"
 ik intake --dry-run | tail -1 | grep -q "github-review: 1 waiting, 1 new" && [ "$(ls "$T/root/tasks" | wc -l)" = "$N0" ] && ok "intake --dry-run: drafts and other repos left out, nothing made" || fail "intake dry run"
-CLAUDE_PET_JOB=intake-scan ik intake --claude "$IK/claude" --json > "$IK/out.json"
+CLAUDE_PET_JOB=intake-scan ORCA_TERMINAL_HANDLE=term_stale TERM_PROGRAM=Orca ITERM_SESSION_ID=w0t0p0:AB ik intake --claude "$IK/claude" --json > "$IK/out.json"
 IT="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["results"][0]; m=r["made"]; assert len(m)==1 and m[0]["session"].startswith("abcd1234"), r; print(m[0]["task"])' "$IK/out.json")"
 ITC="$(ls "$T"/root/tasks/$IT-*/TASK.md)"
 grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && grep -q '^intake_key: acme/web#12' "$ITC" && grep -q '^intake_done: manual' "$ITC" \
@@ -2556,8 +2556,8 @@ grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && gre
   && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref, the default title and the section's goal" || fail "intake task: $(cat "$ITC")"
 grep -qx -- "--bg" "$IK/claude-args" && grep -qx -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
   && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
-  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = none ] \
-  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule, not as the pet's job" || fail "intake launch: $(cat "$IK/claude-args")"
+  && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = "none none none none" ] \
+  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
 "$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
 mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
 ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"

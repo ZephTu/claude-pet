@@ -875,7 +875,9 @@ function mergeBackground(sessions, agents) {
   for (const a of bg) {
     const s = byId.get(a.sessionId);
     // `claude attach` / `stop` take the short id that `claude agents` prints, not the session id.
-    if (s) { s.background = true; s.bgId = a.id; s.title = s.title || a.name; continue; }
+    // It runs in no terminal: a handle on its record was inherited from whatever started it
+    // (a pet opened from a terminal tab), and typing there would miss it.
+    if (s) { s.background = true; s.bgId = a.id; s.terminal = null; s.title = s.title || a.name; continue; }
     sessions.push({ sessionId: a.sessionId, title: a.name, cwd: a.cwd, project: (a.cwd || "").split("/").pop(),
                     state: a.status, updatedAt: a.startedAt ? new Date(a.startedAt).toISOString() : null,
                     terminal: null, background: true, bgId: a.id, lastText: "" });
