@@ -205,6 +205,13 @@ def todo_groups(meta, seen):
     return {g: {"count": len(v), "items": v[-STATUS_TODOS_SHOWN:]} for g, v in groups.items()}
 
 
+def stale_days(meta):
+    """Days an open card has gone without an update, once that is a week or more (the `stale` flag
+    of `hq status`, and the board's tag); else 0."""
+    age = age_days(meta)
+    return age if meta.get("status") in OPEN_STATUSES and age is not None and age >= STATUS_STALE_DAYS else 0
+
+
 def task_status(meta, state, now, seen):
     card = meta["path"]
     written = local_dt(os.path.getmtime(card))
@@ -242,8 +249,8 @@ def task_status(meta, state, now, seen):
                  f"idle since {short_time(quiet, now)} ({who}), but the card says: {waits}",
                  f"从 {short_time(quiet, now)} 起没有动静（{who_zh}），但卡片说在等：{waits}",
                  since=iso(quiet), says=waits)
-    age = age_days(meta)
-    if is_open and age is not None and age >= STATUS_STALE_DAYS:
+    age = stale_days(meta)
+    if age:
         flag("stale", f"not updated for {age} days (since {meta.get('updated')})",
              f"{age} 天没更新（上次 {meta.get('updated')}）", days=age)
     if status in ("done", "abandoned"):

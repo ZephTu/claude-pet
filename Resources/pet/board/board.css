@@ -2,7 +2,7 @@
    Opened from the Home Screen (standalone, black-translucent) the page runs under the status bar,
    and iOS blurs a band there a little deeper than the bar itself: a bit more is left, so the tabs
    start below the blur. (min(): no extra where there is no inset at all.) */
-:root { --safe-top: env(safe-area-inset-top, 0px); }
+:root { --safe-top: env(safe-area-inset-top, 0px); --top-h: 52px; }
 @media (display-mode: standalone) {
   :root { --safe-top: calc(env(safe-area-inset-top, 0px) + min(env(safe-area-inset-top, 0px), 16px)); }
 }
@@ -758,7 +758,7 @@ main { height: calc(100% - 46px - 30px); }
 
 /* ---- Scheduled jobs (jobs.js) ----
    Colours only from the board's tokens, so a new palette reaches this page too. */
-#jobs { display: block; height: calc(100% - 52px - var(--safe-top) - 32px); }
+#jobs { display: block; height: calc(100% - var(--top-h) - var(--safe-top) - 32px); }
 #jobs[hidden] { display: none; }
 #jobs, .jrun-panel { --jround: var(--round, ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif);
   --jmono: ui-monospace, "SF Mono", Menlo, monospace; }
@@ -950,7 +950,7 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
 
 /* top bar: where to go and what to start; counts ride on the tabs */
-#top { height: calc(52px + var(--safe-top)); padding: var(--safe-top) 16px 0; gap: 12px; }
+#top { height: calc(var(--top-h) + var(--safe-top)); padding: var(--safe-top) 16px 0; gap: 12px; }
 .brand { display: flex; align-items: center; gap: 7px; font: 700 15px var(--round); letter-spacing: .01em; color: var(--text); }
 .brand svg { width: 18px; height: 18px; fill: var(--accent); }
 .tabs { display: flex; gap: 2px; margin-left: 6px; }
@@ -983,7 +983,7 @@ h2, .ctx-sec h4, .hqb-t { text-transform: none; letter-spacing: 0; }
 a.top-icon { display: grid; place-items: center; text-decoration: none; }
 
 /* layout: the work, then a quieter side column */
-main { height: calc(100% - 52px - var(--safe-top) - 32px); grid-template-columns: minmax(440px, 1fr) minmax(300px, 360px); }
+main { height: calc(100% - var(--top-h) - var(--safe-top) - 32px); grid-template-columns: minmax(440px, 1fr) minmax(300px, 360px); }
 main.single { grid-template-columns: 1fr; }
 .col { border-right: 0; padding: 18px 22px 40px; }
 .col.side { border-left: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 45%, var(--bg)); padding: 18px 16px 40px; }
@@ -1343,6 +1343,7 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .kc-top .kflag { color: var(--amber); cursor: help; }
 .kc-top .star { margin-left: auto; font-size: 13px; }
 .kc-top .stag { font-size: 10.5px; }
+.kc-top .stag.stale { color: var(--amber); cursor: help; }
 .ki { font-style: normal; margin-right: 3px; }
 .ki.goal { color: var(--blue); }
 .ki.duty { color: var(--violet); }
@@ -1400,7 +1401,7 @@ main.kanban > .vhead, #today-focus > .vhead { flex: none; margin: 0; padding: 16
 .cell:empty { border-color: var(--line); background: none; }
 
 /* the drawer: a task's details, over the right of the board */
-.drawer { position: fixed; top: calc(52px + var(--safe-top)); right: 0; bottom: 32px; width: min(680px, 94vw); background: var(--panel); border-left: 1px solid var(--line);
+.drawer { position: fixed; top: calc(var(--top-h) + var(--safe-top)); right: 0; bottom: 32px; width: min(680px, 94vw); background: var(--panel); border-left: 1px solid var(--line);
   box-shadow: var(--shadow); z-index: 20; display: flex; flex-direction: column; animation: dr-in .18s ease-out; }
 .drawer[hidden] { display: none; }
 @keyframes dr-in { from { transform: translateX(40px); opacity: 0; } }
@@ -1726,7 +1727,7 @@ textarea.pedit { width: 100%; box-sizing: border-box; font: 12.5px/1.5 ui-monosp
 
 /* ---- reading area (reader.js): Markdown and text files, docked on the right, one tab per file.
    The board moves over for it: what floats over the board sits to its left. */
-#reader { position: fixed; top: calc(52px + var(--safe-top)); right: 0; bottom: 0; width: var(--reader-w, 640px); z-index: 21;
+#reader { position: fixed; top: calc(var(--top-h) + var(--safe-top)); right: 0; bottom: 0; width: var(--reader-w, 640px); z-index: 21;
   display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line);
   box-shadow: -10px 0 30px rgba(0,0,0,.18); }
 #reader[hidden] { display: none; }
@@ -1887,6 +1888,20 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
   .icon.x, .session .icons, .pwho .btn, .sec-chat .bub .copy, .sec-chat .report .copy, .att.mini .icon, .rd-tab .rd-x { opacity: 1; }
   .session .stime { visibility: hidden; }
   .grip { display: none; }
+}
+
+/* A medium-width window: one line has no room for the tabs, both boxes and the buttons, and the
+   ? fell off the right edge. The quick note and the filter take a second line; the tabs scroll
+   sideways when even the first line runs short. */
+@media (min-width: 641px) and (max-width: 1080px) {
+  :root { --top-h: 92px; }
+  #top { flex-wrap: wrap; align-content: center; gap: 8px; }
+  #top .spacer { display: none; }
+  #mode { flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  #mode::-webkit-scrollbar { display: none; }
+  #mode .tab { flex: none; }
+  .capture { order: 1; flex: 1 1 calc(100% - 260px); min-width: 0; }
+  .searchbox { order: 2; flex: 0 1 240px; min-width: 0; }
 }
 
 @media (max-width: 640px) {

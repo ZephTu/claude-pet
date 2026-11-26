@@ -115,7 +115,9 @@ hq import plan.json             # create it all: refused whole, problems listed,
             "sessions": ["<session id or 8+ char prefix>"], "confidence": "medium"}]}
 ```
 
-`projects` holds only new ones (also `done_when` — a list of criteria — and `brief`); a task names an
+`projects` holds only new ones (also `done_when` — a list of criteria — and `brief`); every todo
+starts with its owner (`@me`, `@claude` or `@<name>`: one with none would show in nobody's list, so
+it is refused); a task names an
 existing project directly (also `goal`, `log`), or with none gets the one whose directory holds its workdir. Live sessions are bound to their tasks, ended ones recorded on the
 cards; a session already on a task, a taken name or an open card with the same title is refused.
 `hq scan --apply-projects [--only a,b]` still makes one project per repository, without a kind —
@@ -153,7 +155,7 @@ Flags — where the card and the sessions disagree:
 |---|---|
 | `card-behind` | a session not mid-turn (neither working nor held at a prompt) called tools more than 10 min after the card was last written |
 | `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min. A background call counts from its launch to its end (its notification, a TaskStop, or the kill Claude Code records when it exits) wherever those are in the transcript, not only in the tail `status` reads otherwise |
-| `stale` | open and not updated for 7 days |
+| `stale` | open and not updated for 7 days (`hq board --json` carries the days as each task's `stale`, 0 otherwise; the board tags such a card "Nd untouched") |
 | `done-live` | done or abandoned with a session still running |
 | `over-budget` | the card is over 16 KB, 30 links or 30 todos |
 
@@ -719,7 +721,10 @@ alternatives kept for a one-click choice. Feed notes (Zulip, Jira) never get `up
 somewhere else: what the last place got (its todo, log line and refs; a card it created, deleted —
 or marked abandoned if edited since; an update's next, status section, status, `closed` date and
 ticks, each put back unless changed since) is taken back out first, and the old place becomes an
-alternative. Moving to `update` with none of `--next/--state/--status/--done` takes the changes
+alternative. Moving to `task` with no `--title`, when no guess has one either, has the cheap model
+write a short title (the note itself goes into the goal; with no model to ask, its first line is
+the title; a note that is only a screenshot is "Quick note N-001", or 快速记录 for a Chinese
+secretary). Moving to `update` with none of `--next/--state/--status/--done` takes the changes
 from the model's update guess for that task; one that would change nothing is refused. `hq inbox drop|restore N-001`
 deletes an unsorted note or brings it back. `hq inbox [--all] [--json]` lists the unsorted notes and
 those sorted in the last 48 hours; `hq board --json` carries the same list as `inbox`.
@@ -928,7 +933,9 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Todo / Log
-    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"snooze"|"move", …}
+    ├── asks.jsonl            append-only events: {"type": "open"|"resolve"|"reopen"|"snooze"|"move"
+    │                         |"delivered"|"undelivered", "id", …}: asked, answered, answered again,
+    │                         Later, carried to a continued card, the answer handed to its session (or not)
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point (thin: it imports only what the command needs)

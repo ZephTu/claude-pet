@@ -11,7 +11,7 @@ import time
 
 from .core import card_lock, die, hq_root, is_placeholder, ok_workdir, STATUSES, today
 from .sessions import load_state, PET_SESSIONS, pid_alive
-from .cards import append_log, card_paths, parse_card, safe_name, set_fields, STATUS_HEADING_RE
+from .cards import append_log, card_paths, parse_card, safe_name, set_fields, STATUS_HEADING_RE, todo_owner
 from .projects import (
     check_project_name, ensure_project_file, load_project, load_projects, norm_path, project_file,
     project_for_dirs, project_for_path, PROJECT_KINDS, same_name_project, save_projects,
@@ -380,6 +380,11 @@ def import_check(plan):
         elif title:
             open_titles[(project, title.casefold())] = "another task in the plan"
         lists = {k: strings(where, t, k) for k in ("todos", "refs", "log")}
+        # A todo with no owner shows in nobody's list: not Needs you (@me), not a session's (@claude).
+        for x in lists["todos"]:
+            if not todo_owner(x):
+                problems.append(f"{where}: todo {x!r} has no owner — start it with @me (the user does it), "
+                                "@claude (a session does it) or @<name> (someone else)")
         for v in [title, values["next"], values["goal"]] + state_lines + sum(lists.values(), []):
             if v and is_placeholder(v):
                 problems.append(f"{where}: {v!r} is a placeholder, not a value")
