@@ -157,6 +157,11 @@ def main():
     p = sub.add_parser("garden", help="what a look over the board would tidy: zombie tasks, finished tasks with a "
                        "session still running, cards over budget, likely duplicates [--json]")
     p.add_argument("--json", action="store_true"); p.set_defaults(fn="garden.cmd_garden")
+    p = sub.add_parser("doctor", help="check HQ itself: hook wiring, stale session bindings, state files, asks an old "
+                       "`later` closed — --fix clears what is HQ's own state [--json] [--days N]")
+    p.add_argument("--fix", action="store_true"); p.add_argument("--json", action="store_true")
+    p.add_argument("--days", type=int, default=30, help="a bound session quiet this long is over (default 30)")
+    p.set_defaults(fn="doctor.cmd_doctor")
     p = sub.add_parser("hook", help="(internal) Claude Code hook entry point")
     p.set_defaults(fn="hooks.cmd_hook")
 
