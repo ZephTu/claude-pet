@@ -122,6 +122,10 @@ public struct SessionState: Sendable, Equatable, Decodable {
     /// file nobody reads. See `askAnswerable`.
     public let askHeldBy: Int32?
     public let askHeldUntil: Date?
+    /// The shell command `askId` asks to run, for a Bash prompt: approving it starts a shell
+    /// running exactly this (StateAggregator.wasApproved). Cut to its start when long; "" for
+    /// any other prompt.
+    public let askCommand: String
     /// Tool calls failed in a row, and the last one that did ("Bash npm test").
     /// Zero after any success — see `Struggle`.
     public let failStreak: Int
@@ -153,6 +157,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         askKind: String = "",
         askHeldBy: Int32? = nil,
         askHeldUntil: Date? = nil,
+        askCommand: String = "",
         failStreak: Int = 0,
         failTarget: String = "",
         transcript: String = ""
@@ -179,6 +184,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         self.askKind = askKind
         self.askHeldBy = askHeldBy
         self.askHeldUntil = askHeldUntil
+        self.askCommand = askCommand
         self.failStreak = failStreak
         self.failTarget = failTarget
         self.transcript = transcript
@@ -188,7 +194,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         case sessionId, project, cwd, state, tool, detail, since, updatedAt
         case terminal, pid, lastPromptAt, waitingOn, running, promptId, phase, troubleAt
         case backgroundAgents, askId, failStreak, failTarget, transcript
-        case waitingOnFull, askKind, askHeldBy, askHeldUntil
+        case waitingOnFull, askKind, askHeldBy, askHeldUntil, askCommand
     }
 
     /// Hand-written so that a damaged OPTIONAL field cannot take the whole
@@ -224,6 +230,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
         askKind = (try? c.decodeIfPresent(String.self, forKey: .askKind)) as? String ?? ""
         askHeldBy = (try? c.decodeIfPresent(Int32.self, forKey: .askHeldBy)) ?? nil
         askHeldUntil = (try? c.decodeIfPresent(Date.self, forKey: .askHeldUntil)) ?? nil
+        askCommand = (try? c.decodeIfPresent(String.self, forKey: .askCommand)) as? String ?? ""
         failStreak = (try? c.decodeIfPresent(Int.self, forKey: .failStreak)) as? Int ?? 0
         failTarget = (try? c.decodeIfPresent(String.self, forKey: .failTarget)) as? String ?? ""
         transcript = (try? c.decodeIfPresent(String.self, forKey: .transcript)) as? String ?? ""

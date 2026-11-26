@@ -45,7 +45,8 @@ public enum PermissionDecision {
     /// than guessing at a tool failure.
     public static let denyMessage = "The user denied this from Claude Pet."
 
-    /// One file per session: a session has at most one prompt up at a time.
+    /// One file per session. Several prompts can be up at once, but the pet offers only the one
+    /// shown first (`askId`), and each hold takes only the answer naming its own ask.
     public static func fileURL(petHome: URL, sessionId: String) -> URL {
         petHome.appending(path: "decisions")
             .appending(path: CompletionQueue.sanitise(sessionId) + ".json")
@@ -103,8 +104,15 @@ public enum PermissionDecision {
     /// The file moving on means the prompt is gone — answered in the terminal
     /// and already followed by the next event, or replaced by another prompt —
     /// and holding the hook any longer would only keep a process alive.
+    ///
+    /// Several prompts can be up at once — a subagent's beside another's — and the session file
+    /// lists them all under `asks`, its top-level `askId` naming only the one shown first. A
+    /// hold behind another prompt is stale only once its own ask has left that list.
     public static func isStale(askId: String, sessionDocument: [String: Any]?) -> Bool {
-        guard let doc = sessionDocument else { return true }
-        return doc["state"] as? String != "waiting" || doc["askId"] as? String != askId
+        guard let doc = sessionDocument, doc["state"] as? String == "waiting" else { return true }
+        if let asks = doc["asks"] as? [[String: Any]] {
+            return !asks.contains { $0["id"] as? String == askId }
+        }
+        return doc["askId"] as? String != askId
     }
 }

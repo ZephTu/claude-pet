@@ -91,7 +91,6 @@ enum HookEmit {
         // waiting for a reply, not for a permission the pet could grant. The board
         // answers both with their own controls (askKind).
         let askKind = event == "PermissionRequest" ? PermissionSummary.askKind(toolName: toolName) : ""
-        let question = !askKind.isEmpty
         let message = askKind == "question" ? PermissionSummary.questionNote(toolInput: toolInput)
             : askKind == "plan" ? PermissionSummary.planNote
             : hook["message"] as? String ?? ""
@@ -99,11 +98,14 @@ enum HookEmit {
         // The session is over: drop its file now instead of leaving the watcher
         // to time it out fifteen minutes from now.
         if event == "SessionEnd" {
-            try? FileManager.default.removeItem(at: path)
-            // The activity log goes too: it describes a session that no longer
-            // exists, and nothing can reach it any more.
-            try? FileManager.default.removeItem(
-                at: activityDirectory.appending(path: sanitise(sessionID) + ".jsonl"))
+            withSessionLock(sessionID) {
+                try? FileManager.default.removeItem(at: path)
+                // The activity log goes too: it describes a session that no longer
+                // exists, and nothing can reach it any more.
+                try? FileManager.default.removeItem(
+                    at: activityDirectory.appending(path: sanitise(sessionID) + ".jsonl"))
+            }
+            try? FileManager.default.removeItem(at: lockURL(sessionID))
             return
         }
 
@@ -116,183 +118,167 @@ enum HookEmit {
             BackgroundWork.parse(hook["background_tasks"]))
         if event == "Stop", !waitingForWork.isEmpty { state = "busy" }
 
-        // PermissionRequest names the tool and its arguments, so the pet can say
-        // WHAT is blocked rather than just that something is. Carried forward on
-        // other events so the phrase survives until the session stops waiting.
-        let waitingOn: String
-        if question {
-            waitingOn = ""
-        } else if event == "PermissionRequest" {
-            waitingOn = PermissionSummary.describe(toolName: toolName, toolInput: toolInput)
-        } else if state == "waiting" {
-            waitingOn = previousWaitingOn(at: path)
-        } else {
-            waitingOn = ""
-        }
-
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let now = iso8601(Date())
+        // Everything that asks the kernel, before the lock: the lock is held only for reading
+        // the old file and writing the new one.
+        let askedAt = Date()
+        let now = iso8601(askedAt)
         let cwd = hook["cwd"] as? String ?? ""
-
-        var document: [String: Any] = [
-            "sessionId": sessionID,
-            "project": projectName(fromCWD: cwd),
-            "cwd": cwd,
-            "state": state,
-            "tool": hook["tool_name"] as? String ?? "",
-            "detail": message,
-            "since": since(for: state, at: path, fallback: now),
-            "waitingOn": waitingOn,
-            "updatedAt": now,
-        ]
-        // The pet counts the session's turns from it — see TranscriptStats. Only a path it can
-        // open without knowing Claude Code's working directory.
-        if transcript.hasPrefix("/") {
-            document["transcript"] = transcript
-        }
         // The pet decides liveness from this, so an idle session stays listed.
         // Resolved before the terminal because Ghostty's handle is the tty, and
         // this pid is the only process still holding one.
         let pid = claudePID()
-        if let pid {
-            document["pid"] = pid
-        }
         // A background session is in no terminal, whatever terminal variables it inherited
         // (TerminalTarget.isBackgroundSession); the board reaches it through `claude agents`.
-        if TerminalTarget.isBackgroundSession(environment: ProcessInfo.processInfo.environment, sessionId: sessionID,
-                                              parentArguments: pid.flatMap(ProcessProbe.parentPID)
-                                                  .flatMap(ProcessProbe.arguments)) {
-            document["background"] = true
-        } else if let terminal = terminalRef(cwd: cwd,
-                                             tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "") {
-            document["terminal"] = terminal
-        }
-        // Which prompt this is, so a click in the pet answers THIS one — see
-        // PermissionDecision. Minted per request, and carried forward by the
-        // other events that arrive while the same prompt is still up.
-        let askId: String
-        if event == "PermissionRequest" {
-            askId = UUID().uuidString
-        } else if state == "waiting" {
-            askId = previousField("askId", at: path)
-        } else {
-            askId = ""
-        }
-        if !askId.isEmpty { document["askId"] = askId }
-        // A question's menu or a plan's text, for the board to show and answer — carried like
-        // the askId while the same prompt stays up.
-        if event == "PermissionRequest", !askKind.isEmpty {
-            document["askKind"] = askKind
-            if askKind == "plan" {
-                document["plan"] = String((toolInput["plan"] as? String ?? "").prefix(PermissionSummary.planLimit))
-            } else if let questions = toolInput["questions"] as? [Any] {
-                document["questions"] = questions
-            }
-        } else if !askId.isEmpty, let old = readDocument(at: path), old["askId"] as? String == askId {
-            for key in ["askKind", "plan", "questions"] { if let v = old[key] { document[key] = v } }
-        }
-        // The whole of what would be allowed, for the board — carried like the phrase above.
-        let waitingOnFull: String
-        if question || askId.isEmpty {
-            waitingOnFull = ""
-        } else if event == "PermissionRequest" {
-            waitingOnFull = PermissionSummary.full(toolName: toolName, toolInput: toolInput)
-        } else {
-            waitingOnFull = previousField("waitingOnFull", at: path)
-        }
-        if !waitingOnFull.isEmpty { document["waitingOnFull"] = waitingOnFull }
-        // Who holds this prompt's hook open, and until when: the app offers Allow / Deny only
-        // while that is true (SessionState.askAnswerable). Written before the hold starts, so
-        // the app never sees an askId with nobody behind it; carried while the prompt stays up.
-        let holdsAsk = event == "PermissionRequest" && !askId.isEmpty
+        let background = TerminalTarget.isBackgroundSession(
+            environment: ProcessInfo.processInfo.environment, sessionId: sessionID,
+            parentArguments: pid.flatMap(ProcessProbe.parentPID).flatMap(ProcessProbe.arguments))
+        let terminal = background ? nil
+            : terminalRef(cwd: cwd, tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "")
+        // Who holds a prompt's hook open, and until when: the app offers Allow / Deny only
+        // while that is true (SessionState.askAnswerable). Only while the app is there to be
+        // clicked; a test that sets the wait itself is asking for it regardless.
+        let holdsAsk = event == "PermissionRequest"
             && (ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"] != nil
                 || ProcessProbe.isAnyRunning(named: "ClaudePet"))
-        let askedAt = Date()
         let holdFor = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
             .flatMap(TimeInterval.init).map { min($0, PermissionDecision.wait) } ?? PermissionDecision.wait
-        if holdsAsk {
-            document["askHeldBy"] = Int(getpid())
-            document["askHeldUntil"] = iso8601(askedAt.addingTimeInterval(holdFor))
-        } else if !askId.isEmpty, event != "PermissionRequest", let old = readDocument(at: path),
-                  old["askId"] as? String == askId {
-            if let by = old["askHeldBy"] { document["askHeldBy"] = by }
-            if let until = old["askHeldUntil"] { document["askHeldUntil"] = until }
+
+        // One read-modify-write of the session file at a time. Claude Code fires the hooks of
+        // parallel tool calls together; without the lock two PostToolUse each removed their own
+        // call from the list the other had read, and a finished call stayed "running".
+        let written: [String: Any] = withSessionLock(sessionID) {
+            let old = readDocument(at: path)
+
+            // The prompts up in this session, oldest first — see `pendingAsks`. A subagent's
+            // prompt and another's can be up together, and neither may be washed out by the
+            // other agents' tool calls, which go on while it waits.
+            let newAsk: [String: Any]? = event == "PermissionRequest"
+                ? askEntry(hook: hook, toolName: toolName, toolInput: toolInput, askKind: askKind,
+                           message: message, old: old, holds: holdsAsk, askedAt: askedAt, holdFor: holdFor)
+                : nil
+            let asks = pendingAsks(event: event, hook: hook, old: old, adding: newAsk,
+                                   keepAgents: !waitingForWork.isEmpty)
+            if !asks.isEmpty { state = "waiting" }
+            let top = asks.first
+
+            var document: [String: Any] = [
+                "sessionId": sessionID,
+                "project": projectName(fromCWD: cwd),
+                "cwd": cwd,
+                "state": state,
+                "tool": top?["tool"] as? String ?? toolName,
+                "detail": top?["detail"] as? String ?? message,
+                "since": top?["since"] as? String ?? since(for: state, old: old, fallback: now),
+                "updatedAt": now,
+            ]
+            // The pet counts the session's turns from it — see TranscriptStats. Only a path it can
+            // open without knowing Claude Code's working directory.
+            if transcript.hasPrefix("/") {
+                document["transcript"] = transcript
+            }
+            if let pid { document["pid"] = pid }
+            if background {
+                document["background"] = true
+            } else if let terminal {
+                document["terminal"] = terminal
+            }
+
+            // The prompt shown first, in the fields the app and the board read: which prompt it
+            // is, so a click answers THIS one (PermissionDecision); WHAT is blocked, in short
+            // and whole; a question's menu or a plan's text; who holds its hook open.
+            if let top {
+                for (from, to) in [("id", "askId"), ("waitingOn", "waitingOn"), ("waitingOnFull", "waitingOnFull"),
+                                   ("askKind", "askKind"), ("plan", "plan"), ("questions", "questions"),
+                                   ("heldBy", "askHeldBy"), ("heldUntil", "askHeldUntil"), ("command", "askCommand")] {
+                    if let v = top[from], (v as? String)?.isEmpty != true { document[to] = v }
+                }
+                document["asks"] = asks
+            }
+            // A wait with no prompt behind it — a dialog Claude Code announced only by
+            // Notification — keeps the phrase the last prompt left, so it does not blank.
+            // A question or a plan has none.
+            document["waitingOn"] = top.map { $0["waitingOn"] as? String ?? "" }
+                ?? (state == "waiting" ? old?["waitingOn"] as? String ?? "" : "")
+
+            // Only a real user prompt updates this. It is what un-hides a session the
+            // user muted: the session talking to itself — running tools, finishing a
+            // turn — must not count as "we are back in conversation".
+            // Never write an empty string here: the reader decodes this as a Date,
+            // and "" is a value it rejects rather than a value it ignores.
+            let prompt = lastPromptAt(for: event, hook: hook, old: old, now: now)
+            if !prompt.isEmpty { document["lastPromptAt"] = prompt }
+
+            // Which turn this is, counted from the session's own history.
+            //
+            // Claude Code's payload carries no turn identifier, and the obvious
+            // stand-in — the timestamp of the prompt that began the turn — is only
+            // second-resolution, so two turns inside one second collapse into one.
+            // A counter is not a guess about ordering: it advances on exactly the
+            // event that starts a turn, and on nothing else.
+            document["turn"] = turnNumber(for: event, old: old)
+
+            // Claude Code stamps every event of one turn with the same prompt_id.
+            // That is the authoritative turn identifier and it is preferred over the
+            // counter above, which stays only as a fallback for builds that do not
+            // send one.
+            let promptId = (hook["prompt_id"] as? String) ?? ""
+            if !promptId.isEmpty { document["promptId"] = promptId }
+
+            // Which tool calls are in flight, keyed by Claude Code's own
+            // tool_use_id. Without this a PostToolUse left the finished tool showing
+            // as "running", and two parallel calls showed as one.
+            document["running"] = runningTools(event: event, hook: hook, old: old, now: now)
+
+            // A phase is something the session is in the MIDDLE of that no other
+            // event reports. Compaction is the only one so far: it takes a while,
+            // emits nothing else, and without this the pet shows a session that has
+            // apparently stopped working.
+            // A Stop held open by a background agent is its own phase: the session
+            // has stopped talking but has not stopped working, and nothing else in
+            // the file says so. Only Stop carries `background_tasks`, and only Stop
+            // sets this — a mid-turn event describes the tool it is running, which
+            // is the more useful truth while a tool is running.
+            let phase = event == "Stop" && !waitingForWork.isEmpty
+                ? "awaiting-agent"
+                : phaseValue(event: event, old: old)
+            if !phase.isEmpty { document["phase"] = phase }
+
+            // Named so the row can say what it is waiting for. Structural labels
+            // only — never the task's free-text description.
+            if event == "Stop", !waitingForWork.isEmpty {
+                document["backgroundAgents"] = waitingForWork.map(\.label)
+            }
+
+            // When a tool call last came back interrupted. The app watches this for
+            // CHANGES rather than for a flag being set, so the brief warning fires
+            // once per failure instead of for as long as the value sits there.
+            let trouble = troubleAt(event: event, hook: hook, old: old, now: now)
+            if !trouble.isEmpty { document["troubleAt"] = trouble }
+
+            // How many tool calls in a row have failed, and on what. A session that
+            // keeps failing the same command is working on paper and going nowhere;
+            // this is what lets the pet say so. Only the call's short target is
+            // kept, never Claude Code's error text.
+            let streak = failStreak(event: event, hook: hook, old: old)
+            if streak.count > 0 {
+                document["failStreak"] = streak.count
+                document["failTarget"] = streak.target
+            }
+
+            write(document, to: path)
+            return document
         }
-        // Only a real user prompt updates this. It is what un-hides a session the
-        // user muted: the session talking to itself — running tools, finishing a
-        // turn — must not count as "we are back in conversation".
-        // Never write an empty string here: the reader decodes this as a Date,
-        // and "" is a value it rejects rather than a value it ignores.
-        let prompt = lastPromptAt(for: event, hook: hook, at: path, now: now)
-        if !prompt.isEmpty { document["lastPromptAt"] = prompt }
-
-        // Which turn this is, counted from the session's own history.
-        //
-        // Claude Code's payload carries no turn identifier, and the obvious
-        // stand-in — the timestamp of the prompt that began the turn — is only
-        // second-resolution, so two turns inside one second collapse into one.
-        // A counter is not a guess about ordering: it advances on exactly the
-        // event that starts a turn, and on nothing else.
-        let turn = turnNumber(for: event, at: path)
-        document["turn"] = turn
-
-        // Claude Code stamps every event of one turn with the same prompt_id.
-        // That is the authoritative turn identifier and it is preferred over the
-        // counter above, which stays only as a fallback for builds that do not
-        // send one.
+        let askId = event == "PermissionRequest"
+            ? ((written["asks"] as? [[String: Any]])?.last?["id"] as? String ?? "") : ""
         let promptId = (hook["prompt_id"] as? String) ?? ""
-        if !promptId.isEmpty { document["promptId"] = promptId }
+        let turn = written["turn"] as? Int ?? 0
 
-        // Which tool calls are in flight, keyed by Claude Code's own
-        // tool_use_id. Without this a PostToolUse left the finished tool showing
-        // as "running", and two parallel calls showed as one.
-        let running = runningTools(event: event, hook: hook, at: path, now: now)
-        document["running"] = running
-
-        // A phase is something the session is in the MIDDLE of that no other
-        // event reports. Compaction is the only one so far: it takes a while,
-        // emits nothing else, and without this the pet shows a session that has
-        // apparently stopped working.
-        // A Stop held open by a background agent is its own phase: the session
-        // has stopped talking but has not stopped working, and nothing else in
-        // the file says so. Only Stop carries `background_tasks`, and only Stop
-        // sets this — a mid-turn event describes the tool it is running, which
-        // is the more useful truth while a tool is running.
-        let phase = event == "Stop" && !waitingForWork.isEmpty
-            ? "awaiting-agent"
-            : phaseValue(event: event, at: path)
-        if !phase.isEmpty { document["phase"] = phase }
-
-        // Named so the row can say what it is waiting for. Structural labels
-        // only — never the task's free-text description.
-        if event == "Stop", !waitingForWork.isEmpty {
-            document["backgroundAgents"] = waitingForWork.map(\.label)
-        }
-
-        // When a tool call last came back interrupted. The app watches this for
-        // CHANGES rather than for a flag being set, so the brief warning fires
-        // once per failure instead of for as long as the value sits there.
-        let trouble = troubleAt(event: event, hook: hook, at: path, now: now)
-        if !trouble.isEmpty { document["troubleAt"] = trouble }
-
-        // How many tool calls in a row have failed, and on what. A session that
-        // keeps failing the same command is working on paper and going nowhere;
-        // this is what lets the pet say so. Only the call's short target is
-        // kept, never Claude Code's error text.
-        let streak = failStreak(event: event, hook: hook, at: path)
-        if streak.count > 0 {
-            document["failStreak"] = streak.count
-            document["failTarget"] = streak.target
-        }
-
-        write(document, to: path)
-
-        // Only while the app is there to be clicked. A test that sets the wait
-        // itself is asking for it regardless.
-        if holdsAsk {
+        if holdsAsk, !askId.isEmpty {
             awaitDecision(sessionID: sessionID, askId: askId, sessionFile: path,
-                          claudePID: pid, askedAt: askedAt, toolInput: toolInput)
+                          claudePID: pid, askedAt: askedAt, toolInput: toolInput,
+                          command: askCommand(toolName: toolName, toolInput: toolInput))
         }
 
         // A finished tool call, with the duration Claude Code measured itself.
@@ -311,7 +297,7 @@ enum HookEmit {
         // finish. The app keeps it out of sight while the session is busy.
         let held = BackgroundWork.onlyWaits(waitingForWork)
         if event == "Stop", waitingForWork.isEmpty || held {
-            recordCompletion(sessionID: sessionID, project: document["project"] as? String ?? "",
+            recordCompletion(sessionID: sessionID, project: written["project"] as? String ?? "",
                              turnKey: promptId.isEmpty ? String(turn) : promptId, at: now,
                              summary: TurnSummary.headline(
                                 hook["last_assistant_message"] as? String ?? ""),
@@ -342,15 +328,9 @@ enum HookEmit {
     /// something. Empty string for a session the user has not spoken to since
     /// this field existed, which reads as "no conversation yet".
     private static func lastPromptAt(for event: String, hook: [String: Any],
-                                     at path: URL, now: String) -> String {
+                                     old: [String: Any]?, now: String) -> String {
         if event == "UserPromptSubmit", isHuman(hook) { return now }
-        guard
-            let data = try? Data(contentsOf: path),
-            let raw = try? JSONSerialization.jsonObject(with: data),
-            let old = raw as? [String: Any],
-            let previous = old["lastPromptAt"] as? String
-        else { return "" }
-        return previous
+        return old?["lastPromptAt"] as? String ?? ""
     }
 
     /// Did a person type this prompt, or did the session wake itself up?
@@ -386,10 +366,10 @@ enum HookEmit {
     /// PostToolUse never arrived (the session was interrupted, the process was
     /// killed) must not sit there claiming to still be running.
     private static func runningTools(event: String, hook: [String: Any],
-                                     at path: URL, now: String) -> [[String: Any]] {
+                                     old: [String: Any]?, now: String) -> [[String: Any]] {
         if event == "Stop" || event == "StopFailure" || event == "UserPromptSubmit" { return [] }
 
-        var running = (readDocument(at: path)?["running"] as? [[String: Any]]) ?? []
+        var running = (old?["running"] as? [[String: Any]]) ?? []
         let id = (hook["tool_use_id"] as? String) ?? ""
         let tool = (hook["tool_name"] as? String) ?? ""
 
@@ -399,13 +379,17 @@ enum HookEmit {
             // An id-less build would otherwise accumulate duplicates forever.
             let key = id.isEmpty ? tool : id
             running.removeAll { ($0["id"] as? String) == key }
-            running.append([
+            let input = hook["tool_input"] as? [String: Any] ?? [:]
+            var call: [String: Any] = [
                 "id": key,
                 "tool": tool,
-                "target": ActivitySummary.target(toolName: tool,
-                                                 toolInput: hook["tool_input"] as? [String: Any] ?? [:]),
+                "target": ActivitySummary.target(toolName: tool, toolInput: input),
                 "since": now,
-            ])
+                // What a PermissionRequest is matched to this call by — see `askEntry`.
+                "fp": fingerprint(toolName: tool, toolInput: input),
+            ]
+            if let agent = hook["agent_id"] as? String, !agent.isEmpty { call["agent"] = agent }
+            running.append(call)
         case "PostToolUse", "PostToolUseFailure":
             let key = id.isEmpty ? tool : id
             running.removeAll { ($0["id"] as? String) == key }
@@ -423,8 +407,8 @@ enum HookEmit {
     /// usually not a task failing, which is why this drives a brief warning and
     /// not a mood.
     private static func troubleAt(event: String, hook: [String: Any],
-                                  at path: URL, now: String) -> String {
-        let previous = (readDocument(at: path)?["troubleAt"] as? String) ?? ""
+                                  old: [String: Any]?, now: String) -> String {
+        let previous = (old?["troubleAt"] as? String) ?? ""
         if event == "PostToolUseFailure" {
             return hook["is_interrupt"] as? Bool == true ? now : previous
         }
@@ -441,8 +425,7 @@ enum HookEmit {
     /// count again; an interrupt is the user stopping it, not it failing, so it
     /// leaves the count alone.
     private static func failStreak(event: String, hook: [String: Any],
-                                   at path: URL) -> (count: Int, target: String) {
-        let old = readDocument(at: path)
+                                   old: [String: Any]?) -> (count: Int, target: String) {
         let count = old?["failStreak"] as? Int ?? 0
         let target = old?["failTarget"] as? String ?? ""
         switch event {
@@ -467,22 +450,22 @@ enum HookEmit {
     /// finishes, so the phase is cleared by the first event that can only happen
     /// afterwards. Being stuck in a phase forever because one optional hook was
     /// missed is exactly the failure mode to avoid.
-    private static func phaseValue(event: String, at path: URL) -> String {
+    private static func phaseValue(event: String, old: [String: Any]?) -> String {
         switch event {
         case "PreCompact": return "compacting"
         case "UserPromptSubmit", "Stop", "StopFailure", "PreToolUse", "PostToolUse",
              "PostToolUseFailure", "SessionStart":
             return ""
         default:
-            return (readDocument(at: path)?["phase"] as? String) ?? ""
+            return (old?["phase"] as? String) ?? ""
         }
     }
 
     /// This session's turn counter: bumped by UserPromptSubmit, carried by
     /// everything else. A turn redelivering its Stop therefore reports the same
     /// number, which is what makes the completion record idempotent.
-    private static func turnNumber(for event: String, at path: URL) -> Int {
-        let previous = (readDocument(at: path)?["turn"] as? Int) ?? 0
+    private static func turnNumber(for event: String, old: [String: Any]?) -> Int {
+        let previous = (old?["turn"] as? Int) ?? 0
         return event == "UserPromptSubmit" ? previous + 1 : previous
     }
 
@@ -558,14 +541,154 @@ enum HookEmit {
         }
     }
 
-    /// The phrase from the last PermissionRequest, so that the events which
-    /// follow it (a repeated Notification, say) do not blank the bubble.
-    private static func previousWaitingOn(at path: URL) -> String {
-        previousField("waitingOn", at: path)
+    /// The prompt a PermissionRequest puts up, as one row of the session's `asks`.
+    ///
+    /// PermissionRequest carries no tool_use_id, so the call it is about is found among the
+    /// calls in flight: the newest with the same tool and input that no other prompt has
+    /// claimed, from the same agent if there is one. Its PostToolUse is what takes the prompt
+    /// down again — see `pendingAsks`.
+    private static func askEntry(hook: [String: Any], toolName: String, toolInput: [String: Any],
+                                 askKind: String, message: String, old: [String: Any]?,
+                                 holds: Bool, askedAt: Date, holdFor: TimeInterval) -> [String: Any] {
+        let agent = hook["agent_id"] as? String ?? ""
+        let fp = fingerprint(toolName: toolName, toolInput: toolInput)
+        let claimed = Set(currentAsks(old).compactMap { $0["toolUseId"] as? String })
+        let calls = ((old?["running"] as? [[String: Any]]) ?? []).filter {
+            $0["tool"] as? String == toolName && $0["fp"] as? String == fp
+                && !claimed.contains($0["id"] as? String ?? "")
+        }
+        let call = calls.last { $0["agent"] as? String ?? "" == agent } ?? calls.last
+        var ask: [String: Any] = [
+            "id": UUID().uuidString,
+            "tool": toolName,
+            "detail": message,
+            "since": iso8601(askedAt),
+        ]
+        if !agent.isEmpty { ask["agent"] = agent }
+        if let id = call?["id"] as? String { ask["toolUseId"] = id }
+        // A question card is answered on the card, and a plan is approved in its own dialog —
+        // see PermissionSummary.isQuestion / isPlan — so neither is a permission the pet could
+        // grant, and neither has a phrase. The board answers both with their own controls.
+        if askKind.isEmpty {
+            ask["waitingOn"] = PermissionSummary.describe(toolName: toolName, toolInput: toolInput)
+            ask["waitingOnFull"] = PermissionSummary.full(toolName: toolName, toolInput: toolInput)
+            ask["command"] = askCommand(toolName: toolName, toolInput: toolInput)
+        } else {
+            ask["askKind"] = askKind
+            if askKind == "plan" {
+                ask["plan"] = String((toolInput["plan"] as? String ?? "").prefix(PermissionSummary.planLimit))
+            } else if let questions = toolInput["questions"] as? [Any] {
+                ask["questions"] = questions
+            }
+        }
+        // Written before the hold starts, so the app never sees an ask with nobody behind it.
+        if holds {
+            ask["heldBy"] = Int(getpid())
+            ask["heldUntil"] = iso8601(askedAt.addingTimeInterval(holdFor))
+        }
+        return ask
     }
 
-    private static func previousField(_ key: String, at path: URL) -> String {
-        readDocument(at: path)?[key] as? String ?? ""
+    /// The prompts still up after `event`, oldest first; the first is the one the pet shows.
+    ///
+    /// A prompt stays up until the call it asked about ends — its own PostToolUse or
+    /// PostToolUseFailure — or the turn does. Other calls ending, a subagent's or the main
+    /// thread's, say nothing about it: with one file per session, treating every tool event as
+    /// "the prompt was answered" dropped a subagent's prompt the moment any other agent ran a
+    /// tool, while the terminal still showed it. A prompt matched to no call (an older build
+    /// with no tool_use_id) ends with its agent's next tool event, as every prompt once did.
+    /// - Parameter keepAgents: a Stop with background work still running keeps the prompts of
+    ///   subagents, which go on after the main thread has stopped.
+    private static func pendingAsks(event: String, hook: [String: Any], old: [String: Any]?,
+                                    adding new: [String: Any]?, keepAgents: Bool) -> [[String: Any]] {
+        var asks = currentAsks(old)
+        let agent = hook["agent_id"] as? String ?? ""
+        let tool = hook["tool_name"] as? String ?? ""
+        let id = hook["tool_use_id"] as? String ?? ""
+        let key = id.isEmpty ? tool : id
+        func unmatched(_ a: [String: Any]) -> Bool {
+            (a["toolUseId"] as? String ?? "").isEmpty && (a["agent"] as? String ?? "") == agent
+        }
+        switch event {
+        case "Stop":
+            asks = keepAgents ? asks.filter { !($0["agent"] as? String ?? "").isEmpty } : []
+        case "StopFailure", "UserPromptSubmit", "SessionStart":
+            asks = []
+        case "PostToolUse", "PostToolUseFailure":
+            asks.removeAll { ($0["toolUseId"] as? String ?? "") == key || unmatched($0) }
+        case "PreToolUse":
+            asks.removeAll(where: unmatched)
+        case "PermissionRequest":
+            if let new {
+                // The same call asking again is the same prompt, not a second one.
+                if let call = new["toolUseId"] as? String {
+                    asks.removeAll { $0["toolUseId"] as? String == call }
+                } else {
+                    asks.removeAll(where: unmatched)
+                }
+                asks.append(new)
+            }
+        default:
+            break
+        }
+        // A runaway list is a bug somewhere else; cap it rather than write it.
+        return Array(asks.suffix(8))
+    }
+
+    /// The prompts the session file lists. A file written before the list existed has at most
+    /// the one its top-level fields describe, still up while it says "waiting".
+    private static func currentAsks(_ old: [String: Any]?) -> [[String: Any]] {
+        guard let old else { return [] }
+        if let asks = old["asks"] as? [[String: Any]] { return asks }
+        guard old["state"] as? String == "waiting", let id = old["askId"] as? String, !id.isEmpty
+        else { return [] }
+        var ask: [String: Any] = ["id": id, "tool": old["tool"] ?? "", "detail": old["detail"] ?? "",
+                                  "since": old["since"] ?? ""]
+        for (from, to) in [("waitingOn", "waitingOn"), ("waitingOnFull", "waitingOnFull"),
+                           ("askKind", "askKind"), ("plan", "plan"), ("questions", "questions"),
+                           ("askHeldBy", "heldBy"), ("askHeldUntil", "heldUntil")] {
+            if let v = old[from] { ask[to] = v }
+        }
+        return [ask]
+    }
+
+    /// The command a Bash prompt asks to run — what its approval starts a shell for (see
+    /// ProcessProbe.startedToolShell). Only its start is kept for a long one.
+    private static func askCommand(toolName: String, toolInput: [String: Any]) -> String {
+        guard toolName == "Bash", let command = toolInput["command"] as? String else { return "" }
+        return String(command.prefix(2000))
+    }
+
+    /// A short, stable name for one tool call's input, for matching a PermissionRequest to the
+    /// PreToolUse of the same call without keeping the input itself. FNV-1a: Swift's Hasher
+    /// is seeded per process, and these are compared across processes.
+    private static func fingerprint(toolName: String, toolInput: [String: Any]) -> String {
+        let text = toolName + "\u{0}" + PermissionSummary.full(toolName: toolName, toolInput: toolInput)
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+        return String(hash, radix: 16)
+    }
+
+    /// The per-session lock that one hook's read-modify-write of the session file runs under,
+    /// beside that file. The app reaps it with the session's file (SessionWatcher).
+    private static func lockURL(_ sessionID: String) -> URL {
+        sessionsDirectory.appending(path: "." + sessionID + ".lock")
+    }
+
+    /// Runs `body` holding this session's lock. A hook may not hang, so after two seconds it
+    /// gives up waiting and runs anyway — one lost update is better than a stuck session.
+    private static func withSessionLock<T>(_ sessionID: String, _ body: () -> T) -> T {
+        let fd = open(lockURL(sessionID).path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return body() }
+        defer { close(fd) }
+        for _ in 0..<400 {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+                defer { flock(fd, LOCK_UN) }
+                return body()
+            }
+            usleep(5_000)
+        }
+        return body()
     }
 
     /// Holds the PermissionRequest hook open until the user answers from the
@@ -575,14 +698,14 @@ enum HookEmit {
     /// answer comes first, so waiting here never delays the terminal prompt.
     /// Every way out other than a click prints nothing, which leaves the
     /// decision to the terminal exactly as if the pet did not exist:
-    /// - the session file moved on (the prompt was answered and something else
-    ///   happened, or another prompt replaced it);
-    /// - Claude started the approved command's shell — answered in the
-    ///   terminal, with nothing written since because the command is running;
+    /// - the session file no longer lists this prompt (its call ended, or the turn did);
+    /// - Claude started the shell running the command asked about — answered in
+    ///   the terminal, with nothing written since because the command is running;
     /// - the Claude process is gone;
     /// - `PermissionDecision.wait` ran out.
     private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
-                                      claudePID: Int32?, askedAt: Date, toolInput: [String: Any]) {
+                                      claudePID: Int32?, askedAt: Date, toolInput: [String: Any],
+                                      command: String) {
         let answerFile = PermissionDecision.fileURL(petHome: baseDirectory, sessionId: sessionID)
         // `PET_PERMISSION_WAIT` overrides the wait for tests; 0 turns it off.
         let wait = ProcessInfo.processInfo.environment["PET_PERMISSION_WAIT"]
@@ -600,7 +723,7 @@ enum HookEmit {
             }
             if let claudePID {
                 if !ProcessProbe.isClaude(pid: claudePID) { return }
-                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt) { return }
+                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt, running: command) { return }
             }
             usleep(250_000)
         }
@@ -608,11 +731,9 @@ enum HookEmit {
 
     /// Keep `since` across writes that do not change state, otherwise the 60s
     /// urgency escalation can never fire.
-    private static func since(for state: String, at path: URL, fallback: String) -> String {
+    private static func since(for state: String, old: [String: Any]?, fallback: String) -> String {
         guard
-            let data = try? Data(contentsOf: path),
-            let raw = try? JSONSerialization.jsonObject(with: data),
-            let old = raw as? [String: Any],
+            let old,
             old["state"] as? String == state,
             let previous = old["since"] as? String,
             !previous.isEmpty

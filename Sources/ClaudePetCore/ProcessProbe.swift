@@ -153,17 +153,34 @@ public enum ProcessProbe {
     ///
     /// Only a tool shell counts. Claude starts other children while a prompt is
     /// up — the Notification hook it fires a few seconds in, `caffeinate` — and
-    /// none of those mean the prompt was answered.
-    public static func startedToolShell(under pid: Int32, since: Date) -> Bool {
-        childPIDs(of: pid).contains { child in
+    /// none of those mean the prompt was answered. Nor does a shell running some
+    /// other command: a subagent, or another call of the main thread, starts its
+    /// own while the prompt stays up. So the shell must be running `command`, the
+    /// one asked about; a prompt that names none is never answered this way.
+    public static func startedToolShell(under pid: Int32, since: Date, running command: String) -> Bool {
+        guard !command.isEmpty else { return false }
+        return childPIDs(of: pid).contains { child in
             guard let started = startTime(pid: child), started >= since,
                   let arguments = arguments(pid: child)
             else { return false }
-            return isToolShell(arguments: arguments)
+            return isToolShell(arguments: arguments, running: command)
         }
     }
 
-    /// Pure half of `startedToolShell`: Claude Code runs every Bash tool call as
+    /// Pure half of `startedToolShell(under:since:running:)`. Claude Code hands the command to
+    /// the shell as `eval '<command>'`, each `'` written `'"'"'`. `command` may be only the start
+    /// of a long one, so the closing quote is not looked for.
+    public static func isToolShell(arguments: String, running command: String) -> Bool {
+        guard isToolShell(arguments: arguments) else { return false }
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return [command, trimmed].contains { c in
+            arguments.contains("eval '" + c.replacingOccurrences(of: "'", with: #"'"'"'"#))
+                || arguments.contains(c)
+        }
+    }
+
+    /// Claude Code runs every Bash tool call as
     /// `<shell> -c source <config>/shell-snapshots/snapshot-… && <command>`.
     public static func isToolShell(arguments: String) -> Bool {
         arguments.contains("/shell-snapshots/snapshot-")
