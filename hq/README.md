@@ -213,6 +213,15 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    the turn first, the problems are told at the next prompt instead. Card writes from hooks,
    the board and the CLI hold a per-card lock (`~/.claude/hq/state/locks/`). A turn that runs longer than two minutes without
    touching the card is sent back once to update it.
+
+   **The turn's echo.** The Stop hook also shows the user one line (a `systemMessage`, which
+   the session does not see) of what the turn's blocks did: the status change (including the
+   automatic ones), which fields and how many todos, logs and refs were actually written (a
+   repeat counts nothing), new asks by id, answers recorded — and what was refused or dropped,
+   with the first reason and whether the session was sent back or hears at its next prompt;
+   also the write-back guard. A reply with no applied blocks and nothing wrong prints nothing.
+   The words follow the project's language (`lang` from PROJECT.md headings). E.g.
+   `HQ T-012: status active → waiting-on-me, next, +1 todo, ask T-012.5`.
 2. **Questions to you are tracked.** When Claude needs a decision, a confirmation or an
    action from you, it ends its reply with a block:
 
