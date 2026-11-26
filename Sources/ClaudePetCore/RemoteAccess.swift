@@ -499,6 +499,14 @@ public enum RemoteAccess {
 
     public static func allowed(op: String) -> Bool { phoneOps.contains(op) }
 
+    /// A shell job runs any command on the Mac, so only the Mac sets one up: a phone may save a
+    /// Claude job (a missing kind is one), but not make a shell job, turn a job into one, or change
+    /// one written on the Mac. It may still run, switch on or off, stop and delete any job.
+    /// - Parameter storedKind: the kind of the job this save replaces, nil for a new job.
+    public static func phoneMaySave(job: [String: Any], storedKind: String?) -> Bool {
+        (job["kind"] == nil || job["kind"] as? String == "claude") && storedKind != "shell"
+    }
+
     /// A phone opening its pairing link trades the code for a token of its own: the code — seen in
     /// a QR code, maybe pasted somewhere — is spent, and the token never leaves the phone.
     public static let claimOp = "pair"

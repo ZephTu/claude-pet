@@ -557,6 +557,13 @@ final class BoardServer {
         guard RemoteAccess.allowed(op: op) else {
             return json(200, ["error": L("Only on the Mac", "只能在 Mac 上做")])
         }
+        if op == "job-save" {
+            let job = body["job"] as? [String: Any] ?? [:]
+            let stored = (job["id"] as? String).flatMap { JobsController.shared.store.load($0) }?.kind.rawValue
+            guard RemoteAccess.phoneMaySave(job: job, storedKind: stored) else {
+                return json(200, ["error": L("Shell jobs are set up on the Mac", "Shell 定时任务只能在 Mac 上设置")])
+            }
+        }
         // Sessions start the way the Mac's board starts them (one shared choice, BoardPrefs).
         if ["launch", "resume", "job-resume", "send"].contains(op), body["skip"] != nil, let skip = BoardPrefs.skip {
             body["skip"] = skip

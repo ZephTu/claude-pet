@@ -97,6 +97,16 @@ enum RemoteAccessTests {
         t.check("an operation on no list is the Mac's", !RemoteAccess.allowed(op: "some-new-op") && !RemoteAccess.allowed(op: ""))
         t.check("a phone may still read the board, answer asks and run jobs",
                 ["board", "peek", "resolve", "send", "decide", "job-run"].allSatisfy { RemoteAccess.allowed(op: $0) })
+        t.check("a phone may save a Claude job, new or changed",
+                RemoteAccess.phoneMaySave(job: ["kind": "claude", "prompt": "x"], storedKind: nil)
+                && RemoteAccess.phoneMaySave(job: ["prompt": "x"], storedKind: nil)
+                && RemoteAccess.phoneMaySave(job: ["kind": "claude"], storedKind: "claude"))
+        t.check("a phone may not make a shell job, turn a job into one, or change one",
+                !RemoteAccess.phoneMaySave(job: ["kind": "shell", "command": "rm -rf ~"], storedKind: nil)
+                && !RemoteAccess.phoneMaySave(job: ["kind": "shell"], storedKind: "claude")
+                && !RemoteAccess.phoneMaySave(job: ["kind": "claude"], storedKind: "shell")
+                && !RemoteAccess.phoneMaySave(job: ["kind": "Shell"], storedKind: nil)
+                && !RemoteAccess.phoneMaySave(job: ["kind": 1], storedKind: nil))
         t.check("the phone and Mac lists don't overlap", RemoteAccess.phoneOps.isDisjoint(with: RemoteAccess.macOnly))
         // Every operation the bridge handles is on exactly one list: a new one has to be given to
         // the phone on purpose. Read from BoardBridge.handle's top-level cases.
