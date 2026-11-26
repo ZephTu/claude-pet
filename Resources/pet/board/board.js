@@ -2965,7 +2965,8 @@ function sessionProject(s) {
 // on their own pages (Projects & duties). Open on any page (⚙); Esc, Done or a click outside closes it.
 function renderSettings() {
   const box = $("#settings");
-  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
+  // Closed, its suggested phrases go: the next opening reads them afresh.
+  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; ui.phraseSugg = undefined; return; }
   const prev = box.querySelector(".settings-body");
   const scroll = prev ? prev.scrollTop : 0;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Settings", "设置")}">
@@ -5356,7 +5357,7 @@ document.addEventListener("click", async (ev) => {
       } catch (e) { toast(String(e.message || e), true); }
       return refresh();
     }
-    case "open-settings": ui.settings = true; ui.phraseSugg = undefined; return render();
+    case "open-settings": ui.settings = true; return render();
     case "phrase-add": {
       const text = (ui.drafts["phrase-add"] || "").trim();
       if (!text) return;
