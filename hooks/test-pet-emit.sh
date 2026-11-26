@@ -618,6 +618,85 @@ check "a lone prompt allowed from the pet leaves the session busy on its call" \
   "$(decision sA1)|$(field sA1 state)|$(field sA1 askId)|$(qjson "$PET_HOME/sessions/sA1.json" "[c['id'] for c in d['running']]")" \
   'allow|busy||["r1"]'
 
+# Two agents asking to run the same command: a shell running it can't tell whose it is, so
+# neither prompt names its command for the app to watch for (StateAggregator.wasApproved).
+emit UserPromptSubmit sSC /tmp/a
+agent_call PreToolUse sSC a1 c1 "npm test"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sSC","cwd":"/tmp/a","agent_id":"a1","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"npm test"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sSC.out" &
+pid=$!; id="$(await_ask sSC)"
+check "a lone Bash prompt names its command" "$(field sSC askCommand)" "npm test"
+agent_call PreToolUse sSC a2 c2 "npm test"
+agent_ask sSC a2 "npm test"
+check "...but not while another call runs the same command" "$(field sSC askCommand)" ""
+answer sSC "$id" allow; wait $pid
+check "...nor once the first is allowed and its call runs on" \
+  "$(field sSC state)|$(field sSC waitingOnFull)|$(field sSC askCommand)|$(qjson "$PET_HOME/sessions/sSC.json" "[a['toolUseId'] for a in d['asks']]")" \
+  'waiting|npm test||["c2"]'
+agent_call PostToolUse sSC a1 c1 "npm test"
+check "...and names it again when that call is done" "$(field sSC askCommand)" "npm test"
+
+# Approved in the terminal: no hook says so, but Claude Code starts the shell that runs the
+# command. A stand-in process named `claude` starts the holds and that shell, as Claude Code does.
+FAKE="$(dirname "$PET_HOME")/fake"; mkdir -p "$FAKE"
+cat > "$FAKE/claude.c" <<'C'
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int main(void) {  /* runs each line of stdin as a child, like Claude Code its hooks and shells */
+  signal(SIGCHLD, SIG_IGN);
+  char line[4096];
+  while (fgets(line, sizeof line, stdin)) {
+    line[strcspn(line, "\n")] = 0;
+    if (*line && fork() == 0) { execl("/bin/sh", "sh", "-c", line, (char *)0); _exit(127); }
+  }
+  return 0;
+}
+C
+if cc -o "$FAKE/claude" "$FAKE/claude.c" 2>/dev/null; then
+  shell_case() {  # shell_case <session> <command A> <command B> [allow] — A asks first
+    local s="$1"
+    emit UserPromptSubmit "$s" /tmp/a
+    agent_call PreToolUse "$s" a1 "${s}1" "$2"
+    agent_call PreToolUse "$s" a2 "${s}2" "$3"
+    for who in a1:"$2" a2:"$3"; do
+      printf '{"transcript_path":"/f/s.jsonl","hook_event_name":"PermissionRequest","session_id":"%s","cwd":"/tmp/a","agent_id":"%s","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"%s"}}' \
+        "$s" "${who%%:*}" "${who#*:}" > "$FAKE/$s-${who%%:*}.json"
+    done
+    # Write end here only, so closing it ends the stand-in (and the holds, which see it gone).
+    rm -f "$FAKE/ctl"; mkfifo "$FAKE/ctl"
+    "$FAKE/claude" < "$FAKE/ctl" > /dev/null 2>&1 & fake=$!
+    exec 3> "$FAKE/ctl"
+    for a in a1 a2; do
+      echo "exec env PET_HOME='$PET_HOME' PET_PERMISSION_WAIT=10 '$EMIT_BIN' < '$FAKE/$s-$a.json' > '$FAKE/$s-$a.out'" >&3
+      for _ in $(seq 1 40); do
+        [ "$(qjson "$PET_HOME/sessions/$s.json" "sum(1 for a in d.get('asks', []) if a.get('heldBy'))" 2>/dev/null)" = "${a#a}" ] && break
+        sleep 0.05
+      done
+    done
+    [ "${4:-}" = allow ] && { answer "$s" "$(field "$s" askId)" allow; sleep 0.5; }
+    echo "exec /bin/sh -c \"true /x/shell-snapshots/snapshot-1 && eval '$2'\"" >&3
+    sleep 1.5
+  }
+  shell_done() { exec 3>&-; rm -f "$FAKE/ctl"; wait "$fake" 2>/dev/null; sleep 0.5; }
+
+  shell_case sTS "sleep 3" "sleep 4"
+  check "a prompt approved in the terminal comes down when its shell starts" \
+    "$(field sTS state)|$(field sTS waitingOnFull)|$(qjson "$PET_HOME/sessions/sTS.json" "[a['toolUseId'] for a in d['asks']]")|$(cat "$FAKE/sTS-a1.out")" \
+    'waiting|sleep 4|["sTS2"]|'
+  check "...and the next prompt's hold goes on" "$(field sTS askHeldBy | grep -c .)" "1"
+  shell_done
+
+  shell_case sTT "sleep 3" "sleep 3" allow
+  check "the same command asked twice: the first one's shell is not the second's approval" \
+    "$(field sTT state)|$(field sTT waitingOnFull)|$(qjson "$PET_HOME/sessions/sTT.json" "[a['toolUseId'] for a in d['asks']]")|$(cat "$FAKE/sTT-a2.out")" \
+    'waiting|sleep 3|["sTT2"]|'
+  shell_done
+else
+  echo "  skip  approval seen in the shell (no C compiler)"
+fi
+
 # Denied in the terminal, the same: no PostToolUse. An agent has one prompt up at a time, so
 # its next prompt replaces the one before.
 emit UserPromptSubmit sDT /tmp/a
