@@ -166,6 +166,43 @@ cp "$ONLY_USER" "$WORK/only-user.orig.json"
 check "the user's lone hook is still there" \
   "$(json_eq "$ONLY_USER" "$WORK/only-user.orig.json")" "yes"
 
+echo "== settings.json is a symlink into a dotfiles repo =="
+DOT="$WORK/dotfiles"
+LINKED="$WORK/linked"
+mkdir -p "$DOT" "$LINKED"
+printf '{"model":"claude-opus-5","env":{"FOO":"bar"}}' > "$DOT/settings.json"
+cp "$DOT/settings.json" "$WORK/dot.orig.json"
+# Relative, the way `ln -s ../dotfiles/settings.json` is usually done.
+ln -s ../dotfiles/settings.json "$LINKED/settings.json"
+"$EMIT" --patch-settings "$LINKED/settings.json" >/dev/null 2>&1
+check "patching through the link succeeds" "$?" "0"
+check "the link is still a link" "$([ -L "$LINKED/settings.json" ] && echo yes || echo no)" "yes"
+check "the real file got the hooks" "$(count_pet_hooks "$DOT/settings.json")" "11"
+check "the user's keys in the real file survive" "$(jq_path "$DOT/settings.json" env.FOO)" '"bar"'
+LINK_BACKUP="$(ls "$LINKED"/settings.json.bak-claudepet-* 2>/dev/null | head -1)"
+check "the backup sits next to the link, not in the dotfiles repo" \
+  "$([ -n "$LINK_BACKUP" ] && [ -z "$(ls "$DOT" | grep bak-claudepet)" ] && echo yes || echo no)" "yes"
+check "the backup is a copy, not another link" "$([ -L "$LINK_BACKUP" ] && echo link || echo file)" "file"
+check "the backup holds the original contents" "$(json_eq "$LINK_BACKUP" "$WORK/dot.orig.json")" "yes"
+"$EMIT" --unpatch-settings "$LINKED/settings.json" >/dev/null 2>&1
+check "unpatching through the link succeeds" "$?" "0"
+check "the link survives uninstall too" "$([ -L "$LINKED/settings.json" ] && echo yes || echo no)" "yes"
+check "the real file means what it did before" "$(json_eq "$DOT/settings.json" "$WORK/dot.orig.json")" "yes"
+
+echo "== a chain of links, and a link to a file not there yet =="
+mkdir -p "$WORK/chain"
+printf '{"model":"m"}' > "$WORK/chain/real.json"
+ln -s "$WORK/chain/real.json" "$WORK/chain/mid.json"
+ln -s mid.json "$WORK/chain/settings.json"
+"$EMIT" --patch-settings "$WORK/chain/settings.json" >/dev/null 2>&1
+check "the file at the end of the chain got the hooks" "$(count_pet_hooks "$WORK/chain/real.json")" "11"
+check "both links are still links" \
+  "$([ -L "$WORK/chain/mid.json" ] && [ -L "$WORK/chain/settings.json" ] && echo yes || echo no)" "yes"
+ln -s "$WORK/chain/not-yet.json" "$WORK/chain/dangling.json"
+"$EMIT" --patch-settings "$WORK/chain/dangling.json" >/dev/null 2>&1
+check "a dangling link: the file it names is created" "$(count_pet_hooks "$WORK/chain/not-yet.json")" "11"
+check "...and the link now resolves" "$([ -L "$WORK/chain/dangling.json" ] && [ -f "$WORK/chain/dangling.json" ] && echo yes || echo no)" "yes"
+
 # ---- PermissionRequest waits for a click, so it gets a long timeout ---------
 FRESH="$WORK/fresh.json"
 echo '{}' > "$FRESH"

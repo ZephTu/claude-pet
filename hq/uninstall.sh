@@ -21,10 +21,11 @@ for ev in list(hooks):
         del hooks[ev]
 if removed:
     shutil.copy2(path, f"{path}.hq-backup-{time.strftime('%Y%m%d-%H%M%S')}")
-    tmp = path + ".hq-tmp"
+    real = os.path.realpath(path)  # through a symlinked settings.json, as install.sh does
+    tmp = real + ".hq-tmp"
     json.dump(s, open(tmp, "w"), indent=2, ensure_ascii=False)
     json.load(open(tmp))
-    os.replace(tmp, path)
+    os.replace(tmp, real)
 print(f"removed {removed} hook entries")
 PY
 

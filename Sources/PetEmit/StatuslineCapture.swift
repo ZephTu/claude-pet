@@ -8,8 +8,8 @@ import Foundation
 /// arbitrary shell the user wrote — this machine's is a `bash -c` with three
 /// levels of nested quoting — and rewriting one safely, in place, without ever
 /// getting it wrong is not a bet worth taking for an optional feature. The
-/// README explains how to add it by hand; uninstalling the pet therefore cannot
-/// break a statusline it never touched.
+/// README explains how to add it by hand. Uninstalling removes this binary, so
+/// scripts/uninstall.sh stops when the statusline still calls it.
 enum StatuslineCapture {
     /// Keeps whatever this payload can tell us. Silent on every failure.
     ///
@@ -33,9 +33,13 @@ enum StatuslineCapture {
             let folder = SessionInsights.directory(petHome: directory)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let data = SessionInsights.encode(insight)
+            // Atomic for the same reason, and more: the app re-reads this folder only when its
+            // modification time moves, which a rename does and an in-place write does not. Written
+            // in place, a session's file was read once and its model and context aged out of the
+            // hover card 30 minutes later however often the statusline wrote.
             if !data.isEmpty {
                 try? data.write(to: folder.appending(
-                    path: SessionInsights.fileName(sessionId: insight.sessionId)))
+                    path: SessionInsights.fileName(sessionId: insight.sessionId)), options: .atomic)
             }
         }
     }

@@ -153,6 +153,7 @@ Inside `~/.claude/pet/`:
 | `usage.json` | quota numbers, only if you wired up `pet-emit --statusline` below | overwritten each time |
 | `hud-usage.json` | quota numbers saved by claude-hud, only if you pointed its `externalUsageWritePath` here | overwritten by claude-hud |
 | `usage-seen.json` | which of the quota readings in the file appeared when — so a restart still knows which is newest | rewritten when a new reading appears |
+| `app.lock` | held by the running pet, so a second launch exits instead of starting another pet | removed by uninstall |
 
 Aliases, pins, mutes, snoozes and settings live in `UserDefaults`, not here.
 
@@ -178,7 +179,7 @@ Claude Code hands the rate limits only to the statusline command, so something t
 
 **Many sessions, one file.** Every open session's statusline writes the figures from *its own* last API call, so a session idle since this morning keeps writing this morning's numbers, and the file flips between readings every few seconds. The pet watches the file (and re-reads it every two seconds) and shows the reading that appeared **last**: a working session's next call produces a new one, an idle session only repeats an old one. That holds through a quota reset too, when the weekly reset time does not change but the use drops (an earlier "keep the highest" rule stuck at the pre-reset 100%). Which is newer is kept across sleep and across restarts (`usage-seen.json`). Readings the pet has never seen — on its very first run, or written while it was off or asleep — it cannot order at once: for a minute they count as arriving together and the higher one shows, until a working session's figures next move.
 
-**The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. It also means uninstalling the pet cannot break a statusline it never touched.
+**The installer will not do this for you, on purpose.** A statusline command is arbitrary shell you wrote — this author's is a `bash -c` with three levels of nested quoting — and rewriting one in place without ever getting it wrong is not a bet worth taking for an optional feature. Uninstalling does remove `pet-emit`, though, so `scripts/uninstall.sh` stops, before changing anything, while your statusline still calls it, and says what to take out first.
 
 Wiring this up also gives each row a **context-window percentage**, the model's name and the session's `/rename` name — none of which reaches a hook. Hover a row to see them, along with the full path, the turn's age and the last tool call.
 
