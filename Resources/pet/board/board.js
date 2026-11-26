@@ -533,13 +533,20 @@ const isLater = (a) => Boolean(a.snoozed_until) && new Date(a.snoozed_until) > n
 const pendingAsks = (t) => (t.asks || []).filter((a) => a.state === "open");
 const openAsks = (t) => pendingAsks(t).filter((a) => !isLater(a));
 const laterAsks = (t) => pendingAsks(t).filter(isLater);
+// When the first of them comes back: "tomorrow", or its date when put off longer (`later until`).
+function laterBack(later) {
+  const first = new Date(Math.min(...later.map((a) => new Date(a.snoozed_until).getTime())));
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  if (first.toDateString() === tomorrow.toDateString()) return T("back tomorrow", "明天回来");
+  return T(`back ${first.toLocaleDateString("en", { month: "short", day: "numeric" })}`, `${first.getMonth() + 1}月${first.getDate()}日回来`);
+}
 // "2 for later · back tomorrow", and the asks themselves when opened.
 function laterLine(t) {
   const later = laterAsks(t);
   if (!later.length) return "";
   const open = ui.showLater.has(t.id);
   return `<button class="btn small ghost later-toggle" data-action="show-later" data-task="${esc(t.id)}"
-      title="${T("Questions you put off with Later. They come back by themselves tomorrow; open them to answer now", "你选了“稍后”的问题。明天会自己回来；点开可以现在就回答")}">${open ? T("Hide", "收起") : T(`${later.length} for later · back tomorrow`, `${later.length} 条稍后再答 · 明天回来`)}</button>` +
+      title="${T("Questions put off with Later — on the board or in the chat. They come back by themselves (tomorrow, or the day given); open them to answer now", "用“稍后”推迟的问题（看板上或聊天里）。到时会自己回来（明天，或指定的那天）；点开可以现在就回答")}">${open ? T("Hide", "收起") : T(`${later.length} for later · ${laterBack(later)}`, `${later.length} 条稍后再答 · ${laterBack(later)}`)}</button>` +
     (open ? later.map((a) => askCard(t, a)).join("") : "");
 }
 const liveFor = (id) => ui.sessions.filter((s) => s.task === id);
@@ -1465,6 +1472,7 @@ function askCard(t, a, opt = {}) {
     <div class="card ask v-${v}" data-ask="${esc(a.id)}">
       <div class="meta">${meta}</div>
       <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
+      ${isLater(a) && a.later_note ? `<div class="meta later-note">${T("Put off:", "为什么推迟：")} ${esc(a.later_note)}</div>` : ""}
       <textarea class="note grow ask-note" rows="2" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${esc(T("Your answer… sent empty, it's Yes — as Claude suggested · paste images too", "写你的回答……留空发送 = 按 Claude 的建议 · 可以粘贴图片"))}"
         title="${T("Your answer in words — anything goes. Left empty, it goes as Yes, as Claude suggested. ⌘Enter sends; Enter is a new line", "用文字回答，怎么写都行。留空发送就是按 Claude 的建议。⌘回车发送，回车换行")}">${esc(draft("note:" + a.id))}</textarea>
       ${attachStrip(attKey)}
