@@ -123,6 +123,46 @@ function takeSharedPrefs(prefs, readNo) {
   }
   if (Object.keys(missing).length) api("board-prefs", { prefs: missing }).catch(() => {});
 }
+// ---- quick phrases: replies you send often, offered above the message and answer boxes and after
+// a ";". The app keeps the list (BoardPhrases), so the Mac's board and every phone's share it; the
+// "pet" read brings it with every refresh.
+let phrasesSaving = null;   // a change, until a read started after its save brings it back
+function takePhrases(list, readNo) {
+  if (!Array.isArray(list)) return;   // a failed read says nothing about the list
+  if (phrasesSaving && !(phrasesSaving.after !== undefined && readNo > phrasesSaving.after)) return;
+  phrasesSaving = null;
+  ui.phrases = list;
+}
+// The same phrase, as the app sees it (QuickPhrases.key): case, white space and closing punctuation aside.
+const phraseKey = (s) => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ").replace(/[。.!！?？~～,，、;；…]+$/, "");
+// One change, as QuickPhrases.apply makes it: shown at once, then sent; the app applies it to the
+// list as stored now, so the Mac and a phone editing at once don't undo each other.
+function applyPhrase(list, action, text, at) {
+  const k = phraseKey(text), i = list.findIndex((p) => phraseKey(p) === k), out = list.slice();
+  if (action === "add" && i < 0) out.push(text);
+  if (action === "insert" && i < 0) out.splice(Math.max(0, Math.min(at ?? out.length, out.length)), 0, text);
+  if (action === "remove" && i >= 0) out.splice(i, 1);
+  if (action === "up" && i > 0) [out[i - 1], out[i]] = [out[i], out[i - 1]];
+  return out;
+}
+function changePhrase(action, text, at) {
+  if (!Array.isArray(ui.phrases)) return;
+  ui.phrases = applyPhrase(ui.phrases, action, text, at);
+  const mine = phrasesSaving = {};
+  apiObj("phrases", { action, text, at })
+    .then((r) => { if (phrasesSaving === mine && Array.isArray(r.phrases)) ui.phrases = r.phrases; })
+    .catch((e) => toast(String(e.message || e), true))
+    .finally(() => { if (phrasesSaving === mine) mine.after = ui.readNo; render(); });
+  render();
+}
+// false: not added (already there, or the list hasn't come yet) — the caller keeps what was typed.
+function addPhrase(text) {
+  if (!Array.isArray(ui.phrases)) { toast(T("Quick phrases are still loading", "短语还在读取"), true); return false; }
+  if (ui.phrases.some((p) => phraseKey(p) === phraseKey(text))) { toast(T("Already a quick phrase", "已经有这个短语了")); return false; }
+  changePhrase("add", text);
+  toast(T("Quick phrase added", "短语已添加"));
+  return true;
+}
 // All, the page of every task, is gone: whoever had it open lands on the Projects & duties list.
 function startMode() {
   const m = pref("hq-mode", "today");
@@ -745,6 +785,7 @@ async function readBoard(force) {
     ui.skin = pet.skin || ui.skin || "cat";    // the secretary wears the pet's face
     ui.secGlance = pet.secretary || null;
     if (pet.prefs) takeSharedPrefs(pet.prefs, readNo);
+    takePhrases(pet.phrases, readNo);   // not when the read failed: it said nothing about them
     if ($("#pairing")) $("#pairing").hidden = true;
     pruneDrafts();
     ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
@@ -1137,6 +1178,7 @@ function render() {
   for (const [k, region, top] of replyScrolls) {
     document.querySelectorAll(`.ask-reply-body[data-reply="${CSS.escape(k)}"]`).forEach((x) => { if (regionOf(x) === region) x.scrollTop = top; });
   }
+  phraseBarSync();
   slashPlace();
 }
 
@@ -2878,17 +2920,55 @@ function sessionProject(s) {
 // on their own pages (Projects & duties). Open on any page (⚙); Esc, Done or a click outside closes it.
 function renderSettings() {
   const box = $("#settings");
-  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; return; }
+  // Closed, its suggested phrases go: the next opening reads them afresh.
+  if (!ui.settings) { box.hidden = true; box.innerHTML = ""; ui.phraseSugg = undefined; ui.settingsOnTop = false; box.classList.remove("on-top"); return; }
+  box.classList.toggle("on-top", Boolean(ui.settingsOnTop));
   const prev = box.querySelector(".settings-body");
   const scroll = prev ? prev.scrollTop : 0;
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Settings", "设置")}">
     <div class="phead"><div class="stitle">${T("Settings", "设置")}</div>
       <span style="flex:1"></span><button class="btn small" data-action="close-settings">${T("Done", "完成")}</button></div>
-    <div class="settings-body">${renderSessionSettings()}${REMOTE ? renderThisPhone() : renderPhoneAccess()}</div></div>`;
+    <div class="settings-body">${renderSessionSettings()}${renderPhraseSettings()}${REMOTE ? renderThisPhone() : renderPhoneAccess()}</div></div>`;
   box.hidden = false;
   box.querySelector(".settings-body").scrollTop = scroll;   // rebuilt with the board, every few seconds
 }
 function closeSettings() { ui.settings = false; render(); }
+// Quick phrases: the list, a box to add one, and what you have typed to sessions again and again
+// (Claude Code's prompt history, read on the Mac) to keep with a tap.
+function renderPhraseSettings() {
+  const ps = ui.phrases || [];
+  const loading = !Array.isArray(ui.phrases);
+  if (ui.phraseSugg === undefined) {
+    ui.phraseSugg = null;   // loading
+    apiObj("phrase-suggest", {}).then((r) => { ui.phraseSugg = Array.isArray(r.suggestions) ? r.suggestions : []; },
+      () => { ui.phraseSugg = []; }).then(() => { if (ui.settings) render(); });   // render(): it keeps the cursor and waits for an input method
+  }
+  const sugg = (ui.phraseSugg || []).filter((x) => !ps.some((p) => phraseKey(p) === phraseKey(x.text)));
+  return `<div class="set-h" id="set-phrases">${T("Quick phrases", "快捷短语")}</div><div class="set-list phrase-set">
+    <div class="meta">${T("Replies you send often. While you type in a session's message box or an ask's answer box, they show above it: a tap puts one in at the cursor, without sending. Or type ; and a few letters to pick one with the keyboard. One list for this Mac and your phones.",
+      "常发的回复。在 session 的消息框、问题的回答框里打字时，它们列在框的上方：点一下插到光标处，不会直接发出。也可以打 ; 再接几个字，用键盘挑。这台 Mac 和手机共用一份。")}</div>
+    ${loading ? `<div class="meta">${T("Loading…", "读取中…")}</div>` : ""}
+    ${ps.map((p, i) => `<div class="phrase-row"><span class="ptxt">${esc(p)}</span>
+      ${i ? `<button class="icon" data-action="phrase-up" data-text="${esc(p)}" title="${T("Move up", "上移")}">↑</button>` : ""}
+      <button class="icon x" data-action="phrase-drop" data-text="${esc(p)}" title="${T("Remove", "删除")}">✕</button></div>`).join("")}
+    <div class="row nowrap phrase-add"><input class="note" data-key="phrase-add" data-enter="phrase-add" maxlength="300"
+        placeholder="${T("A reply you send often, e.g. Merged — install it", "一句常发的回复，如：合并了，安装吧")}" value="${esc(draft("phrase-add"))}">
+      <button class="btn small primary" data-action="phrase-add">${T("Add", "添加")}</button></div>
+    ${sugg.length ? `<div class="meta">${T("You send these often — tap one to keep it:", "你常发这些——点一下收下：")}</div>
+      <div class="phrase-sugg">${sugg.map((x) => `<button class="chip link" data-action="phrase-keep" data-text="${esc(x.text)}" title="${T(`Sent ${x.count} times`, `发过 ${x.count} 次`)}">＋ ${esc(x.text)} <span class="meta">${x.count}</span></button>`).join("")}</div>` : ""}
+  </div>`;
+}
+// From a chip in the conversation window or a task's drawer: Settings opens over it (see .on-top),
+// and closing it goes back there.
+function openPhraseSettings() {
+  ui.settings = true;
+  ui.settingsOnTop = true;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  ui.phraseSugg = undefined;
+  render();
+  const h = $("#set-phrases");
+  if (h) h.scrollIntoView({ block: "start" });
+}
 function renderSessionSettings() {
   const row = (title, tip, ctl) => `<div class="set-row"><div><b>${title}</b><div class="meta">${tip}</div></div>${ctl}</div>`;
   return `<div class="set-list">
@@ -5200,6 +5280,19 @@ document.addEventListener("click", async (ev) => {
       return render();
     case "project-panel": return goToProject(d.p);   // projects.js
     case "open-settings": ui.settings = true; return render();
+    case "phrase-add": {
+      const text = (ui.drafts["phrase-add"] || "").trim();
+      if (!text) return;
+      if (addPhrase(text)) { delete ui.drafts["phrase-add"]; saveDrafts(); render(); }
+      return;
+    }
+    case "phrase-keep": return addPhrase(d.text);
+    case "phrase-drop": {
+      const at = (ui.phrases || []).findIndex((p) => phraseKey(p) === phraseKey(d.text));
+      changePhrase("remove", d.text);
+      return toast(T("Quick phrase removed", "短语已删除"), false, () => changePhrase("insert", d.text, at));
+    }
+    case "phrase-up": return changePhrase("up", d.text);
     case "close-settings": closeSettings(); return;
     case "copy-onboard": return copyText("/hq-onboard", T("Copied — paste it into any Claude Code session", "已复制——粘贴到任意 Claude Code session 里"));
     case "new-in-project": return openCreate("task", d.p);   // projects.js
@@ -5429,7 +5522,7 @@ document.addEventListener("input", (ev) => {
   if (note) noteFlip(note[1]);
   if (el.dataset.field) render();
   if (el.tagName === "TEXTAREA" && el.classList.contains("grow")) fitGrow(el);
-  if (el.tagName === "TEXTAREA" && el.dataset.session) slashUpdate(el);
+  if (pickerBox(el)) slashUpdate(el);
 });
 
 // Input methods (Pinyin, Japanese…): hold every redraw while a word is being composed.
@@ -5465,11 +5558,21 @@ const SLASH_BUILTIN = () => [
 ];
 const SLASH_MAX = 50;
 const slashCache = {};   // sessionId → { at, skills, loading, failed }
+// What the caret is after: a ";" (or "；") at the start or after a space picks a quick phrase, in any
+// message or answer box; a "/" alone in a session's box (not the secretary's) picks a command.
 function slashQuery(el) {
-  if (el.dataset.session === SEC) return null;
+  if (el.disabled || el.selectionStart !== el.selectionEnd) return null;
+  const before = el.value.slice(0, el.selectionStart);
+  const p = /(^|\s)[;；]([^\s;；]*)$/.exec(before);
+  if (p && (ui.phrases || []).length) return { kind: "phrase", q: p[2].toLowerCase(), from: before.length - p[2].length - 1 };
+  if (!el.dataset.session || el.dataset.session === SEC) return null;
   const m = /^\/([^\s]*)$/.exec(el.value);
-  return m && !el.disabled && el.selectionStart === el.value.length ? m[1].toLowerCase() : null;
+  return m && el.selectionStart === el.value.length ? { kind: "slash", q: m[1].toLowerCase() } : null;
 }
+// The boxes that offer quick phrases: a session's message box (the Sessions column, the
+// conversation window, the secretary) and an ask's answer box.
+const phraseBox = (el) => Boolean(el && el.tagName === "TEXTAREA" && !el.disabled && /^(?:msg|note):/.test(el.dataset.key || ""));
+const pickerBox = (el) => el.tagName === "TEXTAREA" && (el.dataset.session || phraseBox(el));
 function slashSkills(sid) {
   const c = slashCache[sid];
   if (c && (c.loading || Date.now() - c.at < 60_000)) return c.skills || [];
@@ -5485,11 +5588,21 @@ function slashSkills(sid) {
   return slashCache[sid].skills;
 }
 function slashUpdate(el) {
-  const q = slashQuery(el);
-  if (q === null) return slashClose();
+  const sq = slashQuery(el);
+  if (sq === null) return slashClose();
   // Esc said no to this text: a refresh putting the cursor back doesn't ask again; typing does.
   if (ui.slashOff && ui.slashOff.key === el.dataset.key && ui.slashOff.value === el.value) return slashClose();
   ui.slashOff = null;
+  const q = sq.q;
+  if (sq.kind === "phrase") {
+    // Phrases with what was typed anywhere in them, in your order.
+    const items = (ui.phrases || []).filter((p) => p.toLowerCase().includes(q)).map((p) => ({ name: p, phrase: true }));
+    const was = ui.slash && ui.slash.key === el.dataset.key && ui.slash.kind === "phrase" ? ui.slash.items[ui.slash.sel]?.name : null;
+    const keep = was == null ? -1 : items.findIndex((x) => x.name === was);
+    // A bare ";" chooses nothing for you: Return stays a new line until ↑↓ (as for "/").
+    ui.slash = { key: el.dataset.key, kind: "phrase", q, items, sel: keep >= 0 ? keep : q && items.length ? 0 : -1 };
+    return slashDraw();
+  }
   const all = [...SLASH_BUILTIN(), ...slashSkills(el.dataset.session)];
   // Names that start with what was typed first, then names that contain it anywhere ("review"
   // finds code-review), then — from three letters, when it is a word, not a fragment of every
@@ -5498,11 +5611,11 @@ function slashUpdate(el) {
   const ranked = all.map((x, i) => ({ x, r: rank(x), i })).filter((y) => y.r < 3)
     .sort((a, b) => a.r - b.r || a.i - b.i).slice(0, SLASH_MAX);
   const items = ranked.map((y) => y.x);
-  const same = ui.slash && ui.slash.key === el.dataset.key && ui.slash.q === q;
+  const same = ui.slash && ui.slash.key === el.dataset.key && ui.slash.kind === "slash" && ui.slash.q === q;
   const keep = same ? items.findIndex((x) => x.name === ui.slash.items[ui.slash.sel]?.name) : -1;
   // Only a name match is chosen for you: text that merely turns up in a description ("/etc",
   // "/tmp") is more likely a path, and Return should stay a new line until you pick with ↑↓.
-  ui.slash = { key: el.dataset.key, q, items, sel: keep >= 0 ? keep : ranked.length && ranked[0].r < 2 ? 0 : -1 };
+  ui.slash = { key: el.dataset.key, kind: "slash", q, items, sel: keep >= 0 ? keep : ranked.length && ranked[0].r < 2 ? 0 : -1 };
   slashDraw();
 }
 function slashClose() {
@@ -5510,6 +5623,7 @@ function slashClose() {
   ui.slash = null;
   const p = $("#slash");
   if (p) p.hidden = true;
+  phraseBarSync();   // the bar comes back where the list was
 }
 // The box it belongs to: the focused one with its key (the Sessions column and the conversation
 // window share a key, so the focused one, not the first).
@@ -5535,12 +5649,14 @@ function slashDraw() {
   }
   const { items, sel } = ui.slash;
   p.innerHTML = items.map((x, i) => `<div class="srow ${i === sel ? "on" : ""}" role="option" data-i="${i}"${i === sel ? ` aria-selected="true"` : ""}>
-      <span class="sname">/${esc(x.name)}</span>${x.builtin ? `<span class="chip">${T("built-in", "内置")}</span>` : ""}<span class="sdesc">${esc(x.desc || "")}</span></div>`).join("")
-    + `<div class="shint">${slashCache[el.dataset.session]?.failed
+      ${x.phrase ? `<span class="sphrase">${esc(x.name)}</span>` : `<span class="sname">/${esc(x.name)}</span>`}${x.builtin ? `<span class="chip">${T("built-in", "内置")}</span>` : ""}<span class="sdesc">${esc(x.desc || "")}</span></div>`).join("")
+    + `<div class="shint">${ui.slash.kind === "phrase" ? T("Quick phrases · ↑↓ choose · Tab or Return puts it in · Esc closes", "快捷短语 · ↑↓ 选择 · Tab 或回车填入 · Esc 关闭")
+      : slashCache[el.dataset.session]?.failed
       ? T("Couldn't read this session's skills — hq may need updating (hq/install.sh --yes)", "读不到这个 session 的 skill——hq 可能要更新（hq/install.sh --yes）")
       : T("↑↓ choose · Tab or Return fills it in · Esc closes", "↑↓ 选择 · Tab 或回车填入 · Esc 关闭")}</div>`;
   p.hidden = false;
   slashPlace();
+  phraseBarSync();   // the list takes the bar's place
   const on = p.querySelector(".srow.on");
   if (on) on.scrollIntoView({ block: "nearest" });
 }
@@ -5566,8 +5682,15 @@ function slashPick(i) {
   const el = slashBox();
   const x = ui.slash && ui.slash.items[i];
   if (!el || !x) return;
+  const sq = x.phrase ? slashQuery(el) : null;   // where the ";" is now: the caret may have moved
   slashClose();
-  // As typing would: the box's draft, undo and input handlers all see it.
+  // As typing would: the box's draft, undo and input handlers all see it. A phrase takes the
+  // place of the ";" and what followed it.
+  if (x.phrase) {
+    if (!sq || sq.kind !== "phrase") return;
+    el.setSelectionRange(sq.from, el.selectionStart); document.execCommand("insertText", false, x.name);
+    return;
+  }
   el.setSelectionRange(0, el.value.length);
   document.execCommand("insertText", false, `/${x.name} `);
 }
@@ -5594,17 +5717,85 @@ document.addEventListener("keydown", (ev) => {
 // right after, and the caret decides whether the list shows.
 document.addEventListener("focusin", (ev) => {
   const el = ev.target;
-  if (el.tagName === "TEXTAREA" && el.dataset.session) setTimeout(() => { if (document.activeElement === el) slashUpdate(el); }, 0);
+  if (pickerBox(el)) setTimeout(() => { if (document.activeElement === el) slashUpdate(el); }, 0);
 });
+// ---- the quick-phrase bar: one chip per phrase, floating just above the message or answer box
+// you are in, as the "/" list does. Floating, not in the page: showing and hiding it moves
+// nothing, so a click on a button under the box lands where you aimed, and a conversation kept at
+// its newest message stays there. Above, not below: on a phone the keyboard covers what is under
+// the box. A press puts the phrase in at the cursor (after a space when it follows a word) without
+// taking the cursor out of the box; nothing is sent. While a ";" or "/" list is open it has the place.
+var phraseFor = null;   // the box the bar is for (var: render() can run before this line has)
+function phraseBarSync() {
+  const a = document.activeElement;
+  const box = phraseBox(a) && !(slashBox() === a && $("#slash")?.hidden === false) ? a : null;
+  let bar = $("#phrasebar");
+  phraseFor = box;
+  if (!box) { if (bar) bar.hidden = true; return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "phrasebar";
+    bar.hidden = true;
+    document.body.appendChild(bar);
+  }
+  const ps = ui.phrases || [];
+  const sig = JSON.stringify(ps) + LANG;
+  if (bar.dataset.sig !== sig) {
+    bar.dataset.sig = sig;
+    bar.innerHTML = ps.map((p, i) => `<span class="pchip" data-i="${i}" title="${esc(p)}">${esc(p.split("\n")[0])}</span>`).join("")
+      + `<span class="pchip edit" data-edit="1" title="${T("Edit quick phrases (Settings)", "编辑快捷短语（设置）")}">${ps.length ? "✎" : T("＋ Quick phrases", "＋ 常用短语")}</span>`;
+  }
+  bar.hidden = false;
+  phrasePlace();
+}
+function phrasePlace() {
+  const bar = $("#phrasebar");
+  if (!bar || bar.hidden) return;
+  if (!phraseFor || !phraseFor.isConnected) { bar.hidden = true; return; }
+  const r = phraseFor.getBoundingClientRect();
+  if (!r.width) { bar.hidden = true; return; }
+  const left = Math.max(8, r.left);
+  bar.style.left = `${left}px`;
+  bar.style.maxWidth = `${Math.max(160, Math.min(r.width, innerWidth - left - 8))}px`;
+  // Above the box, or under it when it sits at the very top.
+  if (r.top - 8 >= bar.offsetHeight + 4) { bar.style.top = ""; bar.style.bottom = `${innerHeight - r.top + 4}px`; }
+  else { bar.style.bottom = ""; bar.style.top = `${r.bottom + 4}px`; }
+}
+function insertPhrase(el, p) {
+  if (document.activeElement !== el) el.focus({ preventScroll: true });
+  const at = el.selectionStart ?? el.value.length, end = el.selectionEnd ?? at;
+  const before = el.value.slice(0, at);
+  const text = (before && !/\s$/.test(before) ? " " : "") + p;
+  el.setSelectionRange(at, end);
+  // As typing would, so the draft, undo and the box's height follow.
+  if (!document.execCommand("insertText", false, text)) {
+    el.setRangeText(text, at, end, "end");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+document.addEventListener("mousedown", (ev) => {
+  const chip = ev.target.closest && ev.target.closest("#phrasebar .pchip");
+  if (!chip) return;
+  ev.preventDefault();   // the cursor stays in the box (and a phone's keyboard stays up)
+  if (chip.dataset.edit) return openPhraseSettings();
+  const p = (ui.phrases || [])[Number(chip.dataset.i)];
+  if (phraseBox(phraseFor) && phraseFor.isConnected && p != null) insertPhrase(phraseFor, p);
+}, true);
+document.addEventListener("focusin", (ev) => { if (phraseBox(ev.target)) phraseBarSync(); });
+document.addEventListener("focusout", () => setTimeout(phraseBarSync, 0), true);
+document.addEventListener("input", (ev) => { if (ev.target === phraseFor) phrasePlace(); });   // the box grows
+addEventListener("resize", phrasePlace);
+if (window.visualViewport) visualViewport.addEventListener("resize", phrasePlace);
 // Leaving the box closes it — unless the box was only rebuilt by a refresh, which puts the cursor
 // straight back into its stand-in.
 document.addEventListener("focusout", () => setTimeout(() => { if (ui.slash && !slashBox()) slashClose(); }, 0), true);
 document.addEventListener("selectionchange", () => {
   const el = slashBox();
   if (el && slashQuery(el) === null) slashClose();
+  else if (el && ui.slash.kind === "phrase" && slashQuery(el).q !== ui.slash.q) slashUpdate(el);
 });
 // Follow the box when its column or the conversation scrolls.
-document.addEventListener("scroll", (ev) => { if (ev.target.id !== "slash") slashPlace(); }, true);
+document.addEventListener("scroll", (ev) => { if (ev.target.id !== "slash") slashPlace(); if (ev.target.id !== "phrasebar") phrasePlace(); }, true);
 
 // The button ⌘Enter presses for a text box, or null when it has none.
 function submitButtonOf(el) {
@@ -5655,6 +5846,7 @@ document.addEventListener("keydown", async (ev) => {
     if (el.dataset.enter === "log") return act("log", { task: el.dataset.task, message: text }, T("Logged", "已记入日志"));
     if (el.dataset.enter === "addtodo") return act("addtodo", { task: el.dataset.task, text }, T("Todo added", "待办已添加"));
     if (el.dataset.enter === "addref") return act("ref", { action: "add", task: el.dataset.task, ref: text }, T("Added", "已添加"));
+    if (el.dataset.enter === "phrase-add") { if (!addPhrase(text)) ui.drafts[el.dataset.key] = text; saveDrafts(); return render(); }
   }
 });
 

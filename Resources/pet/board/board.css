@@ -1980,3 +1980,31 @@ a.dv-name:hover { color: var(--blue); text-decoration: underline; }
     bottom: var(--statusbar-h, calc(32px + env(safe-area-inset-bottom))); max-height: 70vh; }
   #unread-pop .up-row { padding: 11px 12px; }
 }
+
+/* ---- quick phrases: the bar above the box you type in, and their Settings */
+#phrasebar { position: fixed; z-index: 24; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  padding: 4px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
+#phrasebar[hidden] { display: none; }
+#phrasebar::-webkit-scrollbar { display: none; }
+#phrasebar .pchip { flex: none; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; line-height: 1.5; padding: 2px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--panel-2); color: var(--text); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#phrasebar .pchip:hover { background: var(--wash-blue); }
+#phrasebar .pchip.edit { color: var(--dim); background: transparent; }
+#settings.on-top { z-index: 21; }   /* opened from a phrase chip: over the conversation window or drawer it came from */
+#slash .sphrase { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.phrase-set > .meta { padding: 0 4px 6px; max-width: 620px; }
+.phrase-row { display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.phrase-row .ptxt { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.phrase-row .icon.x { opacity: 1; }
+.phrase-add { padding: 8px 4px; gap: 8px; }
+.phrase-add input { flex: 1; min-width: 0; }
+.phrase-sugg { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 4px 8px; }
+.phrase-sugg .chip { font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+.phrase-sugg .chip .meta { font-size: 11px; }
+@media (max-width: 640px) {
+  #phrasebar { z-index: 27; }
+  #phrasebar .pchip { font-size: 14px; padding: 5px 12px; max-width: 70vw; }
+  #settings.on-top { z-index: 26; }
+  .phrase-sugg .chip { font-size: 14px; padding: 5px 10px; }
+}
