@@ -916,15 +916,16 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 
 | Area | Checks | `--fix` |
 |---|---|---|
-| Hooks | `settings.json` (in `$CLAUDE_CONFIG_DIR` when set) has `hq hook` once on SessionStart, UserPromptSubmit and Stop, and `~/.claude/hq/bin/hq` is there and executable; the pet's `pet-emit` on its 11 events, when the pet is installed; which Python hq runs with (3.9+) | nothing: settings.json is never edited (a missing hook may be an install with `--no-hooks`); it names the installer to rerun |
-| Session bindings | `state/sessions.json` entries whose task is gone, done or abandoned, or whose session has been quiet for `--days` (30). Kept: a session still running (the pet's record; without the pet, a transcript written in the last day) and one holding a close (`held`) | unbinds them; an unbound session's older `delivered` list goes onto the asks as `delivered` events, so no answer is told twice |
-| State files | `state/todo-seen.json` entries for todos no longer open; lock files in `state/locks/` of no card, project or HQ-wide lock | drops the entries; removes a lock file only when it can take the lock without waiting |
-| Asks | asks on open tasks answered `later` when that closed them for good (before it meant "put off") | reopens them (`via: doctor`); their tasks go back to waiting-on-me |
+| Hooks | `settings.json` (in `$CLAUDE_CONFIG_DIR` when set — the installers only wire `~/.claude`, so it says so) has `hq hook` once on SessionStart, UserPromptSubmit and Stop, and `~/.claude/hq/bin/hq` is there and executable; the pet's `pet-emit` on its 11 events, when the pet is installed; which Python hq runs with (3.9+) | nothing: settings.json is never edited; it names the installer to rerun. No hq hook at all is a warning (maybe `--no-hooks`), one wired in part an error |
+| Session bindings | `state/sessions.json` entries whose task is gone (looked up by folder, as the hook does), done or abandoned, or whose session has been quiet for `--days` (30; from `bound_at` when no transcript is found). Kept: a session still running (the pet's record and its pid; without the pet, a transcript or binding from the last day) and one holding a close (`held`, while the card still has `closing`) | unbinds them, judged outside the state lock and removed under it only if unchanged; an unbound session's older `delivered` list — which can name asks of earlier tasks — goes onto each ask as a `delivered` event, so no answer is told twice |
+| State files | `state/todo-seen.json` entries for todos no longer open; lock files in `state/locks/` of no card, project or HQ-wide lock (real folder names, compared without case) | drops the entries; removes a lock file only when it can take the lock without waiting, checked against the cards as they are right then |
+| Asks | asks on open tasks answered `later` when that closed them for good (before it meant "put off") | reopens each one still closed that way (`via: doctor`); active tasks go back to waiting-on-me |
 
 It prints one line per check (✓ / ! / ✗) and a count of the problems; with `--fix`, what it did first and then
 the checks as they stand after. `--json` gives `{"checks": [{area, level, text, fix, items}], "fixed": [...] | null}`.
-It exits 1 when a check is an error (a hook not wired or not runnable, a settings.json or sessions.json that
-can't be read).
+It exits 1 when a check is an error (a hook wired in part or not runnable, Python older than 3.9, a settings.json
+or sessions.json that can't be read, no task root). With `HQ_ROOT` set to another root than config.json's, the
+bindings, todo-seen.json and lock files — shared by every root — are neither checked nor cleared.
 
 ## Files
 

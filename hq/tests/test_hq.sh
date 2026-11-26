@@ -2759,17 +2759,22 @@ out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor)" && fail "doctor with an unreadabl
 echo "$out" | grep -q "✗ .*settings.json can't be read" && ok "doctor: an unreadable settings.json is an error" || fail "doctor bad settings: $out"
 
 DOPEN="$(DQ new "Open one" --workdir "$T" | head -1)"; DDONE="$(DQ new "Done one" --workdir "$T" | head -1)"
+DGONE="$(DQ new "Given up" --workdir "$T" | head -1)"
 DQ bind "$DOPEN" --session d-recent >/dev/null; DQ bind "$DOPEN" --session d-old >/dev/null
-DQ bind "$DDONE" --session d-done >/dev/null; DQ bind "$DDONE" --session d-held >/dev/null
+DQ bind "$DDONE" --session d-done >/dev/null; DQ bind "$DDONE" --session d-held >/dev/null; DQ bind "$DDONE" --session d-live >/dev/null
+DQ bind "$DGONE" --session d-held2 >/dev/null
 DQ ask add "$DOPEN" "Ship it?" >/dev/null; DQ ask resolve "$DOPEN.1" do --via board >/dev/null
-DQ set "$DDONE" status=done >/dev/null
+DQ set "$DDONE" status=done >/dev/null; DQ set "$DGONE" status=abandoned >/dev/null
+sed -i.bak 's/^status: done$/status: done\
+closing: done/' "$T"/doctor-root/tasks/"$DDONE"-*/TASK.md    # d-held's close, still held
 python3 - "$DH/.claude/hq/state/sessions.json" "$DOPEN" <<'PY'
 import json, sys
 p, tid = sys.argv[1], sys.argv[2]
 s = json.load(open(p))
 s["d-old"]["bound_at"] = "2020-01-01T00:00:00+00:00"
-s["d-old"]["delivered"] = [tid + ".1"]           # the older record of an answer told to it
+s["d-done"]["delivered"] = [tid + ".1"]   # the older record of an answer told to it — on its earlier task
 s["d-held"]["held"] = {"task": s["d-held"]["task"]}
+s["d-held2"]["held"] = {"task": s["d-held2"]["task"]}   # a mark left after its task was closed outright
 s["d-gone"] = {"task": "T-999", "bound_at": "2026-01-01T00:00:00+00:00"}
 json.dump(s, open(p, "w"))
 PY
@@ -2780,19 +2785,25 @@ json.dump({sys.argv[2] + "|gone todo": "2026-01-01T00:00:00+08:00", "T-999|x": "
 PY
 echo "- [ ] @me still open" >> "$DDIR/TASK.md"; DQ board --json >/dev/null    # a todo with no stamp of its own: first seen now
 mkdir -p "$DH/.claude/hq/state/locks"; touch "$DH/.claude/hq/state/locks/T-777-deleted.lock" "$DH/.claude/hq/state/locks/T-778-held.lock"
+touch "$DH/.claude/hq/state/locks/$(basename "$DDIR" | tr a-z A-Z).lock"   # the card's own, in another case
 DQ ask add "$DOPEN" "Old later?" >/dev/null
 echo "{\"type\":\"resolve\",\"id\":\"$DOPEN.2\",\"resolution\":\"later\",\"note\":\"\",\"via\":\"cli\",\"ts\":\"2026-11-20T10:00:00+08:00\"}" >> "$DDIR/asks.jsonl"
 out="$(DQ doctor)"
-echo "$out" | grep -q "2 of 5 session bindings are over" && ! echo "$out" | grep -q "d-done" \
+echo "$out" | grep -q "2 of 7 session bindings are over" && ! echo "$out" | grep -q "d-done" \
   && ok "doctor: without the pet to say, a session bound today may still be running — kept even on a done task" || { echo "$out"; fail "doctor bindings without the pet"; }
 mkdir -p "$DH/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"d-recent\"}" > "$DH/.claude/pet/sessions/d-recent.json"
+echo "{\"pid\": $$, \"sessionId\": \"d-live\"}" > "$DH/.claude/pet/sessions/d-live.json"    # running, no transcript yet
 out="$(DQ doctor)"
-echo "$out" | grep -q "3 of 5 session bindings are over" && echo "$out" | grep -q "d-done .*is done" && echo "$out" | grep -q "d-gone .*T-999 no longer exists" \
-  && echo "$out" | grep -q "d-old .*quiet for" && ! echo "$out" | grep -q "d-held\|d-recent" \
-  && ok "doctor: bindings to a closed or deleted task, or of a session long quiet, are over; a held close and a recent one are not" || { echo "$out"; fail "doctor bindings"; }
+echo "$out" | grep -q "4 of 7 session bindings are over" && echo "$out" | grep -q "d-done .*is done" && echo "$out" | grep -q "d-gone .*T-999 no longer exists" \
+  && echo "$out" | grep -q "d-old .*quiet for" && echo "$out" | grep -q "d-held2 .*is abandoned" && ! echo "$out" | grep -q "d-held \|d-recent\|d-live" \
+  && ok "doctor: bindings to a closed or deleted task, or of a session long quiet, are over; a running one (even with no transcript), a held close and a recent one are not" || { echo "$out"; fail "doctor bindings"; }
 echo "$out" | grep -q "todo-seen.json: 2 of 3 entries" && echo "$out" | grep -q "T-777-deleted.lock" && ! echo "$out" | grep -q "$DOPEN-open-one.lock\|inbox.lock" \
   && ok "doctor: todo-seen entries of todos no longer open, lock files of no card" || fail "doctor state files: $out"
 echo "$out" | grep -q "$DOPEN.2 .*2026-11-20  Old later?" && ok "doctor: lists an ask closed by an old later" || fail "doctor later: $out"
+out="$(HQ_ROOT="$T/root" DQ doctor)"
+echo "$out" | grep -q "HQ_ROOT (.*) is not the configured root" && ! echo "$out" | grep -q "session bindings are over\|of no card or project" \
+  && ok "doctor under another HQ_ROOT leaves the shared bindings and lock files alone" || fail "doctor HQ_ROOT: $out"
+HQ_ROOT="$T/root" DQ doctor --fix | grep -q "unbound\|removed" && fail "doctor --fix under another HQ_ROOT touched shared state" || true
 DQ doctor --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["fixed"] is None and {c["area"] for c in d["checks"]} == {"hooks","bindings","state","asks"} and all(c["level"] in ("ok","warn","error") for c in d["checks"]), d' \
   && ok "doctor --json" || fail "doctor json"
 
@@ -2803,19 +2814,19 @@ with open(sys.argv[1], "a") as f:
     print(subprocess.run([sys.argv[2], "doctor", "--fix"], env=dict(os.environ, HOME=sys.argv[3]), capture_output=True, text=True).stdout)
 PY
 out="$(cat "$T/doctor-fix.out")"
-echo "$out" | grep -q "unbound 3 sessions" && echo "$out" | grep -q "dropped 2 todo-seen.json entries" && echo "$out" | grep -q "removed 1 lock file" \
+echo "$out" | grep -q "unbound 4 sessions" && echo "$out" | grep -q "dropped 2 todo-seen.json entries" && echo "$out" | grep -q "removed 1 lock file" \
   && echo "$out" | grep -q "reopened 1 ask: $DOPEN.2" && ok "doctor --fix says what it did" || fail "doctor fix: $out"
 python3 - "$DH/.claude/hq/state/sessions.json" "$DH/.claude/hq/state/todo-seen.json" "$DOPEN" <<'PY' && ok "doctor --fix: stale bindings and todo-seen entries gone, the rest kept" || fail "doctor fix state"
 import json, sys
 s = json.load(open(sys.argv[1])); seen = json.load(open(sys.argv[2]))
-assert sorted(s) == ["d-held", "d-recent"], s
+assert sorted(s) == ["d-held", "d-live", "d-recent"], s
 assert list(seen) == [sys.argv[3] + "|still open"], seen
 PY
 L="$DH/.claude/hq/state/locks"
-[ ! -e "$L/T-777-deleted.lock" ] && [ -e "$L/T-778-held.lock" ] && [ -e "$L/$(basename "$DDIR").lock" ] \
+[ ! -e "$L/T-777-deleted.lock" ] && [ -e "$L/T-778-held.lock" ] && ls "$L" | grep -qi "^$(basename "$DDIR").lock$" \
   && ok "doctor --fix: removes an orphan lock no one holds, keeps a held one and the cards' own" || fail "doctor fix locks: $(ls "$L")"
-DQ asks "$DOPEN" --all --json | python3 -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)}; t=sys.argv[1]; assert a[t+".1"]["delivered"]=="d-old" and a[t+".2"]["state"]=="open", a' "$DOPEN" \
-  && ok "doctor --fix: an unbound session's older delivered record moves onto the ask; the old-later ask is open again" || fail "doctor fix asks"
+DQ asks "$DOPEN" --all --json | python3 -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)}; t=sys.argv[1]; assert a[t+".1"]["delivered"]=="d-done" and a[t+".2"]["state"]=="open", a' "$DOPEN" \
+  && ok "doctor --fix: an unbound session's older delivered record moves onto the ask, on whichever task it is; the old-later ask is open again" || fail "doctor fix asks"
 grep -q "^status: waiting-on-me" "$DDIR/TASK.md" && ok "doctor --fix: a reopened ask puts its task back on you" || fail "doctor fix status"
 out="$(DQ doctor --fix)"; echo "$out" | grep -q "removed 1 lock file" && echo "$out" | grep -q "All good." && ok "doctor --fix again: the lock let go of is removed now" || fail "doctor fix again: $out"
 out="$(DQ doctor --fix)"; echo "$out" | grep -q "Nothing to fix." && ok "doctor --fix with nothing left" || fail "doctor fix nothing: $out"
