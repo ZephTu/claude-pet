@@ -569,6 +569,43 @@ sleep 0.4
 answer sSH "$id" allow; wait $pid
 check "a held prompt outlasts another agent's tool calls" "$(decision sSH)" "allow"
 
+# Denied from the pet (or a plan sent back): Claude Code fires no PostToolUse and the turn goes
+# on, so the hold itself takes its prompt down — else it hid the next prompt until Stop.
+emit UserPromptSubmit sDN /tmp/a
+agent_call PreToolUse sDN - d1 "rm -rf build/"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sDN","cwd":"/tmp/a","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sDN.out" &
+pid=$!; id="$(await_ask sDN)"
+answer sDN "$id" deny; wait $pid
+check "a prompt denied from the pet comes down at once" \
+  "$(decision sDN)|$(field sDN state)|$(field sDN askId)|$(qjson "$PET_HOME/sessions/sDN.json" "[c['id'] for c in d['running']]")" "deny|busy||[]"
+agent_call PreToolUse sDN - d2 "make deploy"
+agent_ask sDN - "make deploy"
+check "...and the next prompt is the one shown" \
+  "$(field sDN waitingOnFull)|$(qjson "$PET_HOME/sessions/sDN.json" "len(d['asks'])")" "make deploy|1"
+
+# Denied in the terminal, the same: no PostToolUse. An agent has one prompt up at a time, so
+# its next prompt replaces the one before.
+emit UserPromptSubmit sDT /tmp/a
+agent_call PreToolUse sDT a1 e1 "rm -rf build/"
+agent_ask sDT a1 "rm -rf build/"
+agent_call PreToolUse sDT a1 e2 "make deploy"
+agent_ask sDT a1 "make deploy"
+check "an agent's next prompt replaces the one it was denied" \
+  "$(field sDT waitingOnFull)|$(qjson "$PET_HOME/sessions/sDT.json" "len(d['asks'])")" "make deploy|1"
+agent_ask sDT a1 "make deploy"
+check "...and the same call asking again is still one prompt" \
+  "$(qjson "$PET_HOME/sessions/sDT.json" "[(a.get('toolUseId'), a.get('agent')) for a in d['asks']]")" '[["e2", "a1"]]'
+
+# A subagent's PermissionRequest may come without agent_id: the call it matched names the agent,
+# so a Stop that leaves the agent running keeps its prompt.
+emit UserPromptSubmit sNA /tmp/a
+agent_call PreToolUse sNA a7 n1 "rm -rf build/"
+agent_ask sNA - "rm -rf build/"
+emit_json '{"hook_event_name":"Stop","session_id":"sNA","cwd":"/tmp/a","background_tasks":[{"id":"t1","type":"subagent","status":"running","description":"x","agent_type":"general-purpose"}]}'
+check "a subagent's prompt without agent_id outlasts the main thread's Stop" \
+  "$(field sNA state)|$(qjson "$PET_HOME/sessions/sNA.json" "[a.get('agent') for a in d.get('asks', [])]")" 'waiting|["a7"]'
+
 # ---- hooks of one session running at once ----------------------------------------
 # Parallel tool calls fire their hooks together; every read-modify-write of the session file
 # must see the one before it.

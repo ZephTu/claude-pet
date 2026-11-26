@@ -168,17 +168,23 @@ public enum ProcessProbe {
     }
 
     /// Pure half of `startedToolShell(under:since:running:)`. Claude Code hands the command to
-    /// the shell as `eval '<command>'`, each `'` written `'"'"'`. `command` may be only the start
-    /// of a long one, so the closing quote is not looked for.
+    /// the shell as `eval '<command>'`, each `'` written `'"'"'`, and the whole quoted command
+    /// must be there, closing quote included: `git push` is not `git push --dry-run`, and
+    /// `npm test` is not another agent's `cd web && npm test`. Only a command cut to
+    /// `commandLimit` is matched by its start.
     public static func isToolShell(arguments: String, running command: String) -> Bool {
         guard isToolShell(arguments: arguments) else { return false }
+        let cut = command.count >= commandLimit
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        return [command, trimmed].contains { c in
-            arguments.contains("eval '" + c.replacingOccurrences(of: "'", with: #"'"'"'"#))
-                || arguments.contains(c)
+        return Set([command, trimmed]).contains { c in
+            let quoted = "eval '" + c.replacingOccurrences(of: "'", with: #"'"'"'"#)
+            return arguments.contains(cut ? quoted : quoted + "'")
         }
     }
+
+    /// How much of an asked command is kept for `isToolShell(arguments:running:)`.
+    public static let commandLimit = 2000
 
     /// Claude Code runs every Bash tool call as
     /// `<shell> -c source <config>/shell-snapshots/snapshot-… && <command>`.

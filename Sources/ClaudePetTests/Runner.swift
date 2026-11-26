@@ -586,8 +586,19 @@ struct Runner {
         let shell = #"/bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1-x.sh 2>/dev/null || true && eval 'echo "it'"'"'s" && tf apply' < /dev/null && pwd -P >| /tmp/claude-1-cwd"#
         t.check("the shell running the asked command counts as its approval",
                 ProcessProbe.isToolShell(arguments: shell, running: #"echo "it's" && tf apply"#))
+        let cutCommand = String(repeating: "x", count: 2100)
         t.check("...when only the start of a long command was kept",
-                ProcessProbe.isToolShell(arguments: shell, running: #"echo "it's" &&"#))
+                ProcessProbe.isToolShell(
+                    arguments: "/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'echo \(cutCommand)' < /dev/null",
+                    running: String("echo \(cutCommand)".prefix(2000))))
+        func toolShell(_ c: String) -> String {
+            "/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval '\(c)' < /dev/null && pwd -P >| /tmp/claude-1-cwd"
+        }
+        t.check("a shell running a longer command is not the asked one's",
+                !ProcessProbe.isToolShell(arguments: toolShell("git push --dry-run"), running: "git push")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("cd web && npm test"), running: "npm test")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("cmake --build ."), running: "make")
+                    && !ProcessProbe.isToolShell(arguments: toolShell("echo rm -rf build"), running: "rm -rf build"))
         t.check("another command's shell does not",
                 !ProcessProbe.isToolShell(arguments: shell, running: "rm -rf build/"))
         t.check("nor does any shell for a prompt that names no command",

@@ -188,14 +188,7 @@ enum HookEmit {
             // The prompt shown first, in the fields the app and the board read: which prompt it
             // is, so a click answers THIS one (PermissionDecision); WHAT is blocked, in short
             // and whole; a question's menu or a plan's text; who holds its hook open.
-            if let top {
-                for (from, to) in [("id", "askId"), ("waitingOn", "waitingOn"), ("waitingOnFull", "waitingOnFull"),
-                                   ("askKind", "askKind"), ("plan", "plan"), ("questions", "questions"),
-                                   ("heldBy", "askHeldBy"), ("heldUntil", "askHeldUntil"), ("command", "askCommand")] {
-                    if let v = top[from], (v as? String)?.isEmpty != true { document[to] = v }
-                }
-                document["asks"] = asks
-            }
+            mirror(asks, into: &document)
             // A wait with no prompt behind it — a dialog Claude Code announced only by
             // Notification — keeps the phrase the last prompt left, so it does not blank.
             // A question or a plan has none.
@@ -550,14 +543,19 @@ enum HookEmit {
     private static func askEntry(hook: [String: Any], toolName: String, toolInput: [String: Any],
                                  askKind: String, message: String, old: [String: Any]?,
                                  holds: Bool, askedAt: Date, holdFor: TimeInterval) -> [String: Any] {
-        let agent = hook["agent_id"] as? String ?? ""
+        let hookAgent = hook["agent_id"] as? String ?? ""
         let fp = fingerprint(toolName: toolName, toolInput: toolInput)
-        let claimed = Set(currentAsks(old).compactMap { $0["toolUseId"] as? String })
+        // Claimed by another agent's prompt. This agent's own are about to be replaced (see
+        // `pendingAsks`), so the same call asking again keeps its call.
+        let claimed = Set(currentAsks(old).filter { $0["agent"] as? String ?? "" != hookAgent }
+            .compactMap { $0["toolUseId"] as? String })
         let calls = ((old?["running"] as? [[String: Any]]) ?? []).filter {
             $0["tool"] as? String == toolName && $0["fp"] as? String == fp
                 && !claimed.contains($0["id"] as? String ?? "")
         }
-        let call = calls.last { $0["agent"] as? String ?? "" == agent } ?? calls.last
+        let call = calls.last { $0["agent"] as? String ?? "" == hookAgent } ?? calls.last
+        // A subagent's PermissionRequest may not say which agent it is; its call does.
+        let agent = hookAgent.isEmpty ? call?["agent"] as? String ?? "" : hookAgent
         var ask: [String: Any] = [
             "id": UUID().uuidString,
             "tool": toolName,
@@ -620,12 +618,11 @@ enum HookEmit {
             asks.removeAll(where: unmatched)
         case "PermissionRequest":
             if let new {
-                // The same call asking again is the same prompt, not a second one.
-                if let call = new["toolUseId"] as? String {
-                    asks.removeAll { $0["toolUseId"] as? String == call }
-                } else {
-                    asks.removeAll(where: unmatched)
-                }
+                // An agent has one prompt up at a time, so its new one replaces any before it:
+                // the same call asking again, or one denied in the terminal — a denial fires
+                // no PostToolUse, and the turn goes on.
+                let asker = new["agent"] as? String ?? ""
+                asks.removeAll { $0["agent"] as? String ?? "" == asker }
                 asks.append(new)
             }
         default:
@@ -633,6 +630,56 @@ enum HookEmit {
         }
         // A runaway list is a bug somewhere else; cap it rather than write it.
         return Array(asks.suffix(8))
+    }
+
+    /// Puts the prompt shown first into the fields the app and the board read: which prompt it
+    /// is, so a click answers THIS one (PermissionDecision); WHAT is blocked, in short and whole;
+    /// a question's menu or a plan's text; who holds its hook open; the command it would run.
+    private static let mirrored = [
+        ("id", "askId"), ("waitingOn", "waitingOn"), ("waitingOnFull", "waitingOnFull"),
+        ("askKind", "askKind"), ("plan", "plan"), ("questions", "questions"),
+        ("heldBy", "askHeldBy"), ("heldUntil", "askHeldUntil"), ("command", "askCommand"),
+    ]
+
+    private static func mirror(_ asks: [[String: Any]], into document: inout [String: Any]) {
+        for (_, to) in mirrored { document[to] = nil }
+        document["asks"] = nil
+        guard let top = asks.first else { return }
+        for (from, to) in mirrored {
+            if let v = top[from], (v as? String)?.isEmpty != true { document[to] = v }
+        }
+        document["asks"] = asks
+    }
+
+    /// Takes a prompt the pet denied out of the session file. Claude Code fires no PostToolUse
+    /// for a denied call and the turn goes on, so nothing else would: the prompt stayed first
+    /// in line — its plan on the board, its hold gone — and hid the next one until Stop. The
+    /// call it was about is no longer running either.
+    private static func dropAsk(_ askId: String, sessionID: String, path: URL) {
+        withSessionLock(sessionID) {
+            guard var document = readDocument(at: path) else { return }
+            let before = currentAsks(document)
+            guard let gone = before.first(where: { $0["id"] as? String == askId }) else { return }
+            let asks = before.filter { $0["id"] as? String != askId }
+            let now = iso8601(Date())
+            if let call = gone["toolUseId"] as? String, var running = document["running"] as? [[String: Any]] {
+                running.removeAll { $0["id"] as? String == call }
+                document["running"] = running
+            }
+            mirror(asks, into: &document)
+            if let top = asks.first {
+                document["tool"] = top["tool"] ?? ""
+                document["detail"] = top["detail"] ?? ""
+                document["since"] = top["since"] ?? now
+            } else {
+                document["state"] = "busy"
+                document["detail"] = ""
+                document["since"] = now
+                document["waitingOn"] = ""
+            }
+            document["updatedAt"] = now
+            write(document, to: path)
+        }
     }
 
     /// The prompts the session file lists. A file written before the list existed has at most
@@ -656,7 +703,7 @@ enum HookEmit {
     /// ProcessProbe.startedToolShell). Only its start is kept for a long one.
     private static func askCommand(toolName: String, toolInput: [String: Any]) -> String {
         guard toolName == "Bash", let command = toolInput["command"] as? String else { return "" }
-        return String(command.prefix(2000))
+        return String(command.prefix(ProcessProbe.commandLimit))
     }
 
     /// A short, stable name for one tool call's input, for matching a PermissionRequest to the
@@ -716,6 +763,8 @@ enum HookEmit {
                let answer = PermissionDecision.decode(data), answer.askId == askId {
                 try? FileManager.default.removeItem(at: answerFile)
                 FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer, toolInput: toolInput))
+                // An allowed call ends with its PostToolUse; a denied one ends here.
+                if answer.behavior == .deny { dropAsk(askId, sessionID: sessionID, path: sessionFile) }
                 return
             }
             if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {
