@@ -57,7 +57,8 @@ project: <an existing project's name — only to move the task to it>
 ```hq-asks
 - <question or request>
 ```
-3. When the user answers tracked asks in chat, record each one:
+3. When the user answers tracked asks in chat, record each one (an answer given on the board,
+   "[HQ board] …", is already recorded: don't write it again):
 ```hq-resolved
 - <ask id> <do|drop|later|archive>: <short note>
 ```

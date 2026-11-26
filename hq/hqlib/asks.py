@@ -116,9 +116,12 @@ def current_ask(aid):
     """(card, id) of the ask now: one asked on a card since continued (`hq continue`) is answered
     where it is now."""
     card, a = find_ask(aid)
-    if a.get("state") == "moved" and a.get("moved_to"):
+    seen = {aid}
+    # Continued again and again: follow it to the card it is on now.
+    while a.get("state") == "moved" and a.get("moved_to") and a["moved_to"] not in seen:
         aid = a["moved_to"]
-        card, _ = find_ask(aid)
+        seen.add(aid)
+        card, a = find_ask(aid)
     return card, aid
 
 
@@ -139,6 +142,12 @@ def snooze_ask(aid, until=None, note="", via="cli"):
     return card
 
 
+def answered_as(a):
+    """An answered ask's answer in a few words, for refusing a second one: `do: go with v2`."""
+    note = " ".join((a.get("note") or "").split())
+    return a["state"] + (f": {note[:60]}{'…' if len(note) > 60 else ''}" if note else "")
+
+
 def resolve_ask(aid, resolution, note="", via="cli", settle=True, until=None):
     """Answer an ask. `settle`: let the answer take the task out of waiting-on-me (settle_status).
     `later` is no answer: the ask is put off (snooze_ask) until `until`, tomorrow by default — what
@@ -149,7 +158,17 @@ def resolve_ask(aid, resolution, note="", via="cli", settle=True, until=None):
         snooze_ask(aid, until, note, via)
         return
     card, aid = current_ask(aid)
-    append_event(os.path.dirname(card), {"type": "resolve", "id": aid, "resolution": resolution, "note": note, "via": via})
+    # Checked and written under the card's lock: a board answer landing in between is not overwritten.
+    with card_lock(card):
+        if via != "board":
+            # Only the board changes an answer in place (the user editing it). A session or the CLI
+            # answering again would quietly replace the user's own answer — often a session echoing
+            # a board answer back as an hq-resolved line. To change one, reopen it first.
+            a = next((a for a in read_asks(os.path.dirname(card)) if a["id"] == aid), None)
+            if a and a["state"] != "open":
+                die(f"{aid} is already answered ({answered_as(a)}): that answer stands — "
+                    f"`hq ask reopen {aid}` first to change it")
+        append_event(os.path.dirname(card), {"type": "resolve", "id": aid, "resolution": resolution, "note": note, "via": via})
     if settle:
         settle_status(card, via)
         # A close held over this question: a No needs nothing done, so with the holding session

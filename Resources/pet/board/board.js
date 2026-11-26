@@ -6047,18 +6047,25 @@ document.addEventListener("focusin", (ev) => {
   const el = ev.target;
   if (pickerBox(el)) setTimeout(() => { if (document.activeElement === el) slashUpdate(el); }, 0);
 });
-// ---- the quick-phrase bar: one chip per phrase, floating just above the message or answer box
-// you are in, as the "/" list does. Floating, not in the page: showing and hiding it moves
-// nothing, so a click on a button under the box lands where you aimed, and a conversation kept at
-// its newest message stays there. Above, not below: on a phone the keyboard covers what is under
-// the box. A press puts the phrase in at the cursor (after a space when it follows a word) without
-// taking the cursor out of the box; nothing is sent. While a ";" or "/" list is open it has the place.
+// ---- the quick-phrase bar: one chip per phrase, just above the message or answer box you are
+// in. Above, not below: on a phone the keyboard covers what is under the box. It floats, but over
+// room of its own: the box you are in moves down by the bar's height (phraseRoom), so the bar never
+// covers the line above it — an ask's question, a conversation's last message. A press puts the
+// phrase in at the cursor (after a space when it follows a word) without taking the cursor out of
+// the box; nothing is sent. While a ";" or "/" list is open it has the place.
 var phraseFor = null;   // the box the bar is for (var: render() can run before this line has)
+var phraseRoomAt = null;   // the box given room above it: { el, key }
+var phraseBarH = 0;        // the bar's height, last seen showing
+var phrasePress = false;   // a mouse button or finger is down
 function phraseBarSync() {
   const a = document.activeElement;
-  const box = phraseBox(a) && !(slashBox() === a && $("#slash")?.hidden === false) ? a : null;
+  const focused = phraseBox(a) ? a : null;
+  const box = focused && !(slashBox() === a && $("#slash")?.hidden === false) ? a : null;
   let bar = $("#phrasebar");
   phraseFor = box;
+  // Left while pressing (a click on a button under the box): the room goes once the press is over,
+  // or the button would move up out from under the pointer before the click lands.
+  if (focused || !phrasePress) phraseRoom(focused);
   if (!box) { if (bar) bar.hidden = true; return; }
   if (!bar) {
     bar = document.createElement("div");
@@ -6074,7 +6081,46 @@ function phraseBarSync() {
       + `<span class="pchip edit" data-edit="1" title="${T("Edit quick phrases (Settings)", "编辑快捷短语（设置）")}">${ps.length ? "✎" : T("＋ Quick phrases", "＋ 常用短语")}</span>`;
   }
   bar.hidden = false;
+  if (bar.offsetHeight && bar.offsetHeight !== phraseBarH) {
+    phraseBarH = bar.offsetHeight;
+    if (phraseRoomAt && phraseRoomAt.el === box) { phraseRoom(null); phraseRoom(box); }   // re-measured
+  }
   phrasePlace();
+}
+// Room for the bar above `box` (null: none anywhere). Made by what is above the box, not what is
+// under it: the box's scroller scrolls by as much, so the box and everything under it stay where
+// they were, and a conversation above a reply box that was at its newest message stays there.
+function phraseRoom(box) {
+  const was = phraseRoomAt;
+  if (was && was.el === box) return;
+  phraseRoomAt = null;
+  // A refresh that rebuilt the box: the new one takes the room as it was, nothing moves.
+  const rebuilt = was && box && !was.el.isConnected && was.key === box.dataset.key;
+  const clear = () => { if (was && was.el.isConnected) { const [el, prop] = phraseRoomSide(was.el); el.style[prop] = ""; } };
+  if (!box) { if (was && was.el.isConnected) phraseKeepPlace(was.el, clear); return; }
+  const h = (phraseBarH || 30) + 6;
+  const set = () => { const [el, prop] = phraseRoomSide(box); el.style[prop] = `calc(${getComputedStyle(el)[prop]} + ${h}px)`; };
+  // From one box to another: both changes at once, held on the box you went to — held on the one
+  // you left, a box higher up would move down under the pointer.
+  if (rebuilt) set(); else phraseKeepPlace(box, () => { clear(); set(); });
+  phraseRoomAt = { el: box, key: box.dataset.key };
+}
+// Where the room goes: a box in a row with its Send button (a reply box) makes the whole row
+// taller from the top, so the button stays beside the box; a box on its own (an answer) moves down.
+function phraseRoomSide(box) {
+  const row = box.parentElement;
+  return row && row.matches(".send, .inrow") ? [row, "paddingTop"] : [box, "marginTop"];
+}
+function phraseKeepPlace(box, change) {
+  let sc = box.parentElement;
+  while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+  sc = sc || document.scrollingElement;
+  const log = box.closest(".panel")?.querySelector(".peek-body");
+  const pinned = log && !log.contains(box) && log.scrollHeight - log.scrollTop - log.clientHeight < 12;
+  const top = box.getBoundingClientRect().top;
+  change();
+  if (sc) sc.scrollTop += box.getBoundingClientRect().top - top;
+  if (pinned) log.scrollTop = log.scrollHeight;
 }
 function phrasePlace() {
   const bar = $("#phrasebar");
@@ -6111,6 +6157,14 @@ document.addEventListener("mousedown", (ev) => {
 }, true);
 document.addEventListener("focusin", (ev) => { if (phraseBox(ev.target)) phraseBarSync(); });
 document.addEventListener("focusout", () => setTimeout(phraseBarSync, 0), true);
+document.addEventListener("pointerdown", () => { phrasePress = true; }, true);
+// After the click that the press makes (dispatched right after the pointer comes up), not before.
+const phrasePressEnd = () => { phrasePress = false; setTimeout(phraseBarSync, 0); };
+document.addEventListener("pointerup", phrasePressEnd, true);
+document.addEventListener("pointercancel", phrasePressEnd, true);
+// Presses that can end with no pointerup: a right-click's menu, a dragged card, the window left.
+for (const t of ["contextmenu", "dragend"]) document.addEventListener(t, phrasePressEnd, true);
+addEventListener("blur", phrasePressEnd);
 document.addEventListener("input", (ev) => { if (ev.target === phraseFor) phrasePlace(); });   // the box grows
 addEventListener("resize", phrasePlace);
 if (window.visualViewport) visualViewport.addEventListener("resize", phrasePlace);
