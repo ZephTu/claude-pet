@@ -288,6 +288,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 if body["opened"] as? Bool == true { Self.onPeek?(str("session")) }
             }
             return r
+        case "seen":
+            // A task's drawer showed these sessions' last replies: that is reading them, as a Peek is.
+            for sid in body["sessions"] as? [String] ?? [] where !sid.isEmpty { Self.onSeen?(sid) }
+            return (["ok": true], nil)
         case "commands":
             // The skills this session can run as slash commands, for the message box's completion.
             return await hq(["peek", str("session"), "--commands", "--json"])

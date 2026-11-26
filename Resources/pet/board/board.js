@@ -529,10 +529,11 @@ const liveTag = (live) => {
     : ["idle", live.length === 1 ? T("idle", "空闲") : T(`${live.length} idle`, `${live.length} 个空闲`)];
   return `<span class="live ${cls}" title="${T("Its live sessions", "它在跑的 session")}">${word}</span>`;
 };
-// The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump or
-// a reply (from here or its terminal) clears it, same as in the pet's list.
+// The pet's red dot, on the board: this session finished and you haven't looked yet. Peek, Jump,
+// a reply (from here or its terminal) or opening its task with its last reply showing clears it,
+// same as in the pet's list. All of them are listed from the status bar's red chip.
 const newTag = (sid) => (ui.unread && ui.unread[sid]
-  ? `<span class="newtag" title="${T("Finished — not looked at yet. Peek, Jump or reply to clear it.", "干完了一轮，你还没看。Peek、Jump 或回复它就会消失。")}">${T("new", "新")}</span>` : "");
+  ? `<span class="newtag" title="${T("Finished — not looked at yet. Opening its task, Peek, Jump or a reply clears it.", "干完了一轮，你还没看。打开它的任务、Peek、Jump 或回复它就会消失。")}">${T("new", "新")}</span>` : "");
 // A session's dot, drawn exactly as in the pet's list (pet.js dotClass — keep the two in step):
 // colour says whether it wants you, shape and motion what it is doing. Sessions the pet doesn't
 // list (a `claude --bg` one, say) fall back to their plain state.
@@ -1091,7 +1092,9 @@ function render() {
   // long lane back to its top.
   grabLaneScrolls();
 
+  markDrawerSeen();   // before anything is drawn: the tags it clears don't show
   renderCounts();
+  renderUnreadPop();
   drawSecretaryButton();
   // Four pages: Focus (the tasks you keep in view), Projects & duties (projects.js: every project,
   // with what is running and waiting on you in each), Needs you (every unanswered ask and your
@@ -1183,7 +1186,9 @@ function renderCounts() {
   // Task counts are on the tabs; the status bar says what the sessions are doing, what waits on
   // you (click → Needs you), and the quota on the right.
   const np = (n, label) => `<span class="np"><b>${n}</b> ${label}</span>`;   // wraps as one on a phone
-  $("#counts").innerHTML =
+  // First, in red: sessions that finished a turn you haven't looked at — click for the list.
+  const fresh = unreadSessions().length;
+  $("#counts").innerHTML = (fresh ? `<span class="sgroup jump unread-chip ${ui.unreadPop ? "on" : ""}" data-action="unread-pop" title="${T("Sessions that finished and you haven't looked at — click for the list", "干完一轮、你还没看的 session——点击看列表")}"><span class="udot"></span>${np(fresh, T(`new repl${fresh === 1 ? "y" : "ies"}`, "条新回复"))}</span>` : "") +
     `<span class="sgroup jump" data-action="open-sessions" title="${T("Live Claude Code sessions — click for the list", "正在运行的 Claude Code session——点击看列表")}">${np(ui.sessions.length, T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session"))}` +
       `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
     (asks || mine || later || loose ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
@@ -1325,11 +1330,15 @@ function lastWordsShown(s) {
   if (!r || !r.text) return true;
   return !plainText(r.text).startsWith(w.slice(0, 80));
 }
-function sessReply(t, s) {
+function replyShown(t, s) {
   const r = s.lastReply;
-  if (!r || !r.text) return "";
+  if (!r || !r.text) return false;
   const at = Date.parse(r.ts) || 0;
-  if (openAsks(t).some((a) => a.session === s.sessionId && a.context && (Date.parse(a.ts) || 0) >= at - 1000)) return "";
+  return !openAsks(t).some((a) => a.session === s.sessionId && a.context && (Date.parse(a.ts) || 0) >= at - 1000);
+}
+function sessReply(t, s) {
+  if (!replyShown(t, s)) return "";
+  const r = s.lastReply;
   const key = replyKey(r.text);
   if (!(key in sessReplyOpen) && ui.unread && ui.unread[s.sessionId]) setSessReply(key, true);
   const open = sessReplyOpen[key] === true;
@@ -1339,6 +1348,69 @@ function sessReply(t, s) {
       <span class="tw">${open ? "▾" : "▸"}</span><span class="sr-k">${r.prev ? T("Its reply before this turn", "上一轮的最后回复") : T("Claude's last reply", "Claude 的最后一段回复")}</span><span class="meta"><span data-ago="${esc(r.ts || "")}">${ago(r.ts)}</span></span>${open ? "" : `<span class="sr-first">${esc(first)}</span>`}</button>
     ${open ? `<div class="md ask-reply-body" data-reply="${esc(key)}">${markdown(r.text)}</div>` : ""}
   </div>`;
+}
+
+// Opening a task's drawer reads the last replies it shows: their "new" tags go, here and on the
+// pet, as a Peek's do. A session whose reply an open ask hides keeps its tag until the ask is
+// answered. Run by render(): on the drawer it opens, and again while it stays open with the board
+// in front (a turn that ends under your eyes is read too), not while the window is behind others.
+// The reply is opened first, as sessReply would for a tagged one, so it doesn't fold as the tag goes.
+function markDrawerSeen() {
+  const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
+  const opened = ui.drawer !== ui.drawerSeen;
+  ui.drawerSeen = ui.drawer;
+  if (!t || !ui.unread || !(opened || boardInFront())) return;
+  const xs = liveFor(t.id).filter((s) => ui.unread[s.sessionId] && replyShown(t, s));
+  if (!xs.length) return;
+  for (const s of xs) {
+    const key = replyKey(s.lastReply.text);
+    if (!(key in sessReplyOpen)) setSessReply(key, true);
+    delete ui.unread[s.sessionId];
+  }
+  api("seen", { sessions: xs.map((s) => s.sessionId) }).catch(() => {});
+}
+const boardInFront = () => document.visibilityState === "visible" && document.hasFocus();
+
+// Every session with a "new" tag, newest reply first: the status bar's red chip lists them, so
+// they are found without scanning every card (on a phone, every page of them).
+function unreadSessions() {
+  const u = ui.unread || {};
+  const at = (s) => Date.parse((s.lastReply && s.lastReply.ts) || s.updatedAt) || 0;
+  return ui.sessions.filter((s) => u[s.sessionId]).sort((a, b) => at(b) - at(a));
+}
+function renderUnreadPop() {
+  const el = $("#unread-pop");
+  const xs = unreadSessions();
+  if (!xs.length) ui.unreadPop = false;
+  el.hidden = !ui.unreadPop;
+  if (!ui.unreadPop) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="up-h"><b>${T("New replies", "新回复")}</b><span class="meta">${xs.length}</span><span class="spacer"></span>
+      <button class="icon x" data-action="unread-pop" title="${T("Close (Esc)", "关闭（Esc）")}">✕</button></div>
+    <div class="up-list">${xs.map((s) => {
+      const t = s.task ? taskById(s.task) : null;
+      const title = String(s.title || s.project || s.sessionId.slice(0, 8));
+      const r = s.lastReply && s.lastReply.text ? plainText(s.lastReply.text) : plainText(s.lastText);
+      const sec = t && t.id === secId();
+      return `<button class="up-row" data-action="unread-go" data-session="${esc(s.sessionId)}" title="${t && !sec ? T("Open its task", "打开它的任务") : sec ? T("Open the secretary", "打开秘书") : T("Peek — open the conversation", "Peek——打开对话")}">
+        <span class="up-t">${t && !sec ? `<span class="tid">${esc(t.id)}</span>${esc(t.title)}` : sec ? T("Secretary", "秘书") : esc(title)}</span>
+        <span class="meta up-m">${t && !sec ? esc(title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title) + " · " : t ? "" : T("no task", "没有任务") + " · "}<span data-ago="${esc((s.lastReply && s.lastReply.ts) || s.updatedAt || "")}">${ago((s.lastReply && s.lastReply.ts) || s.updatedAt)}</span></span>
+        ${r ? `<span class="up-r">${esc(r)}</span>` : ""}</button>`;
+    }).join("")}</div>`;
+}
+// A row of that list: the task's drawer opens with that session picked out (opening it reads its
+// reply); one with no task opens its conversation.
+function unreadGo(sid) {
+  ui.unreadPop = false;
+  const s = ui.sessions.find((x) => x.sessionId === sid);
+  const t = s && s.task ? taskById(s.task) : null;
+  if (!t) return openPeek(sid);
+  if (t.id === secId()) { render(); return openSecretary(); }
+  clearTimeout(ui.hlTimer);
+  ui.hlSession = sid;
+  ui.hlTimer = setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
+  revealTask(t.id);
+  const row = document.querySelector("#drawer .bsess.hl");
+  if (row) row.scrollIntoView({ block: "nearest" });
 }
 
 // The secretary's asks are labeled as its own and open its window, not its (hidden) card.
@@ -4668,13 +4740,15 @@ function jumpSource(el) {
 
 // Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
 // say) is still the drawer's, and a slash-command pick hides its list on mousedown.
-const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch, #reader, #reader-pill";
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch, #reader, #reader-pill, #unread-pop, .unread-chip";
 let pressedIn = false;
 document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
 
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
+  // So does the list of new replies (its chip toggles it).
+  if (ui.unreadPop && document.contains(ev.target) && !ev.target.closest("#unread-pop, .unread-chip")) { ui.unreadPop = false; render(); }
   const el = ev.target.closest("[data-action]");
   // The task drawer closes on a click anywhere outside it — but not one in a dialog or toast over
   // it, one that ends a text selection, or one on a card or button that opens a drawer itself
@@ -4872,6 +4946,8 @@ document.addEventListener("click", async (ev) => {
       if (ui.drawer === d.task) { ui.drawer = null; return render(); }
       return openDrawer(d.task);
     case "drawer-close": ui.drawer = null; return render();
+    case "unread-pop": ui.unreadPop = !ui.unreadPop; return render();
+    case "unread-go": return unreadGo(d.session);
     case "open-sessions": ui.drawer = ui.drawer === "@sessions" ? null : "@sessions"; return render();
     case "drawer-status": {
       // The lit button is where the task is, not a status to save: in Needs you only because of an
@@ -5629,6 +5705,7 @@ document.addEventListener("keydown", async (ev) => {
   const el = ev.target;
   if (ev.key === "Escape" && ui.finishAsk) { ev.preventDefault(); return answerFinishAsk(null); }
   if (ev.key === "Escape" && ui.launchMenu) { ev.preventDefault(); ui.launchMenu = null; return render(); }
+  if (ev.key === "Escape" && ui.unreadPop) { ev.preventDefault(); ui.unreadPop = false; return render(); }
   // Reading a document (last clicked in the reading area): Esc leaves the window beside it open.
   if (ev.key === "Escape" && rdFocused()) return;
   if (ev.key === "Escape" && ui.modal && ui.modal.pop) { ev.preventDefault(); ui.modal.pop = null; return drawPeek(false); }
