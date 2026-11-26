@@ -47,7 +47,8 @@ cat <<EOF
 HQ will make these changes:
 
   1. $HQ_HOME/
-       the hq CLI, templates, config and session bindings (HQ's own folder)
+       the hq CLI (bin/hq and its modules in hqlib/), templates, config and session bindings
+       (HQ's own folder)
   2. $ROOT/
        your task root: tasks/, templates/, hq.json, CLAUDE.md
        (only missing files are created; nothing there is overwritten)
@@ -88,15 +89,33 @@ fi
 
 echo "==> CLI and templates → $HQ_HOME"
 mkdir -p "$HQ_HOME/bin" "$HQ_HOME/state"
-rm -rf "$HQ_HOME/template" "$HQ_HOME/bin/hq"
+# bin/hq is a thin entry; the code is in hqlib/ next to bin/. A hook may run mid-install: the new
+# hqlib and bin/hq are put in under temporary names and swapped in by rename — never seen half-copied,
+# bin/hq never missing — and the new bin/hq goes in only after the new hqlib.
+rm -rf "$HQ_HOME/template" "$HQ_HOME/hqlib.new" "$HQ_HOME/hqlib.old" "$HQ_HOME/bin/hq.new"
 if [ "$DEV" = 1 ]; then
-  ln -s "$SRC/bin/hq" "$HQ_HOME/bin/hq"
+  ln -s "$SRC/hqlib" "$HQ_HOME/hqlib.new"
   ln -s "$SRC/template" "$HQ_HOME/template"
 else
-  cp "$SRC/bin/hq" "$HQ_HOME/bin/hq"
+  cp -R "$SRC/hqlib" "$HQ_HOME/hqlib.new"
+  rm -rf "$HQ_HOME/hqlib.new/__pycache__"
   cp -R "$SRC/template" "$HQ_HOME/template"
 fi
-chmod +x "$SRC/bin/hq" "$HQ_HOME/bin/hq"
+if [ -e "$HQ_HOME/hqlib" ] || [ -L "$HQ_HOME/hqlib" ]; then mv "$HQ_HOME/hqlib" "$HQ_HOME/hqlib.old"; fi
+mv "$HQ_HOME/hqlib.new" "$HQ_HOME/hqlib"
+rm -rf "$HQ_HOME/hqlib.old"
+# Compiled now, so the first hook after an upgrade doesn't pay for it. In place, not before the
+# rename: macOS's own python3 keeps bytecode under ~/Library/Caches by the source's path. Best
+# effort: where the bytecode can't be written, each run compiles again.
+[ "$DEV" = 1 ] || python3 -m compileall -q "$HQ_HOME/hqlib" >/dev/null 2>&1 || true
+chmod +x "$SRC/bin/hq"
+if [ "$DEV" = 1 ]; then
+  ln -s "$SRC/bin/hq" "$HQ_HOME/bin/hq.new"
+else
+  cp "$SRC/bin/hq" "$HQ_HOME/bin/hq.new"
+  chmod +x "$HQ_HOME/bin/hq.new"
+fi
+mv -f "$HQ_HOME/bin/hq.new" "$HQ_HOME/bin/hq"
 python3 - "$HQ_HOME/config.json" "$ROOT" <<'PY'
 import json, os, sys
 path, root = sys.argv[1], sys.argv[2]
