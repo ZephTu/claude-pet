@@ -744,9 +744,9 @@ async function promptSubmit(op, args, ok) {
 }
 
 const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" data-dot="${esc(s.sessionId)}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
-// A session's status words (and its context, with `ctx`), marked so paintDots can redo them alone.
+// A session's status words (and its context, with `ctx`), marked so paintLive can redo them alone.
 const swHtml = (s, ctx) => esc(statusWord(s)) + (ctx ? ctxTag(s) : "");
-const statusSpan = (s, ctx) => `<span data-sw="${esc(s.sessionId)}"${ctx ? ` data-ctx="1"` : ""}>${swHtml(s, ctx)}</span>`;
+const statusSpan = (s, ctx) => { const h = swHtml(s, ctx); return `<span data-sw="${esc(s.sessionId)}"${ctx ? ` data-ctx="1"` : ""} data-was="${esc(h)}">${h}</span>`; };
 // The pet's dots fields that only the dot and the status words show; the rest (its state, a
 // prompt to approve, gone quiet…) decide buttons and order, and redraw the page.
 const PAINT_ONLY = ["activity", "context", "contextTokens", "contextBudget", "agent", "struggle", "replied"];
@@ -757,10 +757,32 @@ function shapeOfDots(dots) {
   }
   return out;
 }
-// Only the paint-only fields changed: redo the dots and status words where they are, nothing else
-// (no rebuild, so no click lost under the pointer and no box losing its cursor).
-function paintDots() {
+// hq's session records change their updatedAt with every hook a session fires (each tool call).
+// The page is keyed on what that time decides — the order sessions show in (newest first), the
+// order of the unread list, and whether a session moved in the last two minutes (Active first) —
+// not on the time itself; paintLive keeps the "3m ago" words current.
+function shapeOfSessions(sessions) {
+  const at = (s) => Date.parse(s.updatedAt) || 0;
+  const replied = (s) => Date.parse((s.lastReply && s.lastReply.ts) || s.updatedAt) || 0;
+  const ids = (xs) => xs.map((x) => x.sessionId);
+  return JSON.stringify([
+    list(sessions).map((x) => { const { updatedAt, ...rest } = x; return Object.assign(rest, { hot: hotAct(at(x)) === HOT }); }),
+    ids(list(sessions).slice().sort((a, b) => at(b) - at(a))),
+    ids(list(sessions).slice().sort((a, b) => replied(b) - replied(a))),
+  ]);
+}
+// When a session last did something, as the page shows it ("3m ago"; `short`: "3m").
+const sessAgo = (s, short) => { const a = ago(s.updatedAt); return short ? a.replace(" ago", "").replace(/前$/, "") : a; };
+const agoSpan = (s, short) => `<span data-sago="${esc(s.sessionId)}"${short ? ` data-short="1"` : ""}>${esc(sessAgo(s, short))}</span>`;
+// A refresh that changed nothing the page is built from: redo, where they are, the words that
+// change anyway — the dots and status words (what a session is running, its context) and the
+// "3m ago"s. No rebuild, so no click lost under the pointer and no box losing its cursor.
+function paintLive() {
   const byId = new Map(list(ui.sessions).map((s) => [s.sessionId, s]));
+  const put = (el, v) => { if (el.textContent !== v) el.textContent = v; };
+  document.querySelectorAll("[data-sago]").forEach((el) => { const s = byId.get(el.dataset.sago); if (s) put(el, sessAgo(s, el.dataset.short)); });
+  document.querySelectorAll("[data-pago]").forEach((el) => { const at = projectActivity(el.dataset.pago); put(el, at ? ago(new Date(at).toISOString()) : ""); });
+  document.querySelectorAll("[data-ago]").forEach((el) => put(el, ago(el.dataset.ago)));
   document.querySelectorAll("[data-dot]").forEach((el) => {
     const s = byId.get(el.dataset.dot);
     if (!s) return;
@@ -796,7 +818,7 @@ async function refresh(force) {
   try { return await readBoard(force); } finally { clearTimeout(timer); release(); }
 }
 async function readBoard(force) {
-  let sig = null, dotsKey = null;
+  let sig = null;
   // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
   if (REMOTE && !ui.board && !ui.loadNote) {
     ui.loadNote = setTimeout(() => {
@@ -813,9 +835,9 @@ async function readBoard(force) {
     ui.readDone = readNo;
     const pet = JSON.parse(unreadText || "{}");
     // What only a session's dot and status words show (what it is running, its context) changes
-    // with every tool call: that repaints those words in place (paintDots), not the whole page.
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + JSON.stringify(Object.assign({}, pet, { dots: shapeOfDots(pet.dots) })) + "\u0001" + jobsSig;
-    dotsKey = JSON.stringify(pet.dots || {});
+    // with every tool call: that repaints those words in place (paintLive), not the whole page.
+    const sessions = JSON.parse(sessionsText);
+    sig = boardText + "\u0001" + shapeOfSessions(sessions) + "\u0001" + agentsText + "\u0001" + JSON.stringify(Object.assign({}, pet, { dots: shapeOfDots(pet.dots) })) + "\u0001" + jobsSig;
     ui.board = JSON.parse(boardText);
     for (const [id, p] of Object.entries(ui.statusPending)) {
       if (p.after !== undefined && readNo > p.after) delete ui.statusPending[id];   // read after the save: hq has it
@@ -831,7 +853,7 @@ async function readBoard(force) {
     takePhrases(pet.phrases, readNo);   // not when the read failed: it said nothing about them
     if ($("#pairing")) $("#pairing").hidden = true;
     pruneDrafts();
-    ui.sessions = mergeBackground(JSON.parse(sessionsText), JSON.parse(agentsText || "[]"));
+    ui.sessions = mergeBackground(sessions, JSON.parse(agentsText || "[]"));
     $("#error").hidden = true;
   } catch (e) {
     $("#error").textContent = String(e.message || e);
@@ -846,10 +868,10 @@ async function readBoard(force) {
     if (holdTimed() && force === "timer") ui.pendingRender = true;
     else render();
   } else {
-    if (dotsKey !== null && dotsKey !== ui.dotsKey) paintDots();
+    // Not under a held pointer or a selection, as a rebuild isn't.
+    if (!holdTimed()) paintLive();
     flushPending();   // nothing new, but one held back (past a selection's minute) still shows
   }
-  if (dotsKey !== null) ui.dotsKey = dotsKey;
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
   else if (ui.modal && ui.modal.type === "prompt") checkPrompt();
   loadFlags();
@@ -2126,7 +2148,7 @@ function kcardSessions(t, opt) {
   const s = sorted[0];
   const st = liveState(s);
   const last = plainText(s.lastText);
-  const line = st === "busy" && last ? esc(last) : st === "waiting" ? statusSpan(s) : `${statusSpan(s)} · ${esc(ago(s.updatedAt))}`;
+  const line = st === "busy" && last ? esc(last) : st === "waiting" ? statusSpan(s) : `${statusSpan(s)} · ${agoSpan(s)}`;
   return `<div class="kc-sess${s.sessionId === ui.hlSession ? " hl" : ""}"><span class="stack">${sorted.slice(0, 3).map(dot).join("")}</span>
     ${live.length > 1 ? `<span class="cnt">${live.length}</span>` : ""}
     <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${live.map((x) => outboxMark(x.sessionId)).join("")}${newTag(s.sessionId)}${line}</span>
@@ -2604,7 +2626,7 @@ function renderTaskBody(t) {
   const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${outboxMark(s.sessionId)}${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${statusSpan(s, true)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
+          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${statusSpan(s, true)} · ${agoSpan(s)}</div>${approveBar(s)}
           ${lastWordsShown(s) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
@@ -2784,7 +2806,7 @@ function drawFinishAsk() {
   box.innerHTML = `<div class="panel" role="dialog" aria-label="${T("Stop its sessions?", "停掉它的 session？")}">
     <div class="stitle">${T(`${esc(a.task)} is ${esc(a.status)} — stop ${n === 1 ? "its session" : `its ${n} sessions`} too?`, `${esc(a.task)} ${word}，要把它的 ${n} 个 session 也停掉吗？`)}</div>
     <div class="meta">${T("Their Claude Code processes end; conversations are kept and Resume picks them up.", "结束它们的 Claude Code 进程；对话保留，之后可以 Resume 续上。")}</div>
-    <ul class="cf-list">${live.map((s) => `<li><span class="dot ${dotClass(s)}"></span>${esc(s.title || s.project || s.sessionId.slice(0, 8))} <span class="meta">${esc(statusWord(s))}</span></li>`).join("")}</ul>
+    <ul class="cf-list">${live.map((s) => `<li>${dot(s)}${esc(s.title || s.project || s.sessionId.slice(0, 8))} <span class="meta">${statusSpan(s)}</span></li>`).join("")}</ul>
     <label class="cf-remember"><input type="checkbox" id="cf-remember"> ${T("Remember my answer and don't ask again (Settings → Sessions changes it)", "记住我的选择，以后不再问（可以在 设置 → Sessions 里改）")}</label>
     <div class="row cf-btns"><button class="btn ghost" data-action="finish-keep">${T("Leave them running", "不停")}</button>
       <button class="btn primary" data-action="finish-stop">${n === 1 ? T("Stop it", "停掉") : T("Stop all", "全部停掉")}</button></div>
@@ -2883,7 +2905,7 @@ function renderSessionList(items, plain) {
       <div class="body">
         <div class="shead">
           <div class="stitle" title="${esc(title)}">${outboxMark(sid)}${newTag(sid)}${esc(t ? title.replace(new RegExp("^" + t.id.replace(/[-]/g, "\\-") + "\\s*"), "") || title : title)}</div>
-          <span class="stime">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
+          <span class="stime">${agoSpan(s, true)}</span>
         </div>
         <div class="shead">
           <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">${T("background", "后台")}</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${statusSpan(s, true)}${s.waitingOn ? T(" · waiting: ", " · 在等：") + esc(s.waitingOn) : ""}</div>

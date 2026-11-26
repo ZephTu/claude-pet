@@ -474,7 +474,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                 let r = await Self.run(claude, ["agents", "--json"], timeout: Self.readTimeout)
                 return r.status == 0 ? .init(text: r.out, error: nil) : .init(text: nil, error: "claude agents failed")
             }
-            return (a.text ?? "[]", nil)
+            // A failed (or timed-out) read says nothing about which sessions run in the background:
+            // keep the last list it gave. An empty one would put a background session back in the
+            // terminal its record inherited, and a message could be typed into that tab.
+            if let text = a.text { Self.lastAgents = text }
+            return (a.text ?? Self.lastAgents ?? "[]", nil)
         case "decide":
             guard let behavior = PermissionDecision.Behavior(rawValue: str("behavior")),
                   !str("session").isEmpty, !str("ask").isEmpty else { return (nil, L("bad decision", "无效的决定")) }
@@ -1161,6 +1165,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// How long a read the board polls may take before it is given up: a stuck `hq` or
     /// `claude agents` must not hold the board's refresh (and every phone's) for good.
     static let readTimeout: TimeInterval = 15
+    /// The last list `claude agents` gave — see the "agents" op.
+    private static var lastAgents: String?
 
     private func hq(_ args: [String], timeout: TimeInterval? = nil) async -> (Any?, String?) {
         await Self.hq(args, timeout: timeout)
@@ -1546,7 +1552,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                         timeout: TimeInterval? = nil) async -> Result {
         await withCheckedContinuation { (continuation: CheckedContinuation<Result, Never>) in
             let once = Once()
-            let answer = { (r: Result) in if once.claim() { continuation.resume(returning: r) } }
+            let answer: @Sendable (Result) -> Void = { r in if once.claim() { continuation.resume(returning: r) } }
             if let timeout {
                 DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout + 3) {
                     answer(Result(status: -1, out: "", err: "timed out", timedOut: true))

@@ -120,7 +120,7 @@ function cardTasks(name, open) {
 // When a session last did something in the project, as "● 3m ago".
 function actTag(name) {
   const at = projectActivity(name);
-  return at ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● ${ago(new Date(at).toISOString())}</span>` : "";
+  return at ? `<span class="act" title="${T("Latest session activity in this project", "这个项目里 session 最近的动静")}">● <span data-pago="${esc(name)}">${ago(new Date(at).toISOString())}</span></span>` : "";
 }
 // Active first: projects with a live session first, newest activity first; the rest keep your
 // dragged order (the sort is stable). Held while the pointer is over the grid (see steady()).
