@@ -304,6 +304,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             if let target = Self.clickTarget?() { pet["clickTarget"] = target }
             pet["skin"] = BoardWindow.currentSkin()
             pet["prefs"] = BoardPrefs.current
+            pet["phrases"] = BoardPhrases.current
             pet["secretary"] = SecretaryController.shared.glance
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
@@ -312,6 +313,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             // does to its sessions: one choice for the Mac's board and every phone's — see BoardPrefs.
             BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
             return (["ok": true], nil)
+        case "phrases":
+            // The whole list, as the board's Settings left it — one list for the Mac and every phone.
+            return (["phrases": BoardPhrases.save(body["phrases"] as? [Any] ?? [])], nil)
+        case "phrase-suggest": return (["suggestions": await BoardPhrases.suggestions()], nil)
         // Phone access (BoardServer): on or off, pairing a phone, the paired ones. The Mac's
         // window only — BoardServer refuses these from a phone.
         case "remote": return (BoardServer.shared.status(), nil)

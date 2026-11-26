@@ -28,6 +28,33 @@ enum BoardPrefs {
     static var skip: Bool? { current["hq-skip-perms"].map { $0 == "1" } }
 }
 
+/// Quick phrases: replies the user sends often, offered under the board's message and answer
+/// boxes. Kept by the app like BoardPrefs, so the Mac's board and every phone's share one list.
+@MainActor
+enum BoardPhrases {
+    private static let defaultsKey = "boardQuickPhrases"
+
+    static var current: [String] { UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [] }
+
+    static func save(_ raw: [Any]) -> [String] {
+        let list = QuickPhrases.clean(raw)
+        UserDefaults.standard.set(list, forKey: defaultsKey)
+        return list
+    }
+
+    /// What the user has typed to sessions again and again (Claude Code's prompt history, which
+    /// holds the board's answers too), minus the phrases already kept.
+    static func suggestions() async -> [[String: Any]] {
+        let have = current
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/history.jsonl")
+        let found = await Task.detached(priority: .utility) { () -> [QuickPhrases.Suggestion] in
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+            return QuickPhrases.suggest(historyLines: text.split(separator: "\n").map(String.init), have: have)
+        }.value
+        return found.map { ["text": $0.text, "count": $0.count] }
+    }
+}
+
 /// Phone access: the board, served over the local network to a paired phone's browser — and,
 /// when turned on as well, over Tailscale to the user's own devices (Tailnet).
 ///

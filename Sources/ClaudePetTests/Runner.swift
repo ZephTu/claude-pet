@@ -2708,6 +2708,7 @@ struct Runner {
         JumpLogTests.run(t)
         DocReaderTests.run(t)
         RemoteAccessTests.run(t)
+        QuickPhraseTests.run(t)
 
         print("\n-- language")
         t.check("a stored language wins over the system's",
