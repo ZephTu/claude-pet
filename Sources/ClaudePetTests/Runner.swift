@@ -432,17 +432,25 @@ struct Runner {
         ]
         t.check("TERM_PROGRAM wins when a stale handle from another terminal is inherited",
                 TerminalTarget.identify(environment: both) == TerminalRef(kind: "iterm2", handle: "w0t0p0:AB-CD"))
-        // With TERM_PROGRAM absent, bare presence is all there is — better than nothing
-        t.check("a background session is in no terminal, whatever handle it inherited",
-                TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x",
-                                                      "CLAUDE_CODE_SESSION_KIND": "bg"]) == nil
-                && TerminalTarget.identify(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x",
-                                                         "CLAUDE_CODE_SESSION_KIND": "interactive"])?.kind == "orca")
+        let ptyHost = "claude bg-pty-host --bg-pty-host /tmp/cc-daemon-501/x/spare/1.pty.sock 200 50 -- /Users/u/.local/share/claude/versions/2.1"
+        t.check("a background session is told apart by what its hooks still see: its parent, or its own job folder",
+                TerminalTarget.isBackgroundSession(environment: [:], sessionId: "3886e10d-a159", parentArguments: ptyHost)
+                && TerminalTarget.isBackgroundSession(environment: ["CLAUDE_JOB_DIR": "/Users/u/.claude/jobs/3886e10d"],
+                                                      sessionId: "3886e10d-a159", parentArguments: "-zsh")
+                && TerminalTarget.isBackgroundSession(environment: ["CLAUDE_CODE_SESSION_KIND": "bg"], sessionId: "", parentArguments: nil))
+        t.check("a session in a terminal is not background, nor one under another session's job folder",
+                !TerminalTarget.isBackgroundSession(environment: ["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "term_x"],
+                                                    sessionId: "79c6e0f6-56fb", parentArguments: "-zsh")
+                && !TerminalTarget.isBackgroundSession(environment: ["CLAUDE_JOB_DIR": "/Users/u/.claude/jobs/3886e10d"],
+                                                       sessionId: "79c6e0f6-56fb", parentArguments: "/bin/zsh -l")
+                && !TerminalTarget.isBackgroundSession(environment: [:], sessionId: "79c6e0f6-56fb", parentArguments: nil))
         t.check("the pet drops the variables of the terminal it was opened from, and keeps the rest",
                 TerminalTarget.inheritedTerminalKeys(["TERM_PROGRAM": "Orca", "ORCA_TERMINAL_HANDLE": "t", "ORCA_TAB_ID": "x",
                                                       "ITERM_SESSION_ID": "w0", "TERM_SESSION_ID": "s", "GHOSTTY_SURFACE_ID": "1",
+                                                      "VSCODE_GIT_ASKPASS_NODE": "/a", "GIT_ASKPASS": "/b",
                                                       "PATH": "/bin", "HOME": "/h", "TERM": "xterm", "HQ_ROOT": "/r"])
                     == ["GHOSTTY_SURFACE_ID", "ITERM_SESSION_ID", "ORCA_TAB_ID", "ORCA_TERMINAL_HANDLE", "TERM_PROGRAM", "TERM_SESSION_ID"])
+        // With TERM_PROGRAM absent, bare presence is all there is — better than nothing
         t.check("a missing TERM_PROGRAM falls back to whichever handle exists",
                 TerminalTarget.identify(environment: ["ORCA_TERMINAL_HANDLE": "term_y"])
                 == TerminalRef(kind: "orca", handle: "term_y"))

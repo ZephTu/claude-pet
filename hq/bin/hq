@@ -4278,7 +4278,7 @@ INTAKE_DROP_ENV = ("CLAUDE_PET_JOB", "CLAUDE_PET_RUN", "CLAUDECODE", "CLAUDE_COD
 # would type messages for it there.
 TERMINAL_ENV = ("TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "ITERM_PROFILE",
                 "LC_TERMINAL", "LC_TERMINAL_VERSION")
-TERMINAL_ENV_PREFIXES = ("ORCA_", "GHOSTTY_", "VSCODE_", "KITTY_")
+TERMINAL_ENV_PREFIXES = ("ORCA_", "GHOSTTY_", "KITTY_")   # not VSCODE_*: git's askpass helper needs them
 
 
 def intake_env(environ):
