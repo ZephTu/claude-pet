@@ -28,6 +28,19 @@ enum BoardPrefs {
     static var skip: Bool? { current["hq-skip-perms"].map { $0 == "1" } }
 }
 
+/// Each card as it was when last opened on a board (SeenCards), kept by the app like BoardPrefs:
+/// a card read on the phone shows as read on the Mac too.
+@MainActor
+enum BoardSeen {
+    private static let defaultsKey = "boardSeenCards"
+
+    static var current: [String: Any] { UserDefaults.standard.dictionary(forKey: defaultsKey) ?? [:] }
+
+    static func save(_ changes: [String: Any]) {
+        UserDefaults.standard.set(SeenCards.merge(current, changes), forKey: defaultsKey)
+    }
+}
+
 /// Quick phrases: replies the user sends often, offered under the board's message and answer
 /// boxes. Kept by the app like BoardPrefs, so the Mac's board and every phone's share one list.
 @MainActor

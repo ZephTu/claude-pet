@@ -468,7 +468,7 @@ public enum RemoteAccess {
         "board", "sessions", "status", "peek", "seen", "commands", "peek-tool", "pet", "history",
         "agents", "prompt", "read-doc",
         // Settings every board shares.
-        "board-prefs", "phrases", "phrase-suggest",
+        "board-prefs", "phrases", "phrase-suggest", "card-seen",
         // Asks, todos and the cards themselves.
         "resolve", "reopen", "snooze", "delivered", "todo", "set", "log", "focus", "project", "ref",
         "workdir", "continue", "addtodo", "bind", "unbind", "new",

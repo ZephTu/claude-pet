@@ -163,7 +163,7 @@ another task. The board shows the Focus tasks' flags as ⚠ lines on their cards
 
 ### What a bound session does differently
 
-The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`):
+The hooks inject a short protocol into the session (see `protocol()` in `hqlib/protocol.py`):
 
 1. **The card is the source of truth.** Claude reads it first and writes progress back — not
    with `hq log/set/ref/addtodo/todo` calls (each tool call is another model round trip over
@@ -531,7 +531,7 @@ as it is; `hq continue` carries it over.
 `refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
 ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
 board shows the title (cut to a few words). A card lists each link once, keyed by a canonical URL
-(`ref_key` / `canonical_url` in `bin/hq`; the board's `refKey` / `canonicalUrl` in `board.js` are
+(`ref_key` / `canonical_url` in `hqlib/refs.py`; the board's `refKey` / `canonicalUrl` in `board.js` are
 the same rules — keep them in step):
 
 | URL | Canonical form |
@@ -944,7 +944,8 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
     ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"snooze"|"move", …}
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
-├── bin/hq                    the CLI and hook entry point
+├── bin/hq                    the CLI and hook entry point (thin: it imports only what the command needs)
+├── hqlib/                    the CLI's code, one module per area (see Code layout below)
 ├── config.json               {"root": "<root>", "sites": {"jira": URL, "jenkins": URL}}
 └── state/sessions.json       session id → bound task, delivery cursor, turn start, finished
 ```
@@ -956,6 +957,35 @@ every few seconds); `hq asks T-012 --all --json` has it. `hq ask resolve`,
 `hq todo` and `hq set` are the write API (`hq todo T-012 2 done --text "…"` matches the todo
 by its text when #2 has moved, and refuses if it is gone). Everything is plain files, so cards can also live
 in git.
+
+## Code layout
+
+`bin/hq` is a thin entry: `hq hook` imports `hqlib.hooks` and, for a session not bound to a task,
+nothing past `hqlib.core` and `hqlib.sessions`; any other command builds the parser in `hqlib.cli`,
+which imports only the module of the command it runs. A hook runs on every turn of every session,
+so keep it that way: a module imports at its top only modules listed before it in the table below,
+and reaches a later one with an import inside the function that needs it.
+
+| Module | What it holds |
+| --- | --- |
+| `core` | paths and constants, small utilities, the card lock, the hq-* blocks of a reply |
+| `sessions` | session bindings (`state/sessions.json`), the pet's live-session files, saved replies |
+| `cards` | reading and writing TASK.md, todos, retired categories |
+| `refs` | canonical URLs and keys, merging refs |
+| `history` | the card budget and HISTORY.md |
+| `projects` | the project registry, PROJECT.md sections, briefs, `hq project` |
+| `asks` | the asks ledger and the status it moves |
+| `protocol` | the text a bound session is given |
+| `focus` | the Focus list, new cards |
+| `update` | applying an hq-update block, repeated @me todos |
+| `continuation` | `hq continue` |
+| `inbox`, `feeds`, `intake`, `autoclose` | notes, Zulip/Jira feeds, Auto intake, closing settled todos |
+| `peek`, `onboard`, `status`, `garden`, `reports` | live sessions and Peek, scan/import, status, garden, the secretary's reports |
+| `board`, `commands` | `hq board` / `hq show`, and the small card commands |
+| `hooks`, `cli` | the hook entry, and the command line |
+
+The tests check that no name is defined twice (in one module, or a function in two) and what a
+hook loads.
 
 ## Tests
 
