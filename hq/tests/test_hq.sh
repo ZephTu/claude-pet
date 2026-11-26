@@ -2778,6 +2778,21 @@ touch -t 200001010000 "$EC"
 out="$(stop sess-echo "Did a lot, forgot the card.")"
 [ "$(echo "$out" | sent)" = True ] && [ "$(echo "$out" | echomsg)" = "HQ $EID: this turn did work but the card wasn't updated (the session was nudged)" ] \
   && ok "echo: the write-back guard is shown too" || fail "echo stale: $out"
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\nref: Echo PR (merged) https://example.com/pr/echo\nref: Echo doc https://example.com/doc/echo\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: +1 ref, 1 ref updated" ] && ok "echo: a renamed ref is not counted as a new one" || fail "echo ref rename: $out"
+"$HQ" project add echop >/dev/null
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\nproject: echop\nlog: project kickoff notes written\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: +1 log, moved project" ] && grep -q ": project kickoff notes written" "$EC" \
+  && ok "echo: the session's own log line that starts with 'project' counts, the move's line doesn't" || fail "echo project log: $out"
+NID="$("$HQ" new "无项目回显" --no-focus | head -1)"; NC="$(ls "$T"/root/tasks/$NID-*/TASK.md)"
+python3 - "$NC" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p).read(); t = re.sub(r"^## Status", "## 当前状态", t, flags=re.M); open(p, "w").write(t)
+PY
+grep -q '^## 当前状态' "$NC" || fail "zh card heading not set"
+"$HQ" bind "$NID" --session sess-nop >/dev/null
+out="$(stop sess-nop "$(printf 'ok\n```hq-update\nnext: 下一步\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ ${NID}：next" ] && ok "echo: a task with no project speaks its card's language" || fail "echo no-project zh: $out"
 "$HQ" project add zhecho >/dev/null
 printf -- '---\nname: zhecho\nkind: duty\n---\n\n## 目标\n回显。\n' > "$T/root/projects/zhecho/PROJECT.md"
 ZID="$("$HQ" new "中文回显" --project zhecho --no-focus | head -1)"; "$HQ" bind "$ZID" --session sess-zh >/dev/null

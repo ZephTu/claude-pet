@@ -5947,6 +5947,7 @@ def _apply_update(card, entries, via, closing=None, wrote=None):
     count = lambda k, n=1: n and wrote.__setitem__(k, wrote.get(k, 0) + n)
     problems, fields, state = [], {}, []
     adds, marks, changes, logs, refs, dirs, pins = [], [], [], [], [], [], set()
+    auto_logs = set()      # log lines HQ adds itself (a project move): not the session's, not counted
     text = open(card, encoding="utf-8").read()
     lines = text.split("\n")
     todos = card_todos(lines)
@@ -6013,7 +6014,9 @@ def _apply_update(card, entries, via, closing=None, wrote=None):
             elif v != (parse_card(card).get("project") or ""):
                 fields["project"] = v
                 count("project")
-                logs.append(f"project {parse_card(card).get('project') or '(none)'!r} → {v!r}")
+                moved = f"project {parse_card(card).get('project') or '(none)'!r} → {v!r}"
+                logs.append(moved)
+                auto_logs.add(moved)
         elif k == "workdir":
             d = os.path.normpath(os.path.expanduser(v))
             if not os.path.isabs(d) or not os.path.isdir(d):
@@ -6063,7 +6066,9 @@ def _apply_update(card, entries, via, closing=None, wrote=None):
         merged = merge_refs(have, refs)
         if merged != have:
             fields["refs"] = merged
-            count("ref", max(1, len(merged) - len(have)))
+            old = {ref_key(r): str(r).strip() for r in have}
+            count("ref", sum(ref_key(r) not in old for r in merged))
+            count("ref_updated", sum(ref_key(r) in old and old[ref_key(r)] != r for r in merged))
     if pins:
         history_drop_links(card, pins)
     if dirs:
@@ -6081,7 +6086,7 @@ def _apply_update(card, entries, via, closing=None, wrote=None):
     for msg in dict.fromkeys(logs):
         if not re.search(r"^- \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: " + re.escape(msg) + r"\s*$", logged, re.M):
             append_log(card, msg)
-            count("log", "project" not in fields or not msg.startswith("project "))
+            count("log", msg not in auto_logs)
     return []
 
 def cmd_ask(args):
@@ -8901,7 +8906,7 @@ def resolved_problems_text(problems):
 ECHO_WORDS = {
     "zh": {"next": "next", "state": "state", "todo": "+{n} todo", "done": "{n} 条 todo 完成",
            "drop": "{n} 条 todo 不做", "change": "{n} 条 todo 改写", "log": "+{n} log", "ref": "+{n} ref",
-           "workdir": "+{n} workdir", "project": "换了项目", "sep": "，", "status": "状态 {a} → {b}",
+           "ref_updated": "{n} 条 ref 更新", "workdir": "+{n} workdir", "project": "换了项目", "sep": "，", "status": "状态 {a} → {b}",
            "asked": "ask {ids}", "answered": "记下回答 {ids}", "touch": "卡片没有新内容",
            "held": "{s} 暂缓：等 {n} 个问题答完", "refused": "hq-update 没写进卡片：{why}", "more": "（共 {n} 处）",
            "unresolved": "{n} 条回答没记上：{why}", "stale": "这轮做了事但卡片没更新",
@@ -8909,7 +8914,7 @@ ECHO_WORDS = {
            "not_end": "hq-update 块不在回复末尾，当成了示例", "lead": "HQ {id}："},
     "en": {"next": "next", "state": "state", "todo": "+{n} todo", "done": "{n} todo done",
            "drop": "{n} todo dropped", "change": "{n} todo reworded", "log": "+{n} log", "ref": "+{n} ref",
-           "workdir": "+{n} workdir", "project": "moved project", "sep": ", ", "status": "status {a} → {b}",
+           "ref_updated": "{n} ref updated", "workdir": "+{n} workdir", "project": "moved project", "sep": ", ", "status": "status {a} → {b}",
            "asked": "ask {ids}", "answered": "answer {ids} recorded", "touch": "nothing new on the card",
            "held": "{s} held: waiting on {n} question(s)", "refused": "hq-update NOT applied: {why}", "more": " ({n} problems)",
            "unresolved": "{n} answer(s) NOT recorded: {why}", "stale": "this turn did work but the card wasn't updated",
@@ -8918,7 +8923,24 @@ ECHO_WORDS = {
            "not_end": "the hq-update block isn't at the end of the reply, so it was taken for an example",
            "lead": "HQ {id}: "},
 }
-ECHO_ORDER = ("next", "state", "todo", "done", "drop", "change", "log", "ref", "workdir", "project")
+ECHO_ORDER = ("next", "state", "todo", "done", "drop", "change", "log", "ref", "ref_updated", "workdir", "project")
+
+
+def echo_lang(meta):
+    """The project's language (its PROJECT.md headings); for a task with none, the card's own."""
+    p = load_project(meta.get("project") or "")
+    if p:
+        return p["lang"]
+    return "zh" if re.search(r"^## .*[\u4e00-\u9fff]", meta.get("body") or "", re.M) else "en"
+
+
+def safe_echo(meta, **kw):
+    """turn_echo, never raising: it is only shown, and runs before the hook's real output."""
+    try:
+        return turn_echo(meta, echo_lang(meta), **kw)
+    except Exception as e:  # noqa: BLE001
+        print(f"hq hook: echo: {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
 
 
 def echo_problem(p, w, n=100):
@@ -9183,7 +9205,6 @@ def _hook_main():
             settle_status(c, "session")
         echo = dict(had_blocks=any(b["kind"] != "hq-update" or b["trailing"] for b in blocks), status=(status_before, parse_card(card).get("status")), wrote=wrote,
                     held=held_now, asked=new_asks, answered=answered, problems=problems, unresolved=unresolved)
-        lang = intake_lang(card)
         if payload.get("stop_hook_active"):
             # One nudge per turn, never a loop. Another Stop hook may have sent the turn back
             # before this one could: tell the session at its next prompt instead of never.
@@ -9191,7 +9212,7 @@ def _hook_main():
                 update_session(sid, lambda e: e.update(update_problems=problems))
             if unresolved:
                 update_session(sid, lambda e: e.update(resolved_problems=unresolved))
-            line = turn_echo(meta, lang, **echo)
+            line = safe_echo(meta, **echo)
             if line:
                 print(json.dumps({"systemMessage": line}, ensure_ascii=False))
             return
@@ -9209,7 +9230,7 @@ def _hook_main():
                            "Reply with just an hq-update block (status / next / state / todo / done / log …; "
                            "a block holding only `touch` if nothing changed), then finish.")
         out = {}
-        line = turn_echo(meta, lang, stale=bool(stale), sent_back=True, **echo)
+        line = safe_echo(meta, stale=bool(stale), sent_back=True, **echo)
         if line:
             out["systemMessage"] = line
         if reasons:

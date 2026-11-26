@@ -219,8 +219,12 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    automatic ones), which fields and how many todos, logs and refs were actually written (a
    repeat counts nothing), new asks by id, answers recorded — and what was refused or dropped,
    with the first reason and whether the session was sent back or hears at its next prompt;
-   also the write-back guard. A reply with no applied blocks and nothing wrong prints nothing.
-   The words follow the project's language (`lang` from PROJECT.md headings). E.g.
+   also the write-back guard. A renamed ref counts as updated, not added; the log line a
+   `project:` move adds itself is not counted. A reply with no hq block at its end (examples
+   mid-reply don't count) and nothing wrong prints nothing; a trailing block that changes
+   nothing — `touch`, a repeat, template placeholders — says "nothing new on the card". The
+   words follow the project's language (`lang` from PROJECT.md headings); a task with no project
+   uses its card's headings. The echo never raises: it can't cost the turn its `decision`. E.g.
    `HQ T-012: status active → waiting-on-me, next, +1 todo, ask T-012.5`.
 2. **Questions to you are tracked.** When Claude needs a decision, a confirmation or an
    action from you, it ends its reply with a block:
