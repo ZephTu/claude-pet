@@ -331,6 +331,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             pet["skin"] = BoardWindow.currentSkin()
             pet["prefs"] = BoardPrefs.current
             pet["phrases"] = BoardPhrases.current
+            pet["seenCards"] = BoardSeen.current
             pet["secretary"] = SecretaryController.shared.glance
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
@@ -338,6 +339,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             // How sessions start (skip permissions, where they open) and what finishing a task
             // does to its sessions: one choice for the Mac's board and every phone's — see BoardPrefs.
             BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
+            return (["ok": true], nil)
+        case "card-seen":
+            // Cards just read in a drawer (or new to the board): what they look like now — see BoardSeen.
+            BoardSeen.save(body["cards"] as? [String: Any] ?? [:])
             return (["ok": true], nil)
         case "phrases":
             // One change at a time, applied to the stored list — one list for the Mac and every phone.
