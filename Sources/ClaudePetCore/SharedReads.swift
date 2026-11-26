@@ -35,7 +35,7 @@ public actor SharedReads {
     /// Ops that only read: they leave what is kept alone. Any other op — including one added
     /// later and not listed here — is taken to change something.
     public static let readOnly: Set<String> = [
-        "board", "sessions", "status", "agents", "pet", "peek", "seen", "commands", "peek-tool",
+        "board", "sessions", "status", "agents", "pet", "peek", "seen", "card-seen", "commands", "peek-tool",
         "history", "prompt", "read-doc", "remote", "phrase-suggest", "jobs", "job-detail",
         "job-preview", "secretary", "intake-job",
     ]
@@ -74,5 +74,10 @@ public actor SharedReads {
     /// read still running is not joined (its answer may be from before the change).
     public func changed() {
         entries.removeAll()
+    }
+
+    /// Only these reads may have changed (a file the board reads from was written — BoardPush).
+    public func changed(_ keys: Set<String>) {
+        for key in keys { entries[key] = nil }
     }
 }

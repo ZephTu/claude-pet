@@ -115,7 +115,9 @@ hq import plan.json             # create it all: refused whole, problems listed,
             "sessions": ["<session id or 8+ char prefix>"], "confidence": "medium"}]}
 ```
 
-`projects` holds only new ones (also `done_when` — a list of criteria — and `brief`); a task names an
+`projects` holds only new ones (also `done_when` — a list of criteria — and `brief`); every todo
+starts with its owner (`@me`, `@claude` or `@<name>`: one with none would show in nobody's list, so
+it is refused); a task names an
 existing project directly (also `goal`, `log`), or with none gets the one whose directory holds its workdir. Live sessions are bound to their tasks, ended ones recorded on the
 cards; a session already on a task, a taken name or an open card with the same title is refused.
 `hq scan --apply-projects [--only a,b]` still makes one project per repository, without a kind —
@@ -153,7 +155,7 @@ Flags — where the card and the sessions disagree:
 |---|---|
 | `card-behind` | a session not mid-turn (neither working nor held at a prompt) called tools more than 10 min after the card was last written |
 | `idle-waiting` | an open task's next/state says it waits on a run (a wait word — wait on, watching, once … finishes, 等, 盯, 跑完后 … — and a machine word — build, job, CI, test, #12345, 构建, 跑 …), but nothing is working on it, waiting on you or running in the background, for 30 min. A background call counts from its launch to its end (its notification, a TaskStop, or the kill Claude Code records when it exits) wherever those are in the transcript, not only in the tail `status` reads otherwise |
-| `stale` | open and not updated for 7 days |
+| `stale` | open and not updated for 7 days (`hq board --json` carries the days as each task's `stale`, 0 otherwise; the board tags such a card "Nd untouched") |
 | `done-live` | done or abandoned with a session still running |
 | `over-budget` | the card is over 16 KB, 30 links or 30 todos |
 
@@ -163,7 +165,7 @@ another task. The board shows the Focus tasks' flags as ⚠ lines on their cards
 
 ### What a bound session does differently
 
-The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`):
+The hooks inject a short protocol into the session (see `protocol()` in `hqlib/protocol.py`):
 
 1. **The card is the source of truth.** Claude reads it first and writes progress back — not
    with `hq log/set/ref/addtodo/todo` calls (each tool call is another model round trip over
@@ -213,6 +215,19 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    the turn first, the problems are told at the next prompt instead. Card writes from hooks,
    the board and the CLI hold a per-card lock (`~/.claude/hq/state/locks/`). A turn that runs longer than two minutes without
    touching the card is sent back once to update it.
+
+   **The turn's echo.** The Stop hook also shows the user one line (a `systemMessage`, which
+   the session does not see) of what the turn's blocks did: the status change (including the
+   automatic ones), which fields and how many todos, logs and refs were actually written (a
+   repeat counts nothing), new asks by id, answers recorded — and what was refused or dropped,
+   with the first reason and whether the session was sent back or hears at its next prompt;
+   also the write-back guard. A renamed ref counts as updated, not added; the log line a
+   `project:` move adds itself is not counted. A reply with no hq block at its end (examples
+   mid-reply don't count) and nothing wrong prints nothing; a trailing block that changes
+   nothing — `touch`, a repeat, template placeholders — says "nothing new on the card". The
+   words follow the project's language (`lang` from PROJECT.md headings); a task with no project
+   uses its card's headings. The echo never raises: it can't cost the turn its `decision`. E.g.
+   `HQ T-012: status active → waiting-on-me, next, +1 todo, ask T-012.5`.
 2. **Questions to you are tracked.** When Claude needs a decision, a confirmation or an
    action from you, it ends its reply with a block:
 
@@ -518,7 +533,7 @@ as it is; `hq continue` carries it over.
 `refs` on a card holds related tickets, PRs and docs (`hq ref add T-012 "<title> <url>"`, or just a
 ticket like `QA-123`); bound sessions are asked to record a short title plus the full URL, and the
 board shows the title (cut to a few words). A card lists each link once, keyed by a canonical URL
-(`ref_key` / `canonical_url` in `bin/hq`; the board's `refKey` / `canonicalUrl` in `board.js` are
+(`ref_key` / `canonical_url` in `hqlib/refs.py`; the board's `refKey` / `canonicalUrl` in `board.js` are
 the same rules — keep them in step):
 
 | URL | Canonical form |
@@ -719,7 +734,10 @@ alternatives kept for a one-click choice. Feed notes (Zulip, Jira) never get `up
 somewhere else: what the last place got (its todo, log line and refs; a card it created, deleted —
 or marked abandoned if edited since; an update's next, status section, status, `closed` date and
 ticks, each put back unless changed since) is taken back out first, and the old place becomes an
-alternative. Moving to `update` with none of `--next/--state/--status/--done` takes the changes
+alternative. Moving to `task` with no `--title`, when no guess has one either, has the cheap model
+write a short title (the note itself goes into the goal; with no model to ask, its first line is
+the title; a note that is only a screenshot is "Quick note N-001", or 快速记录 for a Chinese
+secretary). Moving to `update` with none of `--next/--state/--status/--done` takes the changes
 from the model's update guess for that task; one that would change nothing is refused. `hq inbox drop|restore N-001`
 deletes an unsorted note or brings it back. `hq inbox [--all] [--json]` lists the unsorted notes and
 those sorted in the last 48 hours; `hq board --json` carries the same list as `inbox`.
@@ -916,7 +934,7 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 
 | Area | Checks | `--fix` |
 |---|---|---|
-| Hooks | `settings.json` (in `$CLAUDE_CONFIG_DIR` when set — the installers only wire `~/.claude`, so it says so) has `hq hook` once on SessionStart, UserPromptSubmit and Stop, and `~/.claude/hq/bin/hq` is there and executable; the pet's `pet-emit` on its 11 events, when the pet is installed; which Python hq runs with (3.9+) | nothing: settings.json is never edited; it names the installer to rerun. No hq hook at all is a warning (maybe `--no-hooks`), one wired in part an error |
+| Hooks | `settings.json` (in `$CLAUDE_CONFIG_DIR` when set — the installers only wire `~/.claude`, so it says so) has `hq hook` once on SessionStart, UserPromptSubmit and Stop, and `~/.claude/hq/bin/hq` is there and executable, with its `hqlib/` beside it; the pet's `pet-emit` on its 11 events, when the pet is installed; which Python hq runs with (3.9+) | nothing: settings.json is never edited; it names the installer to rerun. No hq hook at all is a warning (maybe `--no-hooks`), one wired in part an error |
 | Session bindings | `state/sessions.json` entries whose task is gone (looked up by folder, as the hook does), done or abandoned, or whose session has been quiet for `--days` (30; from `bound_at` when no transcript is found). Kept: a session still running (the pet's record and its pid; without the pet, a transcript or binding from the last day) and one holding a close (`held`, while the card still has `closing`) | unbinds them, judged outside the state lock and removed under it only if unchanged; an unbound session's older `delivered` list — which can name asks of earlier tasks — goes onto each ask as a `delivered` event, so no answer is told twice |
 | State files | `state/todo-seen.json` entries for todos no longer open; lock files in `state/locks/` of no card, project or HQ-wide lock (real folder names, compared without case) | drops the entries; removes a lock file only when it can take the lock without waiting, checked against the cards as they are right then |
 | Asks | asks on open tasks answered `later` when that closed them for good (before it meant "put off") | reopens each one still closed that way (`via: doctor`); active tasks go back to waiting-on-me |
@@ -945,10 +963,13 @@ bindings, todo-seen.json and lock files — shared by every root — are neither
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Todo / Log
-    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"snooze"|"move", …}
+    ├── asks.jsonl            append-only events: {"type": "open"|"resolve"|"reopen"|"snooze"|"move"
+    │                         |"delivered"|"undelivered", "id", …}: asked, answered, answered again,
+    │                         Later, carried to a continued card, the answer handed to its session (or not)
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
-├── bin/hq                    the CLI and hook entry point
+├── bin/hq                    the CLI and hook entry point (thin: it imports only what the command needs)
+├── hqlib/                    the CLI's code, one module per area (see Code layout below)
 ├── config.json               {"root": "<root>", "sites": {"jira": URL, "jenkins": URL}}
 └── state/
     ├── sessions.json         session id → bound task, delivery cursor, turn start, finished
@@ -964,6 +985,35 @@ every few seconds); `hq asks T-012 --all --json` has it. `hq ask resolve`,
 `hq todo` and `hq set` are the write API (`hq todo T-012 2 done --text "…"` matches the todo
 by its text when #2 has moved, and refuses if it is gone). Everything is plain files, so cards can also live
 in git.
+
+## Code layout
+
+`bin/hq` is a thin entry: `hq hook` imports `hqlib.hooks` and, for a session not bound to a task,
+nothing past `hqlib.core` and `hqlib.sessions`; any other command builds the parser in `hqlib.cli`,
+which imports only the module of the command it runs. A hook runs on every turn of every session,
+so keep it that way: a module imports at its top only modules listed before it in the table below,
+and reaches a later one with an import inside the function that needs it.
+
+| Module | What it holds |
+| --- | --- |
+| `core` | paths and constants, small utilities, the card lock, the hq-* blocks of a reply |
+| `sessions` | session bindings (`state/sessions.json`), the pet's live-session files, saved replies |
+| `cards` | reading and writing TASK.md, todos, retired categories |
+| `refs` | canonical URLs and keys, merging refs |
+| `history` | the card budget and HISTORY.md |
+| `projects` | the project registry, PROJECT.md sections, briefs, `hq project` |
+| `asks` | the asks ledger and the status it moves |
+| `protocol` | the text a bound session is given |
+| `focus` | the Focus list, new cards |
+| `update` | applying an hq-update block, repeated @me todos |
+| `continuation` | `hq continue` |
+| `inbox`, `feeds`, `intake`, `autoclose` | notes, Zulip/Jira feeds, Auto intake, closing settled todos |
+| `peek`, `onboard`, `status`, `garden`, `reports` | live sessions and Peek, scan/import, status, garden, the secretary's reports |
+| `board`, `commands` | `hq board` / `hq show`, and the small card commands |
+| `hooks`, `cli` | the hook entry, and the command line |
+
+The tests check that no name is defined twice (in one module, or a function in two) and what a
+hook loads.
 
 ## Tests
 

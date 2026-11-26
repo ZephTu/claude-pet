@@ -72,6 +72,15 @@ final class BoardWindow: NSWindow {
         webView.configuration.userContentController.installLanguageScript()
         center()
         setFrameAutosaveName("HQBoard")
+        // Told when what the board shows may have changed (BoardPush): the page reads again
+        // then, and polls only now and then.
+        NotificationCenter.default.addObserver(forName: BoardEvents.changed, object: nil, queue: .main) { [weak self] note in
+            let n = note.userInfo?["n"] as? Int ?? 0
+            MainActor.assumeIsolated {
+                guard let self, self.loaded else { return }
+                self.webView.evaluateJavaScript("window.hqPush && window.hqPush(\(n));")
+            }
+        }
         if let url = PetSchemeHandler.url(path: "board/board.html") {
             webView.load(URLRequest(url: url))
         } else {
@@ -282,10 +291,19 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         // The Mac's window and every phone share the polled reads (SharedReads); anything else
         // may change what they say, so what is kept is dropped before it runs and once it is done.
         let op = body["op"] as? String ?? ""
-        guard SharedReads.changes(op) else { return await perform(body) }
+        guard SharedReads.changes(op) else {
+            let r = await perform(body)
+            // Leaves hq's answers as they were, but which cards were read is shown on every board
+            // (their "updated" marks — BoardSeen): the others hear of it.
+            if op == "card-seen" { await MainActor.run { BoardEvents.shared.nudge() } }
+            return r
+        }
         await SharedReads.shared.changed()
         let r = await perform(body)
         await SharedReads.shared.changed()
+        // Every other open board hears of it too — what changed may be in no watched file (a
+        // setting, a quick phrase, the secretary's state).
+        await MainActor.run { BoardEvents.shared.nudge() }
         return r
     }
 
@@ -331,6 +349,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             pet["skin"] = BoardWindow.currentSkin()
             pet["prefs"] = BoardPrefs.current
             pet["phrases"] = BoardPhrases.current
+            pet["seenCards"] = BoardSeen.current
             pet["secretary"] = SecretaryController.shared.glance
             let data = (try? JSONSerialization.data(withJSONObject: pet, options: [.sortedKeys])) ?? Data("{}".utf8)
             return (String(decoding: data, as: UTF8.self), nil)
@@ -338,6 +357,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             // How sessions start (skip permissions, where they open) and what finishing a task
             // does to its sessions: one choice for the Mac's board and every phone's — see BoardPrefs.
             BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
+            return (["ok": true], nil)
+        case "card-seen":
+            // Cards just read in a drawer (or new to the board): what they look like now — see BoardSeen.
+            BoardSeen.save(body["cards"] as? [String: Any] ?? [:])
             return (["ok": true], nil)
         case "phrases":
             // One change at a time, applied to the stored list — one list for the Mac and every phone.
@@ -1630,6 +1653,8 @@ extension BoardWindow: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
+        // Changes are pushed to this page: its timer can slow down (see BoardEvents).
+        if BoardEvents.shared.running { webView.evaluateJavaScript("window.hqPushOn && window.hqPushOn();") }
         if let script = pending {
             pending = nil
             webView.evaluateJavaScript(script)

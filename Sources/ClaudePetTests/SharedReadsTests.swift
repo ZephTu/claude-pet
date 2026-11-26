@@ -79,6 +79,17 @@ enum SharedReadsTests {
         t.check("a read after a change doesn't join one from before it",
                 o.v == "v5" && o.w == "v6" && box.count == 6)
 
+        // A file change drops only the reads it can make stale (BoardPush), not `claude agents`.
+        wait {
+            _ = await reads.read("board", ttl: 2, fetch)                     // v7
+            o.v = await reads.read("agents", ttl: 20, fetch).text           // v6, still kept
+            await reads.changed(BoardPush.staleReads)
+            o.w = await reads.read("board", ttl: 2, fetch).text             // v8
+            o.v = (o.v ?? "") + "/" + (await reads.read("agents", ttl: 20, fetch).text ?? "")
+        }
+        t.check("a pushed change drops board, sessions and status but keeps agents",
+                o.v == "v6/v6" && o.w == "v8" && box.count == 8)
+
         // A failed read isn't kept.
         let failing = Box()
         let fail: @Sendable () async -> SharedReads.Answer = { _ = failing.bump(); return .init(text: nil, error: "boom") }

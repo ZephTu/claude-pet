@@ -299,6 +299,8 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                     "source": u.source]
         }
         bridge.onMarkAllRead = { [weak self] in self?.markAllRead() }
+        // The board's window and phones are told when its files change, rather than polling.
+        BoardEvents.shared.start()
         // Phone access to the board, if it was left on (Settings → Phone access).
         BoardServer.shared.startIfEnabled()
         panel.showOnDesktop()
@@ -397,6 +399,20 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
         panel?.stopClickThroughMonitoring()
     }
 
+    /// The board shows the pet's unread marks and dots, which change in memory as well as with
+    /// the files (a finished turn counts only once it has held — StateAggregator.settled — and
+    /// no file is written then): when they change, the open boards are told (BoardEvents).
+    private var boardShown = ""
+    private func boardNudgeIfChanged() {
+        let shown: [String: Any] = ["unread": BoardBridge.unreadBySession?() ?? [:], "dots": bridge?.dotState ?? [:]]
+        guard let data = try? JSONSerialization.data(withJSONObject: shown, options: [.sortedKeys]) else { return }
+        let key = String(decoding: data, as: UTF8.self)
+        guard key != boardShown else { return }
+        let first = boardShown.isEmpty
+        boardShown = key
+        if !first { BoardEvents.shared.nudge() }
+    }
+
     private func render() {
         // The demo drives the display itself; a real render would fight it.
         guard demo == nil else { return }
@@ -463,6 +479,7 @@ final class PetAppDelegate: NSObject, NSApplicationDelegate {
                                   "status": hq.statusByTask[$0.task] ?? ""]
                              },
                              jobs: jobs.rows)
+        boardNudgeIfChanged()
         // One number for "how many things want me": sessions blocked on the user,
         // plus finished turns they have not looked at.
         // A postponed item does not count toward the badge: the user said "not
