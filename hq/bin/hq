@@ -4248,13 +4248,16 @@ INTAKE_SOURCES = ("github-review",)         # the auto sources that make tasks s
 INTAKE_KEYS = ("repos", "workdir", "run", "permissions", "done", "focus", "title", "goal", "prompt")
 INTAKE_YES = ("yes", "on", "true", "1", "是", "开")
 # `permissions: review`: what a session started on someone else's PR may do without asking — read
-# the code and the PR, review with skills and subagents, bind itself — and nothing more. The PR is
-# written by whoever asked for the review (its title, branch and diff can carry instructions), so
-# the session never skips permission checks: it runs in dontAsk mode, where anything not listed
-# here (editing, other commands, the network, posting on GitHub) is refused rather than asked.
-# `skip`, its old name, means the same: it never skips them either.
-INTAKE_REVIEW_TOOLS = ("Read", "Grep", "Glob", "Agent", "Task", "Skill", "TodoWrite",
-                       "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)")
+# files, review with /code-review and subagents, read this one PR with gh, bind itself — and nothing
+# more. The PR is written by whoever asked for the review (its title, branch and diff can carry
+# instructions), so the session never skips permission checks: it runs in dontAsk mode, where
+# anything not listed (editing, other commands, other skills, posting on GitHub) is refused rather
+# than asked. Never the bare `Skill`: a skill's `allowed-tools` front matter allows those tools
+# while it runs, so any installed skill with `Bash` or `*` there would open everything. gh is held
+# to the PR's own github.com URL (see intake_review_args): `-R host/…` must not send a request
+# elsewhere. `skip`, the old name, means the same: it never skips them either.
+INTAKE_REVIEW_TOOLS = ("Read", "Grep", "Glob", "Agent", "Task", "Skill(code-review)", "TodoWrite")
+INTAKE_PR_URL = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+$")
 INTAKE_NO = ("no", "off", "false", "0", "否", "关")
 INTAKE_DEFAULT = {
     "github-review": {
@@ -4455,7 +4458,7 @@ def find_claude(given=None):
     return None
 
 
-def intake_launch(tid, title, wd, prompt, review, lang, manual, claude=None):
+def intake_launch(tid, title, wd, prompt, review, lang, manual, claude=None, url=""):
     """Starts a background Claude Code session on the task (`claude --bg`, as the board's ▶ New
     session does in the background): it is told to bind itself first, and is bound from here too
     once `claude agents` reports its id. It never skips permission checks: `review` runs it in
@@ -4470,7 +4473,9 @@ def intake_launch(tid, title, wd, prompt, review, lang, manual, claude=None):
     name = f"{tid} {title}"[:60]
     env = intake_env(os.environ)
     env["HQ_ROOT"] = hq_root()
-    args = [claude, "--bg", "--name", name] + (intake_review_args(hq, tid) if review else []) + [first + prompt]
+    # `--` before the prompt: --allowedTools takes every word after it up to the next flag, and
+    # would take the prompt — PR title and all — as more rules.
+    args = [claude, "--bg", "--name", name] + (intake_review_args(hq, tid, url) if review else []) + ["--", first + prompt]
     try:
         # A session of its own: the job's end kills its process group, which must not take this along.
         r = subprocess.run(args, cwd=wd, capture_output=True, text=True, timeout=30, env=env, start_new_session=True)
@@ -4498,10 +4503,12 @@ def intake_launch(tid, title, wd, prompt, review, lang, manual, claude=None):
     return short
 
 
-def intake_review_args(hq, tid):
-    """`permissions: review`: dontAsk mode, allowed only INTAKE_REVIEW_TOOLS and its own `hq bind`
-    (one value per --allowedTools, so no rule swallows the prompt after it)."""
-    tools = INTAKE_REVIEW_TOOLS + (f"Bash({hq} bind {tid})",)
+def intake_review_args(hq, tid, url=""):
+    """`permissions: review`: dontAsk mode, allowed only INTAKE_REVIEW_TOOLS, its own `hq bind` and
+    `gh pr view|diff|checks` on the PR's own URL — gh takes the host from the URL, so `-R` added
+    after it can't point it at another server. A URL that isn't a plain github.com PR gets no gh."""
+    gh = tuple(f"Bash(gh pr {verb} {url}:*)" for verb in ("view", "diff", "checks")) if INTAKE_PR_URL.match(url or "") else ()
+    tools = INTAKE_REVIEW_TOOLS + gh + (f"Bash({hq} bind {tid})",)
     return ["--permission-mode", "dontAsk"] + [a for t in tools for a in ("--allowedTools", t)]
 
 
@@ -4539,7 +4546,8 @@ def intake_make(source, duty, cfg, item, claude=None, dry=False, record=None):
             if "*" in cfg["repos"] and cfg["permissions"] == "review":
                 raise IntakeError("repos: * with permissions: review — name the repositories, or let it ask for permissions")
             prompt = intake_fill(cfg.get("prompt") or dflt["prompt"][lang], values)
-            sid = intake_launch(tid, title, wd, prompt, cfg["permissions"] == "review", lang, cfg["done"] == "manual", claude)
+            sid = intake_launch(tid, title, wd, prompt, cfg["permissions"] == "review", lang, cfg["done"] == "manual", claude,
+                                item.get("url", ""))
             out["session"] = sid
             append_log(card, ("后台 session 已启动" if lang == "zh" else "background session started") + (f" {sid[:8]}" if sid else ""))
         except IntakeError as e:

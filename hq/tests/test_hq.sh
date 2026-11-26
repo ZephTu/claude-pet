@@ -2554,12 +2554,14 @@ grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && gre
   && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q '^Note: carefully$' "$ITC" \
   && grep -q 'title: "Review web#12: Fix login"' "$ITC" && grep -q '"abcd1234"' "$ITC" && grep -q "review-requested=@me" "$IK/search-args" \
   && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref, the default title and the section's goal" || fail "intake task: $(cat "$ITC")"
-grep -qx -- "--bg" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
+grep -qx -- "--bg" "$IK/claude-args" && grep -q "^Start by running \`.*/hq bind $IT\`" "$IK/claude-args" \
+  && [ "$(grep -B1 "^Start by running" "$IK/claude-args" | head -1)" = "--" ] \
   && ! grep -q -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -A1 -x -- "--permission-mode" "$IK/claude-args" | grep -qx dontAsk \
-  && grep -qx "Bash(gh pr diff:\*)" "$IK/claude-args" && grep -qx "Bash(.*/hq bind $IT)" "$IK/claude-args" && ! grep -qxE "Edit|Write|WebFetch|Bash" "$IK/claude-args" \
+  && grep -qx "Skill(code-review)" "$IK/claude-args" && grep -qx "Bash(gh pr diff https://github.com/acme/web/pull/12:\*)" "$IK/claude-args" \
+  && grep -qx "Bash(.*/hq bind $IT)" "$IK/claude-args" && ! grep -qxE "Edit|Write|WebFetch|Bash|Skill|Bash\(gh pr (view|diff|checks):\*\)" "$IK/claude-args" \
   && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
   && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = "none none none none" ] \
-  && ok "intake run: a background session in the workdir, told to bind, never skipping permissions (permissions: skip is review — dontAsk, read-only tools), with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
+  && ok "intake run: a background session in the workdir, told to bind, never skipping permissions (permissions: skip is review — dontAsk, read-only tools, Skill only code-review, gh only on this PR, the prompt after --), with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
 "$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
 mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
 ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"

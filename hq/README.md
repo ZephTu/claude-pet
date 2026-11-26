@@ -786,7 +786,8 @@ workdir: ~/code/bigtest     # where the task's work and its session happen (defa
                             #   one written here must exist — never another folder instead)
 run: yes                    # start a background session on each new task (default: no)
 permissions: review         # that session asks nothing but may only read: --permission-mode dontAsk with
-                            #   read-only tools (default: ask; `skip`, its old name, means review too)
+                            #   read-only tools, /code-review and gh on that PR
+                            #   (default: ask; `skip`, its old name, means review too)
 done: manual                # only the user closes the task (default); auto: the session may
 focus: yes                  # the task joins Focus (default)
 title: Review {name}#{number}: {title}
@@ -806,9 +807,12 @@ waiting-on-me. With it, `hq intake` starts `claude --bg --name "<id> <title>"` i
 session of its own, and without the pet job's `CLAUDE_PET_JOB` / `CLAUDE_PET_RUN`, so the pet sees
 it), never with `--dangerously-skip-permissions`: the PR's title, branch and diff come from whoever
 asked for the review. With `permissions: review` it adds `--permission-mode dontAsk` and an
-`--allowedTools` each for `Read`, `Grep`, `Glob`, `Agent`, `Task`, `Skill`, `TodoWrite`,
-`Bash(gh pr view:*)`, `Bash(gh pr diff:*)`, `Bash(gh pr checks:*)` and its own `Bash(<hq> bind <id>)`;
-anything else (editing, other commands, the network, posting on GitHub) is refused, not asked. The
+`--allowedTools` each for `Read` (any file), `Grep`, `Glob`, `Agent`, `Task`, `Skill(code-review)`
+(never the bare `Skill`: a skill's own `allowed-tools` would widen the list), `TodoWrite`,
+`Bash(gh pr view|diff|checks <the PR's URL>:*)` (only for a plain github.com PR URL: gh then takes
+the host from the URL, so an added `-R` can't send it elsewhere) and its own `Bash(<hq> bind <id>)`;
+anything else (editing, other commands, other skills, posting on GitHub) is refused, not asked. The
+prompt follows a `--`: `--allowedTools` would otherwise take it as more rules. The
 session is told to run `hq
 bind <id>` first — and, for `done: manual`, never to close the task — then the prompt, and hq binds
 it itself once `claude agents --json --all` lists it. One that fails to start is logged on
