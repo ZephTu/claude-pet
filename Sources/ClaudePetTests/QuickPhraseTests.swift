@@ -15,6 +15,21 @@ enum QuickPhraseTests {
         t.check("closing punctuation and case don't make another phrase",
                 QuickPhrases.key("进度怎么样了？") == QuickPhrases.key("进度怎么样了") && QuickPhrases.key("OK!") == "ok")
 
+        let l = ["好", "继续", "部署吧"]
+        t.check("add puts a new phrase at the end, and not one already there",
+                QuickPhrases.apply(l, action: "add", text: " 合并了 ") == l + ["合并了"]
+                && QuickPhrases.apply(l, action: "add", text: "继续。") == l)
+        t.check("insert puts it back where it was (Undo of a removal)",
+                QuickPhrases.apply(["好", "部署吧"], action: "insert", text: "继续", at: 1) == l
+                && QuickPhrases.apply(l, action: "insert", text: "x", at: 99) == l + ["x"])
+        t.check("remove and up go by the phrase, not a position",
+                QuickPhrases.apply(l, action: "remove", text: "继续") == ["好", "部署吧"]
+                && QuickPhrases.apply(l, action: "up", text: "部署吧") == ["好", "部署吧", "继续"]
+                && QuickPhrases.apply(l, action: "up", text: "好") == l
+                && QuickPhrases.apply(l, action: "remove", text: "gone") == l)
+        t.check("an unknown action or an empty phrase changes nothing",
+                QuickPhrases.apply(l, action: "set", text: "x") == nil && QuickPhrases.apply(l, action: "add", text: "  ") == nil)
+
         func line(_ display: String, paste: String? = nil) -> String {
             var d: [String: Any] = ["display": display, "pastedContents": [String: Any]()]
             if let p = paste { d["pastedContents"] = ["1": ["id": 1, "type": "text", "content": p]] }

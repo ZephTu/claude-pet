@@ -21,6 +21,26 @@ public enum QuickPhrases {
         return out
     }
 
+    /// One change to the list, applied to the list as it is now (not a copy the board read a while
+    /// ago, so the Mac and a phone editing at once don't undo each other): "add" at the end,
+    /// "insert" at `at` (Undo of a removal), "remove", "up" (one place earlier). Phrases are
+    /// matched by `key`. nil for an unknown action or an empty phrase.
+    public static func apply(_ list: [String], action: String, text: String, at: Int? = nil) -> [String]? {
+        let t = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+        let k = key(t)
+        guard !k.isEmpty else { return nil }
+        var out = list
+        let i = out.firstIndex { key($0) == k }
+        switch action {
+        case "add": if i == nil { out.append(t) }
+        case "insert": if i == nil { out.insert(t, at: max(0, min(at ?? out.count, out.count))) }
+        case "remove": if let i { out.remove(at: i) }
+        case "up": if let i, i > 0 { out.swapAt(i, i - 1) }
+        default: return nil
+        }
+        return clean(out)
+    }
+
     /// What makes two replies the same one: case, runs of white space and closing punctuation
     /// don't count ("进度怎么样了" and "进度怎么样了？").
     public static func key(_ s: String) -> String {

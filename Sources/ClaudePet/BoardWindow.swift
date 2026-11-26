@@ -314,8 +314,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             BoardPrefs.save(body["prefs"] as? [String: Any] ?? [:])
             return (["ok": true], nil)
         case "phrases":
-            // The whole list, as the board's Settings left it — one list for the Mac and every phone.
-            return (["phrases": BoardPhrases.save(body["phrases"] as? [Any] ?? [])], nil)
+            // One change at a time, applied to the stored list — one list for the Mac and every phone.
+            guard let list = BoardPhrases.change(action: str("action"), text: str("text"),
+                                                 at: (body["at"] as? NSNumber)?.intValue) else {
+                return (nil, "unknown phrase change")
+            }
+            return (["phrases": list], nil)
         case "phrase-suggest": return (["suggestions": await BoardPhrases.suggestions()], nil)
         // Phone access (BoardServer): on or off, pairing a phone, the paired ones. The Mac's
         // window only — BoardServer refuses these from a phone.

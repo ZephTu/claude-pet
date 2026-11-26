@@ -36,8 +36,9 @@ enum BoardPhrases {
 
     static var current: [String] { UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [] }
 
-    static func save(_ raw: [Any]) -> [String] {
-        let list = QuickPhrases.clean(raw)
+    /// One change (QuickPhrases.apply) to the list as stored now; nil when the request makes no sense.
+    static func change(action: String, text: String, at: Int?) -> [String]? {
+        guard let list = QuickPhrases.apply(current, action: action, text: text, at: at) else { return nil }
         UserDefaults.standard.set(list, forKey: defaultsKey)
         return list
     }
