@@ -514,12 +514,6 @@ def prefs_text(meta):
             "asks; they apply to every task, but the card and the user's own words win):\n" + b)
 
 
-def session_context_text(meta):
-    """What a bound session is told besides the protocol: its project's brief and the user's
-    preferences. One text, so a change to either is announced once (`brief_hash`)."""
-    return "\n\n".join(t for t in (project_brief_text(meta), prefs_text(meta)) if t)
-
-
 def brief_hash(text):
     import hashlib   # only a bound session's hook needs it
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12] if text else ""

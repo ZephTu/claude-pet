@@ -148,6 +148,16 @@ OWED_AFTER_DAYS = 2          # an @me todo or an ask open longer than this is "o
 # answers: the session's suggestion was right) teaches nothing.
 LEARN_NOTE_CHARS = 10
 LEARN_MAX = 20
+# What the board writes for "make it my todo", before the user's own words (if any).
+MADE_TODO_RE = re.compile(r"^made an @me todo — the user will do it:?\s*")
+
+
+def learn_note(a):
+    """The user's own words in an answer, or None when it isn't theirs: only answers given on the
+    board count (a session writes its own note for an answer it records from the chat)."""
+    if a.get("via") != "board":
+        return None
+    return MADE_TODO_RE.sub("", a["note"]).strip()
 EDITS_LOOKBACK = 5           # how many recent reports are checked for the user's edits
 
 
@@ -291,7 +301,7 @@ def task_activity(meta, start, end, reported_closed=()):
              for x in meta["todos"] if inw(naive(x["created"]))]
     asks = read_asks(meta["dir"])
     answered = [{"id": a["id"], "text": a.get("text", ""), "answer": a["state"], "note": a.get("note") or "",
-                 "at": iso(naive(a.get("resolved_at")))}
+                 "at": iso(naive(a.get("resolved_at"))), "via": a.get("via") or ""}
                 for a in asks if a["state"] != "open" and inw(naive(a.get("resolved_at")))]
     asked = [{"id": a["id"], "text": a.get("text", ""), "at": iso(naive(a.get("ts")))}
              for a in asks if inw(naive(a.get("ts"))) and a["state"] != "moved"]   # counted where it went
@@ -400,8 +410,9 @@ def gather_report(kind, since=None, gh=True, now=None):
     if kind == "weekly":
         # How the user answered this week, where the answer said more than yes: what the secretary
         # turns into Preferences in profile.md, which every task session is told (`prefs_text`).
-        r["learn"] = sorted(({"task": t["id"], **a} for t in tasks for a in t["answered"]
-                             if a["answer"] == "drop" or len(a["note"].strip()) >= LEARN_NOTE_CHARS),
+        r["learn"] = sorted(({"task": t["id"], **a, "note": learn_note(a)} for t in tasks for a in t["answered"]
+                             if learn_note(a) is not None
+                             and (a["answer"] == "drop" or len(learn_note(a)) >= LEARN_NOTE_CHARS)),
                             key=lambda a: a["at"])[-LEARN_MAX:]
         # The weekly look over the board (`hq garden`): proposals for the reply, not the report.
         try:

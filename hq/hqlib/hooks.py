@@ -176,7 +176,7 @@ def _hook_main():
     # Only a bound session's hook loads the rest of hq.
     from .cards import find_card, parse_card
     from .history import history_text
-    from .projects import brief_hash, session_context_text
+    from .projects import brief_hash, prefs_text, project_brief_text
     from .asks import (
         add_ask, answered_as, append_event, await_answer, close_ready, CLOSED_STATUSES, current_ask, read_asks, release_close,
         resolve_ask, settle_status, snooze_until,
@@ -192,21 +192,21 @@ def _hook_main():
     if event == "SessionStart":
         # Every source — startup, resume, clear, compact — gets the open @claude todos: after a
         # compaction or /clear the session no longer remembers them.
-        brief = session_context_text(meta)
+        brief, prefs = project_brief_text(meta), prefs_text(meta)
 
         def note_start(e):
-            e.update(announced=True, brief=brief_hash(brief))
+            e.update(announced=True, brief=brief_hash(brief), prefs=brief_hash(prefs))
             for k in ("grants", "grants_task"):     # what retired standing grants kept
                 e.pop(k, None)
         update_session(sid, note_start)
-        parts = [protocol(meta), brief, history_text(meta), open_asks_text(meta, sid=sid, state=state),
+        parts = [protocol(meta), brief, prefs, history_text(meta), open_asks_text(meta, sid=sid, state=state),
                  me_todos_text(meta), claude_todos_text(meta, payload.get("source") or "")]
         emit(event, "\n\n".join(p for p in parts if p))
 
     elif event == "UserPromptSubmit":
         turn_start = time.time()
         lines = []
-        brief = session_context_text(meta)
+        brief, prefs = project_brief_text(meta), prefs_text(meta)
         if not s.get("announced", True):
             # Once, in place of the SessionStart this session had before it was bound.
             moved = s.get("continued_from")
@@ -216,20 +216,22 @@ def _hook_main():
                               f"{a['moved_from']} is now {a['id']}" for a in read_asks(meta["dir"])
                               if a.get("moved_from") and a["state"] == "open"))
                           if moved else "The user bound this session to an HQ task from the board.") + "\n" + protocol(meta))
-            if brief:
-                lines.append(brief)
+            lines += [t for t in (brief, prefs) if t]
             h = history_text(meta)
             if h:
                 lines.append(h)
             for todos in (me_todos_text(meta), claude_todos_text(meta)):
                 if todos:
                     lines.append(todos)
-        elif brief_hash(brief) != (s.get("brief") or "") and (brief or s.get("brief")):
-            # The project's brief or the user's preferences changed, or the task moved to another
-            # project (or none): once.
-            lines.append(f"Context for {meta['id']}, new or changed since you last saw it:\n{brief}" if brief else
-                         f"{meta['id']} no longer has a project brief or user preferences: what the earlier ones said "
-                         "no longer applies.")
+        else:
+            if brief_hash(brief) != (s.get("brief") or "") and (brief or s.get("brief")):
+                # The project's brief changed, or the task moved to another project (or none): once.
+                lines.append(f"Project context for {meta['id']}, new or changed since you last saw it:\n{brief}" if brief else
+                             f"{meta['id']} no longer has a project brief: what the earlier one said no longer applies.")
+            if brief_hash(prefs) != (s.get("prefs") or "") and (prefs or s.get("prefs")):
+                # The user's Preferences changed (or were emptied): once.
+                lines.append(f"New or changed since you last saw them — {prefs}" if prefs else
+                             "The user's standing preferences were removed: what they said no longer applies.")
         if s.get("update_problems"):
             lines.append(update_problems_text(meta, s["update_problems"]))
         if s.get("resolved_problems"):
@@ -251,7 +253,7 @@ def _hook_main():
         told = {a["id"] for a in fresh}
 
         def note_turn(entry):
-            entry.update(turn_start=turn_start, announced=True, brief=brief_hash(brief))
+            entry.update(turn_start=turn_start, announced=True, brief=brief_hash(brief), prefs=brief_hash(prefs))
             for k in ("update_problems", "resolved_problems", "grants", "grants_task"):  # the last two: retired standing grants
                 entry.pop(k, None)
             entry.pop("continued_from", None)

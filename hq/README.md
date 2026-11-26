@@ -656,8 +656,9 @@ Claude Pet runs it from the board's **Secretary** button. The button opens a sch
 `~/.claude/pet/jobs/secretary/`, and runs it once per message:
 
 - the job runs `claude -p --agent secretary` in the root, always in the same session, with its
-  compaction (at the job's percentage of the window or 150k tokens, whichever comes first) and
-  quota guard;
+  compaction (at the job's percentage of the window, or at its `compactAboveTokens`, 150k, which
+  the secretary puts back when missing: 50% of a 1M window let the session reach 188k) and quota
+  guard;
 - the session is bound to the secretary's card before its first run, so its `hq-asks` become
   that card's asks in Needs you;
 - a **Yes** to one of those asks on the board starts a run, and the hook hands the session the
@@ -669,7 +670,7 @@ The job is made with the weekly report prompt and a Friday 17:00 schedule, but o
 edited. A job made earlier that is off and still has the old placeholder prompt, or that writes
 the old daily report, gets the weekly prompt; its schedule moves to Fridays (the default
 placeholder or every N minutes: 17:00; a daily or weekday time the user chose: that time on
-Fridays; a cron or weekly one stays). One with a prompt of the user's own shows as such in the
+Fridays, as does a weekly one on several days; a cron that fires more than once a week: Friday 17:00; one that runs at most weekly stays). One with a prompt of the user's own shows as such in the
 window; turning reports on there replaces the prompt and moves the schedule the same way. A scheduled run that finds the session busy (the user is chatting) waits
 up to 10 minutes for the lock instead of being skipped.
 
@@ -693,7 +694,7 @@ hasn't been written since. The secretary's card is left out. `--json` gives `{no
 findings: [{kind, task, …, asked, settled}], duplicates: [{tasks, titles, statuses, goals, score,
 sharedLinks, words, mention, asked, settled}]}`.
 
-`hq report weekly` (Fridays, so the evening report's scheduled run) includes it as `garden` and ends
+`hq report weekly` (the secretary's scheduled run, Fridays) includes it as `garden` and ends
 its text with a "Tidying the board" section; the secretary proposes the cleanups worth doing as
 asks on its card (at most five a week) and carries out a Yes with `hq set`, `hq continue`,
 `hq addtodo` …

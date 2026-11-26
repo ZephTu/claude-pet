@@ -89,9 +89,12 @@ public struct Job: Codable, Equatable, Sendable {
     /// deleted, so a job that runs every hour doesn't leave hundreds of sessions behind.
     public var keepSessions: Int
     /// Resumed session: compact it first once its context fills this percentage of the model's
-    /// window, or reaches `Job.compactCeiling` tokens, whichever comes first. 0: never (Claude Code
-    /// still compacts on its own when the window is full).
+    /// window. 0: never (Claude Code still compacts on its own when the window is full).
     public var compactAbovePct: Int
+    /// Resumed session: also compact once its context reaches this many tokens, whatever the
+    /// percentage says (on a 1M window, 50% lets every run re-read half a million tokens). 0: no
+    /// such limit. Not on the form: set by what makes such a job (the secretary).
+    public var compactAboveTokens: Int
     public var notify: Notify
     /// Claude runs: the agent the session runs as (`--agent`), from the job's folder's
     /// `.claude/agents/` or the user's. Empty: plain Claude Code. Not on the board's form: set by
@@ -106,18 +109,19 @@ public struct Job: Codable, Equatable, Sendable {
                 enabled: Bool = true, model: String = "", permission: Permission = .standard,
                 timeoutMinutes: Int = 20, skipWeekPct: Int = 90, skipFiveHourPct: Int = 90,
                 sessionMode: SessionMode = .fresh, keepSessions: Int = 20, compactAbovePct: Int = 50,
-                notify: Notify = .failure, agent: String = "", allowedTools: [String] = []) {
+                compactAboveTokens: Int = 0, notify: Notify = .failure, agent: String = "", allowedTools: [String] = []) {
         self.id = id; self.name = name; self.kind = kind; self.prompt = prompt; self.command = command
         self.cwd = cwd; self.schedule = schedule; self.enabled = enabled; self.model = model
         self.permission = permission; self.timeoutMinutes = timeoutMinutes
         self.skipWeekPct = skipWeekPct; self.skipFiveHourPct = skipFiveHourPct
         self.sessionMode = sessionMode; self.keepSessions = keepSessions; self.compactAbovePct = compactAbovePct
-        self.notify = notify; self.agent = agent; self.allowedTools = allowedTools
+        self.compactAboveTokens = compactAboveTokens; self.notify = notify; self.agent = agent; self.allowedTools = allowedTools
     }
 
     enum Keys: String, CodingKey {
         case id, name, kind, prompt, command, cwd, schedule, enabled, model, permission, timeoutMinutes,
-             skipWeekPct, skipFiveHourPct, sessionMode, keepSessions, compactAbovePct, notify, agent, allowedTools
+             skipWeekPct, skipFiveHourPct, sessionMode, keepSessions, compactAbovePct, compactAboveTokens, notify, agent,
+             allowedTools
     }
 
     /// Every field but the id may be missing: a job written by an older version, or by hand,
@@ -132,7 +136,8 @@ public struct Job: Codable, Equatable, Sendable {
                   timeoutMinutes: v(.timeoutMinutes, d.timeoutMinutes),
                   skipWeekPct: v(.skipWeekPct, d.skipWeekPct), skipFiveHourPct: v(.skipFiveHourPct, d.skipFiveHourPct),
                   sessionMode: v(.sessionMode, d.sessionMode), keepSessions: v(.keepSessions, d.keepSessions),
-                  compactAbovePct: v(.compactAbovePct, d.compactAbovePct), notify: v(.notify, d.notify),
+                  compactAbovePct: v(.compactAbovePct, d.compactAbovePct),
+                  compactAboveTokens: v(.compactAboveTokens, d.compactAboveTokens), notify: v(.notify, d.notify),
                   agent: v(.agent, d.agent), allowedTools: v(.allowedTools, d.allowedTools))
     }
 
@@ -150,20 +155,17 @@ public struct Job: Codable, Equatable, Sendable {
         if !(1...24 * 60).contains(timeoutMinutes) { return L("The time limit must be between 1 minute and 24 hours.", "时间上限要在 1 分钟到 24 小时之间。") }
         if !(0...100).contains(skipWeekPct) || !(0...100).contains(skipFiveHourPct) { return L("A quota percentage is between 0 and 100.", "额度百分比要在 0 到 100 之间。") }
         if !(1...500).contains(keepSessions) { return L("Keep between 1 and 500 sessions.", "保留的 session 数要在 1 到 500 之间。") }
+        if compactAboveTokens < 0 { return L("The compaction token limit can't be negative.", "compact 的 token 上限不能是负数。") }
         if !(0...100).contains(compactAbovePct) { return L("The compaction threshold is a percentage between 0 and 100.", "compact 阈值是 0 到 100 之间的百分比。") }
         if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return L("That model name has odd characters.", "模型名里有奇怪的字符。") }
         if agent.range(of: #"^[A-Za-z0-9._-]*$"#, options: .regularExpression) == nil { return L("That agent name has odd characters.", "agent 名里有奇怪的字符。") }
         return schedule.problem()
     }
 
-    /// Past this many tokens a resumed session is compacted whatever the percentage says: on a
-    /// 1M-token window, 50% would let every run re-read half a million tokens.
-    public static let compactCeiling = 150_000
-
     /// Whether a resumed session with this much context should be compacted before the next run.
     public func shouldCompact(contextTokens ctx: Int, window: Int) -> Bool {
         guard compactAbovePct > 0, window > 0 else { return false }
-        return ctx * 100 >= compactAbovePct * window || ctx >= Self.compactCeiling
+        return ctx * 100 >= compactAbovePct * window || (compactAboveTokens > 0 && ctx >= compactAboveTokens)
     }
 
     /// The working directory with `~` expanded.

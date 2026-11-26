@@ -349,6 +349,8 @@ final class SecretaryController {
         "Scheduled run: write the report that is due (Reports in your instructions): run `~/.claude/hq/bin/hq report`, write the report to the file it names, in the format of secretary/reports.md, run `~/.claude/hq/bin/hq report keep <that file name>`, then stop.",
         "定时运行：写今天该写的报告（照你说明里的 Reports 一节）：运行 `~/.claude/hq/bin/hq report`，按 secretary/reports.md 的格式把报告写进它给出的文件，再运行 `~/.claude/hq/bin/hq report keep <那个文件名>`，写完就停。"]
     static func writesReports(_ job: Job) -> Bool { reportPrompts.contains(job.prompt) || dailyPrompts.contains(job.prompt) }
+    /// Its session is compacted past this many tokens too: on a 1M window, 50% let it reach 188k.
+    static let compactTokens = 150_000
     /// When the weekly report runs: Friday afternoon, before the week is over.
     static let reportSchedule = Schedule(kind: .weekly, hour: 17, minute: 0, days: [5], cron: "0 17 * * 5")
     private static let oldPrompts: Set<String> = ["Look over the board: what needs my attention?", "看一眼看板：有什么需要我注意的？"]
@@ -358,12 +360,16 @@ final class SecretaryController {
         (!job.enabled && oldPrompts.contains(job.prompt)) || dailyPrompts.contains(job.prompt)
     }
     /// A report a week: the default 09:00 placeholder or every N minutes becomes Friday 17:00, a
-    /// time of day the user chose (daily, weekdays) moves to Fridays, a cron or weekly one stays.
-    static func migratedSchedule(_ s: Schedule) -> Schedule {
+    /// time of day the user chose (daily, weekdays, several days a week) moves to Fridays, a cron
+    /// that fires more than once a week becomes Friday 17:00; a weekly or cron one that already
+    /// runs at most once a week stays.
+    static func migratedSchedule(_ s: Schedule, now: Date = Date()) -> Schedule {
         if s == Schedule() || s.kind == .every { return reportSchedule }
-        if s.kind == .daily || s.kind == .weekdays {
+        if s.kind == .daily || s.kind == .weekdays || (s.kind == .weekly && s.days.count > 1) {
             return Schedule(kind: .weekly, hour: s.hour, minute: s.minute, days: [5], cron: "\(s.minute) \(s.hour) * * 5")
         }
+        let next = s.nextRuns(after: now, count: 2, anchor: nil)
+        if next.count == 2, next[1].timeIntervalSince(next[0]) < 6 * 86_400 { return reportSchedule }
         return s
     }
 
@@ -376,13 +382,14 @@ final class SecretaryController {
         var job = store.load(Self.jobID) ?? Job(
             id: Self.jobID, name: L("Secretary", "秘书"), kind: .claude, prompt: Self.reportPrompt,
             cwd: root, schedule: Self.reportSchedule, enabled: false, timeoutMinutes: 15, sessionMode: .resume,
-            compactAbovePct: 50, notify: .failure, agent: "secretary", allowedTools: tools)
+            compactAbovePct: 50, compactAboveTokens: Self.compactTokens, notify: .failure, agent: "secretary", allowedTools: tools)
         let fresh = store.load(Self.jobID) == nil
         let old = Self.needsMigration(job)
         if !fresh, !old, job.directory == root, job.agent == "secretary", job.sessionMode == .resume,
-           job.kind == .claude, job.allowedTools == tools { return nil }
+           job.kind == .claude, job.allowedTools == tools, job.compactAboveTokens > 0 { return nil }
         job.cwd = root; job.agent = "secretary"; job.sessionMode = .resume; job.kind = .claude
         job.allowedTools = tools
+        if job.compactAboveTokens <= 0 { job.compactAboveTokens = Self.compactTokens }
         if old {
             job.prompt = Self.reportPrompt
             job.schedule = Self.migratedSchedule(job.schedule)
