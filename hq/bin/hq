@@ -4235,7 +4235,7 @@ def cmd_feed(args):
 #   workdir: ~/code/bigtest       where the session runs (default: the duty's first folder; one
 #                                 written here must exist — no falling back to another folder)
 #   run: yes                      start a background session on each new task (default: no)
-#   permissions: skip             that session skips permission prompts (default: ask)
+#   permissions: review           that session asks nothing: read-only review tools only (default: ask)
 #   done: manual                  only the user closes the task (default); auto: the session may
 #   focus: yes                    the task joins Focus (default)
 #   title: Review {repo}#{number}: {title}
@@ -4247,6 +4247,14 @@ def cmd_feed(args):
 INTAKE_SOURCES = ("github-review",)         # the auto sources that make tasks so far
 INTAKE_KEYS = ("repos", "workdir", "run", "permissions", "done", "focus", "title", "goal", "prompt")
 INTAKE_YES = ("yes", "on", "true", "1", "是", "开")
+# `permissions: review`: what a session started on someone else's PR may do without asking — read
+# the code and the PR, review with skills and subagents, bind itself — and nothing more. The PR is
+# written by whoever asked for the review (its title, branch and diff can carry instructions), so
+# the session never skips permission checks: it runs in dontAsk mode, where anything not listed
+# here (editing, other commands, the network, posting on GitHub) is refused rather than asked.
+# `skip`, its old name, means the same: it never skips them either.
+INTAKE_REVIEW_TOOLS = ("Read", "Grep", "Glob", "Agent", "Task", "Skill", "TodoWrite",
+                       "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)")
 INTAKE_NO = ("no", "off", "false", "0", "否", "关")
 INTAKE_DEFAULT = {
     "github-review": {
@@ -4294,7 +4302,8 @@ class IntakeError(Exception):
 
 def project_intake(text):
     """An Auto intake section, as written → {source: {key: value, "problems": [...]}}. `repos` is a
-    list; run, focus are booleans; permissions is ask|skip; done is manual|auto; the rest are
+    list; run, focus are booleans; permissions is ask|review (`skip` is read as review); done is
+    manual|auto; the rest are
     strings. Comments are skipped outside the prompt; the prompt keeps every line as written until
     a `### <source>` line (so a `### Steps` of its own stays in it)."""
     out, cur, key, inc = {}, None, None, False
@@ -4333,8 +4342,10 @@ def project_intake(text):
             if v and v not in INTAKE_YES + INTAKE_NO:
                 c["problems"].append(f"{k}: yes or no (got {v!r})")
             c[k] = (v in INTAKE_YES) if v else default
-        for k, allowed in (("permissions", ("ask", "skip")), ("done", ("manual", "auto"))):
+        for k, allowed in (("permissions", ("ask", "review")), ("done", ("manual", "auto"))):
             v = str(c.get(k, "")).strip().lower()
+            if k == "permissions" and v == "skip":
+                v = "review"            # never skips permission checks any more (see INTAKE_REVIEW_TOOLS)
             if v and v not in allowed:
                 c["problems"].append(f"{k}: {' or '.join(allowed)} (got {v!r})")
                 v = ""
@@ -4345,9 +4356,9 @@ def project_intake(text):
                 c["problems"].append(f"workdir: no folder {c['workdir']} — no session starts until it exists")
             elif not ok_workdir(d):
                 c["problems"].append(f"workdir: {c['workdir']} — /, the home folder and the HQ root are never a workdir")
-        if "*" in c["repos"] and c["permissions"] == "skip" and c["run"]:
-            c["problems"].append("repos: * with permissions: skip would let anyone who asks for your review run a "
-                                 "session without permission checks — no session starts; name the repositories")
+        if "*" in c["repos"] and c["permissions"] == "review" and c["run"]:
+            c["problems"].append("repos: * with permissions: review would let anyone who asks for your review run a "
+                                 "session that asks you nothing — no session starts; name the repositories")
         if src not in INTAKE_SOURCES:
             c["problems"].append(f"{src}: makes no tasks yet (sources that do: {', '.join(INTAKE_SOURCES)})")
     return out
@@ -4444,10 +4455,12 @@ def find_claude(given=None):
     return None
 
 
-def intake_launch(tid, title, wd, prompt, skip, lang, manual, claude=None):
+def intake_launch(tid, title, wd, prompt, review, lang, manual, claude=None):
     """Starts a background Claude Code session on the task (`claude --bg`, as the board's ▶ New
     session does in the background): it is told to bind itself first, and is bound from here too
-    once `claude agents` reports its id. Returns its session id (or short id); raises IntakeError."""
+    once `claude agents` reports its id. It never skips permission checks: `review` runs it in
+    dontAsk mode with INTAKE_REVIEW_TOOLS, else it asks as usual. Returns its session id (or short
+    id); raises IntakeError."""
     claude = find_claude(claude)
     if not claude:
         raise IntakeError("can't find the claude command")
@@ -4457,7 +4470,7 @@ def intake_launch(tid, title, wd, prompt, skip, lang, manual, claude=None):
     name = f"{tid} {title}"[:60]
     env = intake_env(os.environ)
     env["HQ_ROOT"] = hq_root()
-    args = [claude, "--bg", "--name", name] + (["--dangerously-skip-permissions"] if skip else []) + [first + prompt]
+    args = [claude, "--bg", "--name", name] + (intake_review_args(hq, tid) if review else []) + [first + prompt]
     try:
         # A session of its own: the job's end kills its process group, which must not take this along.
         r = subprocess.run(args, cwd=wd, capture_output=True, text=True, timeout=30, env=env, start_new_session=True)
@@ -4483,6 +4496,13 @@ def intake_launch(tid, title, wd, prompt, skip, lang, manual, claude=None):
             return row["sessionId"]
         time.sleep(0.3)
     return short
+
+
+def intake_review_args(hq, tid):
+    """`permissions: review`: dontAsk mode, allowed only INTAKE_REVIEW_TOOLS and its own `hq bind`
+    (one value per --allowedTools, so no rule swallows the prompt after it)."""
+    tools = INTAKE_REVIEW_TOOLS + (f"Bash({hq} bind {tid})",)
+    return ["--permission-mode", "dontAsk"] + [a for t in tools for a in ("--allowedTools", t)]
 
 
 def intake_make(source, duty, cfg, item, claude=None, dry=False, record=None):
@@ -4516,10 +4536,10 @@ def intake_make(source, duty, cfg, item, claude=None, dry=False, record=None):
             if not wd:
                 raise IntakeError(f"no folder to run in: {cfg['workdir']} is not one" if cfg.get("workdir") else
                                   "no folder to run in: set `workdir:` in the duty's Auto intake section")
-            if "*" in cfg["repos"] and cfg["permissions"] == "skip":
-                raise IntakeError("repos: * with permissions: skip — name the repositories, or let it ask for permissions")
+            if "*" in cfg["repos"] and cfg["permissions"] == "review":
+                raise IntakeError("repos: * with permissions: review — name the repositories, or let it ask for permissions")
             prompt = intake_fill(cfg.get("prompt") or dflt["prompt"][lang], values)
-            sid = intake_launch(tid, title, wd, prompt, cfg["permissions"] == "skip", lang, cfg["done"] == "manual", claude)
+            sid = intake_launch(tid, title, wd, prompt, cfg["permissions"] == "review", lang, cfg["done"] == "manual", claude)
             out["session"] = sid
             append_log(card, ("后台 session 已启动" if lang == "zh" else "background session started") + (f" {sid[:8]}" if sid else ""))
         except IntakeError as e:

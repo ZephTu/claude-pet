@@ -15,6 +15,27 @@ public enum BoardSend {
         }))
     }
 
+    /// The shell line the board types into a terminal tab to run `command` in `dir` (with
+    /// `HQ_ROOT` passed on when the board has one). Every word is single-quoted and stripped of
+    /// what a terminal or the shell's line editor would act on while it is typed: newlines, tabs
+    /// (completion) and every other C0 control character and DEL become a space — a ^U or ^C in a
+    /// task title, a todo or a prompt would otherwise cut the line short and start a new one. The
+    /// shell exits after the command, so the tab closes with the session (`exit 0`, and `;` so a
+    /// failed `cd` doesn't leave it either).
+    public static func shellLine(dir: String, command: [String], hqRoot: String? = nil) -> String {
+        var line = "cd \(shellQuote(dir)) && "
+        if let hqRoot { line += "HQ_ROOT=\(shellQuote(hqRoot)) " }
+        return line + command.map(shellQuote).joined(separator: " ") + "; exit 0"
+    }
+
+    /// One word of a typed shell line: control characters made spaces, then single-quoted.
+    public static func shellQuote(_ word: String) -> String {
+        let clean = String(String.UnicodeScalarView(word.unicodeScalars.map { s in
+            s.value < 0x20 || s.value == 0x7F ? " " : s
+        }))
+        return "'" + clean.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Orca's `terminal send --json` receipt for an agent prompt lists the stages it has seen:
     /// `input_accepted`, then `turn_started`. True when there is such a receipt and it stops short
     /// of a turn (typed, but not shown to have gone in — `--wait-submit` timing out still exits
