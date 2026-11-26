@@ -26,7 +26,6 @@ enum BoardPushTests {
                 && !BoardPush.relevant(home + "/.claude/pet/jumps.jsonl"))
         t.check("the pet's folder itself doesn't (its files say what changed)",
                 !BoardPush.relevant(home + "/.claude/pet") && !BoardPush.relevant(home + "/.claude/pet/activity"))
-        t.check("pushes are no closer than the old poll", PushGate().gap == 4)
         t.check("a card named like a pet file still counts",
                 BoardPush.relevant("/hq/tasks/T-1-x/hud-usage.json") && BoardPush.relevant("/hq/activity/x.md"))
 
@@ -38,16 +37,27 @@ enum BoardPushTests {
                 String(decoding: BoardPush.event(7), as: UTF8.self) == "event: changed\ndata: 7\n\n"
                 && String(decoding: BoardPush.ping, as: UTF8.self).hasPrefix(":"))
 
+        t.check("lock files and hq's locks don't",
+                !BoardPush.relevant(home + "/.claude/hq/state/sessions.json.lock")
+                && !BoardPush.relevant(home + "/.claude/hq/state/locks/T-1"))
+        t.check("lost events count, wherever they are reported",
+                BoardPush.relevant(home + "/.claude/pet", flags: BoardPush.mustScanSubDirs)
+                && BoardPush.relevant("/hq/.git", flags: BoardPush.userDropped | BoardPush.mustScanSubDirs)
+                && BoardPush.relevant("/", flags: BoardPush.kernelDropped))
+
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
-        var g = PushGate(quiet: 0.3, gap: 2)
-        let first = g.note(t0)
-        t.check("the first change pushes once it has gone quiet", first == t0.addingTimeInterval(0.3))
-        t.check("more of the same burst add nothing", g.note(t0.addingTimeInterval(0.1)) == nil && g.note(t0.addingTimeInterval(0.2)) == nil)
-        g.fired(t0.addingTimeInterval(0.3))
-        t.check("a change right after a push waits out the gap",
-                g.note(t0.addingTimeInterval(0.5)) == t0.addingTimeInterval(2.3))
-        g.fired(t0.addingTimeInterval(2.3))
-        t.check("a change long after is pushed after the quiet time only",
-                g.note(t0.addingTimeInterval(10)) == t0.addingTimeInterval(10.3))
+        let at = { (s: TimeInterval) in t0.addingTimeInterval(s) }
+        let same = { (a: Date, b: Date) in abs(a.timeIntervalSince(b)) < 1e-6 }
+        var g = PushGate(quiet: 0.3, maxWait: 1.5, gap: 4)
+        t.check("the first change pushes once it has gone quiet", same(g.note(t0), at(0.3)))
+        t.check("each further write of the burst moves the push on",
+                same(g.note(at(0.2)), at(0.5)) && same(g.note(at(0.4)), at(0.7)))
+        t.check("a burst that never goes quiet is pushed maxWait after its first write",
+                same(g.note(at(1.0)), at(1.3)) && same(g.note(at(1.4)), at(1.5)))
+        g.fired(at(1.5))
+        t.check("a change right after a push waits out the gap", same(g.note(at(2)), at(5.5)))
+        g.fired(at(5.5))
+        t.check("a change long after is pushed after the quiet time only", same(g.note(at(20)), at(20.3)))
+        t.check("pushes are no closer than the old poll", PushGate().gap == 4)
     }
 }

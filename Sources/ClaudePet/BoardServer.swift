@@ -199,11 +199,20 @@ final class BoardServer {
         for s in streams { s.conn.push(data) }
     }
 
-    /// Keeps quiet streams open, and ends those whose device is gone (removed, or expired).
+    /// Keeps quiet streams open, and ends those whose device is gone (removed, or expired) — and,
+    /// over Tailscale, those from a device no longer the user's own (asked again as a new
+    /// connection would be; Tailnet keeps each answer two minutes).
     private func ping() {
         let live = Set(RemoteAccess.live(devices, now: Date()).filter { $0.paired != nil }.map(\.id))
         closeStreams { !live.contains($0) }
         pushAll(BoardPush.ping)
+        for s in streams where s.conn.peer.tailnet {
+            let conn = s.conn
+            Task { @MainActor [weak self] in
+                let ok = await Tailnet.shared.allows(conn.peer.name)
+                if !ok || self?.tailnetOn != true { conn.close() }
+            }
+        }
     }
 
     private func closeStreams(where gone: (String) -> Bool) {
@@ -364,7 +373,7 @@ final class BoardServer {
             }
         }
         open += 1
-        let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address))
+        let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address), tailnet: gate != nil)
         let c = Connection(conn: conn, peer: peer, gate: gate,
                            admit: { [weak self] req, peer in self?.admit(req, from: peer) ?? .refuse(Data()) },
                            handler: { [weak self] req, peer in
@@ -654,6 +663,8 @@ final class BoardServer {
 private struct Peer: Sendable {
     let name: String
     let key: String
+    /// Came over Tailscale: let in only while `tailscale whois` says it is the user's own device.
+    var tailnet = false
 }
 
 /// What a request is answered with.
@@ -677,7 +688,7 @@ private enum Admit {
 @MainActor
 private final class Connection {
     private let conn: NWConnection
-    private let peer: Peer
+    let peer: Peer
     private let admit: (RemoteAccess.Request, Peer) -> Admit
     private let handler: (RemoteAccess.Request, Peer) async -> Reply
     private let streaming: (Connection, String) -> Void

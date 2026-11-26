@@ -12,13 +12,15 @@ public enum BoardPush {
     public static let staleReads: Set<String> = ["board", "sessions", "status"]
 
     /// Whether a change at `path` can change what the board shows. Within the watched trees:
-    /// not git's own files, editors' and hq's temporary files, or the pet's files the board
+    /// not git's own files, lock files, editors' and hq's temporary files, or the pet's files the board
     /// doesn't read (its per-tool activity log — the session's state file changes with it — the
     /// quota cache, the jump log).
-    public static func relevant(_ path: String) -> Bool {
+    public static func relevant(_ path: String, flags: UInt32 = 0) -> Bool {
+        // Events were lost, or a whole folder has to be looked at again: anything may have changed.
+        if flags & (mustScanSubDirs | userDropped | kernelDropped) != 0 { return true }
         let parts = path.split(separator: "/")
         guard let name = parts.last else { return false }
-        if parts.contains(".git") { return false }
+        if parts.contains(".git") || parts.contains("locks") || name.hasSuffix(".lock") { return false }
         if name == ".DS_Store" || name.hasPrefix(".hq-") || name.hasPrefix(".#") || name.hasSuffix("~")
             || name.hasSuffix(".swp") || name.hasSuffix(".tmp") { return false }
         if let i = parts.lastIndex(of: "pet"), i > 0, parts[i - 1] == ".claude" {
@@ -31,6 +33,12 @@ public enum BoardPush {
         }
         return true
     }
+
+    /// FSEvents' flags for lost events (kFSEventStreamEventFlagMustScanSubDirs, …UserDropped,
+    /// …KernelDropped), spelled out so this file needs no CoreServices.
+    public static let mustScanSubDirs: UInt32 = 0x01
+    public static let userDropped: UInt32 = 0x02
+    public static let kernelDropped: UInt32 = 0x04
 
     /// The head of the `/events` stream: no length, kept open until either side closes it.
     public static func streamHead() -> Data {
@@ -51,34 +59,37 @@ public enum BoardPush {
 }
 
 /// When to tell the boards: a burst of writes (a session's hooks fire in clusters, an hq save is a
-/// write and a rename) becomes one push once it has gone quiet for `quiet`, and pushes come no
-/// closer together than `gap` — a busy session writes its state many times a second, and each push
-/// costs a read (`hq board` and `hq sessions`, about 0.4 s of CPU). At 4 s, sessions at work cost
-/// what polling did; a change after a quiet spell shows in half a second, and quiet costs nothing.
+/// write and a rename) becomes one push once it has gone quiet for `quiet` — or `maxWait` after its
+/// first write, for one that never goes quiet — and pushes come no closer together than `gap`: a
+/// busy session writes its state many times a second, and each push costs a read (`hq board` and
+/// `hq sessions`, about 0.4 s of CPU). At 4 s, sessions at work cost what polling did; a change
+/// after a quiet spell shows in about half a second, and quiet costs nothing.
 public struct PushGate: Sendable {
     public let quiet: TimeInterval
+    public let maxWait: TimeInterval
     public let gap: TimeInterval
     private var last: Date?
-    private var due: Date?
+    /// The first change not pushed yet.
+    private var first: Date?
 
-    public init(quiet: TimeInterval = 0.3, gap: TimeInterval = 4) {
+    public init(quiet: TimeInterval = 0.3, maxWait: TimeInterval = 1.5, gap: TimeInterval = 4) {
         self.quiet = quiet
+        self.maxWait = maxWait
         self.gap = gap
     }
 
-    /// A change at `now`: when to push, if a push has to be scheduled — nil when one already is
-    /// (the read it starts comes after this change too).
-    public mutating func note(_ now: Date) -> Date? {
-        if due != nil { return nil }
-        var at = now.addingTimeInterval(quiet)
+    /// A change at `now`: when to push — the time any push already scheduled moves to.
+    public mutating func note(_ now: Date) -> Date {
+        let first = self.first ?? now
+        self.first = first
+        var at = min(now.addingTimeInterval(quiet), first.addingTimeInterval(maxWait))
         if let last, at < last.addingTimeInterval(gap) { at = last.addingTimeInterval(gap) }
-        due = at
         return at
     }
 
     /// The scheduled push went out at `now`.
     public mutating func fired(_ now: Date) {
-        due = nil
+        first = nil
         last = now
     }
 }

@@ -295,6 +295,9 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         await SharedReads.shared.changed()
         let r = await perform(body)
         await SharedReads.shared.changed()
+        // Every other open board hears of it too — what changed may be in no watched file (a
+        // setting, a quick phrase, the secretary's state).
+        await MainActor.run { BoardEvents.shared.nudge() }
         return r
     }
 

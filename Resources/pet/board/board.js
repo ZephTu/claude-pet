@@ -6126,15 +6126,14 @@ async function openStream() {
   if (!REMOTE || ui.stream || document.hidden || !remoteToken()) return;
   const ctl = new AbortController();
   ui.stream = ctl;
-  let opened = false, quiet = null;
+  let opened = 0, quiet = null;
   const listen = () => { clearTimeout(quiet); quiet = setTimeout(() => ctl.abort(), STREAM_QUIET_MS); };
   try {
     listen();   // a Mac that never answers counts as quiet too
     const r = await fetch("/events", { method: "POST", cache: "no-store", headers: { "X-HQ-Token": remoteToken() }, body: "{}", signal: ctl.signal });
     if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-    opened = true;
+    opened = Date.now();
     ui.pushOn = true;
-    ui.streamFails = 0;
     pushed();   // what changed while it was closed
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "";
@@ -6155,9 +6154,11 @@ async function openStream() {
   } finally {
     clearTimeout(quiet);
     if (ui.stream === ctl) { ui.stream = null; ui.pushOn = false; }
-    if (!opened) ui.streamFails = (ui.streamFails || 0) + 1;
-    // Again soon after a stream that worked; backing off from a Mac that keeps refusing.
-    setTimeout(openStream, opened ? 1000 : Math.min(60000, 2000 * 2 ** Math.min(ui.streamFails || 0, 5)));
+    // Again soon after a stream that lasted; backing off from a Mac that keeps refusing, or one
+    // that keeps closing it at once (more boards open than it holds streams for).
+    const lasted = opened && Date.now() - opened > 10000;
+    ui.streamFails = lasted ? 0 : (ui.streamFails || 0) + 1;
+    setTimeout(openStream, lasted ? 1000 : Math.min(60000, 2000 * 2 ** Math.min(ui.streamFails, 5)));
   }
 }
 document.addEventListener("visibilitychange", () => {
