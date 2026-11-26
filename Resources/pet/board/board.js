@@ -1769,7 +1769,7 @@ const notes = () => (ui.board && ui.board.inbox) || [];
 const unsortedNotes = () => notes().filter((x) => x.state === "unsorted" && !x.skip);
 function destLabel(d) {
   if (!d || d.kind === "unsorted") return T("unsorted", "未分拣");
-  if (d.kind === "task") return T(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`) + (d.project ? ` · ${d.project}` : "");
+  if (d.kind === "task") return (d.title ? T(`new task “${d.title}”`, `新任务「${d.title}」`) : T("new task", "新任务")) + (d.project ? ` · ${d.project}` : "");
   if (d.kind === "todo") return `${d.task} ${T("todo", "待办")} @${d.owner || "me"}`;
   if (d.kind === "note") return `${d.task} ${T("log", "记录")}`;
   if (d.kind === "update") return `${d.task} ${T("update", "更新")}${updateDetail(d)}`;
@@ -1805,12 +1805,11 @@ function noteGuesses(x) {
 function destChip(x, d, extra = "", label = destLabel(d)) {
   return `<button class="chip link dest ${extra}" data-action="note-move" data-id="${esc(x.id)}" data-dest="${esc(JSON.stringify(d))}" title="${esc(d.kind === "update" ? [updateText(d), d.text].filter(Boolean).join("\n") : d.text || d.title || "")}">${esc(label)}</button>`;
 }
-// A title for "New task" when the model didn't offer one: the note's first line.
+// The title of the sorter's "new task" guess. With none, hq has the cheap model write a short one
+// when the chip is clicked (the note itself goes into the goal), not the note cut at 60 characters.
 function noteTitle(x) {
   const g = noteGuesses(x).find((d) => d.kind === "task");
-  if (g) return g.title;
-  const line = String(x.text || "").split("\n")[0].trim();
-  return line.length > 60 ? line.slice(0, 59) + "…" : line || T("Quick note", "快速记录");
+  return g ? g.title : "";
 }
 function renderNotes() {
   const all = notes();
@@ -1900,6 +1899,7 @@ function renderNotes() {
 async function noteMove(id, dest, quiet) {
   const x = notes().find((n) => n.id === id);
   const back = x && x.state === "sorted" ? x.dest : { kind: "unsorted" };
+  if (dest.kind === "task" && !dest.title) toast(T(`${id}: writing a title for the new task…`, `${id}：正在给新任务起标题…`));
   try {
     const r = await apiObj("note-move", Object.assign({ id }, dest));
     ui.noteOpen.delete(id);
@@ -2132,6 +2132,7 @@ function kcard(t, opt = {}) {
       title="${T("Click for details · drag to another column to change its status", "点击看详情 · 拖到别的列改状态")}">
     <div class="kc-top"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span>${t.project && !opt.noProject ? `<span class="proj">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}
       ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
+      ${t.stale && isOpen(t) ? `<span class="stag stale" title="${esc(T(`Nobody has updated this card since ${t.updated}: move it on, close it, or turn a recurring todo into a scheduled job`, `这张卡从 ${t.updated} 起没人更新：推进它、关掉它，或者把周期性的待办改成定时任务`))}">${T(`${t.stale}d untouched`, `${t.stale} 天没动`)}</span>` : ""}
       ${flags.length ? `<span class="kflag" title="${esc(flags.map((x) => T(x.text, x.text_zh || x.text)).join("\n"))}">⚠</span>` : ""}
       ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}</div>
     <div class="kc-title">${esc(t.title)}</div>

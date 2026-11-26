@@ -1267,6 +1267,13 @@ def age_days(meta):
         return None
 
 
+def stale_days(meta):
+    """Days an open card has gone without an update, once that is a week or more (the `stale` flag
+    of `hq status`, and the board's tag); else 0."""
+    age = age_days(meta)
+    return age if meta.get("status") in OPEN_STATUSES and age is not None and age >= STATUS_STALE_DAYS else 0
+
+
 # ---------------------------------------------------------------- retired standing grants
 # HQ once had standing grants ("Yes, always" on an ask): a card's or PROJECT.md's `## Grants`
 # (`## 授权`) section, and asks a session ended with `[grant: <wording>]`. They are gone, but files
@@ -1821,6 +1828,7 @@ def cmd_board(args):
             d["asks"] = [a if a.get("state") == "open" else {k: v for k, v in a.items() if k != "context"}
                          for a in m["asks"]]
             d["repo"] = task_repo(m)        # for the board's By repo view: a worktree counts as its repo
+            d["stale"] = stale_days(m)      # the board tags a card nobody has moved for a week
             # What the card budget moved to HISTORY.md: the board shows it with the card's own.
             h = read_history(m["path"])
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],
@@ -3240,7 +3248,8 @@ state), status (active, blocked, waiting-on-me, or done / abandoned when the not
 is finished or dropped — those two are only offered to the user, never written by themselves), \
 done (the task's open todos the note says are finished, each copied exactly as listed). Prefer \
 "update" over "note" when the note finishes one of the task's listed todos or moves it on.
-- "task": new work that fits no open task. title: short (≤ 60 chars); text: the goal, one or two \
+- "task": new work that fits no open task. title: short (≤ 60 chars), naming the work, not the \
+request ("Review Claude Pet and HQ", not "Help me create a task to review…"); text: the goal, one or two \
 sentences; project only from the list given, when one clearly fits; workdir: a path the \
 note names, else the folder of the open task or project the work is closest to (copied in full \
 from the dirs listed), else leave it out.
@@ -3404,10 +3413,47 @@ def inbox_sort(nid, claude=None):
     return inbox_update(nid, lambda x: x.update(fields, state="unsorted") if x.get("state") == "sorting" else None)
 
 
-def inbox_move(nid, want):
+INBOX_TITLE_TIMEOUT = 45
+INBOX_TITLE_SYSTEM = """The user jotted a quick note and filed it as a new task on their task board. \
+Write the task's title: at most 40 characters, in the note's language, naming the work itself, not \
+the request. Drop "help me", "create a task", "I want to" and the like: "Review Claude Pet and HQ", \
+not "Help me create a task to review…"."""
+INBOX_TITLE_SCHEMA = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+
+
+def inbox_title(nid, claude=None):
+    """A short title for a note filed as a new task by hand, when no guess of the sorter's gave one:
+    the cheap model writes it (the note itself goes into the goal). None when a guess has one, or
+    when the model can't be had: the note's first line then stands in."""
+    x = inbox_item(load_inbox(), nid)
+    if any(a and a.get("kind") == "task" and a.get("title") for a in [x.get("dest")] + list(x.get("alts") or [])):
+        return None
+    text = str(x.get("text") or "").strip()
+    exe = find_claude(claude)
+    if not text or not exe:
+        return None
+    cmd = [exe, "-p", "--model", inbox_model(), "--setting-sources", "", "--strict-mcp-config",
+           "--no-session-persistence", "--output-format", "json", "--tools", "",
+           "--json-schema", json.dumps(INBOX_TITLE_SCHEMA), "--system-prompt", INBOX_TITLE_SYSTEM]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION") and k not in FEED_SECRET_ENV}
+    env["HQ_HOOK_CHILD"] = "1"
+    try:
+        r = subprocess.run(cmd, input=text[:4000], capture_output=True, text=True, timeout=INBOX_TITLE_TIMEOUT,
+                           cwd=tempfile.gettempdir(), env=env)
+        out = json.loads(r.stdout)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    ans = out.get("structured_output") if isinstance(out, dict) and not out.get("is_error") else None
+    return (_flat(ans.get("title"), 80) or None) if isinstance(ans, dict) else None
+
+
+def inbox_move(nid, want, claude=None):
     """Takes back what the note wrote (if anything) and files it as `want` says; kind "unsorted"
     just takes it back. Fields `want` leaves out come from a guess of the same kind (and task), else
-    from where it is now."""
+    from where it is now. A new task with no title anywhere gets one from the cheap model, asked
+    before the lock is taken: other notes needn't wait on it."""
+    if want.get("kind") == "task" and not want.get("title"):
+        want = dict(want, title=inbox_title(nid, claude))
     with inbox_lock():
         items = load_inbox()
         x = inbox_item(items, nid)
@@ -3506,7 +3552,7 @@ def cmd_inbox(args):
             x = inbox_move(args.rest[0], {"kind": args.rest[1], "task": args.task, "owner": args.owner,
                                           "text": args.text, "title": args.title, "project": args.project,
                                           "workdir": args.workdir, "next": args.next, "state": args.state,
-                                          "status": args.status, "done": args.done})
+                                          "status": args.status, "done": args.done}, args.claude)
     elif a == "restore":
         # Undo of a drop: back to unsorted.
         x = inbox_update(args.rest[0] if args.rest else die("usage: hq inbox restore N-001"),
@@ -7294,6 +7340,11 @@ def import_check(plan):
         elif title:
             open_titles[(project, title.casefold())] = "another task in the plan"
         lists = {k: strings(where, t, k) for k in ("todos", "refs", "log")}
+        # A todo with no owner shows in nobody's list: not Needs you (@me), not a session's (@claude).
+        for x in lists["todos"]:
+            if not todo_owner(x):
+                problems.append(f"{where}: todo {x!r} has no owner — start it with @me (the user does it), "
+                                "@claude (a session does it) or @<name> (someone else)")
         for v in [title, values["next"], values["goal"]] + state_lines + sum(lists.values(), []):
             if v and is_placeholder(v):
                 problems.append(f"{where}: {v!r} is a placeholder, not a value")
@@ -8078,8 +8129,8 @@ def task_status(meta, state, now, seen):
                  f"idle since {short_time(quiet, now)} ({who}), but the card says: {waits}",
                  f"从 {short_time(quiet, now)} 起没有动静（{who_zh}），但卡片说在等：{waits}",
                  since=iso(quiet), says=waits)
-    age = age_days(meta)
-    if is_open and age is not None and age >= STATUS_STALE_DAYS:
+    age = stale_days(meta)
+    if age:
         flag("stale", f"not updated for {age} days (since {meta.get('updated')})",
              f"{age} 天没更新（上次 {meta.get('updated')}）", days=age)
     if status in ("done", "abandoned"):
