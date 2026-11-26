@@ -59,7 +59,6 @@ Along the top: **Quick note** (jot a line, a link or a screenshot; a small model
 A session ends its reply with the questions it needs answered; they become **asks** on the board and stay there until you answer — nothing you skip is taken as "no". Answer them on the card, in **Needs you**, or in the task itself:
 
 - **Yes** — go ahead, or as suggested. Write your own answer in the note if you like (several lines, screenshots welcome).
-- **Yes, always** — yes, and a standing grant: the task's sessions stop asking for that kind of step.
 - **No**.
 - **To todo** — it is really something you will do yourself.
 - **Later** — the question stays, out of sight until tomorrow, and the session is told you'll answer later.
@@ -79,7 +78,7 @@ Click a card and the task opens beside the board:
 - **Next** — the next step. **New session** starts Claude in the task's folder, bound to the task from its first prompt. **Continue today** carries a long-running task on in a fresh card.
 - **Sessions** — the live one, with 👁 to read it, ↗ to jump to its terminal, ■ to stop it and × to unbind it. **Earlier sessions** can be picked up with **↻ Resume**.
 - **Todos** — `@me` for you, `@claude` for a session. **▶ Do it** hands a Claude todo to the task's session, or starts one to do it.
-- **Grants** and **Log** — what sessions may do without asking, and the decisions and findings, timestamped to the second.
+- **Log** — the decisions and findings, timestamped to the second.
 
 ### Projects and duties
 

@@ -70,7 +70,7 @@
     parent: "", phases: o.phases || [], auto: [], goal: o.goal || "", out: o.out || "",
     done_when: (o.crit || []).map(([t, d]) => (d ? "- [x] " : "- ") + t).join("\n"),
     criteria: (o.crit || []).map(([t, d], i) => ({ i: i + 1, text: t, done: d })),
-    templates: [], raw: {}, brief: o.brief || "", grants: [], stats: o.stats,
+    templates: [], raw: {}, brief: o.brief || "", stats: o.stats,
   });
   const board = {
     root: "/Users/demo/hq",
