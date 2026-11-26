@@ -51,7 +51,7 @@ final class BoardEvents {
     func start() {
         if recheck == nil {
             recheck = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.rewatchIfMoved() }
+                MainActor.assumeIsolated { _ = self?.rewatchIfMoved() }
             }
         }
         guard stream == nil else { return }
