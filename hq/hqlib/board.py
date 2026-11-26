@@ -16,6 +16,7 @@ from .protocol import open_asks_text
 from .focus import focus_state
 from .inbox import inbox_view
 from .reports import closed_time, todo_closed_times
+from .status import stale_days
 
 
 # ---------------------------------------------------------------- commands
@@ -60,6 +61,7 @@ def cmd_board(args):
             d["asks"] = [a if a.get("state") == "open" else {k: v for k, v in a.items() if k != "context"}
                          for a in m["asks"]]
             d["repo"] = task_repo(m)        # for the board's By repo view: a worktree counts as its repo
+            d["stale"] = stale_days(m)      # the board tags a card nobody has moved for a week
             # What the card budget moved to HISTORY.md: the board shows it with the card's own.
             h = read_history(m["path"])
             d["history"] = {"log": h["Log"], "links": [x[2:] for x in h["Links"]],

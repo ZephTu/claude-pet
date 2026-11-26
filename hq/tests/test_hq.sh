@@ -249,6 +249,9 @@ cp "$T/root/templates/TASK.md" "$IP/tpl.bak"; sed -i.x 's/^## Status$/## Where i
 rc=0; out="$("$HQ" import - --dry-run <<< '{"tasks": [{"title": "Stateful", "state": ["half done"]}]}')" || rc=$?
 cp "$IP/tpl.bak" "$T/root/templates/TASK.md"; rm -f "$T/root/templates/TASK.md.x"
 [ "$rc" = 1 ] && echo "$out" | grep -q "task template" && ok "import: state lines refused up front when the task template has no Status section" || fail "import template check: $out"
+rc=0; out="$("$HQ" import - --dry-run <<< '{"tasks": [{"title": "Ownerless", "todos": ["@me send the mail", "weekly tgkb update", "@Bob check"]}]}')" || rc=$?
+[ "$rc" = 1 ] && echo "$out" | grep -q "'weekly tgkb update' has no owner" && ! echo "$out" | grep -q "send the mail\|'@Bob check'" \
+  && ok "import: a todo with no @owner is refused (it would show in nobody's list)" || fail "import todo owner: $out"
 mkdir -p "$T/root/projects/Stale"; rc=0; out="$("$HQ" import - --dry-run <<< '{"projects": [{"name": "stale", "kind": "duty"}]}')" || rc=$?
 [ "$rc" = 1 ] && echo "$out" | grep -q "left from an earlier project" && ok "import: a leftover project folder (any case) is not reused" || fail "import stale folder: $out"
 rmdir "$T/root/projects/Stale"
@@ -1496,6 +1499,10 @@ assert "卡片超预算" in b["flags"][1]["text_zh"], b["flags"]' && ok "status:
 import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]
 assert "'"$S3"'" in ids and "'"$S4"'" in ids, ids' && ok "status with no task: every open task, and a done one only while a session runs on it" || fail "status default selection"
 "$HQ" status --flagged --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert all(i!="'"$S2"'" for i in ids) and "'"$S4"'" in ids, ids' && ok "status --flagged keeps only the flagged tasks" || fail "status --flagged"
+"$HQ" board --json | python3 -c '
+import json,sys; t={x["id"]:x for x in json.load(sys.stdin)["tasks"]}
+assert t["'"$S4"'"]["stale"]>=7 and t["'"$S2"'"]["stale"]==0 and t["'"$S3"'"]["stale"]==0, [(i, x["stale"]) for i, x in t.items()]' \
+  && ok "board --json: stale days on an open card a week untouched, 0 on a fresh or closed one" || fail "board stale"
 "$HQ" focus add "$S2" >/dev/null
 "$HQ" status --focus --json | python3 -c 'import json,sys; ids=[t["id"] for t in json.load(sys.stdin)["tasks"]]; assert "'"$S2"'" in ids and "'"$S4"'" not in ids, ids' && ok "status --focus covers the Focus list" || fail "status --focus"
 # S5: a session held at a permission prompt is mid-turn, so not behind; then it moves to S6.
@@ -1766,6 +1773,23 @@ hqi inbox add -- "docs work for pone" >/dev/null
 answer '{"kind":"task","title":"Docs","text":"t","project":"pone","workdir":"docs","confidence":0.9,"reason":"r","alternatives":[]}'
 NF3="$(hqi inbox sort --claude "$FAKE" --json N-009 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 card "$NF3" | grep -q "^workdirs: \[\"$T/w1/docs\"\]" && ok "a folder named by its last part is looked up in the note's project first" || fail "project-first folder match"
+# Filed as a new task by hand with no guess to take a title from: the cheap model writes a short
+# one and the note goes into the goal; without a model, the note's first line stands in.
+NTT="$(hqi inbox add --json -- "help me open a task: I want to review the whole pet and the board, every feature" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+answer '{"title":"Review the pet and the board"}'
+NT3="$(hqi inbox move --json --claude="$FAKE" -- "$NTT" task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["dest"]["title"]=="Review the pet and the board", x; print(x["task"])')"
+card "$NT3" | grep -q '^title: "Review the pet and the board"' && card "$NT3" | grep -q "^help me open a task: I want to review the whole pet" \
+  && grep -q '"title"' "$FAKE_DIR/args" && grep -qx -- "--tools" "$FAKE_DIR/args" && grep -q "review the whole pet" "$FAKE_DIR/stdin" \
+  && ok "inbox move to task with no title: the model writes a short one, the note is the goal" || fail "note title: $(card "$NT3")"
+NTT="$(hqi inbox add --json -- "$(printf 'help me open a task for the cache rework\nit is slow because the TTL is wrong')" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+touch "$FAKE_DIR/junk"
+hqi inbox move --json --claude="$FAKE" -- "$NTT" task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["title"]=="help me open a task for the cache rework", x' \
+  && ok "no title from the model: the note's first line stands in" || fail "note title fallback"
+touch "$T/shot.png"
+NTI="$(hqi inbox add --json --image "$T/shot.png" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+hqi inbox move --json --claude="$FAKE" -- "$NTI" task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["title"] in ("Quick note '"$NTI"'", "快速记录 '"$NTI"'"), x' \
+  && ok "a screenshot-only note filed as a new task is titled by its id" || fail "image-only note title"
+rm "$FAKE_DIR/junk"
 
 # kind "update": a note moves a task on — its next, status section and status, the todos it finishes.
 # A move takes back exactly that; closing the task and a todo it may mean twice wait for a click.

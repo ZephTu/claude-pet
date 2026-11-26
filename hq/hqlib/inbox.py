@@ -224,7 +224,11 @@ def inbox_dest(d, item, undo=None):
             return None
         out["owner"] = "me"
     if k == "task":
-        out["title"] = _flat(d.get("title"), 80) or _flat(item.get("text"), 60)
+        # No title given: the note's first line; a note that is only a screenshot gets its id.
+        from .reports import report_lang
+        first = str(item.get("text") or "").strip().split("\n", 1)[0]
+        out["title"] = (_flat(d.get("title"), 80) or _flat(first, 60)
+                        or ("快速记录 " if report_lang() == "zh" else "Quick note ") + str(item.get("id") or ""))
         if not out["title"]:
             return None
         names = [p["name"] for p in load_projects()]
@@ -664,7 +668,8 @@ state), status (active, blocked, waiting-on-me, or done / abandoned when the not
 is finished or dropped — those two are only offered to the user, never written by themselves), \
 done (the task's open todos the note says are finished, each copied exactly as listed). Prefer \
 "update" over "note" when the note finishes one of the task's listed todos or moves it on.
-- "task": new work that fits no open task. title: short (≤ 60 chars); text: the goal, one or two \
+- "task": new work that fits no open task. title: short (≤ 60 chars), naming the work, not the \
+request ("Review Claude Pet and HQ", not "Help me create a task to review…"); text: the goal, one or two \
 sentences; project only from the list given, when one clearly fits; workdir: a path the \
 note names, else the folder of the open task or project the work is closest to (copied in full \
 from the dirs listed), else leave it out.
@@ -821,10 +826,48 @@ def inbox_sort(nid, claude=None):
     return inbox_update(nid, lambda x: x.update(fields, state="unsorted") if x.get("state") == "sorting" else None)
 
 
-def inbox_move(nid, want):
+INBOX_TITLE_TIMEOUT = 45
+INBOX_TITLE_SYSTEM = """The user jotted a quick note and filed it as a new task on their task board. \
+Write the task's title: at most 40 characters, in the note's language, naming the work itself, not \
+the request. Drop "help me", "create a task", "I want to" and the like: "Review Claude Pet and HQ", \
+not "Help me create a task to review…"."""
+INBOX_TITLE_SCHEMA = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+
+
+def inbox_title(nid, claude=None):
+    """A short title for a note filed as a new task by hand, when no guess of the sorter's gave one:
+    the cheap model writes it (the note itself goes into the goal). None when a guess has one, or
+    when the model can't be had: the note's first line then stands in."""
+    from .feeds import FEED_SECRET_ENV
+    x = inbox_item(load_inbox(), nid)
+    if any(a and a.get("kind") == "task" and a.get("title") for a in [x.get("dest")] + list(x.get("alts") or [])):
+        return None
+    text = str(x.get("text") or "").strip()
+    exe = find_claude(claude)
+    if not text or not exe:
+        return None
+    cmd = [exe, "-p", "--model", inbox_model(), "--setting-sources", "", "--strict-mcp-config",
+           "--no-session-persistence", "--output-format", "json", "--tools", "",
+           "--json-schema", json.dumps(INBOX_TITLE_SCHEMA), "--system-prompt", INBOX_TITLE_SYSTEM]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION") and k not in FEED_SECRET_ENV}
+    env["HQ_HOOK_CHILD"] = "1"
+    try:
+        r = subprocess.run(cmd, input=text[:4000], capture_output=True, text=True, timeout=INBOX_TITLE_TIMEOUT,
+                           cwd=tempfile.gettempdir(), env=env)
+        out = json.loads(r.stdout)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    ans = out.get("structured_output") if isinstance(out, dict) and not out.get("is_error") else None
+    return (_flat(ans.get("title"), 80) or None) if isinstance(ans, dict) else None
+
+
+def inbox_move(nid, want, claude=None):
     """Takes back what the note wrote (if anything) and files it as `want` says; kind "unsorted"
     just takes it back. Fields `want` leaves out come from a guess of the same kind (and task), else
-    from where it is now."""
+    from where it is now. A new task with no title anywhere gets one from the cheap model, asked
+    before the lock is taken: other notes needn't wait on it."""
+    if want.get("kind") == "task" and not want.get("title"):
+        want = dict(want, title=inbox_title(nid, claude))
     with inbox_lock():
         items = load_inbox()
         x = inbox_item(items, nid)
@@ -923,7 +966,7 @@ def cmd_inbox(args):
             x = inbox_move(args.rest[0], {"kind": args.rest[1], "task": args.task, "owner": args.owner,
                                           "text": args.text, "title": args.title, "project": args.project,
                                           "workdir": args.workdir, "next": args.next, "state": args.state,
-                                          "status": args.status, "done": args.done})
+                                          "status": args.status, "done": args.done}, args.claude)
     elif a == "restore":
         # Undo of a drop: back to unsorted.
         x = inbox_update(args.rest[0] if args.rest else die("usage: hq inbox restore N-001"),

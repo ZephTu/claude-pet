@@ -33,7 +33,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 - **Only sessions started after the install.** Hooks load when a session starts; windows already open are invisible until restarted.
 - **An Esc interrupt sends no signal.** Claude Code emits no hook for it, so the pet reads Claude Code's own session status instead: such a turn shows *No recent activity* about 10 seconds later (90 seconds if that status is unavailable) rather than "finished".
 - **A turn waiting on a background agent isn't "finished".** It is shown as waiting, and reported done only when the agent wakes the session again.
-- **Multiple-choice questions** (`AskUserQuestion`) can't be answered from the pet — the picks are the answer, so the row takes you to the terminal.
+- **Multiple-choice questions** (`AskUserQuestion`) get no buttons on the pet — the picks are the answer, so its row takes you to the terminal. The Task Board can answer them: the session's row there has **Answer…**, which sends your picks to Claude Code as if chosen in the terminal (while the pet is running).
 - **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Terminal, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca, iTerm2 and Terminal, plus background `claude --bg` sessions between turns (the board continues them with the message). Stop works for both; Resume reuses an idle tab of the same name.
 - **Quota, context and model need your statusline.** Claude Code hands them only to the statusline command; [claude-hud](https://github.com/jarrodwatts/claude-hud) or `pet-emit --statusline` has to save them ([how](docs/pet.md#optional-reading-quota-from-your-statusline)). Without that, everything else works.
 - **macOS 14+ only**, and not signed by an Apple Developer ID (the installer strips the quarantine flag; Gatekeeper may still ask). Click-through is a rectangle, not the cat's outline. Animating costs about 7% of one core and 310 MB.
@@ -138,14 +138,15 @@ Open Claude Code anywhere and paste:
 5. **Onboard**: read `~/.claude/commands/hq-onboard.md` and follow it (the `/hq-onboard` command was just added, so this session may not know it yet). It asks the user before creating anything.
 6. **Finish** by telling the user: double-click the cat to open the board (or right-click → Task Board…); hooks act only in sessions started from now on, so restart the ones that should be tracked; Claude Code keeps transcripts for about 30 days by default (`cleanupPeriodDays`), so older work won't show up.
 
-**The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. A `settings.json` that is a symlink (into a dotfiles repo, say) is edited through the link, and the backup next to it is a copy of the contents. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
+**The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving your own settings and hooks as they were — same keys, same values, though the file is rewritten with its keys sorted and its own indentation; the file is backed up first, written atomically and verified. A `settings.json` that is a symlink (into a dotfiles repo, say) is edited through the link, and the backup next to it is a copy of the contents. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
 
 **`scripts/install.sh` installs the checkout it runs in**, so it first fetches `origin/main` (giving up after 20 seconds and using the last fetched copy) and checks that the checkout contains all of it. If not — a feature branch cut before a fix merged — it lists the missing commits and stops; run from an interactive terminal it asks first. `--force` (or `CLAUDE_PET_INSTALL_ANYWAY=1`) installs anyway. Otherwise the installed pet would quietly lose fixes that are already merged.
 
 What it keeps: each session's current state, one record per finished turn (7 days), and **one line of each conversation** — the first line of Claude's last reply. Your prompts are never stored, and the pet makes **no network requests**. The Task Board reads live sessions' recent messages from their local transcripts to show them; nothing is sent anywhere. Details: [docs/pet.md](docs/pet.md#what-it-touches).
 
 ```bash
-./scripts/uninstall.sh      # hooks, app and launch agent removed; settings.json back to what it was
+./scripts/uninstall.sh      # hooks, app and launch agent removed; settings.json keeps your settings
+                            # (keys sorted and re-indented, so not byte for byte; backups stay next to it)
                             # (stops first if your statusline still runs pet-emit; lists what it leaves in ~/.claude/pet)
 hq/uninstall.sh             # HQ's hooks and commands removed; your task cards are kept
 ./scripts/package.sh        # a tarball with a prebuilt binary and a one-click installer, to send to someone
