@@ -35,6 +35,7 @@ const JT = {
     q_can: "What it may do", q_canS: "Nobody is there to click Allow", q_tell: "Tell me", q_more: "More", q_moreS: "Usually fine as it is",
     kindClaude: "Claude prompt", kindClaudeD: "One claude -p turn in the background; it can use your skills and MCP tools.",
     kindShell: "Shell command", kindShellD: "A command or script; its exit code and output are kept.",
+    shellOnMac: "Shell commands are set up on the Mac.",
     name: "Name", namePh: "Morning CI summary", cwd: "Folder", choose: "Choose…",
     prompt: "Prompt",
     promptPh: "/my-skill summarise last night's failed CI jobs and list the three things I should look at today",
@@ -98,6 +99,7 @@ const JT = {
     q_can: "能做什么", q_canS: "跑的时候没人点「允许」", q_tell: "跑完告诉我", q_more: "更多", q_moreS: "一般不用动",
     kindClaude: "Claude prompt", kindClaudeD: "在后台用 claude -p 跑一轮，可以用你的技能和 MCP 工具。",
     kindShell: "Shell 命令", kindShellD: "跑一条命令或脚本，记下退出码和输出。",
+    shellOnMac: "Shell 命令只能在 Mac 上设置。",
     name: "名称", namePh: "早报：昨晚 CI 失败汇总", cwd: "工作目录", choose: "选择…",
     prompt: "Prompt",
     promptPh: "/my-skill 汇总昨晚失败的 CI job，列出今天要我看的 3 件事",
@@ -249,8 +251,11 @@ function jobTemplates() {
     { ...base, name: jt("tpl2"), kind: "claude", prompt: jt("tpl2P"), schedule: { ...base.schedule, kind: "every", everyMinutes: 60 } },
     { ...base, name: jt("tpl3"), kind: "shell", command: "find ~/Library/Caches -type f -atime +30 -delete",
       schedule: { ...base.schedule, kind: "weekly", days: [7], hour: 3, minute: 0 } },
-  ];
+  ].filter((t) => jobKinds().includes(t.kind));
 }
+// A shell job runs any command on the Mac: only the Mac's board sets one up or changes one. A
+// phone makes Claude jobs, and runs, switches, stops or deletes any (BoardServer refuses the rest).
+const jobKinds = () => (REMOTE ? ["claude"] : ["claude", "shell"]);
 
 // ------------------------------------------------------------------ the view
 function renderJobsView() {
@@ -326,7 +331,7 @@ function jobRow(j) {
       <button class="switch ${j.enabled ? "on" : ""}" role="switch" aria-checked="${j.enabled}" data-jaction="toggle" data-id="${esc(j.id)}" title="${j.enabled ? jt("toggleOff") : jt("toggleOn")}"><span></span></button>
       ${running ? `<button class="btn small danger" data-jaction="stop" data-id="${esc(j.id)}">${jt("stop")}</button>`
                 : `<button class="btn small" data-jaction="run" data-id="${esc(j.id)}">${jt("runNow")}</button>`}
-      <button class="btn small ghost" data-jaction="edit" data-id="${esc(j.id)}">${jt("edit")}</button>
+      ${jobKinds().includes(j.kind) ? `<button class="btn small ghost" data-jaction="edit" data-id="${esc(j.id)}">${jt("edit")}</button>` : ""}
       <button class="btn small ghost ${armed ? "armed" : ""}" data-jaction="delete" data-id="${esc(j.id)}">${armed ? jt("delSure") : jt("del")}</button>
     </div>
     ${failed && last.tail ? `<div class="jtail"><b>${jt("lastLines")}</b>${esc(last.tail)}</div>` : ""}
@@ -421,9 +426,9 @@ function drawJobForm() {
     ${f.model && !["sonnet", "opus", "haiku"].includes(f.model) ? `<option value="${esc(f.model)}" selected>${esc(f.model)}</option>` : ""}</select>`;
   const mode = `<select class="jchip" data-jf="sessionMode">${["fresh", "resume"].map((m) => `<option value="${m}" ${f.sessionMode === m ? "selected" : ""}>${jt("s_" + m)}</option>`).join("")}</select>`;
 
-  const what = `<div class="jkind-row"><span class="jkindsw" role="group">${["claude", "shell"].map((k) =>
+  const what = `<div class="jkind-row"><span class="jkindsw" role="group">${jobKinds().map((k) =>
       `<button class="${f.kind === k ? "on" : ""}" aria-pressed="${f.kind === k}" data-jaction="jf-set" data-path="kind" data-value="${k}">${jt(k === "claude" ? "kindClaude" : "kindShell")}</button>`).join("")}</span>
-      <span class="jhelp-in">${jt(claude ? "kindClaudeD" : "kindShellD")}</span></div>
+      <span class="jhelp-in">${jt(claude ? "kindClaudeD" : "kindShellD")}${REMOTE ? " " + jt("shellOnMac") : ""}</span></div>
     <input id="jf-name" class="jfield jname-in" type="text" data-jf="name" value="${esc(f.name)}" placeholder="${esc(jt("namePh"))}" aria-label="${esc(jt("name"))}">
     ${claude
       ? `<textarea class="jfield" rows="4" data-jf="prompt" placeholder="${esc(jt("promptPh"))}" aria-label="${esc(jt("prompt"))}">${esc(f.prompt)}</textarea>

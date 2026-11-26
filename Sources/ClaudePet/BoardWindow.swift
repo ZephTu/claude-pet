@@ -266,7 +266,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) async -> (Any?, String?) {
-        await handle(message.body as? [String: Any] ?? [:])
+        // Only the board's own page may use the bridge — see BoardNavigation.
+        let origin = message.frameInfo.securityOrigin
+        guard BoardNavigation.trusted(mainFrame: message.frameInfo.isMainFrame,
+                                      scheme: origin.protocol, host: origin.host) else {
+            NSLog("ClaudePet: board bridge ignored a message from \(origin.protocol)://\(origin.host)")
+            return (nil, L("not from the board", "不是看板发来的"))
+        }
+        return await handle(message.body as? [String: Any] ?? [:])
     }
 
     /// One request from the board: from its window on the Mac, or from a phone over the local
@@ -1535,6 +1542,22 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 }
 
 extension BoardWindow: WKNavigationDelegate {
+    /// The window shows the board's own pages only: a web link opens in the browser, anything
+    /// else goes nowhere — see BoardNavigation.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        let url = navigationAction.request.url
+        // No target frame: a link or script asking for a new window, which the board doesn't open.
+        switch BoardNavigation.decide(url: url, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true) {
+        case .allow: return .allow
+        case .openOutside:
+            if let url { NSWorkspace.shared.open(url) }
+            return .cancel
+        case .cancel:
+            NSLog("ClaudePet: board window refused to go to \(url?.absoluteString.prefix(200) ?? "nil")")
+            return .cancel
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
         if let script = pending {

@@ -1,3 +1,4 @@
+import ClaudePetCore
 import Foundation
 import WebKit
 import UniformTypeIdentifiers
@@ -16,10 +17,10 @@ import UniformTypeIdentifiers
 /// One custom scheme removes the whole class of problem, and costs a page load
 /// path that is a few lines longer.
 final class PetSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "pet"
+    static let scheme = BoardNavigation.scheme
     /// The authority in `pet://app/index.html`. Anything else is refused, so a
     /// typo produces a 404 rather than a silent empty page.
-    static let host = "app"
+    static let host = BoardNavigation.host
 
     private let root: URL
     /// Tasks WebKit has told us to stop. Replying to a stopped task is an

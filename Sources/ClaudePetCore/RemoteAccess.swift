@@ -460,12 +460,52 @@ public enum RemoteAccess {
 
     // MARK: - What a phone may ask for
 
-    /// Operations only the Mac's own window may run: managing phone access (a phone must not mint
-    /// more tokens or undo a revoke), and a folder picker — a modal dialog on the Mac's screen,
-    /// waiting for someone who isn't there.
-    public static let macOnly: Set<String> = ["remote", "remote-enable", "remote-tailnet", "remote-pair", "remote-revoke", "pick-folder"]
+    /// What a paired phone may ask the Mac for. A list of what is allowed, not of what isn't: an
+    /// operation added to the board's bridge stays the Mac's until it is put here on purpose
+    /// (RemoteAccessTests checks that each one is in exactly one of these two lists).
+    public static let phoneOps: Set<String> = [
+        // Reading the board, sessions and conversations.
+        "board", "sessions", "status", "peek", "seen", "commands", "peek-tool", "pet", "history",
+        "agents", "prompt", "read-doc",
+        // Settings every board shares.
+        "board-prefs", "phrases", "phrase-suggest",
+        // Asks, todos and the cards themselves.
+        "resolve", "reopen", "snooze", "delivered", "todo", "set", "log", "focus", "project", "ref",
+        "workdir", "continue", "addtodo", "bind", "unbind", "new",
+        // Quick notes.
+        "note-add", "note-sort", "note-move", "note-drop", "note-restore",
+        // Sessions: start, message, stop, answer their prompts.
+        "launch", "resume", "send", "interrupt", "saveImage", "stop", "stop-session", "decide",
+        "answer-question", "plan-feedback", "plan-approve",
+        // The secretary and the intake job.
+        "secretary", "secretary-setup", "secretary-send", "secretary-stop", "secretary-reports",
+        "secretary-feed", "secretary-feed-now", "secretary-autoclose", "secretary-autoclose-now",
+        "intake-job", "intake-job-set", "intake-job-now",
+        // Scheduled jobs.
+        "jobs", "job-save", "job-enable", "job-delete", "job-run", "job-stop", "job-preview",
+        "job-detail", "job-seen", "job-resume", "recur-save",
+    ]
 
-    public static func allowed(op: String) -> Bool { !macOnly.contains(op) }
+    /// Operations only the Mac's own window may run:
+    /// - managing phone access: a phone must not mint more tokens or undo a revoke;
+    /// - whatever acts on the Mac's screen, where no one is looking: a folder picker (a modal dialog
+    ///   waiting for someone who isn't there), opening a file, a link or a terminal, jumping to one;
+    /// - the Mac's clipboard, and what a click on the pet opens. The phone's page does its own
+    ///   copying, links and folder typing (board.js, remoteLocal).
+    public static let macOnly: Set<String> = [
+        "remote", "remote-enable", "remote-tailnet", "remote-pair", "remote-revoke",
+        "pick-folder", "open", "openPath", "openURL", "attach", "jump", "copy", "click-target",
+    ]
+
+    public static func allowed(op: String) -> Bool { phoneOps.contains(op) }
+
+    /// A shell job runs any command on the Mac, so only the Mac sets one up: a phone may save a
+    /// Claude job (a missing kind is one), but not make a shell job, turn a job into one, or change
+    /// one written on the Mac. It may still run, switch on or off, stop and delete any job.
+    /// - Parameter storedKind: the kind of the job this save replaces, nil for a new job.
+    public static func phoneMaySave(job: [String: Any], storedKind: String?) -> Bool {
+        (job["kind"] == nil || job["kind"] as? String == "claude") && storedKind != "shell"
+    }
 
     /// A phone opening its pairing link trades the code for a token of its own: the code — seen in
     /// a QR code, maybe pasted somewhere — is spent, and the token never leaves the phone.
