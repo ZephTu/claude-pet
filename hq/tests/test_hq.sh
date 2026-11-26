@@ -2732,6 +2732,95 @@ next: ex two
 done.')")"
 ! echo "$out" | grep -q "not at the end" && ! grep -q "ex one\|ex two" "$AC" && ok "two hq-update examples mid-reply: neither applied, no complaint" || fail "two examples: $out"
 
+# ---- hq doctor: hook wiring, stale bindings, state files, asks an old `later` closed — in a home of its own.
+DH="$T/doctor-home"; mkdir -p "$DH/.claude"; echo '{}' > "$DH/.claude/settings.json"
+HOME="$DH" "$SRC/install.sh" --root "$T/doctor-root" --yes --no-commands >/dev/null
+DQ() { HOME="$DH" "$DH/.claude/hq/bin/hq" "$@"; }
+python3 - "$SRC/../Sources/PetEmit/SettingsPatch.swift" "$SRC/bin/hq" <<'PY' && ok "doctor: the pet's hook events match SettingsPatch.events" || fail "doctor pet events out of step with SettingsPatch.swift"
+import re, sys
+swift = open(sys.argv[1]).read()
+body = re.search(r"static let events = \[(.*?)\]", swift, re.S).group(1)
+want = re.findall(r'"([A-Za-z]+)"', re.sub(r"//.*", "", body))
+hq = re.search(r"PET_HOOK_EVENTS = \((.*?)\)", open(sys.argv[2]).read(), re.S).group(1)
+assert sorted(re.findall(r'"([A-Za-z]+)"', hq)) == sorted(want), (hq, want)
+PY
+out="$(DQ doctor)" && echo "$out" | grep -q "✓ hq hook on SessionStart, UserPromptSubmit, Stop" && echo "$out" | grep -q "Claude Pet is not installed" \
+  && echo "$out" | grep -q "All good." && ok "doctor: a fresh install is all good" || fail "doctor fresh: $out"
+mkdir -p "$DH/cfg"; echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$HOME/.claude/hq/bin/hq hook"},{"type":"command","command":"$HOME/.claude/hq/bin/hq hook"}]}]}}' > "$DH/cfg/settings.json"
+out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor)" && fail "doctor with hooks missing should exit 1" || true
+echo "$out" | grep -q "✗ hq hook missing on SessionStart, UserPromptSubmit" && echo "$out" | grep -q "wired twice on Stop" \
+  && ok "doctor: a missing hook is an error (exit 1), a doubled one a warning; CLAUDE_CONFIG_DIR's settings are read" || fail "doctor missing hooks: $out"
+echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$HOME/.claude/pet/pet-emit"}]}]}}' > "$DH/cfg/settings.json"
+out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor || true)"
+echo "$out" | grep -q "pet hook missing on SessionStart" && echo "$out" | grep -q "pet-emit, which is missing or not executable" \
+  && ok "doctor: a pet hook wired on some events, to a binary that is gone" || fail "doctor pet hooks: $out"
+echo 'not json' > "$DH/cfg/settings.json"
+out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor)" && fail "doctor with an unreadable settings.json should exit 1" || true
+echo "$out" | grep -q "✗ .*settings.json can't be read" && ok "doctor: an unreadable settings.json is an error" || fail "doctor bad settings: $out"
+
+DOPEN="$(DQ new "Open one" --workdir "$T" | head -1)"; DDONE="$(DQ new "Done one" --workdir "$T" | head -1)"
+DQ bind "$DOPEN" --session d-recent >/dev/null; DQ bind "$DOPEN" --session d-old >/dev/null
+DQ bind "$DDONE" --session d-done >/dev/null; DQ bind "$DDONE" --session d-held >/dev/null
+DQ ask add "$DOPEN" "Ship it?" >/dev/null; DQ ask resolve "$DOPEN.1" do --via board >/dev/null
+DQ set "$DDONE" status=done >/dev/null
+python3 - "$DH/.claude/hq/state/sessions.json" "$DOPEN" <<'PY'
+import json, sys
+p, tid = sys.argv[1], sys.argv[2]
+s = json.load(open(p))
+s["d-old"]["bound_at"] = "2020-01-01T00:00:00+00:00"
+s["d-old"]["delivered"] = [tid + ".1"]           # the older record of an answer told to it
+s["d-held"]["held"] = {"task": s["d-held"]["task"]}
+s["d-gone"] = {"task": "T-999", "bound_at": "2026-01-01T00:00:00+00:00"}
+json.dump(s, open(p, "w"))
+PY
+DDIR="$(dirname "$(ls "$T"/doctor-root/tasks/"$DOPEN"-*/TASK.md)")"
+python3 - "$DH/.claude/hq/state/todo-seen.json" "$DOPEN" <<'PY'
+import json, sys
+json.dump({sys.argv[2] + "|gone todo": "2026-01-01T00:00:00+08:00", "T-999|x": "2026-01-01T00:00:00+08:00"}, open(sys.argv[1], "w"))
+PY
+echo "- [ ] @me still open" >> "$DDIR/TASK.md"; DQ board --json >/dev/null    # a todo with no stamp of its own: first seen now
+mkdir -p "$DH/.claude/hq/state/locks"; touch "$DH/.claude/hq/state/locks/T-777-deleted.lock" "$DH/.claude/hq/state/locks/T-778-held.lock"
+DQ ask add "$DOPEN" "Old later?" >/dev/null
+echo "{\"type\":\"resolve\",\"id\":\"$DOPEN.2\",\"resolution\":\"later\",\"note\":\"\",\"via\":\"cli\",\"ts\":\"2026-11-20T10:00:00+08:00\"}" >> "$DDIR/asks.jsonl"
+out="$(DQ doctor)"
+echo "$out" | grep -q "2 of 5 session bindings are over" && ! echo "$out" | grep -q "d-done" \
+  && ok "doctor: without the pet to say, a session bound today may still be running — kept even on a done task" || { echo "$out"; fail "doctor bindings without the pet"; }
+mkdir -p "$DH/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"d-recent\"}" > "$DH/.claude/pet/sessions/d-recent.json"
+out="$(DQ doctor)"
+echo "$out" | grep -q "3 of 5 session bindings are over" && echo "$out" | grep -q "d-done .*is done" && echo "$out" | grep -q "d-gone .*T-999 no longer exists" \
+  && echo "$out" | grep -q "d-old .*quiet for" && ! echo "$out" | grep -q "d-held\|d-recent" \
+  && ok "doctor: bindings to a closed or deleted task, or of a session long quiet, are over; a held close and a recent one are not" || { echo "$out"; fail "doctor bindings"; }
+echo "$out" | grep -q "todo-seen.json: 2 of 3 entries" && echo "$out" | grep -q "T-777-deleted.lock" && ! echo "$out" | grep -q "$DOPEN-open-one.lock\|inbox.lock" \
+  && ok "doctor: todo-seen entries of todos no longer open, lock files of no card" || fail "doctor state files: $out"
+echo "$out" | grep -q "$DOPEN.2 .*2026-11-20  Old later?" && ok "doctor: lists an ask closed by an old later" || fail "doctor later: $out"
+DQ doctor --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["fixed"] is None and {c["area"] for c in d["checks"]} == {"hooks","bindings","state","asks"} and all(c["level"] in ("ok","warn","error") for c in d["checks"]), d' \
+  && ok "doctor --json" || fail "doctor json"
+
+python3 - "$DH/.claude/hq/state/locks/T-778-held.lock" "$DH/.claude/hq/bin/hq" "$DH" > "$T/doctor-fix.out" <<'PY'
+import fcntl, os, subprocess, sys
+with open(sys.argv[1], "a") as f:
+    fcntl.flock(f, fcntl.LOCK_EX)
+    print(subprocess.run([sys.argv[2], "doctor", "--fix"], env=dict(os.environ, HOME=sys.argv[3]), capture_output=True, text=True).stdout)
+PY
+out="$(cat "$T/doctor-fix.out")"
+echo "$out" | grep -q "unbound 3 sessions" && echo "$out" | grep -q "dropped 2 todo-seen.json entries" && echo "$out" | grep -q "removed 1 lock file" \
+  && echo "$out" | grep -q "reopened 1 ask: $DOPEN.2" && ok "doctor --fix says what it did" || fail "doctor fix: $out"
+python3 - "$DH/.claude/hq/state/sessions.json" "$DH/.claude/hq/state/todo-seen.json" "$DOPEN" <<'PY' && ok "doctor --fix: stale bindings and todo-seen entries gone, the rest kept" || fail "doctor fix state"
+import json, sys
+s = json.load(open(sys.argv[1])); seen = json.load(open(sys.argv[2]))
+assert sorted(s) == ["d-held", "d-recent"], s
+assert list(seen) == [sys.argv[3] + "|still open"], seen
+PY
+L="$DH/.claude/hq/state/locks"
+[ ! -e "$L/T-777-deleted.lock" ] && [ -e "$L/T-778-held.lock" ] && [ -e "$L/$(basename "$DDIR").lock" ] \
+  && ok "doctor --fix: removes an orphan lock no one holds, keeps a held one and the cards' own" || fail "doctor fix locks: $(ls "$L")"
+DQ asks "$DOPEN" --all --json | python3 -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)}; t=sys.argv[1]; assert a[t+".1"]["delivered"]=="d-old" and a[t+".2"]["state"]=="open", a' "$DOPEN" \
+  && ok "doctor --fix: an unbound session's older delivered record moves onto the ask; the old-later ask is open again" || fail "doctor fix asks"
+grep -q "^status: waiting-on-me" "$DDIR/TASK.md" && ok "doctor --fix: a reopened ask puts its task back on you" || fail "doctor fix status"
+out="$(DQ doctor --fix)"; echo "$out" | grep -q "removed 1 lock file" && echo "$out" | grep -q "All good." && ok "doctor --fix again: the lock let go of is removed now" || fail "doctor fix again: $out"
+out="$(DQ doctor --fix)"; echo "$out" | grep -q "Nothing to fix." && ok "doctor --fix with nothing left" || fail "doctor fix nothing: $out"
+{ DQ doctor --days 0 2>&1 || true; } | grep -q "at least 1" && ok "doctor --days must be positive" || fail "doctor days"
+
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"

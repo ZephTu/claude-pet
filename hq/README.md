@@ -135,7 +135,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
 `hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00] [--note WHY]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back; `hq ask resolve T-012.3 later [until DATE]` is the same), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
-`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary).
+`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary), `hq doctor [--fix]` (Checking HQ itself, below).
 
 ### Where things stand: `hq status`
 
@@ -910,6 +910,22 @@ are asked every run, since a wrong site or account says 404 too) and `last`. The
 `hq.json`, which may be shared (`-` clears one). `$HQ_JIRA_SITE` / `$HQ_JENKINS_SITE` win; a Jira
 site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still read last.
 
+## Checking HQ itself: `hq doctor`
+
+`hq doctor [--fix] [--days N] [--json]` looks over HQ's own plumbing, without a model:
+
+| Area | Checks | `--fix` |
+|---|---|---|
+| Hooks | `settings.json` (in `$CLAUDE_CONFIG_DIR` when set) has `hq hook` once on SessionStart, UserPromptSubmit and Stop, and `~/.claude/hq/bin/hq` is there and executable; the pet's `pet-emit` on its 11 events, when the pet is installed; which Python hq runs with (3.9+) | nothing: settings.json is never edited (a missing hook may be an install with `--no-hooks`); it names the installer to rerun |
+| Session bindings | `state/sessions.json` entries whose task is gone, done or abandoned, or whose session has been quiet for `--days` (30). Kept: a session still running (the pet's record; without the pet, a transcript written in the last day) and one holding a close (`held`) | unbinds them; an unbound session's older `delivered` list goes onto the asks as `delivered` events, so no answer is told twice |
+| State files | `state/todo-seen.json` entries for todos no longer open; lock files in `state/locks/` of no card, project or HQ-wide lock | drops the entries; removes a lock file only when it can take the lock without waiting |
+| Asks | asks on open tasks answered `later` when that closed them for good (before it meant "put off") | reopens them (`via: doctor`); their tasks go back to waiting-on-me |
+
+It prints one line per check (✓ / ! / ✗) and a count of the problems; with `--fix`, what it did first and then
+the checks as they stand after. `--json` gives `{"checks": [{area, level, text, fix, items}], "fixed": [...] | null}`.
+It exits 1 when a check is an error (a hook not wired or not runnable, a settings.json or sessions.json that
+can't be read).
+
 ## Files
 
 ```
@@ -933,7 +949,11 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point
 ├── config.json               {"root": "<root>", "sites": {"jira": URL, "jenkins": URL}}
-└── state/sessions.json       session id → bound task, delivery cursor, turn start, finished
+└── state/
+    ├── sessions.json         session id → bound task, delivery cursor, turn start, finished
+    ├── todo-seen.json        "T-012|todo text" → when an unstamped todo was first seen
+    ├── replies/              <session id>.json: a bound session's last reply (14 days)
+    └── locks/                one lock file per card, project and HQ-wide write (`hq doctor --fix` prunes)
 ```
 
 `hq board --json` is the read API for UIs (the Claude Pet panel uses it). It is compact JSON,
