@@ -755,7 +755,7 @@ main { height: calc(100% - 46px - 30px); }
 
 /* ---- Scheduled jobs (jobs.js) ----
    Colours only from the board's tokens, so a new palette reaches this page too. */
-#jobs { display: block; height: calc(100% - 46px - 30px); }
+#jobs { display: block; height: calc(100% - 52px - var(--safe-top) - 32px); }
 #jobs[hidden] { display: none; }
 #jobs, .jrun-panel { --jround: var(--round, ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif);
   --jmono: ui-monospace, "SF Mono", Menlo, monospace; }

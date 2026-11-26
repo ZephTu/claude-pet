@@ -1353,7 +1353,7 @@ function sessReply(t, s) {
 // Opening a task's drawer reads the last replies it shows: their "new" tags go, here and on the
 // pet, as a Peek's do. A session whose reply an open ask hides keeps its tag until the ask is
 // answered. Run by render(): on the drawer it opens, and again while it stays open with the board
-// in front (a turn that ends under your eyes is read too), not while the window is behind others.
+// in front with nothing over it (a turn that ends under your eyes is read too).
 // The reply is opened first, as sessReply would for a tagged one, so it doesn't fold as the tag goes.
 function markDrawerSeen() {
   const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
@@ -1369,7 +1369,10 @@ function markDrawerSeen() {
   }
   api("seen", { sessions: xs.map((s) => s.sessionId) }).catch(() => {});
 }
-const boardInFront = () => document.visibilityState === "visible" && document.hasFocus();
+// The drawer is what you are looking at: the board in front, and nothing open over it (a Peek or
+// the secretary in #modal, Settings, or on a phone the full-screen reader).
+const boardInFront = () => document.visibilityState === "visible" && document.hasFocus()
+  && !ui.modal && !ui.settings && !(document.body.classList.contains("reading") && matchMedia("(max-width: 640px)").matches);
 
 // Every session with a "new" tag, newest reply first: the status bar's red chip lists them, so
 // they are found without scanning every card (on a phone, every page of them).
@@ -1403,8 +1406,9 @@ function unreadGo(sid) {
   ui.unreadPop = false;
   const s = ui.sessions.find((x) => x.sessionId === sid);
   const t = s && s.task ? taskById(s.task) : null;
+  render();
   if (!t) return openPeek(sid);
-  if (t.id === secId()) { render(); return openSecretary(); }
+  if (t.id === secId()) return openSecretary();
   clearTimeout(ui.hlTimer);
   ui.hlSession = sid;
   ui.hlTimer = setTimeout(() => { if (ui.hlSession === sid) { ui.hlSession = null; render(); } }, 4000);
@@ -1493,9 +1497,19 @@ function resText(res, note, granted) {
   if (res === "drop") return "No" + (note ? ` — ${note}` : "");
   return (RES_TEXT[res] || res) + (note && res !== "snooze" ? ` — ${note}` : "");
 }
+// Answering an ask reads the reply it came with: the asking session's "new" tag goes (here and on
+// the pet), as a reply sent from the board clears it. Putting it off till later doesn't.
+async function answerAsk(a, res, note) {
+  const out = await resolveAsk(a, res, note);
+  if (res !== "snooze" && a.session) {
+    if (ui.unread) delete ui.unread[a.session];
+    api("seen", { sessions: [a.session] }).catch(() => {});
+  }
+  return out;
+}
 // "To todo" is the board's own answer: the ask becomes an @me todo on its task, and is closed as
 // "do" with a note saying so. Returns what an Undo needs.
-async function answerAsk(a, res, note) {
+async function resolveAsk(a, res, note) {
   if (res === "snooze") { await api("snooze", { id: a.id }); return { snoozed: true }; }
   if (res === "always") {
     const task = a.id.replace(/\.\d+$/, "");
@@ -4744,11 +4758,14 @@ const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .l
 let pressedIn = false;
 document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
 
+// The list of new replies closes on a press anywhere outside it (its chip toggles it). A press,
+// not a click: iOS sends no click for a tap on plain text or an empty part of the page.
+document.addEventListener("pointerdown", (ev) => {
+  if (ui.unreadPop && !ev.target.closest("#unread-pop, .unread-chip")) { ui.unreadPop = false; render(); }
+});
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
   if (ui.launchMenu && !ev.target.closest(".launch")) { ui.launchMenu = null; render(); }
-  // So does the list of new replies (its chip toggles it).
-  if (ui.unreadPop && document.contains(ev.target) && !ev.target.closest("#unread-pop, .unread-chip")) { ui.unreadPop = false; render(); }
   const el = ev.target.closest("[data-action]");
   // The task drawer closes on a click anywhere outside it — but not one in a dialog or toast over
   // it, one that ends a text selection, or one on a card or button that opens a drawer itself
