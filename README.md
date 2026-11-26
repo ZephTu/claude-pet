@@ -138,7 +138,7 @@ Open Claude Code anywhere and paste:
 5. **Onboard**: read `~/.claude/commands/hq-onboard.md` and follow it (the `/hq-onboard` command was just added, so this session may not know it yet). It asks the user before creating anything.
 6. **Finish** by telling the user: double-click the cat to open the board (or right-click → Task Board…); hooks act only in sessions started from now on, so restart the ones that should be tracked; Claude Code keeps transcripts for about 30 days by default (`cleanupPeriodDays`), so older work won't show up.
 
-**The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
+**The pet's installer edits `~/.claude/settings.json`**, appending eleven hooks and leaving yours byte for byte as they were; the file is backed up first, written atomically and verified. A `settings.json` that is a symlink (into a dotfiles repo, say) is edited through the link, and the backup next to it is a copy of the contents. HQ adds three more (unless `--no-hooks`), which act only in sessions bound to a task. Hooks take effect in **newly started** sessions.
 
 **`scripts/install.sh` installs the checkout it runs in**, so it first fetches `origin/main` (giving up after 20 seconds and using the last fetched copy) and checks that the checkout contains all of it. If not — a feature branch cut before a fix merged — it lists the missing commits and stops; run from an interactive terminal it asks first. `--force` (or `CLAUDE_PET_INSTALL_ANYWAY=1`) installs anyway. Otherwise the installed pet would quietly lose fixes that are already merged.
 
@@ -146,6 +146,7 @@ What it keeps: each session's current state, one record per finished turn (7 day
 
 ```bash
 ./scripts/uninstall.sh      # hooks, app and launch agent removed; settings.json back to what it was
+                            # (stops first if your statusline still runs pet-emit; lists what it leaves in ~/.claude/pet)
 hq/uninstall.sh             # HQ's hooks and commands removed; your task cards are kept
 ./scripts/package.sh        # a tarball with a prebuilt binary and a one-click installer, to send to someone
 ```

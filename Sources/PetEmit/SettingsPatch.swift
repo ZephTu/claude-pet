@@ -13,6 +13,9 @@ import Foundation
 ///  - The write is atomic (temp file + rename), so a crash mid-write leaves the
 ///    original file untouched rather than truncated.
 ///  - Adding is idempotent: running it twice adds nothing the second time.
+///  - A settings.json that is a symlink (dotfiles keep it in a repo) is written
+///    through to the file it points at; replacing the link itself would fail or
+///    silently cut it off from the repo.
 enum SettingsPatch {
     static let hookCommand = "$HOME/.claude/pet/pet-emit"
     /// The shell version shipped before the Swift rewrite. Uninstall and the
@@ -38,8 +41,13 @@ enum SettingsPatch {
     ]
 
     /// Returns a process exit code: 0 on success, 1 on failure.
-    static func run(path: String, adding: Bool) -> Int32 {
+    static func run(path given: String, adding: Bool) -> Int32 {
+        // Every read and write goes to the real file. Backups are still named after
+        // the path given, so they land in ~/.claude rather than in the user's
+        // dotfiles repo, and they hold the contents rather than a second link.
+        let path = resolvingSymlinks(given)
         let url = URL(fileURLWithPath: path)
+        if path != given { report("\(given) is a link — editing \(path)") }
 
         var settings: [String: Any]
         if FileManager.default.fileExists(atPath: path) {
@@ -71,7 +79,7 @@ enum SettingsPatch {
             // by an uninstall used to land on the same name — and the code
             // deleted the older file to make room, which threw away a backup of
             // the user's ORIGINAL settings and kept one of our own edit.
-            let base = path + ".bak-claudepet-" + timestamp()
+            let base = given + ".bak-claudepet-" + timestamp()
             var destination = URL(fileURLWithPath: base)
             var attempt = 2
             while FileManager.default.fileExists(atPath: destination.path) {
@@ -276,6 +284,23 @@ enum SettingsPatch {
     }
 
     // MARK: - IO
+
+    /// Follows a chain of symlinks on the last path component to the file at its
+    /// end, whether that file exists yet or not. A path that is not a link comes
+    /// back as it is. Gives up after a fixed number of hops (a link loop), and the
+    /// write that follows then fails cleanly instead of spinning.
+    static func resolvingSymlinks(_ path: String) -> String {
+        var current = path
+        for _ in 0..<32 {
+            guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: current) else {
+                return current
+            }
+            current = target.hasPrefix("/")
+                ? target
+                : ((current as NSString).deletingLastPathComponent as NSString).appendingPathComponent(target)
+        }
+        return current
+    }
 
     /// Temp file plus rename: a crash mid-write cannot truncate the original.
     private static func atomicWrite(_ data: Data, to url: URL) -> Bool {

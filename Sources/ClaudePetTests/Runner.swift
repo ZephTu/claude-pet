@@ -2727,6 +2727,7 @@ struct Runner {
         DocReaderTests.run(t)
         RemoteAccessTests.run(t)
         QuickPhraseTests.run(t)
+        PetLaunchTests.run(t)
 
         print("\n-- language")
         t.check("a stored language wins over the system's",

@@ -566,5 +566,19 @@ check "…as a failure" "$(last status)" "fail"
 check "…with the last output line, which saw CLAUDE_PET_JOB" "$(last summary)" "out-jt"
 check "an unknown job is an error" "$("$EMIT" --run-job nope >/dev/null 2>&1; echo $?)" "2"
 
+# --- the statusline's per-session insight ---
+# The app re-reads insight/ only when the folder's modification time moves. A file
+# rewritten in place never moves it, so the pet saw a session's first reading and
+# nothing after; a rename (a new inode each time) does.
+sl() { printf '{"session_id":"sI","model":{"display_name":"%s"},"context_window":{"used_percentage":%s}}' "$1" "$2" \
+  | "$EMIT_BIN" --statusline >/dev/null; }
+INS="$PET_HOME/insight/sI.json"
+sl Opus 10
+first_inode="$(stat -f %i "$INS" 2>/dev/null)"
+sl Sonnet 20
+check "the insight file is replaced, not rewritten in place" \
+  "$([ -n "$first_inode" ] && [ "$first_inode" != "$(stat -f %i "$INS")" ] && echo yes || echo no)" "yes"
+check "…and holds the newest reading" "$(grep -c Sonnet "$INS" | tr -d ' ')" "1"
+
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAILED"; fi
 exit $((fails > 0))
