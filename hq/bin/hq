@@ -4273,6 +4273,19 @@ INTAKE_MAX_NEW = 3              # new tasks a scan makes; the rest wait for the 
 # The pet's job env (JobRunner): a session started with it would count as the job's and be hidden
 # from the pet (HookEmit skips processes with CLAUDE_PET_JOB) — no permission prompts shown.
 INTAKE_DROP_ENV = ("CLAUDE_PET_JOB", "CLAUDE_PET_RUN", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
+# What ties a process to the terminal tab it started in. A background session is in no terminal; with
+# these it would be recorded as in the tab hq (or the pet that ran it) was started from, and the board
+# would type messages for it there.
+TERMINAL_ENV = ("TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "ITERM_PROFILE",
+                "LC_TERMINAL", "LC_TERMINAL_VERSION")
+TERMINAL_ENV_PREFIXES = ("ORCA_", "GHOSTTY_", "KITTY_")   # not VSCODE_*: git's askpass helper needs them
+
+
+def intake_env(environ):
+    """The environment a background session starts with: this one, less what would tie it to a terminal
+    or to the session or job running hq."""
+    return {k: v for k, v in environ.items() if not k.startswith("CLAUDE_CODE_SESSION")
+            and k not in FEED_SECRET_ENV + INTAKE_DROP_ENV + TERMINAL_ENV and not k.startswith(TERMINAL_ENV_PREFIXES)}
 
 
 class IntakeError(Exception):
@@ -4442,8 +4455,7 @@ def intake_launch(tid, title, wd, prompt, skip, lang, manual, claude=None):
     first = (f"Start by running `{hq} bind {tid}` — it binds this background session to the task and prints "
              f"its rules. " + (INTAKE_MANUAL_DONE[lang] + " " if manual else "") + "Then: ")
     name = f"{tid} {title}"[:60]
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_CODE_SESSION")
-           and k not in FEED_SECRET_ENV + INTAKE_DROP_ENV}
+    env = intake_env(os.environ)
     env["HQ_ROOT"] = hq_root()
     args = [claude, "--bg", "--name", name] + (["--dangerously-skip-permissions"] if skip else []) + [first + prompt]
     try:

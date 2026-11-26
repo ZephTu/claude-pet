@@ -158,8 +158,14 @@ enum HookEmit {
         if let pid {
             document["pid"] = pid
         }
-        if let terminal = terminalRef(cwd: cwd,
-                                      tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "") {
+        // A background session is in no terminal, whatever terminal variables it inherited
+        // (TerminalTarget.isBackgroundSession); the board reaches it through `claude agents`.
+        if TerminalTarget.isBackgroundSession(environment: ProcessInfo.processInfo.environment, sessionId: sessionID,
+                                              parentArguments: pid.flatMap(ProcessProbe.parentPID)
+                                                  .flatMap(ProcessProbe.arguments)) {
+            document["background"] = true
+        } else if let terminal = terminalRef(cwd: cwd,
+                                             tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "") {
             document["terminal"] = terminal
         }
         // Which prompt this is, so a click in the pet answers THIS one — see

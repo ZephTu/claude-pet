@@ -82,6 +82,9 @@ const escButton = (s) => canInterrupt(s)
   : "";
 // What a send needs beyond the text: a background session goes by its short id, and is continued
 // with the board's skip-permissions choice, as a session started from here would be.
+// A session `claude agents` lists as background: its short id, which tells the app it is in no
+// terminal even when its record still names one (written before the pet knew better).
+const bgOf = (sid) => { const s = ui.sessions.find((x) => x.sessionId === sid); return s && s.background ? s.bgId || "" : ""; };
 const sendExtra = (s) => (s && s.background && !SENDABLE[s.terminal && s.terminal.kind] ? { bg: s.bgId, skip: skipPerms() } : {});
 
 // How sessions start (skip permissions, where they open) and what finishing a task does to its
@@ -725,7 +728,7 @@ async function promptSubmit(op, args, ok) {
   m.busy = true;
   drawPrompt();
   try {
-    await api(op, { session: m.sid, ask: m.ask, ...args });
+    await api(op, { session: m.sid, ask: m.ask, bg: bgOf(m.sid), ...args });
     // An approved plan's box stays away until the next hook clears it: one Enter per plan.
     if (op === "plan-approve") (ui.approvedPlans ||= new Set()).add(m.ask);
     for (const k of Object.keys(ui.drafts)) if (k.includes(m.ask)) delete ui.drafts[k];
@@ -875,7 +878,9 @@ function mergeBackground(sessions, agents) {
   for (const a of bg) {
     const s = byId.get(a.sessionId);
     // `claude attach` / `stop` take the short id that `claude agents` prints, not the session id.
-    if (s) { s.background = true; s.bgId = a.id; s.title = s.title || a.name; continue; }
+    // It runs in no terminal: a handle on its record was inherited from whatever started it
+    // (a pet opened from a terminal tab), and typing there would miss it.
+    if (s) { s.background = true; s.bgId = a.id; s.terminal = null; s.title = s.title || a.name; continue; }
     sessions.push({ sessionId: a.sessionId, title: a.name, cwd: a.cwd, project: (a.cwd || "").split("/").pop(),
                     state: a.status, updatedAt: a.startedAt ? new Date(a.startedAt).toISOString() : null,
                     terminal: null, background: true, bgId: a.id, lastText: "" });
@@ -5002,7 +5007,7 @@ document.addEventListener("click", async (ev) => {
     case "note-drop": return act("note-drop", { id: d.id }, T("Deleted — Restore brings it back", "已删掉——点恢复可以找回"));
     case "note-restore": return act("note-restore", { id: d.id }, T("Restored", "已恢复"));
     // On a phone the terminal is out of reach: its conversation, here, is the way in.
-    case "jump": return REMOTE ? openPeek(d.session) : act("jump", { session: d.session, from: jumpSource(el), view: ui.mode });
+    case "jump": return REMOTE ? openPeek(d.session) : act("jump", { session: d.session, bg: bgOf(d.session), from: jumpSource(el), view: ui.mode });
     case "pair-paste": return pairFromLink(($("#pair-link") || {}).value);
     case "pick-photo": return pickPhotos(d.session);
     case "remote-pair":
@@ -5374,7 +5379,7 @@ document.addEventListener("click", async (ev) => {
       if (escHeld(d.session)) return;
       ui.interrupted = { ...(ui.interrupted || {}), [d.session]: Date.now() };
       render();
-      try { await api("interrupt", { session: d.session }); toast(T("Pressed Esc — the turn stops in a moment", "已按 Esc——这一轮马上停下")); }
+      try { await api("interrupt", { session: d.session, bg: bgOf(d.session) }); toast(T("Pressed Esc — the turn stops in a moment", "已按 Esc——这一轮马上停下")); }
       catch (e) { delete ui.interrupted[d.session]; toast(String(e.message || e), true); }
       setTimeout(render, ESC_HOLD_MS + 100);
       return;

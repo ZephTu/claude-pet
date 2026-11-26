@@ -62,6 +62,38 @@ public enum TerminalTarget {
         return nil
     }
 
+    /// Is this a background session (`claude --bg`)? One runs under Claude Code's daemon, in no
+    /// terminal at all, yet keeps the environment of whatever started the daemon: started by the
+    /// pet, that is the pet's own, which holds the terminal tab the pet was opened from — a handle
+    /// that has nothing to do with the session, and is soon gone. The daemon outlives the pet, so
+    /// a pet reinstalled from somewhere else doesn't clear it either.
+    /// Claude Code marks the session's process (CLAUDE_CODE_SESSION_KIND=bg) but takes that
+    /// marker out of what its hooks inherit. What a hook still sees: the session's process runs
+    /// under a `claude bg-pty-host`, and its job folder (CLAUDE_JOB_DIR) is named after the
+    /// session's short id.
+    /// - Parameter parentArguments: the command line of the Claude Code process's parent.
+    public static func isBackgroundSession(environment env: [String: String], sessionId: String,
+                                           parentArguments: String?) -> Bool {
+        if env["CLAUDE_CODE_SESSION_KIND"] == "bg" { return true }
+        if let a = parentArguments, a.contains(" bg-pty-host") || a.hasPrefix("bg-pty-host") { return true }
+        if let dir = env["CLAUDE_JOB_DIR"], sessionId.count >= 8,
+           URL(fileURLWithPath: dir).lastPathComponent == String(sessionId.prefix(8)) { return true }
+        return false
+    }
+
+    /// The variables that tie a process to the terminal tab it was started in. An app opened
+    /// from a terminal (`open`, as scripts/install.sh does) inherits them, and so does everything
+    /// it starts: a session the pet starts would point at the tab the pet was installed from.
+    /// The pet drops them at launch.
+    public static func inheritedTerminalKeys(_ env: [String: String]) -> [String] {
+        let exact: Set<String> = ["TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID",
+                                  "ITERM_SESSION_ID", "ITERM_PROFILE", "LC_TERMINAL", "LC_TERMINAL_VERSION"]
+        // Not VSCODE_*: without TERM_PROGRAM nothing reads them as a terminal, and git's askpass
+        // helper (GIT_ASKPASS, kept) needs them to reach the editor.
+        let prefixes = ["ORCA_", "GHOSTTY_", "KITTY_"]
+        return env.keys.filter { k in exact.contains(k) || prefixes.contains { k.hasPrefix($0) } }.sorted()
+    }
+
     /// Kinds this build knows how to act on. Anything else — including a kind
     /// written by a future pet-emit this binary predates — makes the row
     /// non-clickable rather than giving the user a dead click.

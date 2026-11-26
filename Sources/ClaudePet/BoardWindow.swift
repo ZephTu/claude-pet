@@ -407,7 +407,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                                bg: str("bg"), skip: body["skip"] as? Bool ?? false, outbox: body["outbox"] as? Bool ?? false)
             if r.1 == nil { Self.onSeen?(str("session")) }   // replying means you read it
             return r
-        case "interrupt": return await interrupt(session: str("session"))
+        case "interrupt": return await interrupt(session: str("session"), bg: str("bg"))
         case "saveImage": return saveImage(dataURL: str("data"))
         case "note-add":
             return await Self.noteAdd(text: str("text"), images: body["images"] as? [String] ?? [], via: "board")
@@ -469,14 +469,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return reply(session: str("session"), ask: str("ask"), kind: "plan",
                          PermissionDecision.Answer(askId: str("ask"), behavior: .deny,
                                                    message: BoardPrompt.planFeedback(text)))
-        case "plan-approve": return await approvePlan(session: str("session"), ask: str("ask"))
+        case "plan-approve": return await approvePlan(session: str("session"), ask: str("ask"), bg: str("bg"))
         case "jump":
             let origin = TerminalJump.Origin(session: str("session"), source: str("from").isEmpty ? "board" : str("from"),
                                              view: str("view"))
-            guard let t = terminal(of: str("session")) else {
+            guard let t = terminal(of: str("session"), bg: str("bg")) else {
                 // Logged anyway: the log is about why the user wanted the terminal, not whether it worked.
                 TerminalJump.record?(origin, "")
-                return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
+                return (nil, str("bg").isEmpty ? L("no terminal recorded for this session", "没有记录这个 session 的终端")
+                                               : L("it runs in the background, in no terminal — Attach to open it", "它在后台运行，不在任何终端里 — 用 Attach 打开"))
             }
             // The page says which button: a card's session row, the sessions list, Peek, …
             TerminalJump.jump(kind: t.kind, handle: t.handle, from: origin)
@@ -858,6 +859,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let data = try? Data(contentsOf: f),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let pid = (obj["pid"] as? NSNumber)?.int32Value, ProcessProbe.isClaude(pid: pid),
+                  obj["background"] as? Bool != true,
                   let handle = (obj["terminal"] as? [String: Any])?["handle"] as? String else { continue }
             out[handle] = (obj["sessionId"] as? String) ?? f.deletingPathExtension().lastPathComponent
         }
@@ -1143,12 +1145,15 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     private struct Terminal { let kind: String; let handle: String }
 
-    private func terminal(of session: String) -> Terminal? {
-        guard !session.isEmpty, !session.contains("/") else { return nil }
+    /// `bg`: the board has it as a background session (`claude agents` lists it), so it is in no
+    /// terminal, whatever its record says.
+    private func terminal(of session: String, bg: String = "") -> Terminal? {
+        guard bg.isEmpty, !session.isEmpty, !session.contains("/") else { return nil }
         let file = FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".claude/pet/sessions/\(session).json")
         guard let data = try? Data(contentsOf: file),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              obj["background"] as? Bool != true,   // in no terminal, whatever one it inherited
               let t = obj["terminal"] as? [String: Any],
               let kind = t["kind"] as? String, let handle = t["handle"] as? String
         else { return nil }
@@ -1172,8 +1177,10 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             return (nil, L("give it a model: /model opus, /model sonnet, … — alone it opens a menu in the terminal",
                            "要带上模型名：/model opus、/model sonnet……——不带参数会在终端里打开一个菜单"))
         }
+        // `claude agents` lists it as a background session: it is in no terminal, whatever its
+        // record says (one started by a pet opened from a terminal inherited that tab's handle).
+        if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
         guard let t = terminal(of: session) else {
-            if !bg.isEmpty { return await sendBackground(session: session, bgId: bg, text: text, busy: queue, skip: skip) }
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
         }
         // Typing into a tab whose session has ended would hand the message to the shell as a
@@ -1260,8 +1267,8 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// Presses Esc in the session's terminal, as the user would to interrupt a turn. Only while
     /// it is mid-turn (`BoardSend.mayInterrupt`), and only in a terminal that can take a lone key
     /// (`press`); Terminal.app is left to Jump.
-    private func interrupt(session: String) async -> (Any?, String?) {
-        guard let t = terminal(of: session) else {
+    private func interrupt(session: String, bg: String = "") async -> (Any?, String?) {
+        guard let t = terminal(of: session, bg: bg) else {
             return (nil, L("no terminal recorded for this session", "没有记录这个 session 的终端"))
         }
         guard let pid = Self.sessionRunning(session)
@@ -1342,11 +1349,11 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     /// Approves the plan the session has up: Enter in its terminal, which picks the dialog's
     /// first option. A hook can't do it — Claude Code ignores "allow" for ExitPlanMode.
-    private func approvePlan(session: String, ask: String) async -> (Any?, String?) {
+    private func approvePlan(session: String, ask: String, bg: String = "") async -> (Any?, String?) {
         guard BoardPrompt.matches(dot: Self.petDots?()[session], ask: ask, kind: "plan") else {
             return (nil, L("that plan is no longer waiting here — look in its terminal", "这个计划已经不在这里等了 — 去它的终端里看看"))
         }
-        guard let t = terminal(of: session) else {
+        guard let t = terminal(of: session, bg: bg) else {
             return (nil, L("no terminal to press Enter in — Attach and approve it there", "没有可以按回车的终端 — 用 Attach 打开后在那里批准"))
         }
         guard Self.sessionRunning(session) != nil else { return (nil, L("that session is not running any more", "这个 session 已经不在运行了")) }
