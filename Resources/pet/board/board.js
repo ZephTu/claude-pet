@@ -176,7 +176,7 @@ function startMode() {
 }
 const ui = {
   board: null, sessions: [], peekOpen: new Set(), peeks: {}, hlSession: null, hlTimer: 0,
-  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusMore: null, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
+  drafts: {}, outbox: {}, obTimer: {}, obTurn: {}, statusPending: {}, statusSeq: {}, statusMore: null, statusQ: {}, readNo: 0, readDone: 0, hqOpen: new Set(), filter: "", busy: false, modal: null, recent: [], undoFn: null, msgOpen: new Set(), atts: {}, sending: new Set(), resuming: new Set(), resolving: new Set(), picks: {}, moreRes: new Set(), showLater: new Set(), handed: {}, handing: new Set(), noteOpen: new Set(), noteMoving: new Set(), history: {}, historyLoading: new Set(), histAll: new Set(), adding: new Set(), logAll: new Set(), resOpen: new Set(), projOpen: false, doneOpen: new Set(), refMore: new Set(),
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
@@ -1897,14 +1897,19 @@ function renderNotes() {
 }
 // Moves a note; the toast's Undo puts it back where it was.
 async function noteMove(id, dest, quiet) {
+  // One move per note at a time: a new task may wait on the model for its title, and a second
+  // click meanwhile would finish first and then be taken back by the first.
+  if (ui.noteMoving.has(id)) return toast(T(`${id} is still being filed`, `${id} 还在放`));
   const x = notes().find((n) => n.id === id);
   const back = x && x.state === "sorted" ? x.dest : { kind: "unsorted" };
   if (dest.kind === "task" && !dest.title) toast(T(`${id}: writing a title for the new task…`, `${id}：正在给新任务起标题…`));
+  ui.noteMoving.add(id);
   try {
     const r = await apiObj("note-move", Object.assign({ id }, dest));
     ui.noteOpen.delete(id);
     if (!quiet) toast(`${id} → ${destLabel(r.state === "sorted" ? r.dest : null)}${r.left ? ` (${r.left})` : ""}`, false, () => noteMove(id, back, true));
   } catch (e) { toast(String(e.message || e), true); }
+  finally { ui.noteMoving.delete(id); }
   return refresh();
 }
 async function captureSubmit() {

@@ -1752,10 +1752,14 @@ NT3="$(hqi inbox move --json --claude="$FAKE" -- "$NTT" task | python3 -c 'impor
 card "$NT3" | grep -q '^title: "Review the pet and the board"' && card "$NT3" | grep -q "^help me open a task: I want to review the whole pet" \
   && grep -q '"title"' "$FAKE_DIR/args" && grep -qx -- "--tools" "$FAKE_DIR/args" && grep -q "review the whole pet" "$FAKE_DIR/stdin" \
   && ok "inbox move to task with no title: the model writes a short one, the note is the goal" || fail "note title: $(card "$NT3")"
-NTT="$(hqi inbox add --json -- "help me open a task for the cache rework" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+NTT="$(hqi inbox add --json -- "$(printf 'help me open a task for the cache rework\nit is slow because the TTL is wrong')" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 touch "$FAKE_DIR/junk"
 hqi inbox move --json --claude="$FAKE" -- "$NTT" task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["title"]=="help me open a task for the cache rework", x' \
   && ok "no title from the model: the note's first line stands in" || fail "note title fallback"
+touch "$T/shot.png"
+NTI="$(hqi inbox add --json --image "$T/shot.png" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+hqi inbox move --json --claude="$FAKE" -- "$NTI" task | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["state"]=="sorted" and x["dest"]["title"] in ("Quick note '"$NTI"'", "快速记录 '"$NTI"'"), x' \
+  && ok "a screenshot-only note filed as a new task is titled by its id" || fail "image-only note title"
 rm "$FAKE_DIR/junk"
 
 # kind "update": a note moves a task on — its next, status section and status, the todos it finishes.

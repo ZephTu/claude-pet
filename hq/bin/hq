@@ -2808,7 +2808,10 @@ def inbox_dest(d, item, undo=None):
             return None
         out["owner"] = "me"
     if k == "task":
-        out["title"] = _flat(d.get("title"), 80) or _flat(item.get("text"), 60)
+        # No title given: the note's first line; a note that is only a screenshot gets its id.
+        first = str(item.get("text") or "").strip().split("\n", 1)[0]
+        out["title"] = (_flat(d.get("title"), 80) or _flat(first, 60)
+                        or ("快速记录 " if report_lang() == "zh" else "Quick note ") + str(item.get("id") or ""))
         if not out["title"]:
             return None
         names = [p["name"] for p in load_projects()]

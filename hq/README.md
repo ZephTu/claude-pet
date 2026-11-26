@@ -723,7 +723,8 @@ or marked abandoned if edited since; an update's next, status section, status, `
 ticks, each put back unless changed since) is taken back out first, and the old place becomes an
 alternative. Moving to `task` with no `--title`, when no guess has one either, has the cheap model
 write a short title (the note itself goes into the goal; with no model to ask, its first line is
-the title). Moving to `update` with none of `--next/--state/--status/--done` takes the changes
+the title; a note that is only a screenshot is "Quick note N-001", or 快速记录 for a Chinese
+secretary). Moving to `update` with none of `--next/--state/--status/--done` takes the changes
 from the model's update guess for that task; one that would change nothing is refused. `hq inbox drop|restore N-001`
 deletes an unsorted note or brings it back. `hq inbox [--all] [--json]` lists the unsorted notes and
 those sorted in the last 48 hours; `hq board --json` carries the same list as `inbox`.
