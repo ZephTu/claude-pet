@@ -322,17 +322,11 @@ function projAside(pr) {
         <button class="btn small" data-action="p-kind" data-p="${esc(name)}" data-k="duty">${T("↻ It's a duty", "↻ 设为职责")}</button></div></section>`
       + details + dirsSec(pr) + removeSec(pr);
   }
-  const ng = (pr.grants || []).length;
-  const grants = ng
-    ? `<div class="grants">${pr.grants.map((g) => `<div class="grant"><span class="t">${esc(g.text)}</span>
-        <button class="icon x" title="${T("Revoke — sessions ask again before this kind of step", "撤销——之后 session 遇到这类事情会重新问")}" data-confirm="${T("Revoke?", "撤销？")}" data-action="pgrant-revoke" data-p="${esc(name)}" data-i="${g.i}" data-text="${esc(g.text)}">✕</button></div>`).join("")}</div>`
-    : `<div class="empty">${T("None. An ask answered “Yes always” for the project lands here.", "没有。回答问题时选「可以，并授权」给整个项目的，会出现在这里。")}</div>`;
   const what = infoSec(name, "goal", duty ? T("Scope", "职责范围") : T("Goal", "目标"), mdOr(pr.goal, T("Not written yet.", "还没写。")),
       duty ? T("What this duty covers", "这个职责管什么") : T("What this project is for", "这个项目要做成什么"), "pi-lead")
     + infoSec(name, "out", T("Out of scope", "不管"), mdOr(pr.out, T("Nothing said.", "没写。")), T("What it leaves to others", "哪些事不归它"), "pi-out")
     + infoSec(name, "done_when", duty ? T("Healthy when", "健康标准") : T("Done when", "完成标准"), criteriaHTML(pr), T("- one criterion per line", "- 一行一条"));
   const forSessions = infoSec(name, "brief", T("Brief", "简报"), briefHTML(pr), T("Repos, branches, rules every session here should know", "仓库、分支、每个 session 都该知道的规矩"))
-    + `<section class="pi-sec"><h4>${T("Grants", "授权")}${ng ? `<span class="c">${ng}</span>` : ""}<span class="sub">${T("hold for every task in it", "对它的每个任务都有效")}</span></h4>${grants}</section>`
     + dirsSec(pr);
   return details
     + piGroup(duty ? T("What it is", "这个职责管什么") : T("What it is", "这个项目要做什么"), what)
@@ -521,7 +515,7 @@ function projDetail(name) {
     return `<div class="pd-head">${crumb(null)}<h1>${T("Not in a project", "未归属")}</h1><div class="r2">${laneNums(n)}</div></div>
       <div class="pd solo"><div class="pd-main">${addLine("(none)")}${board4(items)}</div></div>`;
   }
-  const pr = projectByName(name) || { name, defined: false, paths: [], grants: [], stats: null };
+  const pr = projectByName(name) || { name, defined: false, paths: [], stats: null };
   const duty = pr.kind === "duty";
   const statuses = duty ? ["active", "paused"] : ["active", "paused", "done", "abandoned"];
   const st = pr.stats || {};

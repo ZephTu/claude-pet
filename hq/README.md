@@ -135,8 +135,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
 `hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
-`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary),
-`hq grant list|add|revoke T-012 …` (standing grants, below).
+`hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary).
 
 ### Where things stand: `hq status`
 
@@ -280,7 +279,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
 
    On the board an ask is answered in words: what you write in its box is the answer (`do`, the
    note), and sending it empty is Yes, as suggested (`do`, no note). **✕ No** is `drop`; behind
-   **⋯** are **Yes, always** (`do` plus a standing grant, below), **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
+   **⋯** are **Later** — not a resolution: the ask stays open, hidden until tomorrow (`hq ask
    snooze`, `--until` to pick the time), and the session is told you'll answer later — and **No context** (`archive`).
    There is also **⋯ → To todo**, for an ask that is really something you
    will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
@@ -298,57 +297,12 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    asker keeps its answers until it is unbound.
 4. **Drafts are not done.** A message Claude drafted for you to send becomes an `@me` todo
    until you tick it.
-5. **Granted steps aren't asked again.** A standing grant is a kind of step you have said yes
-   to for good ("rerun with the same parameters", "fix review findings and push to the same
-   PR"). SessionStart (every source) lists the task's grants in force — at most 10 and 1500
-   characters — with the rule: grants are permissions, not requests to act now; while bound to
-   this task, a step the session would otherwise ask about that a grant clearly covers is taken
-   without an `hq-asks` and the grant named in the reply; each is read narrowly, and anything
-   bigger, riskier or different is asked as usual. A session bound from the board gets the list
-   with its first injection. Each session's entry in `sessions.json` keeps the grants it was
-   last shown (`grants`, and `grants_task`), so a prompt only carries a line when they changed
-   (`+ granted — a permission from now on, not a request to act now: …` / `- revoked — ask again
-   before doing this: …`) and nothing otherwise; a grant made by an answer is stated once, with
-   the answer. A SessionStart (resume, compact) first lists what was revoked since the session
-   last saw the grants, since the resumed conversation still holds the old list; a session
-   re-bound to another task hears that the old task's grants don't apply there. When an ask is
-   about a routine, reversible kind of step that will come up again, the session may end its
-   line with a suggested wording, `- Rerun #31388? [grant: rerun with the same parameters]` —
-   never for deleting, sending, spending, merging or force-pushing; it is kept apart from the
-   question (the ask's `grant` field) and pre-fills the board's **Yes, always** editor.
 
-   Grants come from you only. The protocol tells sessions never to add, widen or reword one,
-   and `hq grant add` and `ask resolve --grant` refuse to run inside a Claude Code session
-   (`CLAUDE_CODE_SESSION_ID` set; the board's hq runs without it, a session may still revoke).
-   A `state:` line that is a heading is refused, so an `hq-update` can't open a grants section
-   of its own. Ways in: **Yes, always** on an ask (`hq ask resolve T-012.3 do --grant
-   "<wording>"` — `--grant` needs `do`; the resolve event records `granted`, the command prints
-   `{"granted", "existed"}` for the board's Undo, and the answer the session gets says the step
-   is granted from now on), **＋** under the task's Grants on the
-   board, or `hq grant add T-012 "<wording>" [--source T-012.3]`. A wording already granted
-   (same words, ignoring case and spacing) is not added twice; a leading `[ ]` is dropped
-   (a checkbox line would be a todo). `hq grant list T-012 [--json]`
-   numbers them; `hq grant revoke T-012 <n | wording> [--text <wording as last seen>]` removes
-   one (with `--text`, a number that now points at a different grant goes by the wording instead,
-   and fails if that wording is gone) and prints it
-   as JSON, which `hq grant add … --at <ts> --source <ask>` puts back unchanged. Adding and
-   revoking are logged on the card. Project grants live in the project's `PROJECT.md` (same
-   section and parser) and hold for every task in it: `hq grant add|list|revoke --project NAME …`
-   in place of the task id. A session is given both, task grants first, then a "From project
-   NAME" group.
-
-### Grants
-
-```markdown
-## Grants                                   ← or "## 授权"; the first such section outside a code fence
-- rerun release_test with the same parameters <!--g:2026-11-23T10:12:00+08:00 T-077.5-->
-- fix review findings as suggested and push to the same PR <!--g:2026-11-23T11:40:00+08:00-->
-```
-
-One plain bullet per grant — not a `- [ ]` checkbox, which would read as a todo. The comment
-holds when it was granted and the ask it came from (none: added by hand). Edit the section by
-hand freely; the CLI and board create it before the Todo section when it is missing (`## 授权`
-on a Chinese card) and remove it when the last grant is revoked.
+HQ no longer has standing grants ("Yes, always" on an ask, `hq grant`). What they left behind is
+tolerated: an ask a session still ends with `[grant: …]` (or `[授权：…]`) is recorded without it, and
+an old `## Grants` / `## 授权` section on a card or in `PROJECT.md` is left as it is and not read
+(in `PROJECT.md` its heading still ends the section above it). A `state:` line that is a heading
+is refused, so an `hq-update` can't open a section of its own.
 
 ### Todos
 
@@ -403,7 +357,7 @@ still flagged `card over budget` by `hq status`.
 date (`2026-11-20`, `2026/11/20`, `Nov 20[, 2026]`, `2026 Nov 20`, `[2026年]11月20日`) becomes today's,
 else ` (cont. MM-DD)` is appended (`（续 MM-DD）` for a title with CJK). Goal, Status, the open todos
 as written (an open sub-todo of a closed one comes unindented; checklists in Goal/Status are not
-copied twice), Grants, refs, next, a non-active status, project, lead and workdirs come along; both logs point at
+copied twice), refs, next, a non-active status, project, lead and workdirs come along; both logs point at
 the other; the old card becomes `done` with `next: continued in T-new` and its Focus place goes to
 the new card. Sessions bound to the old card are rebound (their next prompt says so). Open asks
 move to the new card under new ids: the new card's `asks.jsonl` gets an `open` event with
@@ -458,12 +412,11 @@ updated: 2026-11-23
 ## Templates               ← or 常见的活: a duty's kinds of recurring work, see below
 ## Auto intake             ← or 自动来活: how a duty's sources make tasks, see "Work that comes in by itself"
 ## Brief                   ← or 简报: given to every session on one of its tasks
-## Grants                  ← or 授权: project grants, same format as a card's
 ## Log                     ← or 决策记录
 ```
 
 Headings are read in either language, or both (`## 目标 / Goal`). A section runs to the next
-Goal / Out of scope / Done when / Templates / Auto intake / Brief / Grants / Log heading, so other `##` headings (a brief's own
+Goal / Out of scope / Done when / Templates / Auto intake / Brief / Log heading (or an old Grants one), so other `##` headings (a brief's own
 `## Commands`) stay inside it — and inside a Brief, so do Out of scope, Templates and Auto intake headings
 (sections that came after briefs: a brief's own `## Templates` is not cut off). A second heading
 of a section (a Scope after a Goal) reads as more of it, and the next write of that section folds
@@ -933,7 +886,7 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 ├── CLAUDE.md                 chief-of-staff rules for sessions started in the root
 ├── templates/TASK.md         card template used by `hq new` (edit freely)
 ├── templates/PROJECT.md      project template used by `hq project add`
-├── projects/<name>/PROJECT.md  a project: kind, goal, brief, project grants
+├── projects/<name>/PROJECT.md  a project: kind, goal, brief
 ├── templates/lead.md         lead agent template
 ├── .claude/agents/           your leads, and secretary.md
 ├── secretary/                the secretary's memory: profile.md, people.md, playbooks.md, reports.md
@@ -943,7 +896,7 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 ├── inbox.json                quick notes: {"last": n, "items": [{id, text, images, state, dest, alts, …}]};
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
-    ├── TASK.md               frontmatter + Goal / Status / Grants / Todo / Log
+    ├── TASK.md               frontmatter + Goal / Status / Todo / Log
     ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"move", …}
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/

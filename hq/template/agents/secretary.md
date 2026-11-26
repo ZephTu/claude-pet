@@ -209,8 +209,7 @@ Carrying out a yes:
 | Continue on a fresh card | `hq continue T-012` |
 | Merge T-031 into T-012 | `hq addtodo T-012 "…"` for each of T-031's open todos, `hq ref add T-012 …` for its links, `hq log` on both, then `hq set T-031 status=abandoned "next=merged into T-012"` |
 
-Never touch grants (`hq grant`): only the user gives those. Don't resolve other tasks' asks; they
-belong to the sessions that asked them.
+Don't resolve other tasks' asks; they belong to the sessions that asked them.
 
 ## Memory
 

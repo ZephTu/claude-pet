@@ -323,33 +323,14 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             Self.onClickTarget?(str("value"))
             return ("ok", nil)
         case "resolve":
-            // "Yes, always" carries the standing grant's wording; hq adds it to the card with the answer.
-            let grant = str("grant").isEmpty ? [] : ["--grant=\(str("grant"))"]
             let r = await hq(["ask", "resolve", str("id"), str("resolution"),
-                              "--via", "board", "--note=\(str("note"))"] + grant)
+                              "--via", "board", "--note=\(str("note"))"])
             // A yes to one of the secretary's proposals: it carries it out now, not at its next chat.
             // Not "To todo": the user took that one on themselves.
             if r.1 == nil {
                 secretary.answered(askID: str("id"), resolution: str("resolution"), toTodo: body["toTodo"] as? Bool == true)
             }
             return r
-        case "grant":
-            // list / add / revoke the standing grants of a task, or of a project (`project`, kept in its
-            // PROJECT.md); revoke goes by #n, checked against the text shown.
-            let index = (body["index"] as? Int).map(String.init) ?? str("index")
-            // Positionals first and the wording as --text=: argparse can't take `rest*` positionals
-            // after options, and wording starting with "-" must not read as one.
-            let project = str("project")
-            let who = project.isEmpty ? [str("task")] : []
-            let whose = project.isEmpty ? [] : ["--project=\(project)"]
-            switch str("action") {
-            case "add":
-                let extra = (str("at").isEmpty ? [] : ["--at=\(str("at"))"]) + (str("source").isEmpty ? [] : ["--source=\(str("source"))"])
-                return await hq(["grant", "add"] + who + whose + ["--via=board", "--text=\(str("text"))"] + extra)
-            case "revoke":
-                return await hq(["grant", "revoke"] + who + (index.isEmpty ? [] : [index]) + whose + ["--via=board", "--text=\(str("text"))"])
-            default: return await hq(["grant", "list"] + who + whose + ["--json"])
-            }
         case "reopen":
             let r = await hq(["ask", "reopen", str("id"), "--via=board"])
             if r.1 == nil { secretary.reopened(askID: str("id")) }    // an Undo: the secretary leaves it
