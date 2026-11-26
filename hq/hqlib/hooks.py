@@ -56,7 +56,8 @@ def resolved_problems_text(problems):
     return ("HQ: these lines of your hq-resolved block were NOT recorded (the others were):\n"
             + "\n".join(f"- {p}" for p in problems)
             + "\nReply with an hq-resolved block holding just those, corrected — each line "
-              "`<ask id> <do|drop|later|archive>: <short note>` (`later until YYYY-MM-DD: …` for another day).")
+              "`<ask id> <do|drop|later|archive>: <short note>` (`later until YYYY-MM-DD: …` for another day). "
+              "Leave out any ask already answered: there is nothing to correct.")
 
 
 # ---------------------------------------------------------------- the Stop hook's echo
@@ -177,7 +178,7 @@ def _hook_main():
     from .history import history_text
     from .projects import brief_hash, project_brief_text
     from .asks import (
-        add_ask, append_event, await_answer, close_ready, CLOSED_STATUSES, current_ask, read_asks, release_close,
+        add_ask, answered_as, append_event, await_answer, close_ready, CLOSED_STATUSES, current_ask, read_asks, release_close,
         resolve_ask, settle_status, snooze_until,
     )
     from .protocol import answer_text, claude_todos_text, me_todos_text, open_asks_text, owned_elsewhere, protocol
@@ -346,6 +347,10 @@ def _hook_main():
                     continue
                 if res == "later" and ask["state"] not in ("open", "moved"):
                     unresolved.append(f"`{first}` — {aid} is already answered ({ask['state']}); nothing to put off")
+                    continue
+                if ask["state"] not in ("open", "moved"):
+                    unresolved.append(f"`{first}` — {aid} is already answered ({answered_as(ask)}), "
+                                      "on the board or earlier: that answer stands, leave this line out")
                     continue
                 try:
                     with contextlib.redirect_stderr(io.StringIO()) as err:

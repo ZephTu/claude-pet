@@ -317,9 +317,12 @@ The hooks inject a short protocol into the session (see `protocol()` in `hqlib/p
    stay closed.
 
    An `hq-resolved` block is one answer a line (an indented line without an ask id continues the
-   note above). A line that can't be read, names no ask, puts off an answered one, or writes
-   `later until` with no date is not dropped: the Stop hook sends those lines back to the session
-   (the rest are recorded). So is a reply whose only `hq-update` block has text after it — taken
+   note above). A line that can't be read, names no ask, answers or puts off an answered one, or
+   writes `later until` with no date is not dropped: the Stop hook sends those lines back to the
+   session (the rest are recorded). Only the board changes an answer in place (`--via board`): a
+   second answer from a session — often its retelling of a board answer — would replace the
+   user's own words, so it goes back, and `hq ask resolve` on an answered ask fails and says to
+   `hq ask reopen` it first (as the board's Undo does). So is a reply whose only `hq-update` block has text after it — taken
    for an example, it would otherwise be skipped without a word.
 
    Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board

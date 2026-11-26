@@ -2781,6 +2781,31 @@ echo "$out" | grep -q "already answered" && "$HQ" asks "$AID" --all --json | pyt
   && ok "later on an answered ask is sent back" || fail "later on answered ask: $out"
 { "$HQ" ask resolve "$AQ" later 2>&1 || true; } | grep -q "already answered" && ok "hq ask resolve … later on an answered ask is refused" || fail "cli later on answered ask"
 { "$HQ" ask resolve "$LQ" later until 2>&1 || true; } | grep -q "usage" && ok "later until with no date is refused" || fail "cli later until no date"
+# A second answer to an answered ask: the session's and the CLI's go back, the board's replaces it.
+"$HQ" ask resolve "$AQ" do --via board --note "the user's own words" >/dev/null
+note_is() { "$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$1"'"][0]; assert (a["state"], a["note"])==("'"$2"'", "'"$3"'"), a'; }
+out="$(stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s drop: my summary
+```
+```hq-update
+touch
+```' "$AQ")")"
+echo "$out" | grep -q "already answered (do: the user's own words)" && echo "$out" | grep -q "leave this line out" && note_is "$AQ" do "the user's own words" \
+  && ok "an hq-resolved line on an answered ask is sent back, the answer kept" || fail "session re-answer: $out"
+{ "$HQ" ask resolve "$AQ" drop 2>&1 || true; } | grep -q "already answered.*ask reopen $AQ" && note_is "$AQ" do "the user's own words" \
+  && ok "hq ask resolve on an answered ask is refused" || fail "cli re-answer"
+"$HQ" ask resolve "$AQ" drop --via board --note "changed my mind" && note_is "$AQ" drop "changed my mind" \
+  && ok "the board still changes an answer" || fail "board re-answer"
+"$HQ" ask reopen "$AQ" --via board
+out="$(stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s do: go
+```
+```hq-update
+touch
+```' "$AQ")")"
+note_is "$AQ" do "go" && ! echo "$out" | grep -q "already answered" && ok "an ask reopened (Undo) is answered again" || fail "answer after reopen: $out"
 out="$(stop sess-ask "$(printf 'Two examples:
 ```hq-update
 next: ex one
