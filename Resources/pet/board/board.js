@@ -4779,8 +4779,9 @@ function jumpSource(el) {
 }
 
 // Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
-// say) is still the drawer's, and a slash-command pick hides its list on mousedown.
-const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, .launch, #reader, #reader-pill, #unread-pop, .unread-chip";
+// say) is still the drawer's, and a slash-command pick hides its list on mousedown. The ";" list
+// and the quick-phrase bar float on the page, outside the drawer, over the box they fill in.
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, #phrasebar, .launch, #reader, #reader-pill, #unread-pop, .unread-chip";
 let pressedIn = false;
 document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
 
