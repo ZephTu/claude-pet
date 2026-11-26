@@ -109,7 +109,7 @@
 <table>
 <tr><th>按钮</th><th>含义</th></tr>
 <tr><td><b>✕ 不要</b>（No）</td><td>不做 / 不要；框里可以写原因或者换成什么。点了变红，按钮变成"发送：不要"；再点一下取消</td></tr>
-<tr><td><b>⋯ → 稍后</b>（Later）</td><td>先不回答：<b>问题留着</b>，从 Needs you 和小猫的红点里隐去，<b>第二天</b>自动回来；session 会收到"用户稍后再答，先做不依赖它的事"。被推迟的问题收在一行"N 条稍后再答 · 明天回来"里，点开可以直接回答</td></tr>
+<tr><td><b>⋯ → 稍后</b>（Later）</td><td>先不回答：<b>问题留着</b>，从 Needs you 和小猫的红点里隐去，<b>第二天</b>自动回来；session 会收到"用户稍后再答，先做不依赖它的事"。被推迟的问题收在一行"N 条稍后再答 · 明天回来"里（session 用 <code>later until</code> 推迟到别的日子时，写最早回来的那天），点开可以直接回答</td></tr>
 <tr><td><b>⋯ → 转待办</b>（To todo）</td><td>这不是要回答的问题，是我自己要去做的事（比如"PR 合并后把消息发给 Ping"）：在这个任务里加一条 <code>@me</code> 待办（框里写的会接在后面），问题关掉，并告诉 session 我会自己做、别再问。Undo 会把这条待办标成已放弃并重新打开问题</td></tr>
 <tr><td><b>⋯ → 不了解背景</b>（No context）</td><td>不了解背景、答不上来，先归档</td></tr>
 </table>
@@ -302,7 +302,7 @@
 <h1 id="zh-link">session 和看板怎么联动</h1>
 <p>session 绑定任务后，三个 hook 会让它遵守下面的规则：</p>
 <ol>
-<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。session 不再一条条跑 <code>hq log</code> / <code>hq set</code> 这些命令，而是在回复末尾写一个 <code>hq-update</code> 块，由 Stop hook 写进卡片。每多一次工具调用就要把整段对话再读一遍，这样能省掉这部分 token。只认回复<b>末尾</b>的那个块——正文中间引用或举例的块不算，模板里 <code>&lt;…&gt;</code> 这样的占位行也不算。块里只要有一行写不进去（状态拼错、找不到那条待办、待办有歧义……），整块都不写，退回给 session 改一次（会列出候选待办）；所以重发整块不会重复添加。同一条待办、日志、ref 已经有了就不再加。冒号用全角也行。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。
+<li><b>先读卡，再干活，干完写回</b>：状态、下一步、待办、日志都写回任务卡。session 不再一条条跑 <code>hq log</code> / <code>hq set</code> 这些命令，而是在回复末尾写一个 <code>hq-update</code> 块，由 Stop hook 写进卡片。每多一次工具调用就要把整段对话再读一遍，这样能省掉这部分 token。只认回复<b>末尾</b>的那个块——正文中间引用或举例的块不算，模板里 <code>&lt;…&gt;</code> 这样的占位行也不算；不过回复里只有一个 <code>hq-update</code>、后面却还有文字时，它不会被悄悄跳过，而是退回给 session，让它放到最后再发一次。块里只要有一行写不进去（状态拼错、找不到那条待办、待办有歧义……），整块都不写，退回给 session 改一次（会列出候选待办）；所以重发整块不会重复添加。同一条待办、日志、ref 已经有了就不再加。冒号用全角也行。一轮干了两分钟以上却没动任务卡，会被提醒一次去更新。
 <pre>```hq-update
 status: blocked
 next: 等 infra 给 token
@@ -314,10 +314,12 @@ log: 选方案 v2，因为更便宜
 ref: PR #9 https://github.com/…/pull/9
 ```</pre>
 只写变了的行；<code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> 可以写多行；<code>state</code> 会替换卡片的"当前状态"一节；<code>done</code> / <code>drop</code> / <code>change</code> 按待办的文字匹配；<code>change: 原文 => 新文字</code> 原地改写一条没做完的待办（位置、谁来做、创建时间都不变，HISTORY.md 里记一笔）；<code>ref:</code> 记的如果是某次构建、run 或某条评论，写进 HISTORY.md 而不是卡片，要卡片留住就写 <code>ref!:</code>；<code>project: 名字</code> 把任务移到<b>已有的</b>项目（没有这个项目就整块退回——项目只能由你建）。什么都没变就只写一行 <code>touch</code>。</li>
-<li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。
+<li><b>需要你确认的事会被记下来</b>：session 把问题放在回复末尾一个 <code>hq-asks</code> 块里，每行一件事。它们会变成看板上的 ask（编号如 <code>T-012.3</code>）。只有顶格的 <code>- </code> 或 <code>1.</code> 开头的行才算一个新问题；下面缩进的行（比如 a) b) 选项）都归上面那个问题。几个 session 同时提问也不会撞号、丢问题。
 <pre>```hq-asks
 - 方案 v2 可以吗？
-- 要不要找 Chengjie 要数据集？
+- 索引用哪种？
+  a) btree
+  b) hash
 ```</pre></li>
 <li><b>没回应的问题不会被当成"不做"</b>：每一轮都会把还没回应的 ask 重新提醒给 session。</li>
 <li><b>session 记得卡上的待办</b>：绑定了任务的 session 每次启动（新开、resume、/clear、compact 之后）都会收到卡上没做完的待办，你的（<code>@me</code>）在前，Claude 的在后（各自原文照抄，最多 20 条、约 2000 字，更早的只说省略了几条）。Claude 的，它要对照现状，在下一个 <code>hq-update</code> 里用 <code>done:</code> 勾掉做完的、用 <code>drop:</code> 去掉过时的；你的，它看到做完了（比如它刚替你装好）就勾掉，事情有变化时用 <code>change:</code> 改写那一条，不再加一条新的。只在启动时给一次（从看板绑定的 session 在绑定后的第一条消息里也给一次），不会每轮都塞进去；要它中途再核对一遍，用待办旁边的 <b>整理待办</b>。</li>
@@ -326,7 +328,7 @@ ref: PR #9 https://github.com/…/pull/9
 <li><b>两边都能回应</b>：
   <ul>
   <li>在看板上点按钮 → session 下一轮收到"用户在看板上回应了 …"；</li>
-  <li>在 session 里直接回答 → session 用 <code>hq-resolved</code> 块记下来，看板上那条随之关闭。</li>
+  <li>在 session 里直接回答 → session 用 <code>hq-resolved</code> 块记下来，看板上那条随之关闭。你说"以后再说"时它写 <code>later</code>：和看板上的 <b>稍后</b> 一样，问题留着、藏到明天；<code>later until 2026-12-05: 等 Ping 回来</code> 就藏到那天，看板上那行写"12月5日回来"，问题下面写为什么推迟。读不懂的行、编号不存在的行、推迟一个已经回答了的问题，都不会被悄悄扔掉，会退回给 session 改。</li>
   </ul></li>
 <li><b>草稿不等于完成</b>：session 替你起草、需要你去发的东西，会变成一条 <code>@me</code> 待办，直到你勾掉。</li>
 </ol>
@@ -351,7 +353,7 @@ ref: PR #9 https://github.com/…/pull/9
 <tr><td><code>hq touch T-012</code></td><td>标记今天看过（没有别的变化时用）</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>列出未回应（或全部）的 ask；加 <code>--json</code> 时每条带着提出它的那段回复。看板只给未回应的问题显示这段回复，已回答的要看就用 <code>hq asks T-012 --all --json</code>（看板的数据里不带，免得每次刷新都传一遍）</td></tr>
 <tr><td><code>hq ask add T-012 "问题"</code></td><td>手动加一条 ask</td></tr>
-<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "说明"</code></td><td>回应一条 ask；<code>later</code> 是推迟到明天（<code>later until 2026-12-05</code> 推迟到那天），问题仍然开着</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>撤销回应，让它重新变成待回应</td></tr>
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>Focus 列表（order 按给出的顺序排）</td></tr>
 <tr><td><code>hq scan [--days 60] [--json]</code></td><td>列出最近的 session，按仓库分组（只读；<code>/hq-onboard</code> 用它）</td></tr>
@@ -580,7 +582,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <table>
 <tr><th>Button</th><th>Meaning</th></tr>
 <tr><td><b>✕ No</b></td><td>no, don't; the box can say why or what instead. It turns red and the button says "Send: No"; click again to take it back</td></tr>
-<tr><td><b>⋯ → Later</b></td><td>not now: <b>the ask stays</b>, hidden from Needs you and the cat's badge until <b>tomorrow</b>, when it comes back by itself; the session is told you'll answer later and to carry on with what doesn't depend on it. Put-off asks sit behind a line "N for later · back tomorrow" — open it to answer one now</td></tr>
+<tr><td><b>⋯ → Later</b></td><td>not now: <b>the ask stays</b>, hidden from Needs you and the cat's badge until <b>tomorrow</b>, when it comes back by itself; the session is told you'll answer later and to carry on with what doesn't depend on it. Put-off asks sit behind a line "N for later · back tomorrow" (or the first day one comes back, when a session put it off with <code>later until</code>) — open it to answer one now</td></tr>
 <tr><td><b>⋯ → To todo</b></td><td>not a question but something I'll do myself (e.g. "after the PRs merge, send the note to Ping"): adds an <code>@me</code> todo on the task (with what's in the box), closes the ask and tells the session you'll do it — don't ask again. Undo drops that todo and reopens the ask</td></tr>
 <tr><td><b>⋯ → No context</b></td><td>can't answer this — park it</td></tr>
 </table>
@@ -803,7 +805,7 @@ After the status word comes how much context the session carries (e.g. <code>210
 <h1 id="en-link">How sessions and the board connect</h1>
 <p>Once bound, three hooks make the session follow these rules:</p>
 <ol>
-<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. Instead of running <code>hq log</code> / <code>hq set</code> … one call at a time, the session ends its reply with an <code>hq-update</code> block and the Stop hook writes it to the card. Every extra tool call re-reads the whole conversation, so this saves those tokens. Only the block at the <b>end</b> of the reply counts — one quoted or shown as an example mid-reply does not, nor do template lines like <code>&lt;…&gt;</code>. If any line cannot be applied (a misspelt status, a todo it cannot find or that matches several, …), nothing in the block is written and it is sent back to the session once to fix, with the candidate todos listed — so resending the whole block never adds anything twice. A todo, log line or ref already on the card is not added again. A turn longer than two minutes that never touched the card is sent back once to update it.
+<li><b>Read the card, work, write back</b> — status, next, todos and log go back to the card. Instead of running <code>hq log</code> / <code>hq set</code> … one call at a time, the session ends its reply with an <code>hq-update</code> block and the Stop hook writes it to the card. Every extra tool call re-reads the whole conversation, so this saves those tokens. Only the block at the <b>end</b> of the reply counts — one quoted or shown as an example mid-reply does not, nor do template lines like <code>&lt;…&gt;</code>. But when the reply's only <code>hq-update</code> has text after it, it isn't skipped silently: it goes back to the session to send again, last. If any line cannot be applied (a misspelt status, a todo it cannot find or that matches several, …), nothing in the block is written and it is sent back to the session once to fix, with the candidate todos listed — so resending the whole block never adds anything twice. A todo, log line or ref already on the card is not added again. A turn longer than two minutes that never touched the card is sent back once to update it.
 <pre>```hq-update
 status: blocked
 next: wait for infra's token
@@ -815,16 +817,18 @@ log: picked plan v2 because it is cheaper
 ref: PR #9 https://github.com/…/pull/9
 ```</pre>
 Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop</code> / <code>log</code> / <code>ref</code> / <code>workdir</code> may repeat; <code>state</code> replaces the card's Status section; <code>done</code> / <code>drop</code> / <code>change</code> find the todo by its text; <code>change: old text => new text</code> rewrites an open todo in place (same spot, owner and creation time; HISTORY.md notes it); a <code>ref:</code> to one build, run or comment goes to HISTORY.md rather than the card — <code>ref!:</code> keeps it on the card; <code>project: NAME</code> moves the task to an <b>existing</b> project (no such project: the block goes back — only you make projects). Nothing changed: a block holding just <code>touch</code>.</li>
-<li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …).
+<li><b>Questions for you are tracked</b> — the session ends its reply with an <code>hq-asks</code> block, one item per line; each becomes an ask on the board (<code>T-012.3</code>, …). Only a line starting at the left with <code>- </code> or <code>1.</code> starts a new question; indented lines under it (options a) b), say) belong to it. Several sessions asking at once never share an ask number or lose a question.
 <pre>```hq-asks
 - Approve plan v2?
-- Ask Chengjie for the dataset?
+- Which index?
+  a) btree
+  b) hash
 ```</pre></li>
 <li><b>An unanswered ask is never a "no"</b> — open asks are reminded to the session every turn.</li>
 <li><b>The session sees the card's todos</b> — whenever a bound session starts (new, resumed, after /clear or a compaction) it gets the card's open todos, yours (<code>@me</code>) first, then Claude's (each word for word, at most 20 and about 2000 characters; older ones are only counted). Claude's it checks against how things stand and, in its next <code>hq-update</code>, ticks finished ones with <code>done:</code> and drops obsolete ones with <code>drop:</code>; yours it ticks when it sees them done (it just installed for you, say) and, when one moves on, rewrites with <code>change:</code> instead of adding another. Only at start (and, for a session bound from the board, once with its first message after binding), not every turn; to have it check again mid-way, use <b>Tidy todos</b> by the todos.</li>
 <li id="en-todo-repeat"><b>Your todos don't repeat</b> — sessions are told to make an <code>@me</code> todo one step you can do in one go: PRs to review and merge are one todo, installing is another; and to keep Claude's todos for work the turn won't finish (waiting on CI, a merge, you), never for what it is doing now. A new <code>@me</code> todo from a session that repeats an open one sends the block back with the open one's text, to rewrite it with <code>change:</code> or close it with <code>done:</code> / <code>drop:</code> in the same block. A repeat is: both about installing from main; both about reviewing or merging a PR they share; or the same numbers and nearly the same words. Alike words with other PRs ("merge #110", "merge #111") are not. When it really is a separate step, the session writes <code>todo!:</code> to add it anyway. Todos you add on the board or with <code>hq addtodo</code> are not checked. Ticking todos whose PR merged: see <a href="#en-autoclose">Finished todos</a>.</li>
 <li><b>The session knows its line of work</b> — when the task's project has a <code>PROJECT.md</code>, a bound session gets a note on it whenever it starts (new, resumed, after /clear or a compaction, and on <code>hq bind</code>): the project, goal or duty, its deadline, the first line of its goal, then the whole <b>Brief</b> (at most 2000 characters; past that it is cut and pointed at PROJECT.md), whatever repo the session works in. An empty brief: nothing is said. After that it hears again, with its next message, only when this note changes (the brief, title, kind, status, deadline or first line of the goal is edited, or the task moves to another project); a brief that is gone is reported as no longer applying.</li>
-<li><b>Answer on either side</b> — on the board (delivered next turn), or in the chat (the session records it with an <code>hq-resolved</code> block and the board updates).</li>
+<li><b>Answer on either side</b> — on the board (delivered next turn), or in the chat (the session records it with an <code>hq-resolved</code> block and the board updates). "Not now" in the chat is <code>later</code>, the board's <b>Later</b>: the ask stays, hidden until tomorrow; <code>later until 2026-12-05: Ping is back then</code> hides it until that day — the board's line says "back Dec 5" and the reason shows under the question. A line that can't be read, names no ask, or puts off one already answered isn't dropped silently: it goes back to the session to fix.</li>
 <li><b>Drafts are not done</b> — anything the session drafted for you to send becomes an <code>@me</code> todo until you tick it.</li>
 </ol>
 <p>Use the board for the overview, batches of answers and status changes; talk in the session's terminal for a deep discussion — once bound, what it asks there shows up here too.</p>
@@ -848,7 +852,7 @@ Only the lines that changed; <code>todo</code> / <code>done</code> / <code>drop<
 <tr><td><code>hq touch T-012</code></td><td>mark reviewed today (nothing else changed)</td></tr>
 <tr><td><code>hq asks [T-012] [--all]</code></td><td>list open (or all) asks; with <code>--json</code>, each with the reply that raised it. The board shows that reply only for open asks; for answered ones use <code>hq asks T-012 --all --json</code> (the board's data leaves it out, rather than carry it on every refresh)</td></tr>
 <tr><td><code>hq ask add T-012 "question"</code></td><td>add an ask by hand</td></tr>
-<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask</td></tr>
+<tr><td><code>hq ask resolve T-012.3 do|drop|later|archive --note "…"</code></td><td>answer an ask; <code>later</code> puts it off till tomorrow (<code>later until 2026-12-05</code>: till then) and it stays open</td></tr>
 <tr><td><code>hq ask reopen T-012.3</code></td><td>take an answer back; the ask is open again</td></tr>
 <tr><td><code>hq focus [add|remove|order T-012 …]</code></td><td>the Focus list (order: in the order given)</td></tr>
 <tr><td><code>hq scan [--days 60] [--json]</code></td><td>recent sessions from existing transcripts, grouped by repository (read-only; <code>/hq-onboard</code> uses it)</td></tr>

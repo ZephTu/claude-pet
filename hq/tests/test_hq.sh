@@ -74,11 +74,11 @@ hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}
 "$HQ" ask resolve T-001.4 drop --via board >/dev/null
 hook '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; l=[x for x in c.splitlines() if x.startswith("- T-001.4 ")][0]; assert l == "- T-001.4 \"" + "x"*30 + "…\" → no", l' && ok "an injected answer quotes only the question's opening words"
 
-MSG2='ok\n```hq-resolved\n- T-001.2 later: waiting on Chengjie\n```'
+MSG2='ok\n```hq-resolved\n- T-001.2 archive: waiting on Chengjie\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG2\"}" >/dev/null
-"$HQ" asks T-001 --all | grep -q "T-001.2.*\[later: waiting on Chengjie\]" && ok "hq-resolved block resolves ask"
+"$HQ" asks T-001 --all | grep -q "T-001.2.*\[archive: waiting on Chengjie\]" && ok "hq-resolved block resolves ask"
 "$HQ" ask reopen T-001.2 && "$HQ" asks T-001 | grep -q "T-001.2" && ok "ask reopen undoes a resolution"
-"$HQ" ask resolve T-001.2 later --note "waiting on Chengjie"
+"$HQ" ask resolve T-001.2 archive --note "waiting on Chengjie"
 
 printf '\n- [ ] @me review the plan\n- [ ] @claude draft the pilot\n' >> "$T"/root/tasks/T-001-*/TASK.md
 "$HQ" todo T-001 1 done --via board
@@ -2620,6 +2620,117 @@ printf '### github-review\nrepos: *\nworkdir: %s\nrun: yes\npermissions: review\
   && grep -q 'repos: \* with permissions: review' "$(grep -l '^intake_key: zed/x#31' "$T"/root/tasks/*/TASK.md)" \
   && ok "intake: repos: * with permissions: review is flagged, and no session starts — anyone could start one" || fail "intake any repo review"
 "$HQ" project set rev auto= >/dev/null
+
+
+# Asks written in a reply (T-116): parallel Stop hooks, multi-line asks, blocks that weren't
+# applied, and Later from the chat.
+"$HQ" new "Asks fixes" >/dev/null
+AC="$(ls "$T"/root/tasks/T-*-asks-fixes/TASK.md)"; AID="$(basename "$(dirname "$AC")" | cut -d- -f1-2)"
+"$HQ" bind "$AID" --session sess-ask >/dev/null
+for i in 0 1 2 3 4 5; do
+  stop sess-ask "$(printf 'ok\n```hq-asks\n- parallel question %s?\n```' $i)" >/dev/null &
+done; wait
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=json.load(sys.stdin); assert len(a)==6 and len({x["id"] for x in a})==6 and sorted(x["text"] for x in a)==[f"parallel question {i}?" for i in range(6)], a' \
+  && ok "parallel Stop hooks asking on one card each get their own ask id" || fail "parallel asks collided"
+for i in 0 1 2 3 4 5; do "$HQ" ask resolve "$AID.$((i+1))" drop >/dev/null; done
+stop sess-ask "$(printf 'ok\n```hq-asks\n- Which index?\n  a) btree\n  b) hash\n- Ship it?\n```')" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=json.load(sys.stdin); assert [x["text"] for x in a]==["Which index?\n  a) btree\n  b) hash", "Ship it?"], a' \
+  && ok "an ask's indented lines stay with it; only a top-level bullet starts a new ask" || fail "multi-line ask split"
+stop sess-ask "$(printf 'ok\n```hq-asks\n1. First?\n   more on the first\n2. Second?\n```')" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x["text"] for x in json.load(sys.stdin)]; assert a[-2:]==["First?\n   more on the first", "Second?"], a' \
+  && ok "numbered asks: the same" || fail "numbered multi-line ask"
+stop sess-ask "$(printf 'ok\n```hq-asks\nPlain one?\nPlain two?\n```')" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x["text"] for x in json.load(sys.stdin)]; assert a[-2:]==["Plain one?", "Plain two?"], a' \
+  && ok "a block with no bullets is still one ask a line" || fail "unbulleted asks"
+for a in $("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print(" ".join(x["id"] for x in json.load(sys.stdin)))'); do "$HQ" ask resolve "$a" drop >/dev/null; done
+# An hq-update with text after it, and no other at the end: not applied, and the session is told.
+out="$(stop sess-ask "$(printf 'Here:\n```hq-update\nnext: mid-reply next\n```\nand some more words.')")"
+! grep -q "mid-reply next" "$AC" && echo "$out" | grep -q '"decision": "block"' && echo "$out" | grep -q "not at the end" \
+  && ok "an hq-update block followed by text is not applied, and the session is told why" || fail "non-trailing hq-update dropped silently: $out"
+out="$(stop sess-ask "$(printf 'For example:\n```hq-update\nnext: just an example\n```\nso:\n```hq-update\nnext: the real next\n```')")"
+grep -q "the real next" "$AC" && ! grep -q "just an example" "$AC" && ! echo "$out" | grep -q "not at the end" \
+  && ok "one mid-reply with another at the end is an example: no complaint" || fail "example hq-update complained: $out"
+# hq-resolved lines that can't be read, or name no ask: told, not dropped.
+"$HQ" ask add "$AID" "Real question?" >/dev/null
+RQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Real question?"][0])')"
+out="$(stop sess-ask "$(printf 'ok\n```hq-resolved\n- %s maybe: unclear\n- T-999.1 do: yes\n- %s do: fine\n```\n```hq-update\ntouch\n```' "$RQ" "$RQ")")"
+echo "$out" | grep -q '"decision": "block"' && echo "$out" | grep -q "$RQ maybe" && echo "$out" | grep -q "T-999.1" \
+  && "$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$RQ"'"][0]; assert a["state"]=="do", a' \
+  && ok "bad hq-resolved lines are sent back; the good ones are recorded" || fail "bad hq-resolved lines dropped silently: $out"
+python3 -c 'import json; print(json.dumps({"session_id":"sess-ask","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"ok\n```hq-resolved\n- T-999.2 do: yes\n```"}))' | "$HQ" hook >/dev/null
+ctxof sess-ask | grep -q "T-999.2" && ok "a bad hq-resolved line while another Stop hook held the turn is reported next prompt" || fail "deferred hq-resolved problem lost"
+# Later from the chat is Later on the board: the ask stays open, out of sight until tomorrow or a date.
+"$HQ" ask add "$AID" "Ask Ping first?" >/dev/null
+LQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Ask Ping first?"][0])')"
+stop sess-ask "$(printf 'ok\n```hq-resolved\n- %s later: waiting on Ping\n```\n```hq-update\ntouch\n```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys,datetime as d; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; assert a["state"]=="open" and d.datetime.fromisoformat(a["snoozed_until"]).date()==d.date.today()+d.timedelta(days=1) and a["later_note"]=="waiting on Ping", a' \
+  && ok "later in hq-resolved puts the ask off till tomorrow, as the board's Later does" || fail "chat later closed the ask"
+ctxof sess-ask | grep -q "$LQ (the user will answer this later: waiting on Ping" && ok "the session sees the note it put off" || fail "later note not shown"
+stop sess-ask "$(printf 'ok\n```hq-resolved\n- %s later until 2030-01-02: after the offsite\n```\n```hq-update\ntouch\n```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; assert a["state"]=="open" and a["snoozed_until"]=="2030-01-02T00:00:00" and a["later_note"]=="after the offsite", a' \
+  && ok "later until a date puts it off till then" || fail "later until"
+out="$(stop sess-ask "$(printf 'ok\n```hq-resolved\n- %s later until someday: hmm\n```\n```hq-update\ntouch\n```' "$LQ")")"
+echo "$out" | grep -q "someday" && ok "later until something that isn't a date is sent back" || fail "bad later date dropped: $out"
+"$HQ" ask resolve "$LQ" later until 2031-03-04 "need Ping" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; assert a["state"]=="open" and a["snoozed_until"]=="2031-03-04T00:00:00" and a["later_note"]=="need Ping", a' \
+  && ok "hq ask resolve … later until DATE: the same" || fail "cli later until"
+"$HQ" ask resolve "$LQ" later >/dev/null
+"$HQ" asks "$AID" | grep -q "$LQ .*\[later — until " && ok "hq ask resolve … later keeps the ask open" || fail "cli later closed the ask"
+# Review fixes: a resolved line without "- " is its own answer; "until" with no date is a note;
+# an offset or a space before the time is part of the date; later on an answered ask is refused.
+"$HQ" ask add "$AID" "Alpha?" >/dev/null; "$HQ" ask add "$AID" "Beta?" >/dev/null
+AQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Alpha?"][0])')"
+BQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Beta?"][0])')"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s do: yes
+  and a second line
+%s drop until the API settles
+```
+```hq-update
+touch
+```' "$AQ" "$BQ")" >/dev/null
+"$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)}; assert a["'"$AQ"'"]["state"]=="do" and a["'"$AQ"'"]["note"]=="yes\nand a second line", a["'"$AQ"'"]; assert a["'"$BQ"'"]["state"]=="drop" and a["'"$BQ"'"]["note"]=="until the API settles", a["'"$BQ"'"]' \
+  && ok "hq-resolved: one answer a line, an indented line is the note's next line, until without a date is a note" || fail "hq-resolved items"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later until 2030-01-02 09:30: Ping out
+```
+```hq-update
+touch
+```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; assert a["snoozed_until"]=="2030-01-02T09:30:00" and a["later_note"]=="Ping out", a' \
+  && ok "later until a date and time" || fail "later until date time"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later until 2030-01-02T09:30:00+00:00: Ping out
+```
+```hq-update
+touch
+```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys,datetime as d; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; exp=d.datetime(2030,1,2,9,30,tzinfo=d.timezone.utc).astimezone().replace(tzinfo=None).isoformat(); assert a["snoozed_until"]==exp and a["later_note"]=="Ping out", (a, exp)' \
+  && ok "later until a time with an offset" || fail "later until offset"
+out="$(stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later: too late
+```
+```hq-update
+touch
+```' "$AQ")")"
+echo "$out" | grep -q "already answered" && "$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$AQ"'"][0]; assert a["state"]=="do" and not a.get("snoozed_until"), a' \
+  && ok "later on an answered ask is sent back" || fail "later on answered ask: $out"
+{ "$HQ" ask resolve "$AQ" later 2>&1 || true; } | grep -q "already answered" && ok "hq ask resolve … later on an answered ask is refused" || fail "cli later on answered ask"
+{ "$HQ" ask resolve "$LQ" later until 2>&1 || true; } | grep -q "usage" && ok "later until with no date is refused" || fail "cli later until no date"
+out="$(stop sess-ask "$(printf 'Two examples:
+```hq-update
+next: ex one
+```
+and
+```hq-update
+next: ex two
+```
+done.')")"
+! echo "$out" | grep -q "not at the end" && ! grep -q "ex one\|ex two" "$AC" && ok "two hq-update examples mid-reply: neither applied, no complaint" || fail "two examples: $out"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

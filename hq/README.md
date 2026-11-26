@@ -134,7 +134,7 @@ board's top bar. Its source is `Resources/pet/board/guide.html`.
 ```
 
 Or from a shell: `hq board`, `hq show T-012`, `hq asks`, `hq ask resolve T-012.3 drop`,
-`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
+`hq project list|show|brief|add|set|paths|rename|remove|auto|order` (see Projects), `hq ask reopen T-012.3`, `hq ask snooze T-012.3 [--until 2026-11-22T09:00] [--note WHY]` (Later: hidden until then — tomorrow by default; `--until ""` brings it back; `hq ask resolve T-012.3 later [until DATE]` is the same), `hq ref add|pin|remove|restore T-012 <url>`, `hq continue T-012 [--title TITLE] [--json]` (Card budget, below), `hq workdir add|remove T-012 <folder>` (the task's workdirs; New session starts in the first; `remove` prints `{"removed": [{i, path}]}` and `hq workdir restore T-012 '<that JSON>'` puts them back at the same place), `hq peek <session-id-prefix> [--meta] [--tool ID] [--commands]` (live or ended), `hq history T-012` (the task's sessions, newest first, with what resuming one needs),
 `hq todo T-012 2 done`, `hq set T-012 status=blocked "next=wait for token"` (`status=` also takes the board's column names: `ready` = active, `needs-you` = waiting-on-me), `hq log T-012 "…"`, `hq garden` (Tidying the board, under Secretary).
 
 ### Where things stand: `hq status`
@@ -223,7 +223,12 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    ```
    ````
 
-   The Stop hook files each line as an ask (`T-012.3`, `T-012.4`, …). Unanswered asks are
+   The Stop hook files each item as an ask (`T-012.3`, `T-012.4`, …). With list items in the
+   block, only a line starting at column 0 with `- `, `* ` or `1.` starts a new ask; every other
+   line (options `a)` `b)` under a question, an indented second line) joins the one above. A
+   block with no list items is one ask a line. Reading the ledger, picking the next id and
+   appending hold the card's lock, so Stop hooks of several sessions asking at once never share
+   an id. Unanswered asks are
    re-injected every turn and shown on the board until you respond — an ask you skipped is
    never treated as "no".
 
@@ -274,7 +279,7 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    |---|---|
    | `do` | yes / here is how (note says how) |
    | `drop` | won't do, stop tracking |
-   | `later` | need to ask someone else, revisit |
+   | `later` | not now — the ask stays open, hidden until tomorrow (`later until 2026-12-05`: until then) |
    | `archive` | I don't have the context to answer — park it |
 
    On the board an ask is answered in words: what you write in its box is the answer (`do`, the
@@ -285,6 +290,22 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    will do yourself: it becomes an `@me` todo on the task and the ask closes. Sessions are told
    to file such things as todos in the first place — an ask is only for a question they need
    answered before going on.
+
+   `later` is the board's **Later** under another name, not a resolution: from the chat
+   (`- T-012.3 later: Ping is out` or `- T-012.3 later until 2026-12-05: …` in `hq-resolved`) or
+   `hq ask resolve T-012.3 later [until DATE] [note]`, it writes a `snooze` event (with the note,
+   shown under the question and to the session), so the question comes back instead of being
+   closed for good. `until` takes a date or a time (`2026-12-05`, `2026-12-05 09:00`, with or
+   without an offset); on any other answer, or with no date after it, "until …" is just the note.
+   Only an open ask can be put off, and being still open, it keeps a close held for questions
+   held — closing over a question needs `drop` or `archive`. Asks closed as `later` before this
+   stay closed.
+
+   An `hq-resolved` block is one answer a line (an indented line without an ask id continues the
+   note above). A line that can't be read, names no ask, puts off an answered one, or writes
+   `later until` with no date is not dropped: the Stop hook sends those lines back to the session
+   (the rest are recorded). So is a reply whose only `hq-update` block has text after it — taken
+   for an example, it would otherwise be skipped without a word.
 
    Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board
    answer is typed straight into the asking session when it is live in Orca, iTerm2 or Terminal, or is a background
@@ -907,7 +928,7 @@ site in `hq.json`'s `"feed"` section, where `--site` used to write it, is still 
 │                             filed and deleted ones are kept 30 days
 └── tasks/T-012-slug/
     ├── TASK.md               frontmatter + Goal / Status / Todo / Log
-    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"move", …}
+    ├── asks.jsonl            append-only events: {"type":"open"|"resolve"|"snooze"|"move", …}
     └── HISTORY.md            past the card budget: Links / Todos / Log, oldest first
 ~/.claude/hq/
 ├── bin/hq                    the CLI and hook entry point
