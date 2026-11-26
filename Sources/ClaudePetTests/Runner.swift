@@ -2763,6 +2763,7 @@ struct Runner {
         DocReaderTests.run(t)
         RemoteAccessTests.run(t)
         QuickPhraseTests.run(t)
+        SeenCardsTests.run(t)
         SharedReadsTests.run(t)
         BoardPushTests.run(t)
         PetLaunchTests.run(t)
