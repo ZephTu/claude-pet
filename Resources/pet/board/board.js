@@ -743,7 +743,37 @@ async function promptSubmit(op, args, ok) {
   refresh();
 }
 
-const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
+const dot = (s) => { const c = dotClass(s); return `<span class="dot ${c}" data-dot="${esc(s.sessionId)}" title="${esc(DOT_TIP[c] || c)}"></span>`; };
+// A session's status words (and its context, with `ctx`), marked so paintDots can redo them alone.
+const swHtml = (s, ctx) => esc(statusWord(s)) + (ctx ? ctxTag(s) : "");
+const statusSpan = (s, ctx) => `<span data-sw="${esc(s.sessionId)}"${ctx ? ` data-ctx="1"` : ""}>${swHtml(s, ctx)}</span>`;
+// The pet's dots fields that only the dot and the status words show; the rest (its state, a
+// prompt to approve, gone quiet…) decide buttons and order, and redraw the page.
+const PAINT_ONLY = ["activity", "context", "contextTokens", "contextBudget", "agent", "struggle", "replied"];
+function shapeOfDots(dots) {
+  const out = {};
+  for (const [sid, d] of Object.entries(dots || {})) {
+    out[sid] = Object.fromEntries(Object.entries(d || {}).filter(([k]) => !PAINT_ONLY.includes(k)));
+  }
+  return out;
+}
+// Only the paint-only fields changed: redo the dots and status words where they are, nothing else
+// (no rebuild, so no click lost under the pointer and no box losing its cursor).
+function paintDots() {
+  const byId = new Map(list(ui.sessions).map((s) => [s.sessionId, s]));
+  document.querySelectorAll("[data-dot]").forEach((el) => {
+    const s = byId.get(el.dataset.dot);
+    if (!s) return;
+    const c = dotClass(s);
+    if (el.className !== "dot " + c) { el.className = "dot " + c; el.title = DOT_TIP[c] || c; }
+  });
+  document.querySelectorAll("[data-sw]").forEach((el) => {
+    const s = byId.get(el.dataset.sw);
+    if (!s) return;
+    const html = swHtml(s, el.dataset.ctx);
+    if (el.dataset.was !== html) { el.innerHTML = html; el.dataset.was = html; }
+  });
+}
 const draft = (key) => ui.drafts[key] ?? "";
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -754,12 +784,19 @@ const list = (v) => (Array.isArray(v) ? v : []);
 // timed rebuild while a mouse button is down.
 // One read at a time for the timer: over a slow link (Tailscale's relay) a read takes longer than
 // the 4 seconds between them, and reads piling up on one another never finish.
+// But a read that never answers must not stop the timer for good: past READ_HOLD_MS the timer may
+// start another (the Mac gives up on a stuck hq after 15 s; a phone's slow link gets longer). The
+// late one still lands if it ever does — readBoard keeps an older read from undoing a newer one.
+const READ_HOLD_MS = REMOTE ? 60000 : 25000;
 async function refresh(force) {
   ui.reading = (ui.reading || 0) + 1;
-  try { return await readBoard(force); } finally { ui.reading--; }
+  let held = true;
+  const release = () => { if (held) { held = false; ui.reading--; } };
+  const timer = setTimeout(release, READ_HOLD_MS);
+  try { return await readBoard(force); } finally { clearTimeout(timer); release(); }
 }
 async function readBoard(force) {
-  let sig = null;
+  let sig = null, dotsKey = null;
   // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
   if (REMOTE && !ui.board && !ui.loadNote) {
     ui.loadNote = setTimeout(() => {
@@ -774,13 +811,16 @@ async function readBoard(force) {
     // what a newer one has already shown.
     if (readNo < ui.readDone) { if (force !== "timer") render(); return; }
     ui.readDone = readNo;
-    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + unreadText + "\u0001" + jobsSig;
+    const pet = JSON.parse(unreadText || "{}");
+    // What only a session's dot and status words show (what it is running, its context) changes
+    // with every tool call: that repaints those words in place (paintDots), not the whole page.
+    sig = boardText + "\u0001" + sessionsText + "\u0001" + agentsText + "\u0001" + JSON.stringify(Object.assign({}, pet, { dots: shapeOfDots(pet.dots) })) + "\u0001" + jobsSig;
+    dotsKey = JSON.stringify(pet.dots || {});
     ui.board = JSON.parse(boardText);
     for (const [id, p] of Object.entries(ui.statusPending)) {
       if (p.after !== undefined && readNo > p.after) delete ui.statusPending[id];   // read after the save: hq has it
       else { const t = taskById(id); if (t) t.status = p.status; }
     }
-    const pet = JSON.parse(unreadText || "{}");
     ui.unread = pet.unread || {};
     ui.dots = pet.dots || {};
     ui.usage = pet.usage || null;
@@ -805,7 +845,11 @@ async function readBoard(force) {
     // Nor while text is selected (a reply you are copying from): the rebuild would drop it.
     if (holdTimed() && force === "timer") ui.pendingRender = true;
     else render();
-  } else flushPending();   // nothing new, but one held back (past a selection's minute) still shows
+  } else {
+    if (dotsKey !== null && dotsKey !== ui.dotsKey) paintDots();
+    flushPending();   // nothing new, but one held back (past a selection's minute) still shows
+  }
+  if (dotsKey !== null) ui.dotsKey = dotsKey;
   if (ui.modal && ui.modal.type === "peek") refreshPeek();
   else if (ui.modal && ui.modal.type === "prompt") checkPrompt();
   loadFlags();
@@ -841,8 +885,9 @@ function showFlags(flags) {
 }
 async function loadFlags() {
   const ids = list(focusState().ids).join(",");
-  if (ui.flagsLoading || (Date.now() - ui.flagsAt < FLAGS_EVERY_MS && ids === ui.flagsIds)) return;
-  ui.flagsLoading = true;
+  // One at a time, but one that never answered doesn't hold them off for good.
+  if ((ui.flagsLoading && Date.now() - ui.flagsLoading < READ_HOLD_MS) || (Date.now() - ui.flagsAt < FLAGS_EVERY_MS && ids === ui.flagsIds)) return;
+  const mine = ui.flagsLoading = Date.now();
   try {
     const r = JSON.parse(await api("status"));
     const flags = {};
@@ -855,7 +900,7 @@ async function loadFlags() {
     ui.flagsAt = Date.now();
     showFlags({});
   } finally {
-    ui.flagsLoading = false;
+    if (ui.flagsLoading === mine) ui.flagsLoading = 0;
   }
 }
 // From the pet: a click on a session opens its task here (Settings → "Clicking a session on the
@@ -1147,7 +1192,9 @@ function render() {
   $("#today-focus").innerHTML = ui.mode === "today" ? renderToday() : "";
   $("#proj-view").innerHTML = "";
   if (ui.mode === "projects" && typeof renderProjectsView === "function") renderProjectsView();   // see projects.js
-  renderNeeds();
+  // Needs you as well: drawn only while it shows (its count on the tab comes from the data).
+  if (ui.mode === "needs") renderNeeds();
+  else for (const id of ["needs-sum", "asks-h", "mytodos-h", "notes-h", "asks", "mytodos", "notes"]) { const el = $("#" + id); if (el && el.firstChild) el.innerHTML = ""; }
   renderCaptureAtts();
   renderSettings();
   renderDrawer();
@@ -2079,10 +2126,10 @@ function kcardSessions(t, opt) {
   const s = sorted[0];
   const st = liveState(s);
   const last = plainText(s.lastText);
-  const line = st === "busy" && last ? last : st === "waiting" ? statusWord(s) : `${statusWord(s)} · ${ago(s.updatedAt)}`;
+  const line = st === "busy" && last ? esc(last) : st === "waiting" ? statusSpan(s) : `${statusSpan(s)} · ${esc(ago(s.updatedAt))}`;
   return `<div class="kc-sess${s.sessionId === ui.hlSession ? " hl" : ""}"><span class="stack">${sorted.slice(0, 3).map(dot).join("")}</span>
     ${live.length > 1 ? `<span class="cnt">${live.length}</span>` : ""}
-    <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${live.map((x) => outboxMark(x.sessionId)).join("")}${newTag(s.sessionId)}${esc(line)}</span>
+    <span class="line ${st === "busy" ? "" : "idle"}" title="${esc(s.title || "")}${last ? "\n" + esc(last) : ""}">${live.map((x) => outboxMark(x.sessionId)).join("")}${newTag(s.sessionId)}${line}</span>
     <button class="go peekb" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek its conversation", "Peek 它的对话")}">${ICON.peek}</button></div>`;
 }
 
@@ -2557,7 +2604,7 @@ function renderTaskBody(t) {
   const sessRow = (s) => `<div class="bsess${s.sessionId === ui.hlSession ? " hl" : ""}">
         ${dot(s)}
         <div class="bs-t"><div class="stitle" title="${esc(s.title || s.project)}">${outboxMark(s.sessionId)}${newTag(s.sessionId)}${esc(String(s.title || s.project).replace(new RegExp("^" + t.id + "\\s+"), "") || s.title || s.project)}</div>
-          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${esc(statusWord(s))}${ctxTag(s)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
+          <div class="meta">${s.background ? `<span class="bgtag">${T("background", "后台")}</span> ` : ""}${statusSpan(s, true)} · ${ago(s.updatedAt)}</div>${approveBar(s)}
           ${lastWordsShown(s) ? `<div class="last" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Its last words — click to Peek", "它最后说的话——点击 Peek")}">${esc(plainText(s.lastText))}</div>` : ""}${outboxHtml(s.sessionId)}</div>
         <div class="icons">
           <button class="icon" data-action="peek" data-session="${esc(s.sessionId)}" title="${T("Peek — open the conversation", "Peek——打开对话")}">${ICON.peek}</button>
@@ -2839,7 +2886,7 @@ function renderSessionList(items, plain) {
           <span class="stime">${ago(s.updatedAt).replace(" ago", "").replace(/前$/, "")}</span>
         </div>
         <div class="shead">
-          <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">${T("background", "后台")}</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${esc(statusWord(s))}${ctxTag(s)}${s.waitingOn ? T(" · waiting: ", " · 在等：") + esc(s.waitingOn) : ""}</div>
+          <div class="meta smeta">${taskCtl}${s.background ? ` <span class="bgtag">${T("background", "后台")}</span>` : ""} · ${ui.sgroupBy !== "project" && sessionProject(s) && sessionProject(s) !== s.project ? `<span class="pchip">${esc(sessionProject(s))}</span> · ` : ""}${esc(s.project || "")} · ${statusSpan(s, true)}${s.waitingOn ? T(" · waiting: ", " · 在等：") + esc(s.waitingOn) : ""}</div>
           <div class="icons">
             <button class="icon" data-action="peek" data-session="${esc(sid)}" title="${T("Peek — open the recent conversation", "Peek——打开最近的对话")}">${ICON.peek}</button>
             ${s.background
@@ -4052,7 +4099,7 @@ function drawContext() {
       </section>
       <section class="ctx-sec">
         <h4>${T("Sessions on this task", "这个任务的 session")}</h4>
-        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${esc(statusWord(s))}${ctxTag(s)}</span>${sessBtn(s.sessionId, T("Conversation", "对话"), true)}</div>`).join("")}
+        ${live.map((s) => `<div class="row ctx-s">${dot(s)}<span>${esc(s.title || s.project)}</span><span class="meta">${statusSpan(s, true)}</span>${sessBtn(s.sessionId, T("Conversation", "对话"), true)}</div>`).join("")}
         ${past.map((p) => `<div class="row ctx-s"><span class="dot"></span><span class="meta">session ${esc(String(p).slice(0, 8))} · ${T("ended", "已结束")}</span>${sessBtn(String(p), T("History", "历史"), false)}</div>`).join("")}
         ${!live.length && !past.length ? `<div class="empty">${T("No session has been bound to this task yet.", "这个任务还没有绑定过 session。")}</div>` : ""}
       </section>

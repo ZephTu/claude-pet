@@ -279,16 +279,35 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// One request from the board: from its window on the Mac, or from a phone over the local
     /// network — see BoardServer, which turns away what only the Mac may do first.
     func handle(_ body: [String: Any]) async -> (Any?, String?) {
+        // The Mac's window and every phone share the polled reads (SharedReads); anything else
+        // may change what they say, so what is kept is dropped before it runs and once it is done.
+        let op = body["op"] as? String ?? ""
+        guard SharedReads.changes(op) else { return await perform(body) }
+        await SharedReads.shared.changed()
+        let r = await perform(body)
+        await SharedReads.shared.changed()
+        return r
+    }
+
+    /// A read every open board polls: shared between them for a moment (SharedReads.ttl).
+    private func shared(_ op: String, _ args: [String]) async -> (Any?, String?) {
+        let a = await SharedReads.shared.read(op, ttl: SharedReads.ttl(op) ?? 0) {
+            await Self.hqText(args, timeout: Self.readTimeout)
+        }
+        return (a.text, a.error)
+    }
+
+    private func perform(_ body: [String: Any]) async -> (Any?, String?) {
         func str(_ key: String) -> String { body[key] as? String ?? "" }
 
         switch body["op"] as? String ?? "" {
-        case "board": return await hq(["board", "--json"])
-        case "sessions": return await hq(["sessions", "--json"])
+        case "board": return await shared("board", ["board", "--json"])
+        case "sessions": return await shared("sessions", ["sessions", "--json"])
         // The Focus cards' ⚠ lines (polled about once a minute: it reads each task's sessions).
-        case "status": return await hq(["status", "--focus", "--json"])
+        case "status": return await shared("status", ["status", "--focus", "--json"])
         case "peek":
             // An open conversation shows the newest reply: that is reading it.
-            let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"])
+            let r = await hq(["peek", str("session"), "-n", "30", "--json", "--meta"], timeout: Self.readTimeout)
             if r.1 == nil {
                 Self.onSeen?(str("session"))
                 // Opening it, not the refreshes every few seconds while it stays open.
@@ -449,9 +468,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
         case "agents":
             // Background sessions have no terminal, so the pet's records can't say what they are;
             // `claude agents --json` can.
+            // Shared like the board's own reads, and for longer: it starts a whole Claude Code.
             guard let claude = await claudePath() else { return ("[]", nil) }
-            let r = await Self.run(claude, ["agents", "--json"])
-            return (r.status == 0 ? r.out : "[]", nil)
+            let a = await SharedReads.shared.read("agents", ttl: SharedReads.ttl("agents") ?? 0) {
+                let r = await Self.run(claude, ["agents", "--json"], timeout: Self.readTimeout)
+                return r.status == 0 ? .init(text: r.out, error: nil) : .init(text: nil, error: "claude agents failed")
+            }
+            return (a.text ?? "[]", nil)
         case "decide":
             guard let behavior = PermissionDecision.Behavior(rawValue: str("behavior")),
                   !str("session").isEmpty, !str("ask").isEmpty else { return (nil, L("bad decision", "无效的决定")) }
@@ -1129,23 +1152,38 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     private var hqPath: String { Self.hqPath }
-    private static var hqPath: String {
+    private nonisolated static var hqPath: String {
         // HQ_BIN: a worktree's hq for `--render-board` while developing; the installed one otherwise.
         if let dev = ProcessInfo.processInfo.environment["HQ_BIN"], !dev.isEmpty { return dev }
         return FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/hq/bin/hq").path
     }
 
-    private func hq(_ args: [String]) async -> (Any?, String?) { await Self.hq(args) }
+    /// How long a read the board polls may take before it is given up: a stuck `hq` or
+    /// `claude agents` must not hold the board's refresh (and every phone's) for good.
+    static let readTimeout: TimeInterval = 15
+
+    private func hq(_ args: [String], timeout: TimeInterval? = nil) async -> (Any?, String?) {
+        await Self.hq(args, timeout: timeout)
+    }
     /// Runs hq and hands its stdout back as text; the page parses JSON itself.
-    static func hq(_ args: [String]) async -> (Any?, String?) {
+    static func hq(_ args: [String], timeout: TimeInterval? = nil) async -> (Any?, String?) {
+        let a = await hqText(args, timeout: timeout)
+        return (a.text, a.error)
+    }
+    nonisolated static func hqText(_ args: [String], timeout: TimeInterval? = nil) async -> SharedReads.Answer {
+        let hqPath = Self.hqPath
         guard FileManager.default.isExecutableFile(atPath: hqPath) else {
-            return (nil, L("HQ is not installed — run hq/install.sh --root <dir>", "没有安装 HQ — 运行 hq/install.sh --root <dir>"))
+            return .init(text: nil, error: L("HQ is not installed — run hq/install.sh --root <dir>", "没有安装 HQ — 运行 hq/install.sh --root <dir>"))
         }
-        let r = await Self.run(hqPath, args)
+        let r = await Self.run(hqPath, args, timeout: timeout)
+        if r.timedOut {
+            return .init(text: nil, error: L("hq \(args.first ?? "") took over \(Int(timeout ?? 0))s — gave up; trying again shortly",
+                                             "hq \(args.first ?? "") 超过 \(Int(timeout ?? 0)) 秒没有返回——已放弃，稍后重试"))
+        }
         if r.status != 0 {
-            return (nil, r.err.isEmpty ? L("hq exited \(r.status)", "hq 退出码 \(r.status)") : r.err.trimmingCharacters(in: .whitespacesAndNewlines))
+            return .init(text: nil, error: r.err.isEmpty ? L("hq exited \(r.status)", "hq 退出码 \(r.status)") : r.err.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        return (r.out, nil)
+        return .init(text: r.out, error: nil)
     }
 
     // MARK: - Terminals
@@ -1480,14 +1518,40 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     // MARK: - Process
 
-    private struct Result: Sendable { let status: Int32; let out: String; let err: String }
+    private struct Result: Sendable {
+        let status: Int32; let out: String; let err: String
+        /// It was still running at its timeout and was ended.
+        var timedOut = false
+    }
     private final class DataBox: @unchecked Sendable { var value = Data() }
+    /// Answers a continuation once: the tool finishing, or its timeout, whichever comes first.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        private(set) var expired = false
+        func expire() { lock.lock(); expired = true; lock.unlock() }
+        func claim() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
+        }
+    }
 
     /// Runs a tool to the end. With a `timeout`, a tool still running then is ended (SIGTERM,
     /// then SIGKILL a second later) and answers whatever it printed, with its signal status.
+    /// Its answer comes by then even if its output never closes (a child it left behind keeps
+    /// the pipe open): a few seconds after the timeout the call returns, timed out, with nothing.
     private nonisolated static func run(_ tool: String, _ args: [String], cwd: String? = nil,
                                         timeout: TimeInterval? = nil) async -> Result {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Result, Never>) in
+            let once = Once()
+            let answer = { (r: Result) in if once.claim() { continuation.resume(returning: r) } }
+            if let timeout {
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout + 3) {
+                    answer(Result(status: -1, out: "", err: "timed out", timedOut: true))
+                }
+            }
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: tool)
@@ -1511,6 +1575,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                     if let timeout {
                         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
                             guard p.isRunning else { return }
+                            once.expire()
                             p.terminate()
                             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
                                 if p.isRunning { kill(p.processIdentifier, SIGKILL) }
@@ -1529,12 +1594,13 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
                     drained.wait()
                     let e = errData.value
                     p.waitUntilExit()
-                    continuation.resume(returning: Result(
+                    answer(Result(
                         status: p.terminationStatus,
                         out: String(data: o, encoding: .utf8) ?? "",
-                        err: String(data: e, encoding: .utf8) ?? ""))
+                        err: String(data: e, encoding: .utf8) ?? "",
+                        timedOut: once.expired))
                 } catch {
-                    continuation.resume(returning: Result(status: -1, out: "", err: error.localizedDescription))
+                    answer(Result(status: -1, out: "", err: error.localizedDescription))
                 }
             }
         }
