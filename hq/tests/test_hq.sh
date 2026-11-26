@@ -458,14 +458,16 @@ p = sys.argv[1]; s = json.load(open(p)); s["sess-1"]["turn_start"] = time.time()
 PY
 touch -t 200001010000 "$T"/root/tasks/T-001-*/TASK.md
 hook '{"session_id":"sess-1","hook_event_name":"Stop","last_assistant_message":"x"}' | grep -q '"decision": "block"' && ok "write-back guard blocks stale card"
-hook '{"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"x"}' | grep -q block && fail "guard looped" || ok "guard does not loop"
+hook '{"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"x"}' | grep -q '"decision"' && fail "guard looped" || ok "guard does not loop"
 
 # hq-update: card bookkeeping written in the reply, applied by the Stop hook (no tool calls)
 stop() { python3 -c 'import json,sys; print(json.dumps({"session_id":sys.argv[1],"hook_event_name":"Stop","last_assistant_message":sys.argv[2]}))' "$1" "$2" | "$HQ" hook; }
 C1="$(ls "$T"/root/tasks/T-001-*/TASK.md)"
 hook '{"session_id":"sess-1","hook_event_name":"SessionStart"}' | grep -q 'hq-update' && ok "protocol teaches the hq-update block"
 out="$(stop sess-1 "$(printf 'Fixed it.\n\n```hq-update\nstatus: blocked\nnext: wait for the token\nstate: build is green\nstate: waiting on infra for the token\ntodo: @me send the token request\ntodo: @claude rerun the suite\nlog: picked plan v2 because it is cheaper\nref: PR #9 https://example.com/pr/9\nworkdir: %s\n```' "$T/repo-a")")"
-[ -z "$out" ] && ok "a clean hq-update block does not block the turn" || fail "clean block blocked: $out"
+! echo "$out" | grep -q '"decision"' && ok "a clean hq-update block does not block the turn" || fail "clean block blocked: $out"
+echo "$out" | python3 -c 'import json,sys; m=json.load(sys.stdin)["systemMessage"]; assert m=="HQ T-001: status waiting-on-me → blocked, next, state, +2 todo, +1 log, +1 ref, +1 workdir", m' \
+  && ok "the user is told in one line what the block wrote" || fail "echo of a clean block: $out"
 python3 - "$C1" "$T/repo-a" <<'PY' && ok "hq-update sets status/next/state/todos/log/ref/workdir"
 import sys, re
 t = open(sys.argv[1]).read()
@@ -481,13 +483,14 @@ stop sess-1 "$(printf 'ok\n```hq-update\nref: PR #9 (merged) https://example.com
 grep -q "PR #9 (merged) https://example.com/pr/9" "$C1" && [ "$(grep -o "example.com/pr/9" "$C1" | wc -l | tr -d ' ')" = 1 ] && ok "hq-update ref with a known URL renames it instead of adding a duplicate" || fail "ref duplicated: $(grep refs "$C1")"
 out="$(stop sess-1 "$(printf 'ok\n```hq-update\nstatus: finished\ndone: no such todo\nwhatever this is\n```')")"
 echo "$out" | python3 -c 'import json,sys; r=json.load(sys.stdin)["reason"]; assert "status must be one of" in r and "no such todo" in r and "whatever this is" in r, r' && ok "lines it cannot apply are sent back once"
-python3 -c 'import json,sys; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"```hq-update\nstatus: nope\n```"}))' | "$HQ" hook | grep -q block && fail "bad block looped" || ok "a bad block is not sent back twice"
+python3 -c 'import json,sys; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"```hq-update\nstatus: nope\n```"}))' | "$HQ" hook | grep -q '"decision"' && fail "bad block looped" || ok "a bad block is not sent back twice"
 python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
 import json, sys, time
 p = sys.argv[1]; s = json.load(open(p)); s["sess-1"]["turn_start"] = time.time() - 600; json.dump(s, open(p, "w"))
 PY
 touch -t 200001010000 "$C1"
-[ -z "$(stop sess-1 "$(printf 'nothing new\n```hq-update\ntouch\n```')")" ] && ok "a touch-only block satisfies the write-back guard"
+out="$(stop sess-1 "$(printf 'nothing new\n```hq-update\ntouch\n```')")"
+! echo "$out" | grep -q '"decision"' && ok "a touch-only block satisfies the write-back guard" || fail "touch block: $out"
 
 # A session that finishes its own task says so on its entry, for the board's "Finishing a task" setting.
 fin() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("sess-1",{}).get("finished")))' "$HOME/.claude/hq/state/sessions.json"; }
@@ -1111,7 +1114,11 @@ assert f"- … {10 - len(l)} older ones not shown" in c, c' && ok "and stays wit
 MT="$("$HQ" new "me todos" | head -1)"; MC="$(ls "$T"/root/tasks/$MT-*/TASK.md)"
 printf '\n## 待办\n- [ ] @me review 并合并 #127、#129 <!--t:2026-11-22T08:00:00+08:00-->\n- [ ] @me 合并后从 main 运行 scripts/install.sh\n- [ ] @me review 并合并 PR #110\n' >> "$MC"
 "$HQ" bind "$MT" --session sess-me >/dev/null
-upd() { stop sess-me "$(printf 'ok\n```hq-update\n%s\n```' "$1")"; }
+# What the turn was sent back with, if anything (the echo to the user aside).
+upd() { stop sess-me "$(printf 'ok\n```hq-update\n%s\n```' "$1")" | python3 -c '
+import json, sys
+t = sys.stdin.read().strip(); d = json.loads(t) if t else {}; d.pop("systemMessage", None)
+print(json.dumps(d, ensure_ascii=False) if d else "")'; }
 o="$(upd 'todo: @me review 并合并 #126、#127、#129')"
 echo "$o" | grep -q 'repeats the open todo \\"review 并合并 #127、#129\\"' && echo "$o" | grep -q "change: review 并合并 #127、#129 => " && echo "$o" | grep -q 'todo!: @me' \
   && ! grep -q "#126" "$MC" && ok "an @me todo about a PR an open one merges is refused, naming the open one" || fail "PR repeat not refused: $o"
@@ -2784,6 +2791,69 @@ next: ex two
 ```
 done.')")"
 ! echo "$out" | grep -q "not at the end" && ! grep -q "ex one\|ex two" "$AC" && ok "two hq-update examples mid-reply: neither applied, no complaint" || fail "two examples: $out"
+
+# The echo (T-123): after each turn of a bound session the user gets one line — a systemMessage the
+# session does not see — of what HQ wrote, and what it refused or could not record.
+EID="$("$HQ" new "Echo" --no-focus | head -1)"; "$HQ" bind "$EID" --session sess-echo >/dev/null
+EC="$(ls "$T"/root/tasks/$EID-*/TASK.md)"
+echomsg() { python3 -c 'import json,sys; t=sys.stdin.read().strip(); print(json.loads(t).get("systemMessage","") if t else "")'; }
+sent() { python3 -c 'import json,sys; t=sys.stdin.read().strip(); print("decision" in json.loads(t) if t else False)'; }
+out="$(stop sess-echo "Just chatting, no blocks.")"
+[ -z "$out" ] && ok "echo: a turn with no blocks says nothing" || fail "echo on a plain reply: $out"
+out="$(stop sess-echo "$(printf 'Two examples:\n```hq-update\nnext: ex one\n```\nand\n```hq-update\nnext: ex two\n```\ndone.')")"
+[ -z "$out" ] && ok "echo: blocks shown mid-reply as examples say nothing" || fail "echo on examples: $out"
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\ntouch\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: nothing new on the card" ] && ok "echo: a touch-only block" || fail "echo touch: $out"
+stop sess-echo "$(printf 'ok\n```hq-update\ntodo: @claude echo one\nlog: echo log\n```')" >/dev/null
+out="$(stop sess-echo "$(printf 'again\n```hq-update\ntodo: @claude echo one\nlog: echo log\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: nothing new on the card" ] && ok "echo: a block sent twice counts nothing the second time" || fail "echo repeat: $out"
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\ndone: echo one\ntodo: @me look at it\nchange: @me look at it => @me look at it twice\n```')")"
+[ "$(echo "$out" | sent)" = True ] && echo "$out" | echomsg | grep -q "^HQ $EID: hq-update NOT applied: .*(sent back to the session)$" \
+  && ok "echo: a refused block is shown as not written, and sent back" || fail "echo refused: $out"
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\nstatus: nope\nnext: x\n```\nmore text after')")"
+echo "$out" | echomsg | grep -q "hq-update NOT applied: the hq-update block isn't at the end of the reply, so it was taken for an example (sent back" \
+  && ok "echo: a block not at the end is named in the user's words" || fail "echo not at end: $out"
+out="$(python3 -c 'import json; print(json.dumps({"session_id":"sess-echo","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"ok\n```hq-update\nstatus: nope\n```"}))' | "$HQ" hook)"
+[ "$(echo "$out" | sent)" = False ] && echo "$out" | echomsg | grep -q "hq-update NOT applied: status must be one of .*(the session hears at its next prompt)$" \
+  && ok "echo: refused while another hook held the turn, and when the session will hear" || fail "echo stop_hook_active: $out"
+hook '{"session_id":"sess-echo","hook_event_name":"UserPromptSubmit","prompt":"hi"}' >/dev/null
+out="$(stop sess-echo "$(printf 'Question.\n```hq-asks\n- Ship the echo?\n```\n```hq-update\nstatus: done\n```')")"
+EQ="$("$HQ" asks "$EID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Ship the echo?"][0])')"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: status active → waiting-on-me, done held: waiting on 1 question(s), ask $EQ" ] && ok "echo: a new ask and a held close" || fail "echo ask/held: $out"
+out="$(stop sess-echo "$(printf 'Noted.\n```hq-resolved\n- %s do: yes\n- T-999.1 do: nope\n```\n```hq-update\nref: Echo PR https://example.com/pr/echo\n```' "$EQ")")"
+echo "$out" | echomsg | grep -q "^HQ $EID: status waiting-on-me → done, +1 ref, answer $EQ (do) recorded, 1 answer(s) NOT recorded: .*T-999.1.*(sent back to the session)$" \
+  && ok "echo: answers recorded and not, a released close, a ref" || fail "echo resolved: $out"
+python3 - "$HOME/.claude/hq/state/sessions.json" <<'PY'
+import json, sys, time
+p = sys.argv[1]; s = json.load(open(p)); s["sess-echo"]["turn_start"] = time.time() - 600; json.dump(s, open(p, "w"))
+PY
+touch -t 200001010000 "$EC"
+out="$(stop sess-echo "Did a lot, forgot the card.")"
+[ "$(echo "$out" | sent)" = True ] && [ "$(echo "$out" | echomsg)" = "HQ $EID: this turn did work but the card wasn't updated (the session was nudged)" ] \
+  && ok "echo: the write-back guard is shown too" || fail "echo stale: $out"
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\nref: Echo PR (merged) https://example.com/pr/echo\nref: Echo doc https://example.com/doc/echo\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: +1 ref, 1 ref updated" ] && ok "echo: a renamed ref is not counted as a new one" || fail "echo ref rename: $out"
+"$HQ" project add echop >/dev/null
+out="$(stop sess-echo "$(printf 'ok\n```hq-update\nproject: echop\nlog: project kickoff notes written\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ $EID: +1 log, moved project" ] && grep -q ": project kickoff notes written" "$EC" \
+  && ok "echo: the session's own log line that starts with 'project' counts, the move's line doesn't" || fail "echo project log: $out"
+NID="$("$HQ" new "无项目回显" --no-focus | head -1)"; NC="$(ls "$T"/root/tasks/$NID-*/TASK.md)"
+python3 - "$NC" <<'PY'
+import re, sys
+p = sys.argv[1]; t = open(p).read(); t = re.sub(r"^## Status", "## 当前状态", t, flags=re.M); open(p, "w").write(t)
+PY
+grep -q '^## 当前状态' "$NC" || fail "zh card heading not set"
+"$HQ" bind "$NID" --session sess-nop >/dev/null
+out="$(stop sess-nop "$(printf 'ok\n```hq-update\nnext: 下一步\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ ${NID}：next" ] && ok "echo: a task with no project speaks its card's language" || fail "echo no-project zh: $out"
+"$HQ" project add zhecho >/dev/null
+printf -- '---\nname: zhecho\nkind: duty\n---\n\n## 目标\n回显。\n' > "$T/root/projects/zhecho/PROJECT.md"
+ZID="$("$HQ" new "中文回显" --project zhecho --no-focus | head -1)"; "$HQ" bind "$ZID" --session sess-zh >/dev/null
+out="$(stop sess-zh "$(printf '好\n```hq-update\nnext: 写测试\ntodo: @claude 跑测试\n```\n\n```hq-update\nstatus: 不对\n```\n')")"
+[ "$(echo "$out" | echomsg)" = "HQ ${ZID}：next，+1 todo，hq-update 没写进卡片：status must be one of waiting-on-me, blocked, active, done, abandoned (got '不对')（已让 session 重写）" ] \
+  && ok "echo: two blocks, one applied and one not, in the project's language" || fail "echo zh: $out"
+out="$(stop sess-zh "$(printf '好\n```hq-update\nnext: 改文档\ndone: 跑测试\n```')")"
+[ "$(echo "$out" | echomsg)" = "HQ ${ZID}：next，1 条 todo 完成" ] && ok "echo: what was written, in Chinese" || fail "echo zh written: $out"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

@@ -59,6 +59,92 @@ def resolved_problems_text(problems):
               "`<ask id> <do|drop|later|archive>: <short note>` (`later until YYYY-MM-DD: …` for another day).")
 
 
+# ---------------------------------------------------------------- the Stop hook's echo
+# One line to the user after each turn of a bound session (a systemMessage: the session doesn't
+# see it): what HQ wrote on the card, and what it refused or dropped — which used to reach only the
+# session, or nobody.
+ECHO_WORDS = {
+    "zh": {"next": "next", "state": "state", "todo": "+{n} todo", "done": "{n} 条 todo 完成",
+           "drop": "{n} 条 todo 不做", "change": "{n} 条 todo 改写", "log": "+{n} log", "ref": "+{n} ref",
+           "ref_updated": "{n} 条 ref 更新", "workdir": "+{n} workdir", "project": "换了项目", "sep": "，", "status": "状态 {a} → {b}",
+           "asked": "ask {ids}", "answered": "记下回答 {ids}", "touch": "卡片没有新内容",
+           "held": "{s} 暂缓：等 {n} 个问题答完", "refused": "hq-update 没写进卡片：{why}", "more": "（共 {n} 处）",
+           "unresolved": "{n} 条回答没记上：{why}", "stale": "这轮做了事但卡片没更新",
+           "back": "（已让 session 重写）", "later": "（下一轮告诉 session）", "nudged": "（已提醒 session）",
+           "not_end": "hq-update 块不在回复末尾，当成了示例", "lead": "HQ {id}："},
+    "en": {"next": "next", "state": "state", "todo": "+{n} todo", "done": "{n} todo done",
+           "drop": "{n} todo dropped", "change": "{n} todo reworded", "log": "+{n} log", "ref": "+{n} ref",
+           "ref_updated": "{n} ref updated", "workdir": "+{n} workdir", "project": "moved project", "sep": ", ", "status": "status {a} → {b}",
+           "asked": "ask {ids}", "answered": "answer {ids} recorded", "touch": "nothing new on the card",
+           "held": "{s} held: waiting on {n} question(s)", "refused": "hq-update NOT applied: {why}", "more": " ({n} problems)",
+           "unresolved": "{n} answer(s) NOT recorded: {why}", "stale": "this turn did work but the card wasn't updated",
+           "back": " (sent back to the session)", "later": " (the session hears at its next prompt)",
+           "nudged": " (the session was nudged)",
+           "not_end": "the hq-update block isn't at the end of the reply, so it was taken for an example",
+           "lead": "HQ {id}: "},
+}
+ECHO_ORDER = ("next", "state", "todo", "done", "drop", "change", "log", "ref", "ref_updated", "workdir", "project")
+
+
+def echo_lang(meta):
+    """The project's language (its PROJECT.md headings); for a task with none, the card's own."""
+    from .projects import load_project
+    p = load_project(meta.get("project") or "")
+    if p:
+        return p["lang"]
+    return "zh" if re.search(r"^## .*[\u4e00-\u9fff]", meta.get("body") or "", re.M) else "en"
+
+
+def safe_echo(meta, **kw):
+    """turn_echo, never raising: it is only shown, and runs before the hook's real output."""
+    try:
+        return turn_echo(meta, echo_lang(meta), **kw)
+    except Exception as e:  # noqa: BLE001
+        print(f"hq hook: echo: {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
+
+
+def echo_problem(p, w, n=100):
+    """A problem as the user reads it: the not-at-the-end one in their words, any other cut short."""
+    if p.startswith("the hq-update block is not at the end"):
+        return w["not_end"]
+    p = " ".join(p.split())
+    return p if len(p) <= n else p[:n - 1] + "…"
+
+
+def turn_echo(meta, lang, *, had_blocks, status=None, wrote=None, held=None, asked=(), answered=(),
+              problems=(), unresolved=(), stale=False, sent_back=False):
+    """The echo line, or "" when the turn wrote nothing and nothing went wrong."""
+    from .asks import open_ask_count
+    w = ECHO_WORDS.get(lang) or ECHO_WORDS["en"]
+    fail = w["later"] if not sent_back else w["back"]
+    parts = []
+    if status and status[0] != status[1]:
+        parts.append(w["status"].format(a=status[0] or "-", b=status[1] or "-"))
+    if held:
+        parts.append(w["held"].format(s=held, n=open_ask_count(meta["path"])))
+    for k in ECHO_ORDER:
+        if (wrote or {}).get(k):
+            parts.append(w[k].format(n=wrote[k]))
+    if asked:
+        parts.append(w["asked"].format(ids=" ".join(asked)))
+    if answered:
+        parts.append(w["answered"].format(ids=" ".join(answered)))
+    bad = []
+    if problems:
+        bad.append(w["refused"].format(why=echo_problem(problems[0], w))
+                   + (w["more"].format(n=len(problems)) if len(problems) > 1 else "") + fail)
+    if unresolved:
+        bad.append(w["unresolved"].format(n=len(unresolved), why=echo_problem(unresolved[0], w)) + fail)
+    if stale:
+        bad.append(w["stale"] + w["nudged"])
+    if not parts and not bad:
+        if not had_blocks:
+            return ""
+        parts.append(w["touch"])
+    return w["lead"].format(id=meta["id"]) + w["sep"].join(parts + bad)
+
+
 def emit(event, context):
     if context:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event,
@@ -194,6 +280,8 @@ def _hook_main():
         status_said = me_ticked = False
         asked_before = {a["id"] for a in read_asks(meta["dir"])}
         asked, resolved = False, set()   # resolved: the cards whose asks this reply answered
+        new_asks, answered, wrote, held_now = [], [], {}, None   # for the echo
+        status_before = meta.get("status")
 
         def finished(after):
             # This session finished its task: say so on its entry, for the board to treat like a
@@ -210,10 +298,13 @@ def _hook_main():
                     change = {}
                     bad = apply_update(card, b["body"], change=change, settle=False, hold=True)
                     problems += bad
+                    for k, n in (change.get("wrote") or {}).items():
+                        wrote[k] = wrote.get(k, 0) + n
                     status_said |= bool(change.get("status"))
                     me_ticked |= bool(change.get("me_ticked"))
                     after, held = change.get("to"), change.get("held")
                     if held:
+                        held_now = held
                         hold = {"task": meta["id"], "status": held, "at": now_iso(), "seq": time.time_ns()}
                         update_session(sid, lambda e: e.update(held=hold))
                     elif not bad and change.get("status"):
@@ -223,7 +314,10 @@ def _hook_main():
                 continue
             for item in (block_items if b["kind"] == "hq-asks" else resolved_items)(b["body"]):
                 if b["kind"] == "hq-asks":
-                    asked |= add_ask(card, item, sid, context=text) not in asked_before
+                    aid = add_ask(card, item, sid, context=text)
+                    if aid not in asked_before and aid not in new_asks:
+                        asked = True
+                        new_asks.append(aid)
                     continue
                 m = RESOLVED_RE.match(item)
                 first = item.split("\n", 1)[0]
@@ -257,6 +351,7 @@ def _hook_main():
                     with contextlib.redirect_stderr(io.StringIO()) as err:
                         resolve_ask(aid, res, note.strip(), via="session", settle=False, until=until)
                         resolved.add(current_ask(aid)[0])
+                        answered.append(f"{aid} ({res})")
                 except SystemExit:
                     unresolved.append(f"`{first}` — {err.getvalue().strip().removeprefix('hq: ') or 'could not be recorded'}")
         # A new question with no status written: the task now waits on the user. Answers recorded
@@ -280,6 +375,8 @@ def _hook_main():
                 settle_status(card, "session")
         for c in resolved - {card}:
             settle_status(c, "session")
+        echo = dict(had_blocks=any(b["kind"] != "hq-update" or b["trailing"] for b in blocks), status=(status_before, parse_card(card).get("status")), wrote=wrote,
+                    held=held_now, asked=new_asks, answered=answered, problems=problems, unresolved=unresolved)
         if payload.get("stop_hook_active"):
             # One nudge per turn, never a loop. Another Stop hook may have sent the turn back
             # before this one could: tell the session at its next prompt instead of never.
@@ -287,6 +384,9 @@ def _hook_main():
                 update_session(sid, lambda e: e.update(update_problems=problems))
             if unresolved:
                 update_session(sid, lambda e: e.update(resolved_problems=unresolved))
+            line = safe_echo(meta, **echo)
+            if line:
+                print(json.dumps({"systemMessage": line}, ensure_ascii=False))
             return
         reasons = []
         if problems:
@@ -295,13 +395,20 @@ def _hook_main():
             reasons.append(resolved_problems_text(unresolved))
         # Write-back guard: a long turn that never touched the card gets one nudge.
         start = s.get("turn_start")
-        if (not problems and start and time.time() - start > WRITEBACK_MIN_TURN_SECONDS
-                and os.path.getmtime(card) < start):
+        stale = (not problems and start and time.time() - start > WRITEBACK_MIN_TURN_SECONDS
+                 and os.path.getmtime(card) < start)
+        if stale:
             reasons.append(f"HQ: this turn did work on {meta['id']} but the task card was not updated. "
                            "Reply with just an hq-update block (status / next / state / todo / done / log …; "
                            "a block holding only `touch` if nothing changed), then finish.")
+        out = {}
+        line = safe_echo(meta, stale=bool(stale), sent_back=True, **echo)
+        if line:
+            out["systemMessage"] = line
         if reasons:
-            print(json.dumps({"decision": "block", "reason": "\n\n".join(reasons)}, ensure_ascii=False))
+            out.update(decision="block", reason="\n\n".join(reasons))
+        if out:
+            print(json.dumps(out, ensure_ascii=False))
 
 
 def cmd_hook(args):

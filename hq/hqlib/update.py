@@ -177,7 +177,7 @@ def apply_update(card, block, via="session", change=None, settle=True, hold=Fals
     `change`, a dict, gets the card's status before and after ("from", "to"), both read under the
     same lock as the write, so a status set elsewhere at the same moment is never taken for this one;
     "status" when the block was applied with a status line, "me_ticked" when it ticked off or
-    dropped an @me todo. `settle`: let such a tick take the task out of waiting-on-me (the Stop
+    dropped an @me todo, "wrote" what it changed on the card (_apply_update's `wrote`). `settle`: let such a tick take the task out of waiting-on-me (the Stop
     hook passes False and decides once for the whole reply)."""
     entries = update_lines(block)
     if entries and all(v and is_placeholder(v) for _, v in entries):
@@ -188,7 +188,8 @@ def apply_update(card, block, via="session", change=None, settle=True, hold=Fals
         if hold:     # `hold`: a close over open asks is held (hold_close) — the Stop hook's case
             block, held = hold_close(card, block)
             entries = update_lines(block)
-        problems = _apply_update(card, entries, via, closing=held)
+        wrote = {}
+        problems = _apply_update(card, entries, via, closing=held, wrote=wrote)
         if held and not problems:
             append_log(card, f"status {held} held (auto, {via}): {open_ask_count(card)} open question(s) on the task — it closes once they are answered", touch=False)
         said = not problems and any(k == "status" for k, _ in entries)
@@ -197,13 +198,20 @@ def apply_update(card, block, via="session", change=None, settle=True, hold=Fals
             settle_status(card, via)
         if change is not None:
             change.update({"from": before, "to": parse_card(card).get("status"),
-                           "status": said, "me_ticked": me_ticked, "held": None if problems else held})
+                           "status": said, "me_ticked": me_ticked, "held": None if problems else held,
+                           "wrote": {} if problems else wrote})
         return problems
 
 
-def _apply_update(card, entries, via, closing=None):
+def _apply_update(card, entries, via, closing=None, wrote=None):
+    """`wrote`, a dict, gets a count for each kind of change actually made — next, state, todo,
+    done, drop, change, log, ref, workdir, project — for the Stop hook's echo to the user. What
+    was already there (a todo or log line repeated, the same next) is not counted."""
+    wrote = {} if wrote is None else wrote
+    count = lambda k, n=1: n and wrote.__setitem__(k, wrote.get(k, 0) + n)
     problems, fields, state = [], {}, []
     adds, marks, changes, logs, refs, dirs, pins = [], [], [], [], [], [], set()
+    auto_logs = set()      # log lines HQ adds itself (a project move): not the session's, not counted
     text = open(card, encoding="utf-8").read()
     lines = text.split("\n")
     todos = card_todos(lines)
@@ -269,7 +277,10 @@ def _apply_update(card, entries, via, closing=None):
                                 "only the user makes new ones")
             elif v != (parse_card(card).get("project") or ""):
                 fields["project"] = v
-                logs.append(f"project {parse_card(card).get('project') or '(none)'!r} → {v!r}")
+                count("project")
+                moved = f"project {parse_card(card).get('project') or '(none)'!r} → {v!r}"
+                logs.append(moved)
+                auto_logs.add(moved)
         elif k == "workdir":
             d = os.path.normpath(os.path.expanduser(v))
             if not os.path.isabs(d) or not os.path.isdir(d):
@@ -292,6 +303,9 @@ def _apply_update(card, entries, via, closing=None):
         # In place: same spot, same creation time — the user sees it updated, not a new one.
         stamp = TODO_TIME_RE.search(t.group(3))
         lines[i] = f"{t.group(1)}- [{t.group(2)}] {new}" + (f" {stamp.group(0).strip()}" if stamp else "")
+    for k, _ in marks:
+        count(k)
+    count("change", len(changes))
     if marks or changes:
         atomic_write(card, "\n".join(lines))
         for k, (i, num, t, _) in marks:
@@ -303,9 +317,12 @@ def _apply_update(card, entries, via, closing=None):
                 for x in card_todos(open(card, encoding="utf-8").read().split("\n")) if x[2].group(2) == " "}
         if (todo_owner(item), " ".join(todo_plain(item).split()).casefold()) not in have:
             add_todo(card, item)
+            count("todo")
     if state:
         text = open(card, encoding="utf-8").read()
         m = STATUS_HEADING_RE.search(text)
+        if m.group(1).strip() != "\n".join(state).strip():
+            count("state")
         atomic_write(card, text[:m.start(1)] + "\n".join(state) + "\n\n" + text[m.end(1):])
     meta = parse_card(card)
     if refs:
@@ -313,12 +330,18 @@ def _apply_update(card, entries, via, closing=None):
         merged = merge_refs(have, refs)
         if merged != have:
             fields["refs"] = merged
+            old = {ref_key(r): str(r).strip() for r in have}
+            count("ref", sum(ref_key(r) not in old for r in merged))
+            count("ref_updated", sum(ref_key(r) in old and old[ref_key(r)] != r for r in merged))
     if pins:
         history_drop_links(card, pins)
     if dirs:
         have = meta.get("workdirs") if isinstance(meta.get("workdirs"), list) else []
         known = {os.path.normpath(h) for h in have}
         fields["workdirs"] = have + [d for d in dict.fromkeys(dirs) if d not in known]
+        count("workdir", len(fields["workdirs"]) - len(have))
+    if fields.get("next") is not None and fields["next"] != str(meta.get("next") or ""):
+        count("next")
     if "status" in fields:
         fields["closing"] = closing     # a status written outright replaces a held close
     set_fields(card, fields)            # also stamps `updated`, so a `touch` block is a touch
@@ -327,6 +350,7 @@ def _apply_update(card, entries, via, closing=None):
     for msg in dict.fromkeys(logs):
         if not re.search(r"^- \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: " + re.escape(msg) + r"\s*$", logged, re.M):
             append_log(card, msg)
+            count("log", msg not in auto_logs)
     return []
 
 
