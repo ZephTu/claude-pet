@@ -119,7 +119,25 @@ def block_items(body):
     return [i for i in items if i and not is_placeholder(i)]
 
 
-RESOLVED_RE = re.compile(r"(T-\d+\.\d+)\s+(do|drop|later|archive)\b(?:\s+until\s+([^\s:]+(?::\d\d)*))?[:\s]*(.*)$", re.S)
+ASK_ID_RE = re.compile(r"T-\d+\.\d+\b")
+# `until` takes a date only when one follows it: "drop until the API settles" is a note.
+RESOLVED_RE = re.compile(r"(T-\d+\.\d+)\s+(do|drop|later|archive)\b(?:\s+until\s+(\d{4}-\d\d-\d\d"
+                         r"(?:[T ]\d\d?:\d\d(?::\d\d)?)?(?:Z|[+-]\d\d:?\d\d)?)(?=[\s:]|$))?[:\s]*(.*)$", re.S)
+
+
+def resolved_items(body):
+    """The answers of an hq-resolved block: one a line — a line joins the one above only when it is
+    indented and names no ask (a note's second line), never one that starts another answer."""
+    items = []
+    for l in (l.rstrip() for l in body.splitlines()):
+        line = re.sub(r"^\s*(?:[-*+]|\d+[.)])\s+", "", l).strip()
+        if not line or is_placeholder(line):
+            continue
+        if items and l[:1].isspace() and not ASK_ID_RE.match(line):
+            items[-1] += "\n" + line
+        else:
+            items.append(line)
+    return items
 
 
 # ---------------------------------------------------------------- card lock
@@ -1382,6 +1400,10 @@ def snooze_ask(aid, until=None, note="", via="cli"):
     if when is None:
         die(f"until must be a date or time like 2026-11-22 or 2026-11-22T09:00, not {until!r}")
     card, aid = current_ask(aid)
+    if when:
+        state = next((a["state"] for a in read_asks(os.path.dirname(card)) if a["id"] == aid), None)
+        if state != "open":
+            die(f"{aid} is already answered ({state}): nothing to put off — `hq ask reopen {aid}` first")
     ev = {"type": "snooze", "id": aid, "until": when, "via": via}
     if note and when:
         ev["note"] = note
@@ -5590,7 +5612,9 @@ def continue_task(card, title=None):
 def move_open_asks(old, path):
     """Moves the old card's open asks (snoozed ones too) to the card at `path`; returns
     [{"from": old id, "to": new id}, …]."""
-    with card_lock(path):
+    # The old card's lock too: a Stop hook asking or answering there mid-move would leave an ask
+    # open on a card about to close, or move one already answered.
+    with card_lock(os.path.join(old["dir"], "TASK.md")), card_lock(path):
         return _move_open_asks(old, path)
 
 
@@ -6035,7 +6059,9 @@ def cmd_ask(args):
         if not args.rest:
             die("usage: hq ask resolve <ask-id> <do|drop|later [until DATE]|archive> [note…]")
         rest, until = args.rest[1:], args.until
-        if args.rest[0] == "later" and len(rest) >= 2 and rest[0] == "until":
+        if args.rest[0] == "later" and rest[:1] == ["until"]:
+            if len(rest) < 2:
+                die("usage: hq ask resolve <ask-id> later until <date> [note…]")
             until, rest = rest[1], rest[2:]
         resolve_ask(args.target, args.rest[0], args.note or " ".join(rest), via=args.via, until=until)
 
@@ -8934,12 +8960,13 @@ def _hook_main():
             print(f"hq hook: saving the reply: {e}", file=sys.stderr)
         problems, unresolved = [], []   # the hq-update's problems; hq-resolved lines not recorded
         blocks = hq_blocks(text)
-        if not any(b["trailing"] for b in blocks if b["kind"] == "hq-update"):
-            # A block with text after it reads as an example — unless no other is at the end, when it
-            # was this reply's bookkeeping put in the wrong place. Say so rather than drop it.
-            if any(b["kind"] == "hq-update" for b in blocks):
-                problems.append("the hq-update block is not at the end of the reply (text follows it), so it was "
-                                "taken for an example; bookkeeping goes last, after everything else")
+        updates = [b for b in blocks if b["kind"] == "hq-update"]
+        if len(updates) == 1 and not updates[0]["trailing"]:
+            # A block with text after it reads as an example — but the reply's only one was more
+            # likely its bookkeeping put in the wrong place. Say so rather than drop it.
+            problems.append("the hq-update block is not at the end of the reply (text follows it), so it was "
+                            "taken for an example; bookkeeping goes last, after everything else. If it was only "
+                            "an example, reply with an hq-update block holding just `touch`")
         # A status the reply wrote itself (and that was applied) wins over the automatic moves,
         # which are made once, after all its blocks.
         status_said = me_ticked = False
@@ -8972,7 +8999,7 @@ def _hook_main():
                     if not bad and change.get("from") in OPEN_STATUSES and after in CLOSED_STATUSES:
                         finished(after)
                 continue
-            for item in block_items(b["body"]):
+            for item in (block_items if b["kind"] == "hq-asks" else resolved_items)(b["body"]):
                 if b["kind"] == "hq-asks":
                     asked |= add_ask(card, item, sid, context=text) not in asked_before
                     continue
@@ -8985,6 +9012,10 @@ def _hook_main():
                 if until and res != "later":
                     unresolved.append(f"`{first}` — only later takes `until <date>`")
                     continue
+                if res == "later" and not until and re.match(r"until\b", note):
+                    # Meant as a date: put off till tomorrow instead, it would come back on the wrong day.
+                    unresolved.append(f"`{first}` — `{note.split(':')[0].strip()}` is not a date like 2026-11-22 or 2026-11-22T09:00")
+                    continue
                 if until and snooze_until(until) is None:
                     unresolved.append(f"`{first}` — `until {until}` is not a date like 2026-11-22")
                     continue
@@ -8993,11 +9024,19 @@ def _hook_main():
                         acard = find_card(aid.rsplit(".", 1)[0])
                 except SystemExit:
                     acard = None
-                if not acard or not any(a["id"] == aid for a in read_asks(os.path.dirname(acard))):
+                ask = next((a for a in read_asks(os.path.dirname(acard)) if a["id"] == aid), None) if acard else None
+                if not ask:
                     unresolved.append(f"`{first}` — there is no ask {aid}")
                     continue
-                resolve_ask(aid, res, note.strip(), via="session", settle=False, until=until)
-                resolved.add(current_ask(aid)[0])
+                if res == "later" and ask["state"] not in ("open", "moved"):
+                    unresolved.append(f"`{first}` — {aid} is already answered ({ask['state']}); nothing to put off")
+                    continue
+                try:
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        resolve_ask(aid, res, note.strip(), via="session", settle=False, until=until)
+                        resolved.add(current_ask(aid)[0])
+                except SystemExit:
+                    unresolved.append(f"`{first}` — {err.getvalue().strip().removeprefix('hq: ') or 'could not be recorded'}")
         # A new question with no status written: the task now waits on the user. Answers recorded
         # with no status written: it stops waiting once nothing is left on the user.
         released = False

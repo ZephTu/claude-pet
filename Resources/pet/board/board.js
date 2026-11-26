@@ -538,6 +538,7 @@ function laterBack(later) {
   const first = new Date(Math.min(...later.map((a) => new Date(a.snoozed_until).getTime())));
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
   if (first.toDateString() === tomorrow.toDateString()) return T("back tomorrow", "明天回来");
+  if (first.toDateString() === new Date().toDateString()) return T("back later today", "今天晚些回来");
   return T(`back ${first.toLocaleDateString("en", { month: "short", day: "numeric" })}`, `${first.getMonth() + 1}月${first.getDate()}日回来`);
 }
 // "2 for later · back tomorrow", and the asks themselves when opened.

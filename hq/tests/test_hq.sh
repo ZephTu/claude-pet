@@ -2658,6 +2658,61 @@ echo "$out" | grep -q "someday" && ok "later until something that isn't a date i
   && ok "hq ask resolve … later until DATE: the same" || fail "cli later until"
 "$HQ" ask resolve "$LQ" later >/dev/null
 "$HQ" asks "$AID" | grep -q "$LQ .*\[later — until " && ok "hq ask resolve … later keeps the ask open" || fail "cli later closed the ask"
+# Review fixes: a resolved line without "- " is its own answer; "until" with no date is a note;
+# an offset or a space before the time is part of the date; later on an answered ask is refused.
+"$HQ" ask add "$AID" "Alpha?" >/dev/null; "$HQ" ask add "$AID" "Beta?" >/dev/null
+AQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Alpha?"][0])')"
+BQ="$("$HQ" asks "$AID" --json | python3 -c 'import json,sys; print([a["id"] for a in json.load(sys.stdin) if a["text"]=="Beta?"][0])')"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s do: yes
+  and a second line
+%s drop until the API settles
+```
+```hq-update
+touch
+```' "$AQ" "$BQ")" >/dev/null
+"$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a={x["id"]:x for x in json.load(sys.stdin)}; assert a["'"$AQ"'"]["state"]=="do" and a["'"$AQ"'"]["note"]=="yes\nand a second line", a["'"$AQ"'"]; assert a["'"$BQ"'"]["state"]=="drop" and a["'"$BQ"'"]["note"]=="until the API settles", a["'"$BQ"'"]' \
+  && ok "hq-resolved: one answer a line, an indented line is the note's next line, until without a date is a note" || fail "hq-resolved items"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later until 2030-01-02 09:30: Ping out
+```
+```hq-update
+touch
+```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; assert a["snoozed_until"]=="2030-01-02T09:30:00" and a["later_note"]=="Ping out", a' \
+  && ok "later until a date and time" || fail "later until date time"
+stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later until 2030-01-02T09:30:00+00:00: Ping out
+```
+```hq-update
+touch
+```' "$LQ")" >/dev/null
+"$HQ" asks "$AID" --json | python3 -c 'import json,sys,datetime as d; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$LQ"'"][0]; exp=d.datetime(2030,1,2,9,30,tzinfo=d.timezone.utc).astimezone().replace(tzinfo=None).isoformat(); assert a["snoozed_until"]==exp and a["later_note"]=="Ping out", (a, exp)' \
+  && ok "later until a time with an offset" || fail "later until offset"
+out="$(stop sess-ask "$(printf 'ok
+```hq-resolved
+- %s later: too late
+```
+```hq-update
+touch
+```' "$AQ")")"
+echo "$out" | grep -q "already answered" && "$HQ" asks "$AID" --all --json | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin) if x["id"]=="'"$AQ"'"][0]; assert a["state"]=="do" and not a.get("snoozed_until"), a' \
+  && ok "later on an answered ask is sent back" || fail "later on answered ask: $out"
+{ "$HQ" ask resolve "$AQ" later 2>&1 || true; } | grep -q "already answered" && ok "hq ask resolve … later on an answered ask is refused" || fail "cli later on answered ask"
+{ "$HQ" ask resolve "$LQ" later until 2>&1 || true; } | grep -q "usage" && ok "later until with no date is refused" || fail "cli later until no date"
+out="$(stop sess-ask "$(printf 'Two examples:
+```hq-update
+next: ex one
+```
+and
+```hq-update
+next: ex two
+```
+done.')")"
+! echo "$out" | grep -q "not at the end" && ! grep -q "ex one\|ex two" "$AC" && ok "two hq-update examples mid-reply: neither applied, no complaint" || fail "two examples: $out"
 
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"

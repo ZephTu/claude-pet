@@ -295,12 +295,17 @@ The hooks inject a short protocol into the session (see `protocol()` in `bin/hq`
    (`- T-012.3 later: Ping is out` or `- T-012.3 later until 2026-12-05: …` in `hq-resolved`) or
    `hq ask resolve T-012.3 later [until DATE] [note]`, it writes a `snooze` event (with the note,
    shown under the question and to the session), so the question comes back instead of being
-   closed for good. Asks closed as `later` before this stay closed.
+   closed for good. `until` takes a date or a time (`2026-12-05`, `2026-12-05 09:00`, with or
+   without an offset); on any other answer, or with no date after it, "until …" is just the note.
+   Only an open ask can be put off, and being still open, it keeps a close held for questions
+   held — closing over a question needs `drop` or `archive`. Asks closed as `later` before this
+   stay closed.
 
-   An `hq-resolved` line that can't be read, names no ask, or gives `until` a non-date is not
-   dropped: the Stop hook sends those lines back to the session (the rest are recorded). So is a
-   reply whose only `hq-update` block has text after it — taken for an example, it would
-   otherwise be skipped without a word.
+   An `hq-resolved` block is one answer a line (an indented line without an ask id continues the
+   note above). A line that can't be read, names no ask, puts off an answered one, or writes
+   `later until` with no date is not dropped: the Stop hook sends those lines back to the session
+   (the rest are recorded). So is a reply whose only `hq-update` block has text after it — taken
+   for an example, it would otherwise be skipped without a word.
 
    Answer in chat (Claude records it with an `hq-resolved` block) or on the board. A board
    answer is typed straight into the asking session when it is live in Orca, iTerm2 or Terminal, or is a background
