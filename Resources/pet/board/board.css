@@ -614,6 +614,22 @@ select.place { max-width: 100px; }
 .newtag { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px; margin-right: 6px;
   border-radius: 8px; background: var(--red); color: #fff; vertical-align: 2px; letter-spacing: .02em; }
 
+/* what changed on a card since you last opened it (board.js cardChanges): blue, beside the red
+   of a new reply and the amber of what waits on you */
+.chgtag { flex: none; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px; border-radius: 8px;
+  background: var(--wash-blue); color: var(--blue); letter-spacing: .02em; }
+.newtag.chg { background: var(--blue); color: var(--on-accent); }
+.kc.chg { box-shadow: inset 3px 0 0 var(--blue); }
+.kc.chg.sel { box-shadow: inset 3px 0 0 var(--blue), 0 0 0 1px var(--lc); }
+.card.ask.chg { box-shadow: inset 3px 0 0 var(--blue); }
+.now.chg, .todo.chg, .logs li.e.chg, .ref-i.chg { background: var(--wash-blue); border-radius: 6px; }
+.now.chg { box-shadow: inset 3px 0 0 var(--blue); }
+.pill.chg { box-shadow: 0 0 0 2px var(--blue); }
+#statusbar .chg-chip { color: var(--blue); display: inline-flex; align-items: center; gap: 6px; }
+#statusbar .chg-chip b { color: var(--blue); }
+#statusbar .chg-chip.on { text-decoration: underline; }
+.chg-chip .udot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); flex: none; }
+
 /* "▶ Do it" on an @claude todo */
 .todo .doit { flex: none; align-self: flex-start; margin-top: 1px; white-space: nowrap; }
 

@@ -180,7 +180,9 @@ const ui = {
   mode: startMode(),
   // The task open in the side drawer ("@sessions": the list of live sessions), and whether the
   // boards show a column of recently finished tasks.
-  drawer: null, diffOpen: new Set(), showDone: pref("hq-show-done", "0") === "1",
+  drawer: null, diffOpen: new Set(),
+  // What changed on each card since it was last opened (see cardChanges).
+  seenCards: null, seenWrites: [], ownEdits: [], drawerChg: null, chgMemo: new Map(), showDone: pref("hq-show-done", "0") === "1",
   sgroupBy: pref("hq-sgroupby", "list"),
   scollapsed: new Set(JSON.parse(pref("hq-scollapsed", "[]"))), activeFirst: pref("hq-activefirst", "1") === "1", shown: {}, hover: new Set(), heldBack: false,
   // Tasks whose open @claude todos are unfolded (folded by default).
@@ -289,7 +291,34 @@ function keepMemo(key, tag, result) {
   try { localStorage.setItem(KEPT_PREFIX + key, JSON.stringify({ tag, result })); }
   catch (e) { try { localStorage.removeItem(KEPT_PREFIX + key); } catch (e2) { /* storage off */ } }
 }
+// Changes made from this board (an answer, a tick, a status, a log line) are yours: what each one
+// did is read from the moment it is made (ownPatch), and recorded once the read after it is in
+// (absorbOwn). Only what the change itself names — not whatever else differs from the last read,
+// which may be old (a phone left locked) — so what someone else changed meanwhile stays marked.
+const OWN_OPS = new Set(["resolve", "reopen", "snooze", "delivered", "todo", "set", "log", "ref", "workdir", "addtodo"]);
+function ownTask(op, args) {
+  if (!OWN_OPS.has(op) || !args) return "";
+  if (args.task) return String(args.task);
+  const m = String(args.id || "").match(/^(.+)\.\d+$/);
+  return m ? m[1] : "";
+}
 async function api(op, args = {}) {
+  const own = ownTask(op, args);
+  if (!own) return apiCall(op, args);
+  const e = { task: own, op, args };
+  ui.ownEdits.push(e);
+  ui.chgMemo.clear();
+  try {
+    const r = await apiCall(op, args);
+    e.after = ui.readNo;
+    return r;
+  } catch (err) {
+    ui.ownEdits = ui.ownEdits.filter((x) => x !== e);
+    ui.chgMemo.clear();
+    throw err;
+  }
+}
+async function apiCall(op, args) {
   if (NATIVE) return NATIVE.postMessage(Object.assign({ op }, args));
   if (!REMOTE) throw new Error(T("Open this page from Claude Pet (Task Board…)", "请从 Claude Pet 打开此页（Task Board…）"));
   // What happens on the phone itself rather than on the Mac.
@@ -859,6 +888,10 @@ async function readBoard(force) {
     ui.secGlance = pet.secretary || null;
     if (pet.prefs) takeSharedPrefs(pet.prefs, readNo);
     takePhrases(pet.phrases, readNo);   // not when the read failed: it said nothing about them
+    takeSeen(pet.seenCards, readNo);
+    absorbOwn(readNo);
+    baselineSeen();
+    if (ui.modal && ui.modal.type === "peek" && !ui.modal.secretary && document.visibilityState === "visible") markPeekSeen(ui.modal.sid);
     if ($("#pairing")) $("#pairing").hidden = true;
     pruneDrafts();
     ui.sessions = mergeBackground(sessions, JSON.parse(agentsText || "[]"));
@@ -1197,6 +1230,7 @@ function render() {
   // long lane back to its top.
   grabLaneScrolls();
 
+  ui.chgMemo.clear();   // the board may have changed since the last drawing
   markDrawerSeen();   // before anything is drawn: the tags it clears don't show
   renderCounts();
   renderUnreadPop();
@@ -1296,7 +1330,9 @@ function renderCounts() {
   const np = (n, label) => `<span class="np"><b>${n}</b> ${label}</span>`;   // wraps as one on a phone
   // First, in red: sessions that finished a turn you haven't looked at — click for the list.
   const fresh = unreadSessions().length;
-  $("#counts").innerHTML = (fresh ? `<span class="sgroup jump unread-chip ${ui.unreadPop ? "on" : ""}" data-action="unread-pop" title="${T("Sessions that finished and you haven't looked at — click for the list", "干完一轮、你还没看的 session——点击看列表")}"><span class="udot"></span>${np(fresh, T(`new repl${fresh === 1 ? "y" : "ies"}`, "条新回复"))}</span>` : "") +
+  const chg = changedCards().length;
+  $("#counts").innerHTML = (fresh ? `<span class="sgroup jump unread-chip ${ui.unreadPop === true ? "on" : ""}" data-action="unread-pop" title="${T("Sessions that finished and you haven't looked at — click for the list", "干完一轮、你还没看的 session——点击看列表")}"><span class="udot"></span>${np(fresh, T(`new repl${fresh === 1 ? "y" : "ies"}`, "条新回复"))}</span>` : "") +
+    (chg ? `<span class="sgroup jump chg-chip ${ui.unreadPop === "cards" ? "on" : ""}" data-action="chg-pop" title="${T("Cards that changed since you last opened them — click for the list", "上次打开之后变过的卡——点击看列表")}"><span class="udot"></span>${np(chg, T(`updated card${chg === 1 ? "" : "s"}`, "张卡有更新"))}</span>` : "") +
     `<span class="sgroup jump" data-action="open-sessions" title="${T("Live Claude Code sessions — click for the list", "正在运行的 Claude Code session——点击看列表")}">${np(ui.sessions.length, T(`session${ui.sessions.length === 1 ? "" : "s"}`, "个 session"))}` +
       `${part(by("busy"), T("working", "在干活"))}${part(by("waiting"), T("waiting on you", "等你"), "warn")}</span>` +
     (asks || mine || later || loose ? `<span class="sgroup jump" data-action="mode" data-m="needs" title="${T("Open Needs you", "打开 Needs you")}">` +
@@ -1467,6 +1503,7 @@ function markDrawerSeen() {
   const t = ui.drawer && ui.drawer !== "@sessions" ? taskById(ui.drawer) : null;
   const opened = ui.drawer !== ui.drawerSeen;
   ui.drawerSeen = ui.drawer;
+  markCardSeen(t, opened);
   if (!t || !ui.unread || !(opened || boardInFront())) return;
   const xs = liveFor(t.id).filter((s) => ui.unread[s.sessionId] && replyShown(t, s));
   if (!xs.length) return;
@@ -1482,6 +1519,189 @@ function markDrawerSeen() {
 const boardInFront = () => document.visibilityState === "visible" && document.hasFocus()
   && !ui.modal && !ui.settings && !(document.body.classList.contains("reading") && matchMedia("(max-width: 640px)").matches);
 
+// ---- What changed on a card since you last opened it. Each card's look when its drawer was
+// last open — its status, next step, open asks, todos, newest log entry and links — is kept by
+// the app (BoardSeen), one record for the Mac's board and every phone's: a card read on the phone
+// is read on the Mac too. What differs now marks the card ("updated"), its new asks ("new"), and,
+// in the drawer, each thing that changed, for as long as the drawer stays open. Opening the
+// drawer reads the card; a Peek reads the asks its session raised. A card the store doesn't know
+// yet (the first time, a new task) starts out read. What you change yourself, from this board, is
+// read as you make it (absorbOwn).
+const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
+const todoKey = (x) => fnv(`${x.state}|${x.owner || ""}|${x.text}`);
+const logKey = (l) => `${l.date}|${l.text}`;
+function cardSnap(t, logs = logEntries(t)) {
+  return {
+    s: t.status || "", n: fnv(t.next || ""), a: pendingAsks(t).map((a) => a.id), t: t.todos.map(todoKey),
+    l: logs.length ? logs[logs.length - 1].date : "", lx: [], r: mergeRefs(list(t.refs)).map(fnv),
+  };
+}
+// Log lines hq writes for what was done on the board — a tick ("todo #3 → done (board)"), a status
+// it changed on its own ("(auto, board)") — are never new: they are yours.
+const BOARD_LOG = /\((?:auto, )?board\)/;
+// What one of your changes (ui.ownEdits) did to the card, as a patch to its record: only what the
+// change names, and only once the card shows it.
+function ownPatch(seen, t, e, now) {
+  const p = {}, a = e.args || {};
+  const add = (k, xs) => { const have = list(p[k] || seen[k]); const more = xs.filter((x) => !have.includes(x)); if (more.length) p[k] = have.concat(more); };
+  for (const f of e.op === "set" ? list(a.fields) : []) {
+    const i = String(f).indexOf("="), k = String(f).slice(0, i), v = String(f).slice(i + 1);
+    if (k === "status" && now.s === v) p.s = now.s;
+    if (k === "next" && (t.next || "") === v) p.n = now.n;
+  }
+  if (e.op === "todo") add("t", t.todos.filter((x) => x.text === a.text).map(todoKey));
+  if (e.op === "addtodo") add("t", t.todos.filter((x) => x.text && String(a.text || "").includes(x.text)).map(todoKey));
+  if (e.op === "resolve" || e.op === "reopen") add("a", now.a.filter((id) => id === a.id));
+  if (e.op === "log") add("lx", logEntries(t).filter((l) => l.text.trim() === String(a.message || "").trim()).map(logKey));
+  if (e.op === "ref") {
+    const r = String(a.ref || "");
+    add("r", mergeRefs(list(t.refs)).filter((x) => r && (r.includes(unmarkedRef(x)) || unmarkedRef(x).includes(r))).map(fnv));
+  }
+  // An answer or a tick can move the status by itself: hq logs that as "(auto, board)".
+  const st = logEntries(t).filter((l) => /^status\b.*→/.test(l.text)).pop();
+  const m = st && st.text.match(/→\s*([\w-]+)\s*\(auto, board\)/);
+  if (m && m[1] === now.s && e.op !== "set") p.s = now.s;
+  return p;
+}
+function withOwn(seen, t, edits, now) {
+  let r = seen;
+  for (const e of edits) r = Object.assign({}, r, ownPatch(r, t, e, now));
+  return r;
+}
+const NO_CHANGE = { any: false, status: null, next: false, asks: [], todos: [], logs: [], refs: [] };
+// What differs between the card now and the record of it (your own changes taken as read); null
+// when there is no record — the secretary's card isn't opened in a drawer, so it is never marked.
+// Worked out once per card per drawing (ui.chgMemo, emptied by render and whenever the record or
+// your changes move).
+function cardChanges(t) {
+  if (ui.chgMemo.has(t.id)) return ui.chgMemo.get(t.id);
+  const c = cardChangesNow(t);
+  ui.chgMemo.set(t.id, c);
+  return c;
+}
+function cardChangesNow(t) {
+  const rec = ui.seenCards && ui.seenCards[t.id];
+  if (!rec || t.id === secId()) return null;
+  const logs = logEntries(t), now = cardSnap(t, logs);
+  const mine = ui.ownEdits.filter((e) => e.task === t.id);
+  const seen = mine.length ? withOwn(rec, t, mine, now) : rec;
+  const had = (k) => new Set(list(seen[k])), A = had("a"), Tt = had("t"), R = had("r"), X = had("lx");
+  const c = {
+    status: (seen.s || "") !== now.s ? seen.s || "" : null, next: seen.n !== now.n,
+    asks: now.a.filter((x) => !A.has(x)), todos: now.t.filter((x) => !Tt.has(x)),
+    logs: logs.filter((l) => l.date > (seen.l || "") && !BOARD_LOG.test(l.text)).map(logKey).filter((k) => !X.has(k)),
+    refs: now.r.filter((x) => !R.has(x)),
+  };
+  c.any = c.status !== null || c.next || c.asks.length + c.todos.length + c.logs.length + c.refs.length > 0;
+  return c;
+}
+// What a card marks: in its open drawer, everything read since it opened (ui.drawerChg); anywhere
+// else, what changed since it was last opened.
+const shownChanges = (t) => (ui.drawerChg && ui.drawerChg.id === t.id && ui.drawer === t.id ? ui.drawerChg.c : cardChanges(t)) || NO_CHANGE;
+function changeWords(c, t) {
+  const n = (k, one, many, zh) => (c[k].length ? T(`${c[k].length} ${c[k].length === 1 ? one : many}`, `${c[k].length} ${zh}`) : "");
+  return [
+    c.status !== null ? T(`status ${LABEL[c.status] || c.status || "—"} → ${LABEL[t.status] || t.status}`, `状态 ${LABEL[c.status] || c.status || "—"} → ${LABEL[t.status] || t.status}`) : "",
+    c.next ? T("next step changed", "下一步变了") : "",
+    n("asks", "new ask", "new asks", "个新问题"), n("todos", "new or changed todo", "new or changed todos", "条待办新增或变动"),
+    n("logs", "log entry", "log entries", "条新日志"), n("refs", "new link", "new links", "个新链接"),
+  ].filter(Boolean).join(T(", ", "、"));
+}
+const chgTag = (t) => {
+  const c = cardChanges(t);
+  return c && c.any ? `<span class="chgtag" title="${esc(T("Changed since you last opened it: ", "自你上次打开后：") + changeWords(c, t))}">${T("updated", "有更新")}</span>` : "";
+};
+const askNew = (t, a) => shownChanges(t).asks.includes(a.id);
+const askNewTag = (t, a) => (askNew(t, a) ? `<span class="newtag chg" title="${T("New since you last opened its task", "你上次打开这个任务之后新来的")}">${T("new", "新")}</span>` : "");
+
+// The record, as the "pet" read brings it, with this board's own writes on top until a read
+// started after they were saved brings them back (as takeSharedPrefs does). A write is a patch:
+// the app merges its fields into the card's record (SeenCards.merge), so two boards writing
+// different fields of one card don't undo each other.
+function takeSeen(store, readNo) {
+  if (!store || typeof store !== "object" || Array.isArray(store)) return;   // a failed read says nothing about it
+  ui.seenWrites = ui.seenWrites.filter((w) => !(w.after !== undefined && readNo > w.after));
+  const all = Object.assign({}, store);
+  for (const w of ui.seenWrites) for (const [id, p] of Object.entries(w.cards)) all[id] = p && all[id] ? Object.assign({}, all[id], p) : p;
+  ui.seenCards = all;
+  ui.chgMemo.clear();
+}
+function putSeen(cards) {
+  if (!ui.seenCards || !Object.keys(cards).length) return;
+  for (const [id, p] of Object.entries(cards)) ui.seenCards[id] = p && ui.seenCards[id] ? Object.assign({}, ui.seenCards[id], p) : p;
+  ui.chgMemo.clear();
+  const w = { cards };
+  ui.seenWrites.push(w);
+  api("card-seen", { cards }).catch(() => {}).finally(() => { w.after = ui.readNo; });
+}
+// After a read of the board: a card the record doesn't have yet starts out read; a task gone from
+// the board leaves it.
+function baselineSeen() {
+  if (!ui.seenCards || !tasks().length) return;
+  const put = {};
+  for (const t of tasks()) if (!ui.seenCards[t.id]) put[t.id] = cardSnap(t);
+  for (const id of Object.keys(ui.seenCards)) if (ui.seenCards[id] && !taskById(id)) put[id] = null;
+  putSeen(put);
+}
+// The first read after one of your changes has been saved: what it did goes into the record.
+function absorbOwn(readNo) {
+  const done = ui.ownEdits.filter((e) => e.after !== undefined && readNo > e.after);
+  if (!done.length) return;
+  ui.ownEdits = ui.ownEdits.filter((e) => !done.includes(e));
+  ui.chgMemo.clear();
+  if (!ui.seenCards) return;
+  const put = {};
+  for (const e of done) {
+    const t = taskById(e.task), seen = ui.seenCards[e.task];
+    if (!t || !seen) continue;
+    const p = ownPatch(Object.assign({}, seen, put[e.task] || {}), t, e, cardSnap(t));
+    if (Object.keys(p).length) put[e.task] = Object.assign(put[e.task] || {}, p);
+  }
+  putSeen(put);
+}
+// The drawer open on a card, with the board in front (markDrawerSeen): the card is read. What had
+// changed stays marked in it until it closes, along with what changes while it is open.
+function markCardSeen(t, opened) {
+  if (opened || !ui.drawerChg || ui.drawerChg.id !== (t && t.id)) ui.drawerChg = null;
+  if (!t || !ui.seenCards || !(opened || boardInFront())) return;
+  const c = cardChanges(t);
+  if (!c) return;
+  if (!ui.drawerChg) ui.drawerChg = { id: t.id, c };
+  else if (c.any) {
+    const d = ui.drawerChg.c, join = (k) => d[k].concat(c[k].filter((x) => !d[k].includes(x)));
+    ui.drawerChg.c = { any: true, status: d.status !== null ? d.status : c.status, next: d.next || c.next,
+      asks: join("asks"), todos: join("todos"), logs: join("logs"), refs: join("refs") };
+  }
+  if (c.any) putSeen({ [t.id]: cardSnap(t) });
+}
+// A Peek shows its session's conversation, asks and all: those asks are read.
+function markPeekSeen(sid) {
+  if (!ui.seenCards || !sid) return;
+  const put = {};
+  for (const t of tasks()) {
+    const seen = ui.seenCards[t.id];
+    if (!seen) continue;
+    const ids = pendingAsks(t).filter((a) => a.session === sid && !list(seen.a).includes(a.id)).map((a) => a.id);
+    if (ids.length) put[t.id] = { a: list(seen.a).concat(ids) };
+  }
+  putSeen(put);
+}
+// The cards with something new, most recently active first: the status bar's blue chip lists them.
+function changedCards() {
+  if (!ui.seenCards) return [];
+  return listed().filter((t) => (isOpen(t) || recentDone(t)) && ui.drawer !== t.id && (cardChanges(t) || NO_CHANGE).any)
+    .sort((a, b) => String(b.lastActive || "").localeCompare(String(a.lastActive || "")));
+}
+function renderChangedPop(el) {
+  const xs = changedCards();
+  if (!xs.length) { ui.unreadPop = false; el.hidden = true; el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="up-h"><b>${T("Updated cards", "有更新的卡")}</b><span class="meta">${xs.length}</span><span class="spacer"></span>
+      <button class="icon x" data-action="chg-pop" title="${T("Close (Esc)", "关闭（Esc）")}">✕</button></div>
+    <div class="up-list">${xs.map((t) => `<button class="up-row" data-action="chg-go" data-task="${esc(t.id)}" title="${T("Open the task", "打开这个任务")}">
+        <span class="up-t"><span class="tid">${esc(t.id)}</span>${esc(t.title)}</span>
+        <span class="up-r">${esc(changeWords(cardChanges(t), t))}</span></button>`).join("")}</div>`;
+}
+
 // Every session with a "new" tag, newest reply first: the status bar's red chip lists them, so
 // they are found without scanning every card (on a phone, every page of them).
 function unreadSessions() {
@@ -1491,6 +1711,7 @@ function unreadSessions() {
 }
 function renderUnreadPop() {
   const el = $("#unread-pop");
+  if (ui.unreadPop === "cards") { el.hidden = false; return renderChangedPop(el); }
   const xs = unreadSessions();
   if (!xs.length) ui.unreadPop = false;
   el.hidden = !ui.unreadPop;
@@ -1539,8 +1760,8 @@ function askCard(t, a, opt = {}) {
     : opt.inTask ? `<span class="chip">${esc(a.id)}</span>${ago(a.ts)}`
     : `<span class="chip link" data-action="goto" data-task="${esc(t.id)}">${esc(a.id)}</span>${esc(t.title)} · ${ago(a.ts)}`;
   return `
-    <div class="card ask v-${v}" data-ask="${esc(a.id)}">
-      <div class="meta">${meta}</div>
+    <div class="card ask v-${v}${askNew(t, a) ? " chg" : ""}" data-ask="${esc(a.id)}">
+      <div class="meta">${askNewTag(t, a)}${meta}</div>
       <div class="ask-text clickable" title="${T("Show where this came from", "看看它从哪来")}" data-action="ctx" data-kind="ask" data-task="${esc(t.id)}" data-id="${esc(a.id)}">${esc(a.text)}</div>
       ${isLater(a) && a.later_note ? `<div class="meta later-note">${T("Put off:", "为什么推迟：")} ${esc(a.later_note)}</div>` : ""}
       <textarea class="note grow ask-note" rows="2" data-key="note:${esc(a.id)}" data-att="${esc(attKey)}" placeholder="${esc(T("Your answer… sent empty, it's Yes — as Claude suggested · paste images too", "写你的回答……留空发送 = 按 Claude 的建议 · 可以粘贴图片"))}"
@@ -2124,7 +2345,7 @@ function kcard(t, opt = {}) {
   const star = focusIds().includes(t.id);
   const asks = openAsks(t), mine = myTodos(t);
   const rows = [
-    ...asks.map((a) => `<div class="row ask-q"><span class="q">?</span><span class="t" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}" title="${T("Answer it here or with a note — opens the task", "在详情里回答，可以写说明")}">${esc(a.text)}</span>${quickAnswer(t, a)}</div>`),
+    ...asks.map((a) => `<div class="row ask-q"><span class="q">?</span>${askNewTag(t, a)}<span class="t" data-action="ask-answer" data-task="${esc(t.id)}" data-id="${esc(a.id)}" title="${T("Answer it here or with a note — opens the task", "在详情里回答，可以写说明")}">${esc(a.text)}</span>${quickAnswer(t, a)}</div>`),
     ...(t.waiting_on_me ? [`<div class="row"><span class="q">!</span><span class="t">${esc(t.waiting_on_me)}</span></div>`] : []),
     ...mine.map((x) => `<div class="row"><span class="box" title="${T("Mark done (you can undo)", "标为完成（可以撤销）")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="done" data-from="open" data-text="${esc(x.text)}"></span><span class="t">${esc(x.text)}</span></div>`),
   ];
@@ -2132,11 +2353,12 @@ function kcard(t, opt = {}) {
   const you = rows.length ? `<div class="kc-you">${rows.slice(0, max).join("")}${rows.length > max ? `<span class="more" data-action="ask-answer" data-task="${esc(t.id)}">${T(`${rows.length - max} more →`, `还有 ${rows.length - max} 件 →`)}</span>` : ""}</div>` : "";
   const next = t.next && ln !== "done" ? `<div class="kc-next"><b>${ln === "blocked" ? T("Waiting on", "在等") : T("Next", "下一步")}</b>${esc(t.next)}</div>` : "";
   const flags = list(ui.flags[t.id]);
-  return `<div class="kc l-${ln} ${opt.compact ? "compact" : ""} ${ln === "done" ? "done" : ""} ${ui.drawer === t.id ? "sel" : ""}" id="kc-${esc(t.id)}"
+  const chg = ui.drawer === t.id ? "" : chgTag(t);
+  return `<div class="kc l-${ln} ${opt.compact ? "compact" : ""} ${ln === "done" ? "done" : ""} ${ui.drawer === t.id ? "sel" : ""} ${chg ? "chg" : ""}" id="kc-${esc(t.id)}"
       data-action="open-task" data-task="${esc(t.id)}" ${isOpen(t) ? `draggable="true" data-drag-card="${esc(t.id)}"` : ""}
       title="${T("Click for details · drag to another column to change its status", "点击看详情 · 拖到别的列改状态")}">
     <div class="kc-top"><span class="id tid" data-task="${esc(t.id)}">${esc(t.id)}</span>${t.project && !opt.noProject ? `<span class="proj">${kindIcon(pr)}${esc(pr && pr.title && pr.title !== t.project ? pr.title : t.project)}</span>` : ""}
-      ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}
+      ${t.status === "abandoned" ? `<span class="stag abandoned">${STATUS_SHORT.abandoned}</span>` : ""}${chg}
       ${t.stale && isOpen(t) ? `<span class="stag stale" title="${esc(T(`Nobody has updated this card since ${t.updated}: move it on, close it, or turn a recurring todo into a scheduled job`, `这张卡从 ${t.updated} 起没人更新：推进它、关掉它，或者把周期性的待办改成定时任务`))}">${T(`${t.stale}d untouched`, `${t.stale} 天没动`)}</span>` : ""}
       ${flags.length ? `<span class="kflag" title="${esc(flags.map((x) => T(x.text, x.text_zh || x.text)).join("\n"))}">⚠</span>` : ""}
       ${isOpen(t) ? `<button class="star ${star ? "on" : ""}" data-action="focus-toggle" data-task="${esc(t.id)}" title="${star ? T("In Focus — click to take it off", "在 Focus 里——点击拿掉") : T("Add to Focus", "加进 Focus")}">${star ? "★" : "☆"}</button>` : ""}</div>
@@ -2439,9 +2661,9 @@ function resolveRef(ref) {
 const REF_GROUPS = [["github", "GitHub"], ["jira", "Jira"], ["confluence", "Confluence"], ["jenkins", "Jenkins"], ["other", T("Other", "其他")]];
 const REF_GROUP_SHOWN = 5;
 function refGroups(t, refs, editing) {
-  const by = {};
+  const by = {}, fresh = shownChanges(t).refs;
   for (const r of refs.slice().reverse()) (by[refSource(r.url)] = by[refSource(r.url)] || []).push(r);
-  const item = (r) => `<div class="ref-i">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
+  const item = (r) => `<div class="ref-i${fresh.includes(fnv(r.ref)) ? " chg" : ""}">${r.url ? `<a href="#" class="ref" data-action="link" data-url="${esc(r.url)}" title="${esc(r.label + "\n" + r.url)}">${esc(shortLabel(r.label))}</a>` : `<span class="ref none" title="${esc(r.label)}">${esc(shortLabel(r.label))}</span>`}
       ${editing ? `<button class="icon x" title="${T("Remove", "移除")}" data-confirm="${T("Remove?", "移除？")}" data-action="ref-remove" data-task="${esc(t.id)}" data-ref="${esc(r.ref)}">✕</button>` : ""}</div>`;
   return REF_GROUPS.filter(([g]) => by[g]).map(([g, name]) => {
     const rs = by[g], key = `${t.id}:${g}`, all = ui.refMore.has(key);
@@ -2516,6 +2738,7 @@ const OWNER_LABEL = (o) => (o === "me" ? T("You", "你") : o === "claude" ? "Cla
 
 function renderTaskBody(t) {
   const k = (f) => `${f}:${t.id}`;
+  const chg = shownChanges(t);   // what changed since it was last opened: marked below
   const adding = (what) => ui.adding.has(`${t.id}:${what}`);
   // next: edit, then Save or Cancel — nothing saves on Enter or on blur.
   const field = (name, label, placeholder) => {
@@ -2549,7 +2772,8 @@ function renderTaskBody(t) {
     .map((x, k) => [x, k]).sort((a, b) => closedAt(b[0]) - closedAt(a[0]) || a[1] - b[1]).map(([x]) => x);
   const anyTodos = t.todos.length + histDone.length;
   const foldDone = finished.length > FINISHED_SHOWN && !ui.doneOpen.has(t.id);
-  const shownDone = foldDone ? finished.filter(isRecent) : finished;
+  // A todo that changed since the card was last opened stays in view too, marked.
+  const shownDone = foldDone ? finished.filter((x) => isRecent(x) || chg.todos.includes(todoKey(x))) : finished;
   const hiddenDone = finished.length - shownDone.length;
   // Claude's open todos — its own working list, often long — fold behind one row, in their place
   // after yours; yours and other people's stay in view. The row unfolds them (remembered per task).
@@ -2561,13 +2785,14 @@ function renderTaskBody(t) {
     const who = x.owner ? `<span class="who ${x.owner === "me" ? "me" : x.owner === "claude" ? "cl" : ""}">${esc(OWNER_LABEL(x.owner))}</span>` : `<span class="who"></span>`;
     if (x.hist) return `<div class="todo ${x.state} hist" title="${T("In HISTORY.md (card budget)", "在 HISTORY.md 里（卡片预算）")}">
       <span class="box ${x.state}">${mark}</span>${who}<span class="t">${esc(x.text)}</span></div>`;
-    return `<div class="todo ${x.state}">
+    return `<div class="todo ${x.state}${chg.todos.includes(todoKey(x)) ? " chg" : ""}">
       <span class="box ${x.state}" title="${x.state === "open" ? T("Mark done", "标为完成") : T("Reopen", "恢复")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="${next}" data-from="${x.state}" data-text="${esc(x.text)}">${mark}</span>
       ${who}<span class="t">${esc(x.text)}</span>
       ${doItButton(t, x)}
       ${x.state === "open" ? `<button class="icon x" title="${T("Won't do", "不做")}" data-confirm="${T("Won't do?", "不做？")}" data-action="todo" data-task="${esc(t.id)}" data-i="${x.i}" data-state="drop" data-from="open" data-text="${esc(x.text)}">✕</button>` : ""}</div>`;
   };
-  const claudeFold = () => `<button class="todo cfold ${claudeShown ? "on" : ""}" data-action="claude-todos-toggle" data-task="${esc(t.id)}"
+  const claudeChg = !claudeShown && openTodos.some((x) => x.owner === "claude" && chg.todos.includes(todoKey(x)));
+  const claudeFold = () => `<button class="todo cfold ${claudeShown ? "on" : ""}${claudeChg ? " chg" : ""}" data-action="claude-todos-toggle" data-task="${esc(t.id)}"
       title="${claudeShown ? T("Fold Claude's todos", "收起 Claude 的待办") : T("Show Claude's open todos", "展开 Claude 的未完成待办")}"><span class="box fold">${claudeShown ? "▾" : "▸"}</span><span class="who cl">Claude</span><span class="t">${T(`Claude's ${claudeN} todo${claudeN === 1 ? "" : "s"}`, `Claude 的 ${claudeN} 条`)}</span></button>`;
   const todoRows = () => {
     const out = [];
@@ -2595,7 +2820,7 @@ function renderTaskBody(t) {
     const day = logDay(l.date);
     const head = day !== lastDay ? `<li class="day">${esc(day)}</li>` : "";
     lastDay = day;
-    return `${head}<li class="e"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
+    return `${head}<li class="e${chg.logs.includes(logKey(l)) ? " chg" : ""}"><time title="${esc(l.date)}">${esc(l.date.slice(11, 16))}</time><div>${inline(l.text)}</div></li>`;
   }).join("");
   // One entry per link, merged as hq merges them (a card may predate that): a PR and a comment on
   // it, or a build and its console, are one link.
@@ -2631,7 +2856,7 @@ function renderTaskBody(t) {
       </div>
       ${field("next", T("Next", "下一步"), T("the next concrete step", "下一个具体的步骤"))}
     </div>`
-    : `<div class="now">
+    : `<div class="now${chg.next ? " chg" : ""}"${chg.next ? ` title="${T("Changed since you last opened this task", "你上次打开这个任务之后改过")}"` : ""}>
       <div class="now-t"><div class="k">${T("Next", "下一步")}</div><div class="v">${t.next ? inline(t.next) : `<span class="faint">${T("No next step yet — Edit to set one", "还没有下一步——点编辑来设置")}</span>`}</div>
         ${t.closing && isOpen(t) ? `<div class="meta">${t.closing === "abandoned"
           ? T("Its session abandoned it: it closes once the open questions are answered and the session has acted on them", "session 已经说要放弃：等没答的问题答完、session 处理完再关")
@@ -2688,7 +2913,7 @@ function renderTaskBody(t) {
       </div>
       <aside class="trail">
         <dl class="props">
-          <dt>${T("Status", "状态")}</dt><dd><span class="pill" data-st="${esc(t.status)}">${esc(LABEL[t.status] || t.status || "—")}</span></dd>
+          <dt>${T("Status", "状态")}</dt><dd><span class="pill${chg.status !== null ? " chg" : ""}" data-st="${esc(t.status)}"${chg.status !== null ? ` title="${esc(T(`Was ${LABEL[chg.status] || chg.status || "—"} when you last opened it`, `你上次打开时是「${LABEL[chg.status] || chg.status || "—"}」`))}"` : ""}>${esc(LABEL[t.status] || t.status || "—")}</span></dd>
           <dt>${T("Project", "项目")}</dt><dd>${esc(t.project || "—")}</dd>
           ${t.phase ? `<dt>${T("Phase", "阶段")}</dt><dd>${esc(t.phase)}</dd>` : ""}
           <dt>${T("Folders", "目录")}</dt><dd>${dirs.map((x) => `<span class="path" title="${esc(x)}"><span class="nm">${esc(tildePath(x).split("/").pop() || tildePath(x))}</span>${resEdit ? ` <button class="lnk x" data-action="workdir-remove" data-task="${esc(t.id)}" data-path="${esc(x)}" title="${T("Remove this folder from the task", "从任务里移除这个目录")}">✕</button>` : ""}</span>`).join("")}
@@ -2780,11 +3005,15 @@ async function setStatus(id, status) {
   const t = taskById(id);
   if (t) t.status = status;
   const pend = ui.statusPending[id] = { status };
+  // Yours, from the moment it shows: not "updated" (see ownPatch). api() adds its own once it runs.
+  const own = { task: id, op: "set", args: { fields: [`status=${status}`] } };
+  ui.ownEdits.push(own);
   render();
   const save = (ui.statusQ[id] || Promise.resolve()).then(() => api("set", { task: id, fields: [`status=${status}`] }));
   ui.statusQ[id] = save.catch(() => {});
-  try { await save; }
+  try { await save; own.after = ui.readNo; }
   catch (e) {
+    ui.ownEdits = ui.ownEdits.filter((x) => x !== own);
     toast(String(e.message || e), true);
     if (ui.statusPending[id] === pend) { delete ui.statusPending[id]; await refresh(); }   // a newer pick is still on its way otherwise
     return false;
@@ -3189,6 +3418,7 @@ async function openPeek(sid, back, opt = {}) {
                fullTools: new Set(), todoOpen: false,
                // Just started from the board: not live yet, but not ended either — it is coming up.
                starting: Boolean(opt.starting) && !s, startedAt: Date.now() };
+  markPeekSeen(ui.modal.sid);
   drawPeek(true);
   await refreshPeek(true);
 }
@@ -4865,14 +5095,14 @@ function jumpSource(el) {
 // Where a click started: one pressed in the drawer and let go outside it (slipping off a button,
 // say) is still the drawer's, and a slash-command pick hides its list on mousedown. The ";" list
 // and the quick-phrase bar float on the page, outside the drawer, over the box they fill in.
-const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, #phrasebar, .launch, #reader, #reader-pill, #unread-pop, .unread-chip";
+const DRAWER_KEEPERS = "#drawer, #modal, #confirm, #toast, #settings, #slash, #phrasebar, .launch, #reader, #reader-pill, #unread-pop, .unread-chip, .chg-chip";
 let pressedIn = false;
 document.addEventListener("mousedown", (ev) => { pressedIn = Boolean(ev.target.closest && ev.target.closest(DRAWER_KEEPERS)); }, true);
 
 // The list of new replies closes on a press anywhere outside it (its chip toggles it). A press,
 // not a click: iOS sends no click for a tap on plain text or an empty part of the page.
 document.addEventListener("pointerdown", (ev) => {
-  if (ui.unreadPop && !ev.target.closest("#unread-pop, .unread-chip")) { ui.unreadPop = false; render(); }
+  if (ui.unreadPop && !ev.target.closest("#unread-pop, .unread-chip, .chg-chip")) { ui.unreadPop = false; render(); }
 });
 document.addEventListener("click", async (ev) => {
   // The "New session ▾" menu closes on any click outside it.
@@ -5045,7 +5275,9 @@ document.addEventListener("click", async (ev) => {
       if (ui.drawer === d.task) { ui.drawer = null; return render(); }
       return openDrawer(d.task);
     case "drawer-close": ui.drawer = null; return render();
-    case "unread-pop": ui.unreadPop = !ui.unreadPop; return render();
+    case "unread-pop": ui.unreadPop = ui.unreadPop !== true; return render();
+    case "chg-pop": ui.unreadPop = ui.unreadPop === "cards" ? false : "cards"; return render();
+    case "chg-go": ui.unreadPop = false; return revealTask(d.task);
     case "unread-go": return unreadGo(d.session);
     case "open-sessions": ui.drawer = ui.drawer === "@sessions" ? null : "@sessions"; return render();
     case "drawer-status": {
