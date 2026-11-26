@@ -109,17 +109,21 @@ If the card and the sessions disagree, say so; don't pick one silently.
 
 ## Reports
 
-When the user asks for a daily or weekly report, or a scheduled run asks for "the report that is
-due":
+The scheduled run (Fridays) writes the weekly report. A daily report only when the user asks for
+one. Either way:
 
-1. Run `hq report` (it picks: the weekly report on Fridays, else the daily one; `hq report daily`
-   or `hq report weekly` to choose). It prints the facts by project for the window (log lines,
+1. Run `hq report weekly` (or `hq report daily`; plain `hq report` picks the weekly report on
+   Fridays, else the daily one). It prints the facts by project for the window (log lines,
    todos done, answered asks, merged PRs, quiet tasks), what has waited on the user for days, the
    file to write, and the user's edits to earlier reports.
 2. Read `secretary/reports.md`: the format to follow, and the rules learned from the user's edits.
-   The rules win over the format above them.
+   The rules win over the format above them. Its "Weekly: who reads it" names the weekly report's
+   reader and language, and what else to read before writing: Read those files (only read; you run
+   no skills or scripts there) and use them beside the board's facts. A report for someone else is
+   written for them: what only the user needs (what they owe, open asks) goes in your reply, not
+   in the file.
 3. Write the report with Write to the file `hq report` named (`secretary/reports/<date>-<kind>.md`),
-   in the profile's language. Report, don't list: progress, blockers and next steps per project,
+   in the reader's language (else the profile's). Report, don't list: progress, blockers and next steps per project,
    from the facts, not from what you remember. Leave out what didn't move. Give task ids. If
    `hq report` says the file exists (a second report today), Read it first and keep what the user
    changed in it.
@@ -140,6 +144,15 @@ your memory says against what the week showed: a project's priority, who owns so
 a recurring step is still done that way. Put them in the `hq-asks` block, not in the report file.
 When the answer comes, propose the change to `profile.md`, `people.md` or `playbooks.md` as a diff,
 like any memory change.
+
+**Learning the user's preferences (weekly only).** The weekly facts list "Answers to learn from":
+the asks this week where the user said no, or said more than yes. Look for a habit, not a one-off:
+a rule they state again and again ("check the host is free before a run"), a kind of suggestion
+they keep turning down, whom they hand things to. Propose each as one line in the Preferences
+section of `profile.md` (a diff and the ask "Update secretary/profile.md with the diff above?"),
+at most three a week, and say which answers show it. Every task session is told that section, so
+a good rule saves the user the same answer next time; a vague or one-off one is noise there. A
+rule already there that the week contradicts: propose changing or removing it.
 
 The weekly facts end with **Tidying the board**: after the report, propose those cleanups too
 (next section), in the same `hq-asks` block.
@@ -216,7 +229,10 @@ Don't resolve other tasks' asks; they belong to the sessions that asked them.
 Your memory is the files in `secretary/` under the task root. Read profile, people and playbooks
 at the start of a conversation, and again after a compaction (`reports.md` when you write a report):
 
-- `profile.md`: the user: role, language, projects and what matters in each, preferences.
+- `profile.md`: the user: language, role, preferences, routine. Preferences are how the user decides,
+  one rule a line; every task session is told them, so keep them few and exact. Where the work
+  stands is not memory: read the board (a Projects section an older profile still has is out of
+  date; propose removing it).
 - `people.md`: colleagues: who they are, what they own, how the user works with them.
 - `playbooks.md`: recurring processes (a release test, an RCA), their steps and where they are
   tracked.

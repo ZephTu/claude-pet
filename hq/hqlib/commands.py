@@ -13,7 +13,7 @@ from .refs import KEY_MARK, merge_refs, ref_key, unmarked
 from .history import history_add, history_drop_links, process_ref
 from .projects import (
     brief_hash, ensure_project, fill_template, intake_lang, intake_manual, INTAKE_MANUAL_DONE, load_project,
-    project_brief_text, project_for_dirs, project_for_path,
+    project_brief_text, project_for_dirs, project_for_path, session_context_text,
 )
 from .asks import (
     add_ask, append_event, await_answer, CLOSED_STATUSES, find_ask, read_asks, resolve_ask, settle_status,
@@ -152,7 +152,7 @@ def cmd_bind(args):
     if fields:
         set_fields(card, fields)
         meta = parse_card(card)         # its project decides the brief
-    brief = project_brief_text(meta)
+    brief = session_context_text(meta)
     with state_lock():
         state = load_state()
         old = state.get(sid, {})

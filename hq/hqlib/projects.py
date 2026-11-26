@@ -480,6 +480,46 @@ def project_brief_text(meta):
     return "\n".join(lines)
 
 
+PREFS_CHARS = 1500              # of profile.md's Preferences a session is given
+PREFS_HEADINGS = ("preferences", "偏好")
+
+
+def prefs_text(meta):
+    """The user's standing preferences, from the Preferences section of the secretary's profile.md:
+    every bound session is told them, so it asks less and guesses the user's way. Empty with no
+    secretary, an empty section, or on the secretary's own card (it reads the whole profile)."""
+    from .cards import secretary_task_id
+    path = os.path.join(hq_root(), "secretary", "profile.md")
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return ""
+    if meta.get("id") and meta.get("id") == secretary_task_id():
+        return ""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    body, inside = [], False
+    for line in text.splitlines():
+        m = re.match(r"^##\s+(.+?)\s*$", line)
+        if m:
+            inside = m.group(1).strip().lower() in PREFS_HEADINGS
+            continue
+        if inside:
+            body.append(line)
+    b = "\n".join(body).strip()
+    if not b:
+        return ""
+    if len(b) > PREFS_CHARS:
+        b = b[:PREFS_CHARS].rstrip() + "\n… (cut short — the rest is in secretary/profile.md)"
+    return ("The user's standing preferences (Preferences in secretary/profile.md, learned from how they answered "
+            "asks; they apply to every task, but the card and the user's own words win):\n" + b)
+
+
+def session_context_text(meta):
+    """What a bound session is told besides the protocol: its project's brief and the user's
+    preferences. One text, so a change to either is announced once (`brief_hash`)."""
+    return "\n\n".join(t for t in (project_brief_text(meta), prefs_text(meta)) if t)
+
+
 def brief_hash(text):
     import hashlib   # only a bound session's hook needs it
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12] if text else ""

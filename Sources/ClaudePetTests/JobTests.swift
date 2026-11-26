@@ -17,6 +17,13 @@ enum JobTests {
                     && sparse?.skipWeekPct == 90 && sparse?.skipFiveHourPct == 90 && sparse?.compactAbovePct == 50)
         t.check("a quota percentage over 100 is refused", Job(id: "j1", name: "n", prompt: "p", skipWeekPct: 120).problem() != nil)
         t.check("a compaction percentage over 100 is refused", Job(id: "j1", name: "n", prompt: "p", compactAbovePct: 101).problem() != nil)
+        let half = Job(id: "j1", name: "n", prompt: "p", compactAbovePct: 50)
+        t.check("a resumed session compacts at its percentage of a small window",
+                half.shouldCompact(contextTokens: 100_000, window: 200_000) && !half.shouldCompact(contextTokens: 90_000, window: 200_000))
+        t.check("a 1M window compacts at the ceiling, not at half a million",
+                half.shouldCompact(contextTokens: 188_000, window: 1_000_000) && !half.shouldCompact(contextTokens: 120_000, window: 1_000_000))
+        t.check("a compaction percentage of 0 never compacts",
+                !Job(id: "j1", name: "n", prompt: "p", compactAbovePct: 0).shouldCompact(contextTokens: 900_000, window: 1_000_000))
         t.check("a job without an id does not load",
                 (try? JSONDecoder().decode(Job.self, from: Data(#"{"name":"x"}"#.utf8))) == nil)
         t.check("a sensible job has no problem", sparse?.problem() == nil)

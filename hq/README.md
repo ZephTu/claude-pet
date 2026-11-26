@@ -475,7 +475,13 @@ it is cut, pointing at PROJECT.md). `sessions.json` keeps a hash of what each se
 UserPromptSubmit gives it again only when it changed (any of those parts was edited, or the task
 moved to another project), and says so when it is gone (emptied, the file removed, or the task
 moved to a project without one). HTML comments and lone `<placeholder>` lines from the template
-are not passed on. `hq project brief NAME` prints exactly what sessions get. A PROJECT.md that
+are not passed on. `hq project brief NAME` prints exactly what sessions get.
+
+With the brief comes the user's **Preferences**: the `## Preferences` (or `## 偏好`) section of
+`<root>/secretary/profile.md`, HTML comments left out, capped at 1500 characters. It is told the
+same way and in the same text, so editing it is announced once to every bound session at its next
+prompt. The secretary's own session isn't told it (it reads the whole profile). The secretary
+proposes the rules from the user's answers (Reports, below). A PROJECT.md that
 can't be read is treated as missing, and a hook never fails a turn: an error goes to stderr.
 
 ```
@@ -618,9 +624,12 @@ overwrites what the user wrote:
 - `<root>/.claude/agents/secretary.md`: who it is, its boundaries, and which `hq` command
   answers which question;
 - `<root>/secretary/profile.md`, `people.md` and `playbooks.md`: its memory, which the user can
-  edit and which it changes only after a yes;
-- `<root>/secretary/reports.md`: how its daily and weekly reports are written, ending in the rules
-  it learned from the user's edits;
+  edit and which it changes only after a yes. `profile.md` holds the user's language, role,
+  Preferences (how they decide, one rule a line: every bound session is told them, see The brief)
+  and routine; where the work stands is not kept there, the secretary reads the board;
+- `<root>/secretary/reports.md`: how its daily and weekly reports are written — the weekly
+  report's reader, language and other files to read first ("Weekly: who reads it"), then the
+  format — ending in the rules it learned from the user's edits;
 - its own task card, "Secretary" (lead `secretary`, kept off Focus). The card's id is recorded
   as `"secretary": {"task": "T-…"}` in `hq.json`, and `hq board --json` reports it as
   `"secretary"`.
@@ -647,18 +656,21 @@ Claude Pet runs it from the board's **Secretary** button. The button opens a sch
 `~/.claude/pet/jobs/secretary/`, and runs it once per message:
 
 - the job runs `claude -p --agent secretary` in the root, always in the same session, with its
-  compaction and quota guard;
+  compaction (at the job's percentage of the window or 150k tokens, whichever comes first) and
+  quota guard;
 - the session is bound to the secretary's card before its first run, so its `hq-asks` become
   that card's asks in Needs you;
 - a **Yes** to one of those asks on the board starts a run, and the hook hands the session the
   answer at the start of that run.
 
-The job is made with the report prompt and a weekday 18:30 schedule, but off; the window's
-**Turn on** enables it. The prompt names the steps (`hq report`, write, `hq report keep`) itself,
-for an agent definition the user edited before reports existed. A job made earlier that is off
-and still has the old placeholder prompt gets the report prompt, and the evening schedule unless
-the user chose a fixed time. One with a prompt of the user's own shows as such in the window;
-**Turn on** there replaces the prompt (and an every-N-minutes schedule). A scheduled run that finds the session busy (the user is chatting) waits
+The job is made with the weekly report prompt and a Friday 17:00 schedule, but off; the window's
+**Weekly report** switch enables it. The prompt names the steps (`hq report weekly`, write,
+`hq report keep`, propose what the week's answers teach) itself, for an agent definition the user
+edited. A job made earlier that is off and still has the old placeholder prompt, or that writes
+the old daily report, gets the weekly prompt; its schedule moves to Fridays (the default
+placeholder or every N minutes: 17:00; a daily or weekday time the user chose: that time on
+Fridays; a cron or weekly one stays). One with a prompt of the user's own shows as such in the
+window; turning reports on there replaces the prompt and moves the schedule the same way. A scheduled run that finds the session busy (the user is chatting) waits
 up to 10 minutes for the lock instead of being skipped.
 
 Unattended, the job is allowed only Read, Grep, Glob, `Bash(~/.claude/hq/bin/hq:*)` and Edit or
@@ -700,7 +712,10 @@ reports as unified diffs, today's own included (`"exists": true` when today's fi
 rewrite must keep the user's changes). A card closed on the window's first day counts as closed
 in the window unless the report the window starts at already listed it (`closed` dates have no
 time). Cards whose only news is new `@claude` todos count as quiet. Cards closed in the last week
-are kept only when one of their PRs merged in the window. The secretary's own card is left out. It also names the file to write,
+are kept only when one of their PRs merged in the window. The secretary's own card is left out. A
+weekly report also carries `garden` (Tidying the board) and `learn`: the window's answered asks
+where the user said no or wrote a note of 10 characters or more (at most 20, oldest first), from
+which the secretary proposes Preferences. It also names the file to write,
 `secretary/reports/<date>-<daily|weekly>.md`, and creates `secretary/reports.md` from the template
 when it is missing.
 

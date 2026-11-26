@@ -4,7 +4,14 @@
      in a report, the secretary turns into a rule and adds to the last section once you say yes to
      the diff. -->
 
-## Daily
+## Weekly: who reads it
+<!-- The weekly report is written for this reader. Leave it empty for a report to yourself. -->
+- Reader: <!-- e.g. my manager; or "me" -->
+- Language: <!-- when it isn't the profile's language, e.g. English for a manager who reads English -->
+- Also read: <!-- files or folders beyond the board, e.g. "the team review notes in ~/notes/team/
+     (findings.md, actions.md)". The secretary only reads them: it runs no skills or scripts. -->
+
+## Daily (only when you ask for one)
 - First line: the one thing that matters most today (progress or a blocker), in a sentence.
 - One section per project that moved today. Three items each, a line or two, with task ids (T-072):
   - **Progress**: what got done, PRs merged, questions settled.

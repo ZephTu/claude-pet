@@ -36,6 +36,7 @@ SECRETARY_AGENT_OLD = {
     "99304f170efe63aa90ea716ec6fb015fc00b570d7533ec003a40665ee4c0549d",
     "7d51000eeb7e6a3ed3b36d56781080e82a020ed0e0fd66d56c440133d8fc2842",
     "a14b021ecad90565a410302362f48252f5e3d28bd9910bdd95048afdf893080c",
+    "18eacc87c912bd13cc6a5daefc1fedd0a7e1d40ce6a0fda1423e4b1efca786d5",
 }
 SECRETARY_TITLE = {"zh": "秘书", "en": "Secretary"}
 SECRETARY_GOAL = {
@@ -143,6 +144,10 @@ REPORT_KINDS = ("daily", "weekly")
 REPORT_NAME_RE = re.compile(r"^(\d{4}-\d\d-\d\d)-(daily|weekly)\.md$")
 GH_PR_RE = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 OWED_AFTER_DAYS = 2          # an @me todo or an ask open longer than this is "owed"
+# The weekly report's answers to learn from: a "no", or a note at least this long. A bare yes (most
+# answers: the session's suggestion was right) teaches nothing.
+LEARN_NOTE_CHARS = 10
+LEARN_MAX = 20
 EDITS_LOOKBACK = 5           # how many recent reports are checked for the user's edits
 
 
@@ -393,6 +398,11 @@ def gather_report(kind, since=None, gh=True, now=None):
          "file": path, "exists": os.path.isfile(path), "format": ensure_report_format(),
          "projects": projects, "owed": owed, "edits": report_edits(), "gh": bool(gh and states)}
     if kind == "weekly":
+        # How the user answered this week, where the answer said more than yes: what the secretary
+        # turns into Preferences in profile.md, which every task session is told (`prefs_text`).
+        r["learn"] = sorted(({"task": t["id"], **a} for t in tasks for a in t["answered"]
+                             if a["answer"] == "drop" or len(a["note"].strip()) >= LEARN_NOTE_CHARS),
+                            key=lambda a: a["at"])[-LEARN_MAX:]
         # The weekly look over the board (`hq garden`): proposals for the reply, not the report.
         try:
             r["garden"] = gather_garden(now.astimezone())
@@ -458,6 +468,14 @@ def report_text(r):
         out.append("## The user's edits to earlier reports (learn the format from these)")
         for e in r["edits"]:
             out += ["```diff", e["diff"].rstrip("\n"), "```"]
+        out.append("")
+    if r.get("learn"):
+        out.append("## Answers to learn from (weekly) — not for the report file")
+        out.append("Where the user said no or more than yes this week. A habit that shows here (a rule they keep "
+                   "stating, a kind of suggestion they keep turning down) belongs in profile.md's Preferences: "
+                   "propose it as a diff (Learning the user's preferences in your instructions).")
+        out += [f"- {a['task']} {a['id']} \"{clip(a['text'], 100)}\" → {a['answer']}"
+                f"{': ' + clip(a['note'], 160) if a['note'] else ''}" for a in r["learn"]]
         out.append("")
     if r.get("garden"):
         out.append("## Tidying the board (weekly; hq garden) — not for the report file")

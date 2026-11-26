@@ -89,7 +89,8 @@ public struct Job: Codable, Equatable, Sendable {
     /// deleted, so a job that runs every hour doesn't leave hundreds of sessions behind.
     public var keepSessions: Int
     /// Resumed session: compact it first once its context fills this percentage of the model's
-    /// window. 0: never (Claude Code still compacts on its own when the window is full).
+    /// window, or reaches `Job.compactCeiling` tokens, whichever comes first. 0: never (Claude Code
+    /// still compacts on its own when the window is full).
     public var compactAbovePct: Int
     public var notify: Notify
     /// Claude runs: the agent the session runs as (`--agent`), from the job's folder's
@@ -153,6 +154,16 @@ public struct Job: Codable, Equatable, Sendable {
         if model.range(of: #"^[A-Za-z0-9._\[\]-]*$"#, options: .regularExpression) == nil { return L("That model name has odd characters.", "模型名里有奇怪的字符。") }
         if agent.range(of: #"^[A-Za-z0-9._-]*$"#, options: .regularExpression) == nil { return L("That agent name has odd characters.", "agent 名里有奇怪的字符。") }
         return schedule.problem()
+    }
+
+    /// Past this many tokens a resumed session is compacted whatever the percentage says: on a
+    /// 1M-token window, 50% would let every run re-read half a million tokens.
+    public static let compactCeiling = 150_000
+
+    /// Whether a resumed session with this much context should be compacted before the next run.
+    public func shouldCompact(contextTokens ctx: Int, window: Int) -> Bool {
+        guard compactAbovePct > 0, window > 0 else { return false }
+        return ctx * 100 >= compactAbovePct * window || ctx >= Self.compactCeiling
     }
 
     /// The working directory with `~` expanded.
