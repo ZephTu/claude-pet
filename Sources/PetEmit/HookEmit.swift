@@ -160,6 +160,10 @@ enum HookEmit {
                 : nil
             let asks = pendingAsks(event: event, hook: hook, old: old, adding: newAsk,
                                    keepAgents: !waitingForWork.isEmpty)
+            // Which tool calls are in flight, keyed by Claude Code's own
+            // tool_use_id. Without this a PostToolUse left the finished tool showing
+            // as "running", and two parallel calls showed as one.
+            let running = runningTools(event: event, hook: hook, old: old, now: now)
             if !asks.isEmpty { state = "waiting" }
             let top = asks.first
 
@@ -188,7 +192,7 @@ enum HookEmit {
             // The prompt shown first, in the fields the app and the board read: which prompt it
             // is, so a click answers THIS one (PermissionDecision); WHAT is blocked, in short
             // and whole; a question's menu or a plan's text; who holds its hook open.
-            mirror(asks, into: &document)
+            mirror(asks, running: running, into: &document)
             // A wait with no prompt behind it — a dialog Claude Code announced only by
             // Notification — keeps the phrase the last prompt left, so it does not blank.
             // A question or a plan has none.
@@ -219,10 +223,7 @@ enum HookEmit {
             let promptId = (hook["prompt_id"] as? String) ?? ""
             if !promptId.isEmpty { document["promptId"] = promptId }
 
-            // Which tool calls are in flight, keyed by Claude Code's own
-            // tool_use_id. Without this a PostToolUse left the finished tool showing
-            // as "running", and two parallel calls showed as one.
-            document["running"] = runningTools(event: event, hook: hook, old: old, now: now)
+            document["running"] = running
 
             // A phase is something the session is in the MIDDLE of that no other
             // event reports. Compaction is the only one so far: it takes a while,
@@ -564,6 +565,8 @@ enum HookEmit {
         ]
         if !agent.isEmpty { ask["agent"] = agent }
         if let id = call?["id"] as? String { ask["toolUseId"] = id }
+        // What tells its command's shell from another call's — see `shellIsShared`.
+        ask["fp"] = fp
         // A question card is answered on the card, and a plan is approved in its own dialog —
         // see PermissionSummary.isQuestion / isPlan — so neither is a permission the pet could
         // grant, and neither has a phrase. The board answers both with their own controls.
@@ -641,32 +644,57 @@ enum HookEmit {
         ("heldBy", "askHeldBy"), ("heldUntil", "askHeldUntil"), ("command", "askCommand"),
     ]
 
-    private static func mirror(_ asks: [[String: Any]], into document: inout [String: Any]) {
+    ///
+    /// The command goes only while no other call running could have started the same shell:
+    /// the app takes that shell for this prompt's approval (StateAggregator.wasApproved).
+    private static func mirror(_ asks: [[String: Any]], running: [[String: Any]],
+                               into document: inout [String: Any]) {
         for (_, to) in mirrored { document[to] = nil }
         document["asks"] = nil
         guard let top = asks.first else { return }
         for (from, to) in mirrored {
             if let v = top[from], (v as? String)?.isEmpty != true { document[to] = v }
         }
+        if shellIsShared(top, running: running) { document["askCommand"] = nil }
         document["asks"] = asks
     }
 
-    /// Takes a prompt the pet denied out of the session file. Claude Code fires no PostToolUse
-    /// for a denied call and the turn goes on, so nothing else would: the prompt stayed first
-    /// in line — its plan on the board, its hold gone — and hid the next one until Stop. The
-    /// call it was about is no longer running either.
-    private static func dropAsk(_ askId: String, sessionID: String, path: URL) {
+    /// Could another call in flight have started the shell this prompt's command runs in?
+    ///
+    /// A shell is matched to a prompt by its command alone (ProcessProbe.startedToolShell).
+    /// Two agents asking to run the same command — both `npm test` — start the same-looking
+    /// shell: approving the first started one that read as the second's approval, and the
+    /// second prompt left the pet while the terminal still showed it. Then only the call's
+    /// own PostToolUse takes the prompt down.
+    private static func shellIsShared(_ ask: [String: Any], running: [[String: Any]]) -> Bool {
+        guard let fp = ask["fp"] as? String, !fp.isEmpty else { return false }
+        let own = ask["toolUseId"] as? String ?? ""
+        return running.contains { $0["fp"] as? String == fp && $0["id"] as? String != own }
+    }
+
+    /// Takes an answered prompt out of the session file, so the one behind it comes first.
+    ///
+    /// Denied, Claude Code fires no PostToolUse and the turn goes on, so nothing else would: the
+    /// prompt stayed first in line — its plan on the board, its hold gone — and hid the next one
+    /// until Stop. The call it was about is no longer running either (`callEnded`).
+    ///
+    /// Allowed, the call runs, and its PostToolUse comes only when it is done — after a long
+    /// command, minutes. Until then the prompt stayed first, so the app read the whole session
+    /// as approved and busy while the next prompt waited unseen in the terminal. The call stays
+    /// running: it is.
+    private static func dropAsk(_ askId: String, sessionID: String, path: URL, callEnded: Bool) {
         withSessionLock(sessionID) {
             guard var document = readDocument(at: path) else { return }
             let before = currentAsks(document)
             guard let gone = before.first(where: { $0["id"] as? String == askId }) else { return }
             let asks = before.filter { $0["id"] as? String != askId }
             let now = iso8601(Date())
-            if let call = gone["toolUseId"] as? String, var running = document["running"] as? [[String: Any]] {
+            var running = document["running"] as? [[String: Any]] ?? []
+            if callEnded, let call = gone["toolUseId"] as? String {
                 running.removeAll { $0["id"] as? String == call }
                 document["running"] = running
             }
-            mirror(asks, into: &document)
+            mirror(asks, running: running, into: &document)
             if let top = asks.first {
                 document["tool"] = top["tool"] ?? ""
                 document["detail"] = top["detail"] ?? ""
@@ -745,9 +773,12 @@ enum HookEmit {
     /// answer comes first, so waiting here never delays the terminal prompt.
     /// Every way out other than a click prints nothing, which leaves the
     /// decision to the terminal exactly as if the pet did not exist:
-    /// - the session file no longer lists this prompt (its call ended, or the turn did);
+    /// - the session file no longer lists this prompt (its call ended, the turn did, or
+    ///   another hold answered it);
     /// - Claude started the shell running the command asked about — answered in
-    ///   the terminal, with nothing written since because the command is running;
+    ///   the terminal, with nothing written since because the command is running.
+    ///   The prompt comes down, as on a click, so a prompt behind it is shown. Not
+    ///   while another call in flight runs the same command (`shellIsShared`);
     /// - the Claude process is gone;
     /// - `PermissionDecision.wait` ran out.
     private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
@@ -763,16 +794,25 @@ enum HookEmit {
                let answer = PermissionDecision.decode(data), answer.askId == askId {
                 try? FileManager.default.removeItem(at: answerFile)
                 FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer, toolInput: toolInput))
-                // An allowed call ends with its PostToolUse; a denied one ends here.
-                if answer.behavior == .deny { dropAsk(askId, sessionID: sessionID, path: sessionFile) }
+                // Answered either way, so it comes down now. An allowed call goes on running
+                // until its PostToolUse; a denied one ends here.
+                dropAsk(askId, sessionID: sessionID, path: sessionFile,
+                        callEnded: answer.behavior == .deny)
                 return
             }
-            if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {
+            let document = readDocument(at: sessionFile)
+            if PermissionDecision.isStale(askId: askId, sessionDocument: document) {
                 return
             }
             if let claudePID {
                 if !ProcessProbe.isClaude(pid: claudePID) { return }
-                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt, running: command) { return }
+                let ask = currentAsks(document).first { $0["id"] as? String == askId } ?? [:]
+                let running = document?["running"] as? [[String: Any]] ?? []
+                if !command.isEmpty, !shellIsShared(ask, running: running),
+                   ProcessProbe.startedToolShell(under: claudePID, since: askedAt, running: command) {
+                    dropAsk(askId, sessionID: sessionID, path: sessionFile, callEnded: false)
+                    return
+                }
             }
             usleep(250_000)
         }
