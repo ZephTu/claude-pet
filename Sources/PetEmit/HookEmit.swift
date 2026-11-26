@@ -651,18 +651,25 @@ enum HookEmit {
         document["asks"] = asks
     }
 
-    /// Takes a prompt the pet denied out of the session file. Claude Code fires no PostToolUse
-    /// for a denied call and the turn goes on, so nothing else would: the prompt stayed first
-    /// in line — its plan on the board, its hold gone — and hid the next one until Stop. The
-    /// call it was about is no longer running either.
-    private static func dropAsk(_ askId: String, sessionID: String, path: URL) {
+    /// Takes an answered prompt out of the session file, so the one behind it comes first.
+    ///
+    /// Denied, Claude Code fires no PostToolUse and the turn goes on, so nothing else would: the
+    /// prompt stayed first in line — its plan on the board, its hold gone — and hid the next one
+    /// until Stop. The call it was about is no longer running either (`callEnded`).
+    ///
+    /// Allowed, the call runs, and its PostToolUse comes only when it is done — after a long
+    /// command, minutes. Until then the prompt stayed first, so the app read the whole session
+    /// as approved and busy while the next prompt waited unseen in the terminal. The call stays
+    /// running: it is.
+    private static func dropAsk(_ askId: String, sessionID: String, path: URL, callEnded: Bool) {
         withSessionLock(sessionID) {
             guard var document = readDocument(at: path) else { return }
             let before = currentAsks(document)
             guard let gone = before.first(where: { $0["id"] as? String == askId }) else { return }
             let asks = before.filter { $0["id"] as? String != askId }
             let now = iso8601(Date())
-            if let call = gone["toolUseId"] as? String, var running = document["running"] as? [[String: Any]] {
+            if callEnded, let call = gone["toolUseId"] as? String,
+               var running = document["running"] as? [[String: Any]] {
                 running.removeAll { $0["id"] as? String == call }
                 document["running"] = running
             }
@@ -747,7 +754,8 @@ enum HookEmit {
     /// decision to the terminal exactly as if the pet did not exist:
     /// - the session file no longer lists this prompt (its call ended, or the turn did);
     /// - Claude started the shell running the command asked about — answered in
-    ///   the terminal, with nothing written since because the command is running;
+    ///   the terminal, with nothing written since because the command is running.
+    ///   The prompt comes down, as on a click, so a prompt behind it is shown;
     /// - the Claude process is gone;
     /// - `PermissionDecision.wait` ran out.
     private static func awaitDecision(sessionID: String, askId: String, sessionFile: URL,
@@ -763,8 +771,10 @@ enum HookEmit {
                let answer = PermissionDecision.decode(data), answer.askId == askId {
                 try? FileManager.default.removeItem(at: answerFile)
                 FileHandle.standardOutput.write(PermissionDecision.hookOutput(answer, toolInput: toolInput))
-                // An allowed call ends with its PostToolUse; a denied one ends here.
-                if answer.behavior == .deny { dropAsk(askId, sessionID: sessionID, path: sessionFile) }
+                // Answered either way, so it comes down now. An allowed call goes on running
+                // until its PostToolUse; a denied one ends here.
+                dropAsk(askId, sessionID: sessionID, path: sessionFile,
+                        callEnded: answer.behavior == .deny)
                 return
             }
             if PermissionDecision.isStale(askId: askId, sessionDocument: readDocument(at: sessionFile)) {
@@ -772,7 +782,10 @@ enum HookEmit {
             }
             if let claudePID {
                 if !ProcessProbe.isClaude(pid: claudePID) { return }
-                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt, running: command) { return }
+                if ProcessProbe.startedToolShell(under: claudePID, since: askedAt, running: command) {
+                    dropAsk(askId, sessionID: sessionID, path: sessionFile, callEnded: false)
+                    return
+                }
             }
             usleep(250_000)
         }

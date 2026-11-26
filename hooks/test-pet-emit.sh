@@ -584,6 +584,40 @@ agent_ask sDN - "make deploy"
 check "...and the next prompt is the one shown" \
   "$(field sDN waitingOnFull)|$(qjson "$PET_HOME/sessions/sDN.json" "len(d['asks'])")" "make deploy|1"
 
+# Allowed from the pet while another agent's prompt waits behind it: the allowed call runs until
+# its PostToolUse, but its prompt is answered — the next one comes first at once, and the call
+# it was about stays running.
+emit UserPromptSubmit sAQ /tmp/a
+agent_call PreToolUse sAQ a1 q1 "sleep 90 && echo a"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sAQ","cwd":"/tmp/a","agent_id":"a1","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"sleep 90 && echo a"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sAQ.out" &
+pid=$!; id="$(await_ask sAQ)"
+agent_call PreToolUse sAQ a2 q2 "touch /tmp/b"
+agent_ask sAQ a2 "touch /tmp/b"
+check "two agents' prompts queue, the first shown" \
+  "$(field sAQ waitingOnFull)|$(qjson "$PET_HOME/sessions/sAQ.json" "len(d['asks'])")" "sleep 90 && echo a|2"
+answer sAQ "$id" allow; wait $pid
+check "allowing the first prompt shows the next one at once" \
+  "$(decision sAQ)|$(field sAQ state)|$(field sAQ waitingOnFull)|$(qjson "$PET_HOME/sessions/sAQ.json" "[a['toolUseId'] for a in d['asks']]")" \
+  'allow|waiting|touch /tmp/b|["q2"]'
+check "...and the allowed call is still running" \
+  "$(qjson "$PET_HOME/sessions/sAQ.json" "sorted(c['id'] for c in d['running'])")" '["q1", "q2"]'
+agent_call PostToolUse sAQ a1 q1 "sleep 90 && echo a"
+check "...until its PostToolUse, which leaves the next prompt up" \
+  "$(field sAQ state)|$(field sAQ waitingOnFull)|$(qjson "$PET_HOME/sessions/sAQ.json" "[c['id'] for c in d['running']]")" \
+  'waiting|touch /tmp/b|["q2"]'
+
+# Allowed with nothing behind it: the session is busy running the call.
+emit UserPromptSubmit sA1 /tmp/a
+agent_call PreToolUse sA1 - r1 "make build"
+printf '{"hook_event_name":"PermissionRequest","session_id":"sA1","cwd":"/tmp/a","tool_name":"Bash","tool_input":{"command":"make build"}}' \
+  | PET_PERMISSION_WAIT=10 "$EMIT" > "$PET_HOME/sA1.out" &
+pid=$!; id="$(await_ask sA1)"
+answer sA1 "$id" allow; wait $pid
+check "a lone prompt allowed from the pet leaves the session busy on its call" \
+  "$(decision sA1)|$(field sA1 state)|$(field sA1 askId)|$(qjson "$PET_HOME/sessions/sA1.json" "[c['id'] for c in d['running']]")" \
+  'allow|busy||["r1"]'
+
 # Denied in the terminal, the same: no PostToolUse. An agent has one prompt up at a time, so
 # its next prompt replaces the one before.
 emit UserPromptSubmit sDT /tmp/a
