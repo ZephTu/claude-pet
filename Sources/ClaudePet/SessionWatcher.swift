@@ -131,6 +131,9 @@ final class SessionWatcher {
             // does not come back when the user starts typing again.
             if !StateAggregator.isLive(state, now: now) {
                 try? fm.removeItem(at: url)
+                // The lock pet-emit takes to write it (HookEmit.lockURL).
+                try? fm.removeItem(at: directory.appending(
+                    path: "." + url.deletingPathExtension().lastPathComponent + ".lock"))
                 continue
             }
             states.append(state)

@@ -28,6 +28,14 @@ H2="$T/home2"; mkdir -p "$H2/.claude"; echo '{}' > "$H2/.claude/settings.json"
 HOME="$H2" "$SRC/install.sh" --root "$T/root2" --yes --no-hooks --no-commands >/dev/null
 grep -q hq "$H2/.claude/settings.json" && fail "--no-hooks touched settings" || ok "--no-hooks leaves settings.json alone"
 [ ! -e "$H2/.claude/commands/task.md" ] && ok "--no-commands skips slash commands"
+H3="$T/home3"; mkdir -p "$H3/.claude" "$H3/dotfiles"; echo '{"model":"m"}' > "$H3/dotfiles/settings.json"
+ln -s ../dotfiles/settings.json "$H3/.claude/settings.json"
+HOME="$H3" "$SRC/install.sh" --root "$T/root3" --yes --no-commands >/dev/null
+[ -L "$H3/.claude/settings.json" ] && grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" \
+  && ok "a symlinked settings.json stays a link; the hooks go into the file it points at" || fail "install through a symlink"
+HOME="$H3" "$SRC/uninstall.sh" >/dev/null
+[ -L "$H3/.claude/settings.json" ] && ! grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" && grep -q '"model"' "$H3/dotfiles/settings.json" \
+  && ok "uninstall works through the link too" || fail "uninstall through a symlink"
 
 out="$("$HQ" new "Benchmark vs Neo4j" --category benchmark --workdir "$T")"
 TID="$(echo "$out" | head -1)"; [ "$TID" = "T-001" ] && ok "new task gets T-001"
@@ -2538,7 +2546,7 @@ ik() { env IK="$IK" PATH="$IK/bin:$PATH" "$HQ" "$@"; }
 printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\n<!-- a note -->\nbogus: 1\ngoal: Look at it.\nNote: carefully\nprompt: Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short.\n### jira-filter\nrepos: x\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
 "$HQ" project show rev --json | python3 -c '
 import json,sys; i=json.load(sys.stdin)["intake"]; c=i["github-review"]
-assert c["repos"]==["acme/web"] and c["run"] is True and c["permissions"]=="skip" and c["done"]=="manual" and c["focus"] is True, c
+assert c["repos"]==["acme/web"] and c["run"] is True and c["permissions"]=="review" and c["done"]=="manual" and c["focus"] is True, c
 assert c["prompt"]=="Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short." and c["goal"]=="Look at it.\nNote: carefully", c
 assert len(c["problems"])==1 and "unknown key" in c["problems"][0], c
 assert "makes no tasks yet" in i["jira-filter"]["problems"][0], i' \
@@ -2554,10 +2562,14 @@ grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && gre
   && grep -q 'PR acme/web#12 https://github.com/acme/web/pull/12' "$ITC" && grep -q '^Note: carefully$' "$ITC" \
   && grep -q 'title: "Review web#12: Fix login"' "$ITC" && grep -q '"abcd1234"' "$ITC" && grep -q "review-requested=@me" "$IK/search-args" \
   && ok "intake: a task in the duty, marked as come in by itself, with the PR as a ref, the default title and the section's goal" || fail "intake task: $(cat "$ITC")"
-grep -qx -- "--bg" "$IK/claude-args" && grep -qx -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -q "bind $IT" "$IK/claude-args" \
+grep -qx -- "--bg" "$IK/claude-args" && grep -q "^Start by running \`.*/hq bind $IT\`" "$IK/claude-args" \
+  && [ "$(grep -B1 "^Start by running" "$IK/claude-args" | head -1)" = "--" ] \
+  && ! grep -q -- "--dangerously-skip-permissions" "$IK/claude-args" && grep -A1 -x -- "--permission-mode" "$IK/claude-args" | grep -qx dontAsk \
+  && grep -qx "Skill(code-review)" "$IK/claude-args" && grep -qx "Bash(gh pr diff https://github.com/acme/web/pull/12:\*)" "$IK/claude-args" \
+  && grep -qx "Bash(.*/hq bind $IT)" "$IK/claude-args" && ! grep -qxE "Edit|Write|WebFetch|Bash|Skill|Bash\(gh pr (view|diff|checks):\*\)" "$IK/claude-args" \
   && grep -q "never write \`status: done\`" "$IK/claude-args" && grep -q "Then: Review https://github.com/acme/web/pull/12 by ann." "$IK/claude-args" \
   && grep -q "Keep it short." "$IK/claude-args" && [ "$(cat "$IK/claude-cwd")" = "$(cd "$T/work-rev" && pwd -P)" ] && [ "$(cat "$IK/claude-env")" = "none none none none" ] \
-  && ok "intake run: a background session in the workdir, told to bind, with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
+  && ok "intake run: a background session in the workdir, told to bind, never skipping permissions (permissions: skip is review — dontAsk, read-only tools, Skill only code-review, gh only on this PR, the prompt after --), with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
 "$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
 mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
 ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"
@@ -2601,6 +2613,12 @@ printf '### github-review\nrepos: acme/web\nworkdir: %s/nope\nrun: yes\n' "$T" |
   && IB="$(grep -l '^intake_key: acme/web#30' "$T"/root/tasks/*/TASK.md)" && grep -q '^status: waiting-on-me' "$IB" && grep -q 'could not start a background session: no folder to run in' "$IB" \
   && grep -q 'ann asked you to review https://github.com/acme/web/pull/30 (feat-30 → main)' "$IB" \
   && ok "intake: a workdir written wrong is flagged; no session starts anywhere else, the task (default goal) waits on you" || fail "intake bad workdir"
+printf '### github-review\nrepos: *\nworkdir: %s\nrun: yes\npermissions: review\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
+"$HQ" project show rev --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]; assert c["permissions"]=="review" and any(p.startswith("repos: *") for p in c["problems"]), c' \
+  && python3 -c 'import json; print(json.dumps([{"repository":{"nameWithOwner":"zed/x"},"number":31,"title":"X","url":"https://github.com/zed/x/pull/31","author":{"login":"eve"},"isDraft":False}]))' > "$IK/search.json" \
+  && rm -f "$IK/claude-args" && ! ik intake --claude "$IK/claude" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
+  && grep -q 'repos: \* with permissions: review' "$(grep -l '^intake_key: zed/x#31' "$T"/root/tasks/*/TASK.md)" \
+  && ok "intake: repos: * with permissions: review is flagged, and no session starts — anyone could start one" || fail "intake any repo review"
 "$HQ" project set rev auto= >/dev/null
 
 "$SRC/uninstall.sh" >/dev/null

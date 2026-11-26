@@ -108,6 +108,27 @@ struct AppMain {
             }
             app.run()
         }
+        // Only a launch that means the pet starts one: anything else prints the usage, and a
+        // second pet beside a running one exits (PetLaunch says why).
+        switch PetLaunch.decide(arguments) {
+        case .start: break
+        case .help:
+            print(PetLaunch.usage)
+            exit(0)
+        case .unknown(let args):
+            FileHandle.standardError.write(Data("unknown argument: \(args.joined(separator: " "))\n\(PetLaunch.usage)\n".utf8))
+            exit(2)
+        }
+        let lock = PetLaunch.lockURL(petHome: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/pet"))
+        switch PetLaunch.acquireLock(at: lock, wait: 5) {
+        case .acquired: break
+        case .held:
+            let pid = PetLaunch.holder(at: lock).map { " (pid \($0))" } ?? ""
+            FileHandle.standardError.write(Data("Claude Pet is already running\(pid)\n".utf8))
+            exit(0)
+        case .unavailable(let reason):
+            FileHandle.standardError.write(Data("cannot open \(lock.path) (\(reason)); starting without the one-pet check\n".utf8))
+        }
         // .accessory keeps it out of the Dock and out of Cmd-Tab.
         app.setActivationPolicy(.accessory)
         let delegate = PetAppDelegate()

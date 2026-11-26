@@ -83,6 +83,15 @@ enum IdleTabTests {
         t.check("typeable: ESC, ^C, ^D, NUL, BEL and DEL are removed",
                 BoardSend.typeable("a\u{1B}[201~b\u{03}\u{04}\u{00}\u{07}c\u{7F}d") == "a[201~bcd")
         t.check("typeable: a tab is kept", BoardSend.typeable("a\tb") == "a\tb")
+        // What launch and Resume type into a tab: no key a terminal or the shell's editor acts on.
+        let shellTyped = BoardSend.shellLine(dir: "/tmp/a b", command: ["/bin/claude", "--name", "T-1 x\u{15}rm -rf ~\u{03}",
+                                                                  "fix it\nnow\tplease\u{1B}[201~\u{7F}'q'"])
+        t.check("shellLine: no control character is left in any word",
+                !shellTyped.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F })
+        t.check("shellLine: control characters become spaces, quotes stay quoted",
+                shellTyped == #"cd '/tmp/a b' && '/bin/claude' '--name' 'T-1 x rm -rf ~ ' 'fix it now please [201~ '\''q'\'''; exit 0"#)
+        t.check("shellLine: HQ_ROOT is passed on, cleaned the same way",
+                BoardSend.shellLine(dir: "/d", command: ["c"], hqRoot: "/r\u{15}") == "cd '/d' && HQ_ROOT='/r ' 'c'; exit 0")
         t.check("orca receipt: input accepted only is unproven",
                 BoardSend.orcaTurnUnproven(#"{"ok":true,"result":{"send":{"prompt":{"requestId":"r1","stages":["input_accepted"],"provider":"claude"}}}}"#))
         t.check("orca receipt: a started turn is proven",

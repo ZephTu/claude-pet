@@ -138,7 +138,7 @@ hq/install.sh --root ~/claude-hq --no-hooks       # 只装看板和命令行，�
 5. **初始化**：读 `~/.claude/commands/hq-onboard.md` 并照着做（`/hq-onboard` 命令刚装上，当前 session 可能还不认识它）。它在创建任何东西之前都会先问用户。
 6. **收尾**时告诉用户：双击小猫打开看板（或右键 → Task Board…）；hook 只对从现在起新开的 session 生效，想被跟踪的 session 要重开；Claude Code 默认只保留约 30 天的对话记录（`cleanupPeriodDays`），更早的工作找不回来。
 
-**桌宠的安装脚本会改 `~/.claude/settings.json`**：追加十一个 hook，你原有的一个字节都不动；改之前先备份，原子写入、写完校验。HQ 再加三个（除非用 `--no-hooks`），只在绑定了任务的 session 里起作用。hook 只对**新开**的 session 生效。
+**桌宠的安装脚本会改 `~/.claude/settings.json`**：追加十一个 hook，你原有的一个字节都不动；改之前先备份，原子写入、写完校验。`settings.json` 是符号链接（比如指向 dotfiles 仓库）时，改的是它指向的文件，旁边的备份是内容的拷贝。HQ 再加三个（除非用 `--no-hooks`），只在绑定了任务的 session 里起作用。hook 只对**新开**的 session 生效。
 
 **`scripts/install.sh` 装的是它所在的那份代码**，所以它会先抓取 `origin/main`（20 秒没响应就放弃，用上次抓到的副本），再检查这份代码是否包含它的全部提交。如果不包含（比如某个修复合并之前就切出来的功能分支），它会列出缺的提交并停下；在交互式终端里运行时会先问你。加 `--force`（或设 `CLAUDE_PET_INSTALL_ANYWAY=1`）才会照装。否则装上去的小猫会悄悄少掉已经合并的修复。
 
@@ -146,6 +146,7 @@ hq/install.sh --root ~/claude-hq --no-hooks       # 只装看板和命令行，�
 
 ```bash
 ./scripts/uninstall.sh      # 摘掉 hook、删掉 app 和开机自启；settings.json 回到装之前的样子
+                            # （statusline 还在用 pet-emit 时先停下；会列出 ~/.claude/pet 里留下了什么）
 hq/uninstall.sh             # 摘掉 HQ 的 hook 和命令；任务卡保留
 ./scripts/package.sh        # 打一个带预编译二进制和一键安装脚本的包，发给别人
 ```

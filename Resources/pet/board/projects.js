@@ -445,8 +445,8 @@ function intake(pr) {
     ${INTAKE_READY.some((k) => auto.has(k)) ? intakeScanRow() : ""}
     ${Object.entries(pr.intake || {}).filter(([k]) => !INTAKE_READY.includes(k)).flatMap(([, c]) => c.problems || []).map((x) => `<div class="meta inote warn">${esc(x)}</div>`).join("")}</div>`;
   const autoEdit = editing(name, "intake") ? `<div class="tpl-edit">${sectionEditor(name, "intake", INTAKE_SAMPLE())}
-    <div class="meta">${T("A ### heading per source (github-review). repos: (comma-separated, * for any); workdir: where its session runs (default: the duty's first folder); run: yes starts a background session on each new task; permissions: skip lets it run without asking; done: manual (only you close the task) or auto; title: / goal: / prompt: (last: it takes the rest) can use {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.",
-      "每个来源一个 ### 标题（github-review）。repos:（逗号分隔，* 表示任意仓库）；workdir: session 在哪个目录跑（默认职责的第一个目录）；run: yes 每建一个任务就在后台起一个 session；permissions: skip 让它不问权限直接跑；done: manual（只能你来关）或 auto；title: / goal: / prompt:（放最后，后面的行都算它的）可以用 {repo}（owner/name）{name} {number} {title} {url} {author} {branch} {base}。")}</div></div>` : "";
+    <div class="meta">${T("A ### heading per source (github-review). repos: (comma-separated, * for any); workdir: where its session runs (default: the duty's first folder); run: yes starts a background session on each new task; permissions: review lets it run without asking, but only reading files and the PR, with /code-review (it can't edit, run other commands, use other skills or post anything); done: manual (only you close the task) or auto; title: / goal: / prompt: (last: it takes the rest) can use {repo} (owner/name) {name} {number} {title} {url} {author} {branch} {base}.",
+      "每个来源一个 ### 标题（github-review）。repos:（逗号分隔，* 表示任意仓库）；workdir: session 在哪个目录跑（默认职责的第一个目录）；run: yes 每建一个任务就在后台起一个 session；permissions: review 让它不问权限，但只能读文件和 PR、用 /code-review（不能改文件、跑别的命令、用别的 skill、发任何东西）；done: manual（只能你来关）或 auto；title: / goal: / prompt:（放最后，后面的行都算它的）可以用 {repo}（owner/name）{name} {number} {title} {url} {author} {branch} {base}。")}</div></div>` : "";
   const tplEdit = editing(name, "templates") ? `<div class="tpl-edit">${sectionEditor(name, "templates", TPL_SAMPLE())}
     <div class="meta">${T("A ### heading per template: title: (with {date} / {week}), goal:, and - [ ] @owner todo lines.", "每个模板一个 ### 标题：title:（可用 {date} / {week}）、goal:，以及 - [ ] @owner 待办 行。")}</div></div>` : "";
   // Folded under the tasks unless opened (remembered per duty) or a template is being edited: the
@@ -466,7 +466,7 @@ function intake(pr) {
 function intakeSummary(pr, k) {
   const c = (pr.intake || {})[k];
   if (!c || !(c.repos || []).length) return `<small class="warn">${T("No repositories yet: ✎ to set it up", "还没配置仓库：点 ✎ 写配置")}</small>`;
-  const bits = [c.repos.join(", "), c.run ? (c.permissions === "skip" ? T("runs a session (no prompts)", "自动跑（不问权限）") : T("runs a session", "自动跑"))
+  const bits = [c.repos.join(", "), c.run ? (c.permissions === "review" ? T("runs a session (read-only, no prompts)", "自动跑（只读，不问权限）") : T("runs a session", "自动跑"))
     : T("task only", "只建任务"), c.done === "auto" ? T("may close itself", "可以自己关") : T("you close it", "你来关")];
   return `<small class="full">${esc(bits.join(" · "))}</small>${(c.problems || []).map((x) => `<small class="warn">${esc(x)}</small>`).join("")}`;
 }

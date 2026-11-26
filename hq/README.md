@@ -785,7 +785,9 @@ repos: tigergraph/bigtest, tigergraph/mit-devops   # comma-separated; * for any 
 workdir: ~/code/bigtest     # where the task's work and its session happen (default: the duty's first path;
                             #   one written here must exist — never another folder instead)
 run: yes                    # start a background session on each new task (default: no)
-permissions: skip           # that session runs with --dangerously-skip-permissions (default: ask)
+permissions: review         # that session asks nothing but may only read: --permission-mode dontAsk with
+                            #   read-only tools, /code-review and gh on that PR
+                            #   (default: ask; `skip`, its old name, means review too)
 done: manual                # only the user closes the task (default); auto: the session may
 focus: yes                  # the task joins Focus (default)
 title: Review {name}#{number}: {title}
@@ -795,17 +797,25 @@ prompt: Review {url} with /code-review …   # last: the lines after it, as writ
 
 Placeholders: `{repo}` (owner/name), `{name}`, `{number}`, `{title}`, `{url}`, `{author}`, `{branch}`,
 `{base}`. Unknown keys, bad values, a missing workdir and blocks for sources that make no tasks yet
-are listed as `problems` (the board shows them in red); `repos: *` with `permissions: skip` and
+are listed as `problems` (the board shows them in red); `repos: *` with `permissions: review` and
 `run: yes` is one too, and no session starts with it. Comments are skipped outside the prompt; a
 `## ` line inside the prompt still ends the section. The
 first active duty, in `hq.json`'s order, whose repos match takes the PR. Its task: `project` the
 duty, the PR as a ref (`PR owner/repo#n <url>`), a log line, and the frontmatter `intake:
 github-review`, `intake_key: owner/repo#n`, `intake_done: manual|auto`. Without `run: yes` it is
-waiting-on-me. With it, `hq intake` starts `claude --bg --name "<id> <title>"` in the workdir
-(plus `--dangerously-skip-permissions` with `permissions: skip`; in a session of its own, and without
-the pet job's `CLAUDE_PET_JOB` / `CLAUDE_PET_RUN`, so the pet sees it), telling the session to run `hq
-bind <id>` first — and, for `done: manual`, never to close the task — then the prompt, and binds
-the session itself once `claude agents --json --all` lists it. One that fails to start is logged on
+waiting-on-me. With it, `hq intake` starts `claude --bg --name "<id> <title>"` in the workdir (in a
+session of its own, and without the pet job's `CLAUDE_PET_JOB` / `CLAUDE_PET_RUN`, so the pet sees
+it), never with `--dangerously-skip-permissions`: the PR's title, branch and diff come from whoever
+asked for the review. With `permissions: review` it adds `--permission-mode dontAsk` and an
+`--allowedTools` each for `Read` (any file), `Grep`, `Glob`, `Agent`, `Task`, `Skill(code-review)`
+(never the bare `Skill`: a skill's own `allowed-tools` would widen the list), `TodoWrite`,
+`Bash(gh pr view|diff|checks <the PR's URL>:*)` (only for a plain github.com PR URL: gh then takes
+the host from the URL, so an added `-R` can't send it elsewhere) and its own `Bash(<hq> bind <id>)`;
+anything else (editing, other commands, other skills, posting on GitHub) is refused, not asked. The
+prompt follows a `--`: `--allowedTools` would otherwise take it as more rules. The
+session is told to run `hq
+bind <id>` first — and, for `done: manual`, never to close the task — then the prompt, and hq binds
+it itself once `claude agents --json --all` lists it. One that fails to start is logged on
 the card, which turns waiting-on-me, and counts as an error. The default prompt has the session
 review with /code-review, put its comments on the card and ask before posting anything.
 

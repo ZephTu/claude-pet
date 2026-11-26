@@ -13,6 +13,28 @@ say() { echo "$@"; }
 
 say "=== Claude Pet uninstaller ==="
 
+# A statusline wrapped in `pet-emit --statusline` (docs/pet.md) would break the moment
+# pet-emit is gone, in every session, with nothing pointing back here. The installer never
+# writes it, so neither does this: stop before touching anything and say what to change.
+# Both user settings files count; one plutil cannot parse is searched as text instead of
+# being taken for one with no statusline.
+for file in "$SETTINGS" "$CLAUDE_DIR/settings.local.json"; do
+  [ -f "$file" ] || continue
+  if statusline="$(plutil -extract statusLine.command raw -o - "$file" 2>/dev/null)"; then
+    case "$statusline" in *pet-emit*) ;; *) continue ;; esac
+  elif ! plutil -lint "$file" >/dev/null 2>&1 && statusline="$(grep -o 'pet-emit[^"]*--statusline' "$file")"; then
+    :
+  else
+    continue
+  fi
+  echo "!! your statusline still runs pet-emit, which uninstalling removes:" >&2
+  echo "     $statusline" >&2
+  echo "   In $file, take the 'pet-emit --statusline --' part out of statusLine.command" >&2
+  echo "   (or remove statusLine if pet-emit was all it ran), then run this again." >&2
+  echo "   Nothing has been changed." >&2
+  exit 1
+done
+
 pkill -x ClaudePet 2>/dev/null || true
 
 # Unwiring needs pet-emit itself. The installed copy may already be gone, so
@@ -54,11 +76,19 @@ done
 rm -rf "$APP_DEST"
 say "==> removed $APP_DEST"
 
-rm -f "$PET_DIR/pet-emit"
+rm -f "$PET_DIR/pet-emit" "$PET_DIR/app.lock"
 rm -rf "$PET_DIR/sessions"
-rmdir "$PET_DIR" 2>/dev/null || true
-say "==> cleaned up $PET_DIR"
+# Say what is actually left rather than claim the folder is gone: jobs, notes and history
+# stay unless you remove them.
+if rmdir "$PET_DIR" 2>/dev/null || [ ! -e "$PET_DIR" ]; then
+  say "==> removed $PET_DIR"
+else
+  say "==> kept $PET_DIR, which still holds: $(ls -A "$PET_DIR" | tr '\n' ' ')"
+  say "    (rm -rf \"$PET_DIR\" removes it, scheduled jobs included)"
+fi
 
 say ""
-say "All gone. The settings.json backups are still there"
+say "Done. The settings.json backups are still there"
 say "($CLAUDE_DIR/settings.json.bak-claudepet-*) — delete them once you are happy."
+say "Claude Code sessions already open keep the hooks they started with: restart them, or"
+say "they report a hook error on each event until they end."

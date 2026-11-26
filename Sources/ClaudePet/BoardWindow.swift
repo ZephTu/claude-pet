@@ -654,8 +654,6 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     /// Single-quoted for a POSIX shell: nothing inside is interpreted.
-    private static func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-
     /// Starts a Claude Code session for a task: binds a fresh session id to the task first (so the
     /// session starts with the task's rules), then runs `claude --session-id … --name … <prompt>`
     /// in the task's directory — in a new terminal tab, or in the background with `--bg`.
@@ -714,12 +712,12 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// after it, so when the session ends — Stop, /exit, Ctrl-C twice — its tab closes instead of
     /// piling up at a prompt (Orca and iTerm2 close a tab whose shell exits; Terminal.app does when
     /// its profile says "close if the shell exited cleanly", hence `exit 0`). The `;` also runs it
-    /// after a failed `cd`, so a tab the board opened never lingers.
+    /// after a failed `cd`, so a tab the board opened never lingers. Every word — the task title in
+    /// `--name`, the prompt with a todo's text in it — is typed, so control characters go
+    /// (`BoardSend.shellLine`).
     private static func shellLine(dir: String, command: [String]) -> String {
-        var line = "cd \(shq(dir)) && "
         // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
-        if let root = ProcessInfo.processInfo.environment["HQ_ROOT"] { line += "HQ_ROOT=\(shq(root)) " }
-        return line + command.map(shq).joined(separator: " ") + "; exit 0"
+        BoardSend.shellLine(dir: dir, command: command, hqRoot: ProcessInfo.processInfo.environment["HQ_ROOT"])
     }
 
     /// Types `command` into a tab titled `title` that sits at a shell prompt with no Claude Code
@@ -1035,7 +1033,7 @@ final class BoardBridge: NSObject, WKScriptMessageHandlerWithReply {
             tell application "Terminal"
               \(focus ? "activate" : "")
               set t to do script "\(esc)"
-              set custom title of t to "\(IdleTab.appleScriptLiteral(title))"
+              set custom title of t to "\(IdleTab.appleScriptLiteral(BoardSend.typeable(title)))"
             end tell
             """
             // iTerm2 comes to the front on its own when it makes a window or tab (and when it has
