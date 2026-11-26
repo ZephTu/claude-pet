@@ -99,6 +99,10 @@ final class BoardServer {
     private static let maxOpen = 48
     /// Files already compressed, by ETag: the board's scripts don't change between loads.
     private var gzipped: [String: Data] = [:]
+    /// Phones holding `/events` open, oldest first, with the device each was opened by.
+    private var streams: [(conn: Connection, device: String)] = []
+    private var pinger: Timer?
+    private var watching: NSObjectProtocol?
     private var root: URL? { Bundle.module.url(forResource: "pet", withExtension: nil)?.standardizedFileURL }
 
     var enabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
@@ -120,6 +124,8 @@ final class BoardServer {
 
     func setTailnet(_ on: Bool) async -> (Any?, String?) {
         UserDefaults.standard.set(on, forKey: Self.tailnetKey)
+        // A phone's stream over Tailscale must not outlive the switch: each opens again, and is let in or not.
+        if !on { closeStreams { _ in true } }
         if on { await Tailnet.shared.current(force: true) }
         return (status(), nil)
     }
@@ -153,6 +159,13 @@ final class BoardServer {
             }
             l.start(queue: .main)
             listener = l
+            BoardEvents.shared.start()
+            if watching == nil {
+                watching = NotificationCenter.default.addObserver(forName: BoardEvents.changed, object: nil, queue: .main) { [weak self] note in
+                    let n = note.userInfo?["n"] as? Int ?? 0
+                    MainActor.assumeIsolated { self?.pushAll(BoardPush.event(n)) }
+                }
+            }
         } catch {
             lastError = Self.describe(error)
         }
@@ -174,6 +187,49 @@ final class BoardServer {
         listener?.cancel()
         listener = nil
         lastError = nil
+        closeStreams { _ in true }
+    }
+
+    // MARK: - Pushes (BoardPush)
+
+    /// A phone opened `/events`: kept until it goes away, its device is removed, or more phones
+    /// than maxStreams hold one (the oldest goes — a phone whose stream ends polls, and opens it again).
+    private func opened(_ conn: Connection, device: String) {
+        streams.append((conn, device))
+        while streams.count > BoardPush.maxStreams { streams.removeFirst().conn.close() }
+        guard pinger == nil else { return }
+        pinger = Timer.scheduledTimer(withTimeInterval: BoardPush.keepAlive, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.ping() }
+        }
+    }
+
+    private func streamClosed(_ conn: Connection) {
+        streams.removeAll { $0.conn === conn }
+        if streams.isEmpty { pinger?.invalidate(); pinger = nil }
+    }
+
+    private func pushAll(_ data: Data) {
+        for s in streams { s.conn.push(data) }
+    }
+
+    /// Keeps quiet streams open, and ends those whose device is gone (removed, or expired) — and,
+    /// over Tailscale, those from a device no longer the user's own (asked again as a new
+    /// connection would be; Tailnet keeps each answer two minutes).
+    private func ping() {
+        let live = Set(RemoteAccess.live(devices, now: Date()).filter { $0.paired != nil }.map(\.id))
+        closeStreams { !live.contains($0) }
+        pushAll(BoardPush.ping)
+        for s in streams where s.conn.peer.tailnet {
+            let conn = s.conn
+            Task { @MainActor [weak self] in
+                let ok = await Tailnet.shared.allows(conn.peer.name)
+                if !ok || self?.tailnetOn != true { conn.close() }
+            }
+        }
+    }
+
+    private func closeStreams(where gone: (String) -> Bool) {
+        for s in streams where gone(s.device) { s.conn.close() }
     }
 
     private static func describe(_ error: Error) -> String {
@@ -226,6 +282,7 @@ final class BoardServer {
 
     func revoke(_ id: String) -> (Any?, String?) {
         devices = devices.filter { $0.id != id }
+        closeStreams { $0 == id }
         return (status(), nil)
     }
 
@@ -329,14 +386,18 @@ final class BoardServer {
             }
         }
         open += 1
-        let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address))
+        let peer = Peer(name: Self.peerName(conn.endpoint), key: RemoteAccess.lockKey(address), tailnet: gate != nil)
         let c = Connection(conn: conn, peer: peer, gate: gate,
                            admit: { [weak self] req, peer in self?.admit(req, from: peer) ?? .refuse(Data()) },
                            handler: { [weak self] req, peer in
                                await self?.respond(to: req, from: peer)
-                                   ?? RemoteAccess.response(status: 500, type: "text/plain", body: Data())
+                                   ?? .whole(RemoteAccess.response(status: 500, type: "text/plain", body: Data()))
                            },
-                           closed: { [weak self] in self?.open -= 1 })
+                           streaming: { [weak self] conn, device in self?.opened(conn, device: device) },
+                           closed: { [weak self] conn in
+                               self?.open -= 1
+                               self?.streamClosed(conn)
+                           })
         c.start()
     }
 
@@ -405,7 +466,7 @@ final class BoardServer {
         guard RemoteAccess.hostAllowed(req.headers["host"], names: names) else {
             return .refuse(text(403, "This address can't be used for the board."))
         }
-        guard req.path == "/api" else {
+        guard req.path == "/api" || req.path == "/events" else {
             guard req.method == "GET" || req.method == "HEAD" else { return .refuse(text(405, "GET only")) }
             return .read(maxBody: 0)
         }
@@ -448,15 +509,37 @@ final class BoardServer {
                    "pair": true])
     }
 
-    fileprivate func respond(to req: RemoteAccess.Request, from peer: Peer) async -> Data {
-        // admit has turned away a foreign Host, a wrong method, and an /api request without a token.
-        if req.path == "/api" { return await api(req, from: peer.name) }
+    fileprivate func respond(to req: RemoteAccess.Request, from peer: Peer) async -> Reply {
+        // admit has turned away a foreign Host, a wrong method, and an /api or /events request without a token.
+        if req.path == "/api" { return .whole(await api(req, from: peer.name)) }
+        if req.path == "/events" { return events(req, from: peer.name) }
         if req.path == "/" || req.path == "/board" || req.path == "/board/" {
-            return RemoteAccess.response(status: 302, type: "text/plain", body: Data(),
-                                         extra: ["Location": "/board/board.html"])
+            return .whole(RemoteAccess.response(status: 302, type: "text/plain", body: Data(),
+                                                extra: ["Location": "/board/board.html"]))
         }
-        if req.path == "/manifest.webmanifest" { return manifest() }
-        return file(req)
+        if req.path == "/manifest.webmanifest" { return .whole(manifest()) }
+        return .whole(file(req))
+    }
+
+    /// `POST /events`: held open, told of every change (BoardPush). POST, with the token in its
+    /// header as /api has it: the page reads it with fetch, not EventSource, which can't send one.
+    private func events(_ req: RemoteAccess.Request, from peer: String) -> Reply {
+        var all = devices
+        guard let i = RemoteAccess.match(Self.presented(req), in: all, now: Date()), all[i].paired != nil else {
+            return .whole(unpaired())
+        }
+        if seen(&all[i], from: peer) { devices = all }
+        return .stream(device: all[i].id)
+    }
+
+    /// Notes when and from where a phone last asked — written at most once a minute (the board asks
+    /// every few seconds). Whether `d` changed and is to be saved.
+    private func seen(_ d: inout RemoteAccess.Device, from peer: String) -> Bool {
+        let now = Date()
+        guard d.lastSeen.map({ now.timeIntervalSince($0) > 60 }) ?? true || d.lastAddress != peer else { return false }
+        d.lastSeen = now
+        d.lastAddress = peer
+        return true
     }
 
     private func text(_ status: Int, _ s: String) -> Data {
@@ -561,12 +644,7 @@ final class BoardServer {
             return json(200, ["result": ["token": token]])
         }
         if op == RemoteAccess.claimOp { return json(200, ["error": L("This phone is paired already", "这台手机已经配对过了")]) }
-        // Written at most once a minute: the board asks every few seconds.
-        if all[i].lastSeen.map({ now.timeIntervalSince($0) > 60 }) ?? true || all[i].lastAddress != peer {
-            all[i].lastSeen = now
-            all[i].lastAddress = peer
-            devices = all
-        }
+        if seen(&all[i], from: peer) { devices = all }
         guard RemoteAccess.allowed(op: op) else {
             return json(200, ["error": L("Only on the Mac", "只能在 Mac 上做")])
         }
@@ -598,6 +676,16 @@ final class BoardServer {
 private struct Peer: Sendable {
     let name: String
     let key: String
+    /// Came over Tailscale: let in only while `tailscale whois` says it is the user's own device.
+    var tailnet = false
+}
+
+/// What a request is answered with.
+private enum Reply {
+    /// A whole response, then the connection closes.
+    case whole(Data)
+    /// The `/events` stream's head, then the connection stays open for pushes (BoardPush).
+    case stream(device: String)
 }
 
 /// What to do with a request once its head has arrived.
@@ -608,14 +696,16 @@ private enum Admit {
     case read(maxBody: Int)
 }
 
-/// One request on one connection: read its head, decide whether to read the rest, answer, close.
+/// One request on one connection: read its head, decide whether to read the rest, answer, close —
+/// or, for `/events`, keep it open and write each push to it.
 @MainActor
 private final class Connection {
     private let conn: NWConnection
-    private let peer: Peer
+    let peer: Peer
     private let admit: (RemoteAccess.Request, Peer) -> Admit
-    private let handler: (RemoteAccess.Request, Peer) async -> Data
-    private let closed: () -> Void
+    private let handler: (RemoteAccess.Request, Peer) async -> Reply
+    private let streaming: (Connection, String) -> Void
+    private let closed: (Connection) -> Void
     /// Asked before the request is read, when there's something to ask (a Tailscale peer).
     private let gate: (@MainActor () async -> Bool)?
     private var buffer = Data()
@@ -623,15 +713,19 @@ private final class Connection {
     private var maxBody: Int?
     private var done = false
     private var counted = true
+    /// Holding `/events` open.
+    private var isStream = false
 
     init(conn: NWConnection, peer: Peer, gate: (@MainActor () async -> Bool)? = nil,
          admit: @escaping (RemoteAccess.Request, Peer) -> Admit,
-         handler: @escaping (RemoteAccess.Request, Peer) async -> Data, closed: @escaping () -> Void) {
+         handler: @escaping (RemoteAccess.Request, Peer) async -> Reply,
+         streaming: @escaping (Connection, String) -> Void, closed: @escaping (Connection) -> Void) {
         self.conn = conn
         self.peer = peer
         self.gate = gate
         self.admit = admit
         self.handler = handler
+        self.streaming = streaming
         self.closed = closed
     }
 
@@ -645,8 +739,9 @@ private final class Connection {
             }
         }
         conn.start(queue: .main)
-        // A request that never finishes arriving doesn't hold the connection forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in finish() }
+        // A request that never finishes arriving doesn't hold the connection forever (a stream is
+        // held on purpose: it ends when the phone goes, or a ping can't be sent).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in if !isStream { finish() } }
         guard let gate else { return receive() }
         Task { @MainActor [self] in
             let ok = await gate()
@@ -675,17 +770,52 @@ private final class Connection {
                 switch RemoteAccess.parse(buffer, maxBody: maxBody ?? 0) {
                 case .request(let req):
                     Task { @MainActor in
-                        var out = await handler(req, peer)
-                        if req.method == "HEAD", let end = out.range(of: Data("\r\n\r\n".utf8)) {
-                            out = out.subdata(in: out.startIndex..<end.upperBound)
+                        switch await handler(req, peer) {
+                        case .whole(var out):
+                            if req.method == "HEAD", let end = out.range(of: Data("\r\n\r\n".utf8)) {
+                                out = out.subdata(in: out.startIndex..<end.upperBound)
+                            }
+                            send(out)
+                        case .stream(let device):
+                            openStream(device)
                         }
-                        send(out)
                     }
                 case .reject(let status):
                     send(RemoteAccess.response(status: status, type: "text/plain", body: Data()))
                 case .incomplete:
                     if isComplete || error != nil { finish() } else { receive() }
                 }
+            }
+        }
+    }
+
+    /// The stream's head, then a comment long enough that a browser hands over what it has at
+    /// once rather than waiting for more; then it waits for pushes, and for the phone to hang up.
+    private func openStream(_ device: String) {
+        guard !done else { return }
+        isStream = true
+        buffer = Data()
+        push(BoardPush.streamHead() + Data((": " + String(repeating: " ", count: 2048) + "\n\n").utf8))
+        streaming(self, device)
+        drain()
+    }
+
+    /// Writes to an open stream; one that can't be written to is over.
+    func push(_ data: Data) {
+        guard isStream, !done else { return }
+        conn.send(content: data, completion: .contentProcessed { [self] error in
+            MainActor.assumeIsolated { if error != nil { finish() } }
+        })
+    }
+
+    func close() { finish() }
+
+    /// A stream's phone sends nothing more: what arrives is dropped, and its end ends the stream.
+    private func drain() {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 1 << 12) { [self] _, _, isComplete, error in
+            MainActor.assumeIsolated {
+                guard !done else { return }
+                if isComplete || error != nil { finish() } else { drain() }
             }
         }
     }
@@ -702,7 +832,7 @@ private final class Connection {
         done = true
         buffer = Data()
         conn.cancel()
-        if counted { counted = false; closed() }
+        if counted { counted = false; closed(self) }
     }
 }
 

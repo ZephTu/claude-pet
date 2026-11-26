@@ -432,6 +432,7 @@ async function pairFromLink(text) {
   const box = $("#pairing");
   if (box) box.hidden = true;
   refresh();
+  openStream();
 }
 async function apiJSON(op, args) { return JSON.parse(await api(op, args)); }
 // For ops whose reply is an object already (launch) — or JSON text, either way.
@@ -849,10 +850,15 @@ const list = (v) => (Array.isArray(v) ? v : []);
 const READ_HOLD_MS = REMOTE ? 60000 : 25000;
 async function refresh(force) {
   ui.reading = (ui.reading || 0) + 1;
+  ui.readAt = Date.now();
   let held = true;
   const release = () => { if (held) { held = false; ui.reading--; } };
   const timer = setTimeout(release, READ_HOLD_MS);
-  try { return await readBoard(force); } finally { clearTimeout(timer); release(); }
+  try { return await readBoard(force); } finally {
+    clearTimeout(timer); release();
+    // A push that came while this read ran may be about a change it missed.
+    if (ui.pushQueued && !ui.reading) { ui.pushQueued = false; refresh("timer"); }
+  }
 }
 async function readBoard(force) {
   let sig = null;
@@ -6339,8 +6345,75 @@ document.addEventListener("drop", async (ev) => {
   }
 });
 
+// ---- Pushes (BoardPush): the Mac says when the files the board reads from change — to its own
+// window directly, to a phone over a stream the page holds open (/events). While told, the timer
+// only backs that up, every PUSHED_POLL_MS: for what no file says (a session's process gone, a
+// hold run out). Without it — the stream down, an older pet — it reads every 4 seconds as before.
+// A Peek stays on 4 seconds: a conversation's newest lines are in its transcript, which isn't watched.
+const PUSHED_POLL_MS = 30000;
+// A stream that has said nothing this long (the Mac pings every 25 s) is dead: opened again.
+const STREAM_QUIET_MS = 60000;
+window.hqPushOn = () => { ui.pushOn = true; };
+window.hqPush = () => { ui.pushOn = true; pushed(); };
+function pushed() {
+  if (document.hidden) { ui.pushMissed = true; return; }
+  if (ui.reading) { ui.pushQueued = true; return; }
+  refresh("timer");
+}
+async function openStream() {
+  if (!REMOTE || ui.stream || document.hidden || !remoteToken()) return;
+  const ctl = new AbortController();
+  ui.stream = ctl;
+  let opened = 0, quiet = null;
+  const listen = () => { clearTimeout(quiet); quiet = setTimeout(() => ctl.abort(), STREAM_QUIET_MS); };
+  try {
+    listen();   // a Mac that never answers counts as quiet too
+    const r = await fetch("/events", { method: "POST", cache: "no-store", headers: { "X-HQ-Token": remoteToken() }, body: "{}", signal: ctl.signal });
+    if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+    opened = Date.now();
+    ui.pushOn = true;
+    pushed();   // what changed while it was closed
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      listen();
+      buf += dec.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const ev = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        if (/^event: changed$/m.test(ev)) pushed();
+      }
+    }
+  } catch (e) {
+    /* closed, cut off, or the Mac out of reach: the timer reads meanwhile */
+  } finally {
+    clearTimeout(quiet);
+    if (ui.stream === ctl) { ui.stream = null; ui.pushOn = false; }
+    // Again soon after a stream that lasted; backing off from a Mac that keeps refusing, or one
+    // that keeps closing it at once (more boards open than it holds streams for).
+    const lasted = opened && Date.now() - opened > 10000;
+    ui.streamFails = lasted ? 0 : (ui.streamFails || 0) + 1;
+    setTimeout(openStream, lasted ? 1000 : Math.min(60000, 2000 * 2 ** Math.min(ui.streamFails, 5)));
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  // A phone in the background loses its stream anyway: closed here, opened again on return.
+  if (document.hidden) { if (ui.stream) ui.stream.abort(); return; }
+  openStream();
+  if (ui.pushMissed || Date.now() - (ui.readAt || 0) > 4000) { ui.pushMissed = false; pushed(); }
+});
+
 refresh();
-setInterval(() => { if (document.visibilityState === "visible" && !document.hidden && !ui.reading) refresh("timer"); }, 4000);
+// After a pairing code from the link has bought this phone its token.
+Promise.resolve(pairingClaim).finally(openStream);
+setInterval(() => {
+  if (document.visibilityState !== "visible" || document.hidden || ui.reading) return;
+  if (ui.pushOn && !(ui.modal && ui.modal.type === "peek") && Date.now() - (ui.readAt || 0) < PUSHED_POLL_MS) return;
+  refresh("timer");
+}, 4000);
 // Not on a dropdown: its menu takes the mouseup, so the button would never read as released.
 document.addEventListener("mousedown", (ev) => { if (ev.target.tagName !== "SELECT") ui.pointerDown = true; }, true);
 document.addEventListener("mouseover", (ev) => {

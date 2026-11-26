@@ -75,4 +75,9 @@ public actor SharedReads {
     public func changed() {
         entries.removeAll()
     }
+
+    /// Only these reads may have changed (a file the board reads from was written — BoardPush).
+    public func changed(_ keys: Set<String>) {
+        for key in keys { entries[key] = nil }
+    }
 }
