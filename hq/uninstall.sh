@@ -33,5 +33,5 @@ for c in task board hq-onboard; do
   f="$CLAUDE_DIR/commands/$c.md"
   [ -f "$f" ] && grep -q '.claude/hq/bin/hq' "$f" && rm "$f" && echo "removed /$c"
 done
-rm -rf "$CLAUDE_DIR/hq/bin" "$CLAUDE_DIR/hq/template"
+rm -rf "$CLAUDE_DIR/hq/bin" "$CLAUDE_DIR/hq/hqlib" "$CLAUDE_DIR/hq/template"
 echo "HQ removed. Config and session bindings remain in $CLAUDE_DIR/hq (delete it to forget them)."

@@ -485,7 +485,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 &lt;任务根目录&gt;/tasks/T-012-xxx/HISTORY.md   卡片放不下的：早结束的待办、勾待办记录、旧日志、过程链接
 &lt;任务根目录&gt;/projects/rca/PROJECT.md      项目：类型、目标、简报
 &lt;任务根目录&gt;/templates/                   新任务、新项目、lead 的模板
-~/.claude/hq/bin/hq                       命令行工具 + hook 入口
+~/.claude/hq/bin/hq                       命令行工具 + hook 入口（只是个入口，每次只加载要用的模块）
+~/.claude/hq/hqlib/                       命令行工具的代码，按功能分成模块
 ~/.claude/hq/config.json                  {"root": "任务根目录"}
 ~/.claude/hq/state/sessions.json          session → 任务的绑定
 &lt;任务根目录&gt;/hq.json                       项目、链接规则、过程链接、秘书的任务卡、分拣用的模型
@@ -984,7 +985,8 @@ next: "run baseline on clusters A/C"
 &lt;root&gt;/tasks/T-012-slug/HISTORY.md     what is past the card budget: older closed todos, ticks, older log, process links
 &lt;root&gt;/projects/rca/PROJECT.md         a project: kind, goal, brief
 &lt;root&gt;/templates/                      task, project and lead templates
-~/.claude/hq/bin/hq                    CLI and hook entry point
+~/.claude/hq/bin/hq                    CLI and hook entry point (a thin one: each run loads only the modules it needs)
+~/.claude/hq/hqlib/                    the CLI's code, one module per area
 ~/.claude/hq/config.json               {"root": "&lt;root&gt;"}
 ~/.claude/hq/state/sessions.json       session → task bindings
 &lt;root&gt;/hq.json                         projects, link rules, process links, the secretary's card, the sorting model

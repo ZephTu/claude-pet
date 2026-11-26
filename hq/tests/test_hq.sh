@@ -22,6 +22,27 @@ for ev in ("SessionStart", "UserPromptSubmit", "Stop"):
 PY
 "$SRC/install.sh" --yes >/dev/null
 [ "$(grep -o 'hq/bin/hq hook' "$HOME/.claude/settings.json" | wc -l | tr -d ' ')" = 3 ] && ok "re-install is idempotent"
+# bin/hq is a thin entry; the code is in hqlib/ next to it, installed compiled.
+L="$HOME/.claude/hq/hqlib"
+# (compiled where this python keeps bytecode: macOS's own python3 keeps it under ~/Library/Caches)
+[ -f "$L/hooks.py" ] && [ ! -L "$L" ] && [ ! -e "$L.new" ] && [ ! -e "$L.old" ] && python3 -c \
+  'import importlib.util as u, os, sys; sys.exit(not os.path.exists(u.cache_from_source(sys.argv[1])))' "$L/hooks.py" \
+  && ok "install copies hqlib next to bin/hq, compiled" || fail "install hqlib"
+python3 - "$SRC/hqlib" <<'PY' && ok "no name defined twice in a module of hqlib, nor a function or class in two" || fail "duplicate definitions"
+import ast, collections, glob, os, sys
+where, bad = collections.defaultdict(list), []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "*.py"))):
+    m, here = os.path.basename(f)[:-3], collections.Counter()
+    for s in ast.parse(open(f, encoding="utf-8").read()).body:
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            here[s.name] += 1
+            where[s.name].append(m)
+        elif isinstance(s, (ast.Assign, ast.AnnAssign)):
+            here.update(t.id for t in (s.targets if isinstance(s, ast.Assign) else [s.target]) if isinstance(t, ast.Name))
+    bad += [f"{m}.{n}: defined {c} times" for n, c in here.items() if c > 1]
+bad += [f"{n}: in {', '.join(ms)}" for n, ms in where.items() if len(ms) > 1]
+assert not bad, "\n".join(bad)
+PY
 [ -f "$HOME/.claude/commands/task.md" ] && [ -f "$HOME/.claude/commands/hq-onboard.md" ] && [ -f "$T/root/CLAUDE.md" ] && [ -f "$T/root/hq.json" ] && ok "commands and root scaffolded"
 echo n | "$SRC/install.sh" >/dev/null 2>&1 && fail "install without --yes on a pipe should refuse" || ok "install refuses without confirmation"
 H2="$T/home2"; mkdir -p "$H2/.claude"; echo '{}' > "$H2/.claude/settings.json"
@@ -56,6 +77,14 @@ grep -q "repo-a" "$T"/root/tasks/T-002-*/TASK.md && ok "bind from inside a sessi
 grep -q "\"$HOME\"" "$T"/root/tasks/T-002-*/TASK.md && fail "home dir recorded as workdir" || ok "home dir is never a workdir"
 "$HQ" unbind --session sess-in >/dev/null; "$HQ" unbind --session sess-home >/dev/null
 hook '{"session_id":"sess-1","hook_event_name":"SessionStart"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "hq-asks" in c' && ok "SessionStart injects protocol"
+# A hook runs on every turn of every session: it loads no more of hq than it needs.
+loaded() { echo "$1" | python3 -X importtime "$HQ" hook 2>&1 >/dev/null | sed -n 's/^import time: *[0-9]* *| *[0-9]* *| *//p' \
+  | tr -d ' ' | grep -E '^(hqlib.*|argparse|subprocess|tempfile)$' | sort | tr '\n' ' '; }
+got="$(loaded '{"session_id":"s-unbound","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+[ "$got" = "hqlib hqlib.core hqlib.hooks hqlib.sessions " ] && ok "an unbound session's hook loads only core and sessions" || fail "unbound hook loads: $got"
+got="$(loaded '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+[ -n "$got" ] && [ -z "$(echo "$got" | tr ' ' '\n' | grep -vxE 'hqlib(\.(core|sessions|hooks|cards|refs|history|projects|asks|protocol|update))?|')" ] \
+  && ok "a bound session's hook loads no command line, subprocess or unrelated module" || fail "bound hook loads: $got"
 
 MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n```'
 hook "{\"session_id\":\"sess-1\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
@@ -495,9 +524,9 @@ rm "$HOME/.claude/pet/sessions/sess-1.json"; rmdir "$HOME/.claude/pet/sessions" 
 # Peek shows the slash commands you ran (/compact before the line saying it compacted, as it ran),
 # and a session's last reply skips Claude Code's stand-ins and, mid-turn, the turn going on.
 python3 - "$HQ" <<'PY' && ok "slash commands in Peek; last_reply picks the finished turn's reply" || fail "commands / last_reply"
-import importlib.machinery, importlib.util, sys
-loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
-spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))
+from hqlib import peek as hq
 def u(text, ts, **kw): return {"type": "user", "message": {"role": "user", "content": text}, "timestamp": ts, **kw}
 def a(text, ts, model="claude"): return {"type": "assistant", "message": {"model": model, "content": [{"type": "text", "text": text}]}, "timestamp": ts}
 T = lambda s: f"2026-01-01T00:00:{s:02d}Z"
@@ -1128,9 +1157,9 @@ echo "$o" | grep -q 'is the open todo \\"review 并合并 PR #111\\" already' &&
 o="$(upd 'todo！: @me 全角感叹号也认')"
 [ -z "$o" ] && grep -q "全角感叹号也认" "$MC" && ok "todo！: with a full-width mark works" || fail "full-width todo!: $o"
 python3 - "$HQ" "$MC" <<'PY' && ok "a changed todo is not a report note" || fail "changed tick in the report"
-import sys, json, datetime as dt, importlib.machinery, importlib.util
-loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
-spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+import os, sys, json, datetime as dt
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))
+from hqlib import reports as hq
 a = hq.task_activity(hq.parse_card(sys.argv[2]), dt.datetime(2000, 1, 1), dt.datetime(2100, 1, 1))
 s = json.dumps(a, ensure_ascii=False)
 assert "deploy the fix" in s and "→ changed" not in s, s[:600]
@@ -1141,9 +1170,9 @@ PY
 # page the issue, a Jenkins console or test report the build. A link to one comment, and any other
 # #fragment, stays its own. hq and board.js agree.
 python3 - "$HQ" <<'PY' && ok "canonical keys for GitHub, Jira, Jenkins, Confluence and other URLs" || fail "canonical keys"
-import importlib.machinery, importlib.util, sys
-loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
-spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))
+from hqlib import refs as hq
 GH, JI, JK = "https://github.com/tigergraph/bigtest", "https://graphsql.atlassian.net", "https://jenkins.graphtiger.com/job"
 cases = [
     (f"{GH}/pull/3261#issuecomment-7075621457", f"{GH}/pull/3261#issuecomment-7075621457"),
@@ -1208,9 +1237,9 @@ assert not bad, "\n".join(map(str, bad))
 assert hq.ref_key("QA-1  x") == "QA-1 x" and hq.ref_key(f"a {GH}/pull/1 b {GH}/pull/1#c") == f"a {GH}/pull/1 b {GH}/pull/1#c"
 PY
 python3 - "$HQ" <<'PY' && ok "merging: canonical URL kept, its title preferred, else the newest; merging again changes nothing" || fail "merge_refs"
-import importlib.machinery, importlib.util, sys
-loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
-spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))
+from hqlib import refs as hq
 GH, JK = "https://github.com/tigergraph/bigtest/pull", "https://jenkins.graphtiger.com/job/release_test_all"
 card = [f"PR #3260 remote_segment rotate + replica count {GH}/3260", f"smoke #33911 {JK}/33911/", f"smoke #33911 (passed) {JK}/33911/",
         f"PR #3261 replica check version range {GH}/3261", f"PR #3261 verification comment {GH}/3261#issuecomment-7075621457",
@@ -2277,9 +2306,9 @@ JT="$(hqi inbox sort --claude "$FAKE" --json "$NJ" | python3 -c 'import json,sys
   && ok "taking back an untouched new card removes it, HISTORY.md and all" || fail "inbox undo card with history: $(ls "$T"/root/tasks/$JT-* 2>&1)"
 "$HQ" unbind --session sess-bud >/dev/null
 python3 - "$SRC/bin/hq" <<'PY' && ok "continued_title re-dates a dated title, or marks it continued"
-import datetime as dt, importlib.util, importlib.machinery, sys
-loader = importlib.machinery.SourceFileLoader("hqmod", sys.argv[1])
-spec = importlib.util.spec_from_loader("hqmod", loader); hq = importlib.util.module_from_spec(spec); loader.exec_module(hq)
+import os, datetime as dt, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))
+from hqlib import continuation as hq
 d = dt.date(2026, 11, 23); f = hq.continued_title
 assert f("release test all 4.2.7 on 2026 Nov 22", d) == "release test all 4.2.7 on 2026 Nov 23"
 assert f("run 2026-11-22", d) == "run 2026-11-23" and f("run 2026/11/2", d) == "run 2026/11/23"
@@ -2735,4 +2764,5 @@ done.')")"
 "$SRC/uninstall.sh" >/dev/null
 grep -q 'hq/bin/hq hook' "$HOME/.claude/settings.json" && fail "uninstall left hooks" || ok "uninstall removes hooks, keeps others"
 grep -q other-tool "$HOME/.claude/settings.json" && [ -d "$T/root/tasks/T-001-benchmark-vs-neo4j" ] && ok "uninstall keeps other hooks and data"
+[ ! -e "$HOME/.claude/hq/bin" ] && [ ! -e "$HOME/.claude/hq/hqlib" ] && ok "uninstall removes bin/hq and hqlib" || fail "uninstall left the CLI"
 echo "$pass passed"
