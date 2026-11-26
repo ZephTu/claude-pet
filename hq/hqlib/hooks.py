@@ -345,11 +345,22 @@ def _hook_main():
                 if not ask:
                     unresolved.append(f"`{first}` — there is no ask {aid}")
                     continue
+                if ask["state"] == "moved":
+                    # Continued to another card: the ask as it is there now (current_ask).
+                    try:
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            ncard, nid = current_ask(aid)
+                        ask = next((a for a in read_asks(os.path.dirname(ncard)) if a["id"] == nid), ask)
+                    except SystemExit:
+                        pass
+                    shown = f"{aid} (now {ask['id']})" if ask["id"] != aid else aid
+                else:
+                    shown = aid
                 if res == "later" and ask["state"] not in ("open", "moved"):
-                    unresolved.append(f"`{first}` — {aid} is already answered ({ask['state']}); nothing to put off")
+                    unresolved.append(f"`{first}` — {shown} is already answered ({ask['state']}); nothing to put off")
                     continue
                 if ask["state"] not in ("open", "moved"):
-                    unresolved.append(f"`{first}` — {aid} is already answered ({answered_as(ask)}), "
+                    unresolved.append(f"`{first}` — {shown} is already answered ({answered_as(ask)}), "
                                       "on the board or earlier: that answer stands, leave this line out")
                     continue
                 try:

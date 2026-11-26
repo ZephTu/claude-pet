@@ -6096,11 +6096,13 @@ function phraseRoom(box) {
   phraseRoomAt = null;
   // A refresh that rebuilt the box: the new one takes the room as it was, nothing moves.
   const rebuilt = was && box && !was.el.isConnected && was.key === box.dataset.key;
-  if (was && was.el.isConnected) phraseKeepPlace(was.el, () => { const [el, prop] = phraseRoomSide(was.el); el.style[prop] = ""; });
-  if (!box) return;
+  const clear = () => { if (was && was.el.isConnected) { const [el, prop] = phraseRoomSide(was.el); el.style[prop] = ""; } };
+  if (!box) { if (was && was.el.isConnected) phraseKeepPlace(was.el, clear); return; }
   const h = (phraseBarH || 30) + 6;
   const set = () => { const [el, prop] = phraseRoomSide(box); el.style[prop] = `calc(${getComputedStyle(el)[prop]} + ${h}px)`; };
-  if (rebuilt) set(); else phraseKeepPlace(box, set);
+  // From one box to another: both changes at once, held on the box you went to — held on the one
+  // you left, a box higher up would move down under the pointer.
+  if (rebuilt) set(); else phraseKeepPlace(box, () => { clear(); set(); });
   phraseRoomAt = { el: box, key: box.dataset.key };
 }
 // Where the room goes: a box in a row with its Send button (a reply box) makes the whole row
@@ -6160,6 +6162,9 @@ document.addEventListener("pointerdown", () => { phrasePress = true; }, true);
 const phrasePressEnd = () => { phrasePress = false; setTimeout(phraseBarSync, 0); };
 document.addEventListener("pointerup", phrasePressEnd, true);
 document.addEventListener("pointercancel", phrasePressEnd, true);
+// Presses that can end with no pointerup: a right-click's menu, a dragged card, the window left.
+for (const t of ["contextmenu", "dragend"]) document.addEventListener(t, phrasePressEnd, true);
+addEventListener("blur", phrasePressEnd);
 document.addEventListener("input", (ev) => { if (ev.target === phraseFor) phrasePlace(); });   // the box grows
 addEventListener("resize", phrasePlace);
 if (window.visualViewport) visualViewport.addEventListener("resize", phrasePlace);
