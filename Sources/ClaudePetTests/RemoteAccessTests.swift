@@ -91,6 +91,35 @@ enum RemoteAccessTests {
                 && !RemoteAccess.hostAllowed("other.tail1.ts.net:8790", names: ["my-mac.tail1.ts.net"])
                 && RemoteAccess.hostAllowed("100.96.1.2:8790", names: []))
         t.check("changing Tailscale access is the Mac's alone", !RemoteAccess.allowed(op: "remote-tailnet"))
+        t.check("a phone may not open things, jump, or use the Mac's clipboard",
+                ["open", "openPath", "openURL", "attach", "jump", "copy", "pick-folder", "click-target"]
+                    .allSatisfy { !RemoteAccess.allowed(op: $0) })
+        t.check("an operation on no list is the Mac's", !RemoteAccess.allowed(op: "some-new-op") && !RemoteAccess.allowed(op: ""))
+        t.check("a phone may still read the board, answer asks and run jobs",
+                ["board", "peek", "resolve", "send", "decide", "job-run"].allSatisfy { RemoteAccess.allowed(op: $0) })
+        t.check("the phone and Mac lists don't overlap", RemoteAccess.phoneOps.isDisjoint(with: RemoteAccess.macOnly))
+        // Every operation the bridge handles is on exactly one list: a new one has to be given to
+        // the phone on purpose. Read from BoardBridge.handle's top-level cases.
+        let bridgeSource = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("ClaudePet/BoardWindow.swift")
+        if let src = try? String(contentsOf: bridgeSource, encoding: .utf8),
+           let start = src.range(of: "func handle(_ body: [String: Any]) async"),
+           let end = src.range(of: "\n        default:", options: .regularExpression, range: start.upperBound..<src.endIndex) {
+            var ops = Set<String>()
+            for line in src[start.upperBound..<end.lowerBound].split(separator: "\n") where line.hasPrefix("        case \"") {
+                let head = line.dropFirst(8).prefix { $0 != ":" }
+                for m in head.matches(of: /"([^"]+)"/) { ops.insert(String(m.1)) }
+            }
+            let known = RemoteAccess.phoneOps.union(RemoteAccess.macOnly)
+            t.check("the bridge's operations were found", ops.count > 60)
+            t.check("every bridge operation is on the phone's list or the Mac's (missing: \(ops.subtracting(known).sorted()))",
+                    ops.isSubset(of: known))
+            t.check("the lists name no operation the bridge lacks (extra: \(known.subtracting(ops).sorted()))",
+                    known == ops)
+        } else {
+            t.check("could read BoardBridge.handle's operations", false)
+        }
 
         // Slow links: files compressed, and kept by the phone until they change.
         t.check("CRC-32 as gzip computes it", RemoteAccess.crc32(Data("hello".utf8)) == 0x3610_a686
@@ -223,5 +252,30 @@ enum RemoteAccessTests {
         t.check("a response says its length, closes, and isn't cached",
                 resp.hasPrefix("HTTP/1.1 401 Unauthorized\r\n") && resp.contains("Content-Length: 2\r\n")
                 && resp.contains("Connection: close\r\n") && resp.contains("Cache-Control: no-store\r\n") && resp.hasSuffix("\r\n\r\n{}"))
+
+        print("\n-- the board window: only its own pages, and only they reach the bridge")
+        let board = URL(string: "pet://app/board/board.html")
+        t.check("the board's pages load", BoardNavigation.decide(url: board, mainFrame: true) == .allow
+                && BoardNavigation.decide(url: URL(string: "pet://app/board/guide.html#zh-start"), mainFrame: true) == .allow
+                && BoardNavigation.decide(url: URL(string: "PET://APP/board/board.html"), mainFrame: true) == .allow)
+        t.check("pet:// with another host goes nowhere",
+                BoardNavigation.decide(url: URL(string: "pet://evil/x.html"), mainFrame: true) == .cancel)
+        t.check("a web or mail link opens outside the board",
+                BoardNavigation.decide(url: URL(string: "https://tailscale.com/download"), mainFrame: true) == .openOutside
+                && BoardNavigation.decide(url: URL(string: "http://example.com"), mainFrame: true) == .openOutside
+                && BoardNavigation.decide(url: URL(string: "mailto:a@b.c"), mainFrame: true) == .openOutside)
+        t.check("a web page in an embedded frame is not opened, nor loaded",
+                BoardNavigation.decide(url: URL(string: "https://example.com"), mainFrame: false) == .cancel)
+        t.check("file, data, javascript and about pages go nowhere",
+                ["file:///etc/hosts", "data:text/html,hi", "javascript:alert(1)", "about:blank", "x-custom://y"]
+                    .allSatisfy { BoardNavigation.decide(url: URL(string: $0), mainFrame: true) == .cancel }
+                && BoardNavigation.decide(url: nil, mainFrame: true) == .cancel)
+        t.check("the bridge answers the board's main frame",
+                BoardNavigation.trusted(mainFrame: true, scheme: "pet", host: "app"))
+        t.check("the bridge ignores an embedded frame, or a page from anywhere else",
+                !BoardNavigation.trusted(mainFrame: false, scheme: "pet", host: "app")
+                && !BoardNavigation.trusted(mainFrame: true, scheme: "https", host: "tailscale.com")
+                && !BoardNavigation.trusted(mainFrame: true, scheme: "pet", host: "other")
+                && !BoardNavigation.trusted(mainFrame: true, scheme: "", host: ""))
     }
 }
