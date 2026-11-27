@@ -11,35 +11,45 @@ public enum PasteboardImage {
     static let asIs: [(type: String, mime: String)] = [
         ("public.png", "image/png"), ("public.jpeg", "image/jpeg"), ("com.compuserve.gif", "image/gif"),
     ]
-    /// Types converted to PNG, before any other image type found on the pasteboard.
-    static let converted = ["public.tiff", "com.microsoft.bmp"]
     /// What the board's web view turns into an image itself when it is pasted (an image file
     /// copied in Finder included).
     static let webReadable: Set<String> = Set(asIs.map(\.type) + ["public.tiff", "public.file-url"])
 
-    /// The image on `pb` as (bytes, MIME type): PNG, JPEG or GIF as they are, anything else
-    /// AppKit decodes (TIFF, BMP, HEIC …) as PNG. Nil when there is none.
+    /// The image on `pb` as (bytes, MIME type): PNG, JPEG or GIF as they are, then the other
+    /// types AppKit decodes (TIFF, BMP, HEIC …) as PNG — those the pasteboard's items really hold
+    /// before those AppKit derives from them (the TIFF it offers for a BMP), so a BMP is decoded
+    /// once, from itself. Last, whatever NSImage makes of it (a PDF). Nil when there is none.
     public static func read(_ pb: NSPasteboard) -> (data: Data, mime: String)? {
         let types = (pb.types ?? []).map(\.rawValue)
         for (type, mime) in asIs where types.contains(type) {
             if let d = pb.data(forType: .init(type)), NSBitmapImageRep(data: d) != nil { return (d, mime) }
         }
-        let others = converted + types.filter { NSImage.imageTypes.contains($0) && !converted.contains($0) }
+        let held = (pb.pasteboardItems ?? []).flatMap { $0.types.map(\.rawValue) }
+        var others: [String] = []
+        for type in held + types where NSImage.imageTypes.contains(type) && !others.contains(type)
+            && !asIs.contains(where: { $0.type == type }) && type != "com.adobe.pdf" { others.append(type) }
         var clear: Data?   // one that decodes to nothing but transparent pixels: the last resort
-        for type in others where types.contains(type) {
+        for type in others {
             guard let d = pb.data(forType: .init(type)), let png = png(from: d) else { continue }
             if !png.clear { return (png.data, "image/png") }
             if clear == nil { clear = png.data }
         }
-        return clear.map { ($0, "image/png") }
+        if let clear { return (clear, "image/png") }
+        if let tiff = NSImage(pasteboard: pb)?.tiffRepresentation,
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            return (png, "image/png")
+        }
+        return nil
     }
 
-    /// True when `pb` holds an image the board's web view would not see on a paste — only types
-    /// it can't read, a BMP from Deskflow say. AppKit offers a TIFF made from such a BMP, but the
-    /// web view goes by what the pasteboard's items really hold, so those are what count here.
-    public static func needsHandingToWeb(_ pb: NSPasteboard) -> Bool {
+    /// The image to hand the board's web view on a paste, when it would see none itself: the
+    /// pasteboard's items hold no type it reads (a BMP from Deskflow, say — AppKit offers a TIFF
+    /// made from it, but the web view goes by what the items really hold) and no text either, so
+    /// cells copied with a picture of them still paste as text. Nil otherwise.
+    public static func forWeb(_ pb: NSPasteboard) -> (data: Data, mime: String)? {
         let held = Set((pb.pasteboardItems ?? []).flatMap { $0.types.map(\.rawValue) })
-        return held.isDisjoint(with: webReadable) && read(pb) != nil
+        guard !held.isEmpty, held.isDisjoint(with: webReadable), pb.string(forType: .string) == nil else { return nil }
+        return read(pb)
     }
 
     /// Image bytes in any type AppKit decodes, as PNG; `clear` when every pixel is transparent.
@@ -74,14 +84,15 @@ public enum PasteboardImage {
     }
 
     /// A BMP with its alpha mask cleared, so it decodes opaque; nil when it has no alpha mask.
-    /// The mask sits at byte 66 (after the file header, the 40-byte info header and the red, green
-    /// and blue masks): in a V4/V5 header, or right after a 40-byte one with BI_ALPHABITFIELDS.
+    /// The mask is in a V3/V4/V5 header with BI_BITFIELDS, at byte 66 (after the file header, the
+    /// 40-byte info header and the red, green and blue masks). ImageIO doesn't decode
+    /// BI_ALPHABITFIELDS at all, so that one is left alone.
     static func bmpWithoutAlpha(_ data: Data) -> Data? {
         let b = [UInt8](data)
         guard b.count > 70, b[0] == 0x42, b[1] == 0x4D else { return nil }
         func u32(_ at: Int) -> UInt32 { (0..<4).reduce(0) { $0 | UInt32(b[at + $1]) << (8 * $1) } }
         let header = u32(14), compression = u32(30)
-        guard compression == 3 || compression == 6, header >= 56 || compression == 6 else { return nil }
+        guard compression == 3, header >= 56 else { return nil }
         var out = b
         out.replaceSubrange(66..<70, with: [0, 0, 0, 0])
         return Data(out)

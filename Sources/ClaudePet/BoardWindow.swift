@@ -223,8 +223,7 @@ final class BoardWindow: NSWindow {
     private func pasteImageForPage(_ event: NSEvent) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
               event.charactersIgnoringModifiers?.lowercased() == "v",
-              PasteboardImage.needsHandingToWeb(.general),
-              let img = PasteboardImage.read(.general) else { return false }
+              let img = PasteboardImage.forWeb(.general) else { return false }
         let url = "data:\(img.mime);base64,\(img.data.base64EncodedString())"
         webView.evaluateJavaScript("window.pasteImage ? window.pasteImage('\(url)') : false") { [weak self] took, _ in
             guard let self, (took as? Bool) != true else { return }

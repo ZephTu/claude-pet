@@ -36,7 +36,7 @@ enum PasteboardImageTests {
         put([("public.png", png)])
         var got = PasteboardImage.read(pb)
         t.check("a PNG (a screenshot) is kept as it is", got?.data == png && got?.mime == "image/png")
-        t.check("… and left to the web view, which reads it itself", !PasteboardImage.needsHandingToWeb(pb))
+        t.check("… and left to the web view, which reads it itself", !(PasteboardImage.forWeb(pb) != nil))
 
         put([("public.jpeg", jpeg)])
         got = PasteboardImage.read(pb)
@@ -46,17 +46,17 @@ enum PasteboardImageTests {
         got = PasteboardImage.read(pb)
         t.check("a TIFF (a browser's copied image) becomes a PNG of the same picture",
                 got?.mime == "image/png" && decoded(got)?.pixelsWide == 4 && red(decoded(got), 2)! == (200, 80, 90, 255))
-        t.check("… and is left to the web view", !PasteboardImage.needsHandingToWeb(pb))
+        t.check("… and is left to the web view", !(PasteboardImage.forWeb(pb) != nil))
 
         put([("com.microsoft.bmp", bmp)])
         got = PasteboardImage.read(pb)
         t.check("a BMP alone (Deskflow) becomes a PNG of the same picture",
                 got?.mime == "image/png" && decoded(got)?.pixelsHigh == 3 && red(decoded(got), 3)! == (200, 120, 90, 255))
-        t.check("… and is handed to the web view, which can't read a BMP", PasteboardImage.needsHandingToWeb(pb))
+        t.check("… and is handed to the web view, which can't read a BMP", (PasteboardImage.forWeb(pb) != nil))
 
         put([("com.microsoft.bmp", bmp), ("public.png", png)])
         t.check("a BMP next to a PNG: the PNG is used, and the web view reads that",
-                PasteboardImage.read(pb)?.data == png && !PasteboardImage.needsHandingToWeb(pb))
+                PasteboardImage.read(pb)?.data == png && !(PasteboardImage.forWeb(pb) != nil))
 
         // A 32-bit BMP whose V5 header names an alpha channel left all zeros: decoded as it says,
         // every pixel would be transparent (and black).
@@ -70,9 +70,20 @@ enum PasteboardImageTests {
         t.check("a BMP with a real alpha channel keeps it",
                 red(decoded(PasteboardImage.read(pb)), 0).map { $0.3 == 128 } == true)
 
+        put([("public.utf8-plain-text", Data("a\tb".utf8)), ("com.microsoft.bmp", bmp)])
+        t.check("a BMP that comes with text (cells copied in Excel) pastes as text in the board",
+                PasteboardImage.forWeb(pb) == nil)
+
+        let pdf = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 20, height: 10)
+        let ctx = CGContext(consumer: CGDataConsumer(data: pdf)!, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil); ctx.setFillColor(red: 1, green: 0, blue: 0, alpha: 1); ctx.fill(box); ctx.endPDFPage(); ctx.closePDF()
+        put([("com.adobe.pdf", pdf as Data)])
+        t.check("a PDF alone still becomes a picture", PasteboardImage.read(pb)?.mime == "image/png")
+
         pb.clearContents()
         pb.setString("just text", forType: .string)
-        t.check("text alone is no image", PasteboardImage.read(pb) == nil && !PasteboardImage.needsHandingToWeb(pb))
+        t.check("text alone is no image", PasteboardImage.read(pb) == nil && !(PasteboardImage.forWeb(pb) != nil))
     }
 
     /// A top-down 32-bit BMP with a V5 header and BI_BITFIELDS masks, alpha mask 0xFF000000.
