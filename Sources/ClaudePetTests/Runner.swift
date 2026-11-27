@@ -2767,6 +2767,7 @@ struct Runner {
         SharedReadsTests.run(t)
         BoardPushTests.run(t)
         PetLaunchTests.run(t)
+        PasteboardImageTests.run(t)
 
         print("\n-- language")
         t.check("a stored language wins over the system's",

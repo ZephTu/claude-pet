@@ -213,7 +213,23 @@ final class BoardWindow: NSWindow {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        performEditShortcut(event) || super.performKeyEquivalent(with: event)
+        if pasteImageForPage(event) { return true }
+        return performEditShortcut(event) || super.performKeyEquivalent(with: event)
+    }
+
+    /// ⌘V with an image on the pasteboard that the web view can't read itself — a BMP, which is
+    /// what Deskflow puts there — would paste nothing at all: the image goes to the page as PNG
+    /// instead. When no message box has the focus, the page says so and the paste goes on as usual.
+    private func pasteImageForPage(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers?.lowercased() == "v",
+              let img = PasteboardImage.forWeb(.general) else { return false }
+        let url = "data:\(img.mime);base64,\(img.data.base64EncodedString())"
+        webView.evaluateJavaScript("window.pasteImage ? window.pasteImage('\(url)') : false") { [weak self] took, _ in
+            guard let self, (took as? Bool) != true else { return }
+            _ = (self.firstResponder ?? self).tryToPerform(#selector(NSText.paste(_:)), with: self)
+        }
+        return true
     }
 
     /// Renders the live board to a PNG — the development check for layout,

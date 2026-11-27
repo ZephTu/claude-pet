@@ -142,8 +142,8 @@ final class NotePanel: NSPanel {
     }
 }
 
-/// A text view that turns a pasted image (a screenshot, or an image file copied in Finder) into
-/// a saved file rather than inline rich text.
+/// A text view that turns a pasted image (a screenshot, an image file copied in Finder, a BMP from
+/// Deskflow) into a saved file rather than inline rich text.
 final class NoteTextView: NSTextView {
     var onImage: ((Data, String) -> Void)?
 
@@ -157,10 +157,8 @@ final class NoteTextView: NSTextView {
                 return
             }
         }
-        if pb.string(forType: .string) == nil, let img = NSImage(pasteboard: pb),
-           let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-           let png = rep.representation(using: .png, properties: [:]) {
-            onImage?(png, "image/png")
+        if pb.string(forType: .string) == nil, let img = PasteboardImage.read(pb) {
+            onImage?(img.data, img.mime)
             return
         }
         pasteAsPlainText(sender)
