@@ -24,7 +24,7 @@ enum JobRunner {
         // the history shows, rather than two runs fighting over one session.
         let lockFD = open(store.folder(id).appending(path: "lock").path, O_CREAT | O_RDWR, 0o600)
         // Except that a fixed-time run of a job that keeps one session waits a while for the run
-        // going on: that is a chat with the secretary, and its evening report shouldn't be lost to it.
+        // going on: that is a chat with the secretary, and its weekly report shouldn't be lost to it.
         let waitFor: TimeInterval = trigger == "schedule" && first.sessionMode == .resume && first.schedule.kind != .every ? 600 : 0
         let deadline = Date().addingTimeInterval(waitFor)
         var locked = lockFD >= 0 && flock(lockFD, LOCK_EX | LOCK_NB) == 0
@@ -115,8 +115,8 @@ enum JobRunner {
             let base = claudeFlags(job)
             // A long-lived session is compacted before it gets heavy, so every run doesn't
             // re-read its whole history.
-            if resuming, job.compactAbovePct > 0, let ctx = state["contextTokens"] as? Int,
-               let window = state["contextWindow"] as? Int, window > 0, ctx * 100 >= job.compactAbovePct * window {
+            if resuming, let ctx = state["contextTokens"] as? Int, let window = state["contextWindow"] as? Int,
+               job.shouldCompact(contextTokens: ctx, window: window) {
                 _ = execute(shellClaude(["-p", "--output-format", "json", "--resume", sid] + base.model),
                             cwd: cwd, env: env, stdin: "/compact", out: errPath, err: errPath,
                             timeout: 15, stop: store.stopURL(id))

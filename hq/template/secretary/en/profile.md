@@ -9,11 +9,11 @@ English
 ## Role
 <!-- what you do, your team, who you report to -->
 
-## Projects
-<!-- each line of work and what matters in it: deadlines, who is waiting, what "done" means -->
-
 ## Preferences
-<!-- how you like answers, what to flag right away, what can wait -->
+<!-- How you decide, one rule a line: "reviewers who don't answer in two days: don't wait",
+     "ask before anything that costs money". Every task session is told this section, so keep it
+     short. The secretary proposes rules from how you answer asks (weekly), as diffs you approve.
+     Where your work stands is not kept here: the secretary reads the board. -->
 
 ## Routine
 <!-- when you work, when you check the board, what a normal week looks like -->

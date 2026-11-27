@@ -10,8 +10,7 @@ import Foundation
 ///   `--agent secretary`, the same session every run, compacted past a threshold and skipped
 ///   when the subscription's quota is nearly used up (see Jobs.swift). Each message from the board
 ///   is one run, its text the run's prompt. Its schedule, off until the user turns it on from the
-///   secretary's window, is the evening report: weekdays at 18:30, the weekly one on Fridays
-///   (`hq report` picks which);
+///   secretary's window, is the weekly report: Fridays at 17:00 (a daily report only when asked);
 /// - the session is bound to the secretary's card, so the hq hooks give it the card's rules, file
 ///   its `hq-asks` as asks in Needs you, and tell it the answers at its next turn;
 /// - the board shows the conversation in Peek, by the session's id;
@@ -111,7 +110,7 @@ final class SecretaryController {
             o["schedule"] = ["enabled": job.enabled, "kind": sch.kind.rawValue,
                              // false: its scheduled runs ask something else (the user's own prompt).
                              "reports": migrating || Self.writesReports(job),
-                             "hour": sch.hour, "minute": sch.minute,
+                             "hour": sch.hour, "minute": sch.minute, "days": sch.days,
                              "next": job.enabled ? (job.schedule.nextRuns(after: Date(), count: 1, anchor: nil).first.map(Jobs.iso) ?? "") : ""]
         }
         o["feed"] = jobStatus(Self.feedJobID)
@@ -205,14 +204,14 @@ final class SecretaryController {
         return start(text, trigger: "chat")
     }
 
-    /// The evening report on or off: the job's schedule (weekdays 18:30 unless the user changed it
+    /// The weekly report on or off: the job's schedule (Fridays 17:00 unless the user changed it
     /// in Scheduled). Turning it on gives the job the report prompt if it asks something else, and
     /// a fixed time if it runs every N minutes: the user asked for reports, from the window.
     func setReports(on: Bool) async -> (Any?, String?) {
         if let err = await prepare() { return (nil, err) }
-        if on, var job = store.load(Self.jobID), !Self.writesReports(job) {
+        if on, var job = store.load(Self.jobID), !Self.reportPrompts.contains(job.prompt) {
             job.prompt = Self.reportPrompt
-            if job.schedule.kind == .every { job.schedule = Self.reportSchedule }
+            job.schedule = Self.migratedSchedule(job.schedule)
             if let err = await save(job) { return (nil, err) }
         }
         let r = await jobs.setEnabled(Self.jobID, on)
@@ -339,22 +338,39 @@ final class SecretaryController {
         return r
     }
 
-    /// What a scheduled run asks: the report that is due (`hq report` picks daily or weekly). It
+    /// What a scheduled run asks: the weekly report, for the reader `secretary/reports.md` names. It
     /// names the steps itself: an agent definition the user edited keeps its old instructions.
     static var reportPrompt: String { L(reportPrompts[0], reportPrompts[1]) }
     private static let reportPrompts = [
+        "Scheduled run: write the weekly report (Reports in your instructions): run `~/.claude/hq/bin/hq report weekly`, write the report to the file it names, for the reader and in the format of secretary/reports.md, run `~/.claude/hq/bin/hq report keep <that file name>`, propose what the week's answers teach about the user's preferences, then stop.",
+        "定时运行：写周报（照你说明里的 Reports 一节）：运行 `~/.claude/hq/bin/hq report weekly`，按 secretary/reports.md 里写的读者和格式把报告写进它给出的文件，再运行 `~/.claude/hq/bin/hq report keep <那个文件名>`，提议从本周的答复里学到的偏好，然后停。"]
+    /// What scheduled runs asked before reports became weekly: the daily report, the weekly one on Fridays.
+    private static let dailyPrompts: Set<String> = [
         "Scheduled run: write the report that is due (Reports in your instructions): run `~/.claude/hq/bin/hq report`, write the report to the file it names, in the format of secretary/reports.md, run `~/.claude/hq/bin/hq report keep <that file name>`, then stop.",
         "定时运行：写今天该写的报告（照你说明里的 Reports 一节）：运行 `~/.claude/hq/bin/hq report`，按 secretary/reports.md 的格式把报告写进它给出的文件，再运行 `~/.claude/hq/bin/hq report keep <那个文件名>`，写完就停。"]
-    static func writesReports(_ job: Job) -> Bool { reportPrompts.contains(job.prompt) }
-    /// The schedule a job made before reports existed had, and the time reports run at instead.
-    static let reportSchedule = Schedule(kind: .weekdays, hour: 18, minute: 30, cron: "30 18 * * 1-5")
+    static func writesReports(_ job: Job) -> Bool { reportPrompts.contains(job.prompt) || dailyPrompts.contains(job.prompt) }
+    /// Its session is compacted past this many tokens too: on a 1M window, 50% let it reach 188k.
+    static let compactTokens = 150_000
+    /// When the weekly report runs: Friday afternoon, before the week is over.
+    static let reportSchedule = Schedule(kind: .weekly, hour: 17, minute: 0, days: [5], cron: "0 17 * * 5")
     private static let oldPrompts: Set<String> = ["Look over the board: what needs my attention?", "看一眼看板：有什么需要我注意的？"]
-    /// Made before reports: its prompt and schedule were placeholders nobody ran (it was off).
-    private static func needsMigration(_ job: Job) -> Bool { !job.enabled && oldPrompts.contains(job.prompt) }
-    /// The default 09:00 placeholder, or every N minutes (a report an hour is not a report), becomes
-    /// the evening; a fixed time the user chose stays.
-    private static func migratedSchedule(_ s: Schedule) -> Schedule {
-        s == Schedule() || s.kind == .every ? reportSchedule : s
+    /// Made before reports (its prompt and schedule were placeholders nobody ran: it was off), or
+    /// writing the daily report, from before reports became weekly.
+    private static func needsMigration(_ job: Job) -> Bool {
+        (!job.enabled && oldPrompts.contains(job.prompt)) || dailyPrompts.contains(job.prompt)
+    }
+    /// A report a week: the default 09:00 placeholder or every N minutes becomes Friday 17:00, a
+    /// time of day the user chose (daily, weekdays, several days a week) moves to Fridays, a cron
+    /// that fires more than once a week becomes Friday 17:00; a weekly or cron one that already
+    /// runs at most once a week stays.
+    static func migratedSchedule(_ s: Schedule, now: Date = Date()) -> Schedule {
+        if s == Schedule() || s.kind == .every { return reportSchedule }
+        if s.kind == .daily || s.kind == .weekdays || (s.kind == .weekly && s.days.count > 1) {
+            return Schedule(kind: .weekly, hour: s.hour, minute: s.minute, days: [5], cron: "\(s.minute) \(s.hour) * * 5")
+        }
+        let next = s.nextRuns(after: now, count: 2, anchor: nil)
+        if next.count == 2, next[1].timeIntervalSince(next[0]) < 6 * 86_400 { return reportSchedule }
+        return s
     }
 
     /// The job as the secretary needs it. The user may change its model, time limit, quota and
@@ -366,13 +382,14 @@ final class SecretaryController {
         var job = store.load(Self.jobID) ?? Job(
             id: Self.jobID, name: L("Secretary", "秘书"), kind: .claude, prompt: Self.reportPrompt,
             cwd: root, schedule: Self.reportSchedule, enabled: false, timeoutMinutes: 15, sessionMode: .resume,
-            compactAbovePct: 50, notify: .failure, agent: "secretary", allowedTools: tools)
+            compactAbovePct: 50, compactAboveTokens: Self.compactTokens, notify: .failure, agent: "secretary", allowedTools: tools)
         let fresh = store.load(Self.jobID) == nil
         let old = Self.needsMigration(job)
         if !fresh, !old, job.directory == root, job.agent == "secretary", job.sessionMode == .resume,
-           job.kind == .claude, job.allowedTools == tools { return nil }
+           job.kind == .claude, job.allowedTools == tools, job.compactAboveTokens > 0 { return nil }
         job.cwd = root; job.agent = "secretary"; job.sessionMode = .resume; job.kind = .claude
         job.allowedTools = tools
+        if job.compactAboveTokens <= 0 { job.compactAboveTokens = Self.compactTokens }
         if old {
             job.prompt = Self.reportPrompt
             job.schedule = Self.migratedSchedule(job.schedule)

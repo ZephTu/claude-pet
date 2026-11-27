@@ -3752,8 +3752,8 @@ async function setupSecretary() {
 
 // Messages the board or its schedule sent on your behalf: a line in the middle, not your bubble.
 const SEC_NOTES = [
-  [/^(Scheduled run:|定时运行：)/, "report", () => T("Scheduled: the report that is due", "定时：写今天该写的报告")],
-  [/^(Write the report that is due now|现在写今天该写的报告)/, "report", () => T("You asked for the report now", "你让它现在写一份报告")],
+  [/^(Scheduled run:|定时运行：)/, "report", () => T("Scheduled: the weekly report", "定时：写周报")],
+  [/^(Write the report that is due now|现在写今天该写的报告|Write this week's report now|现在写本周的周报)/, "report", () => T("You asked for the report now", "你让它现在写一份报告")],
   [/^(I answered your proposals on the board|我在看板上回应了你的建议)/, "wake", () => T("You answered its proposals", "你回应了它的建议")],
 ];
 const secNote = (text) => { const n = SEC_NOTES.find(([re]) => re.test(String(text || "").trim())); return n ? { kind: n[1], text: n[2]() } : null; };
@@ -3941,7 +3941,7 @@ function secRows(m, busy, doing) {
 
 // The side column (wide windows only), in two layers. On top what wants your eyes: what it keeps
 // an eye on and the proposals waiting on your answer (gone when there are none), open by default.
-// Below, folded to one line each until opened: its reports, what it does by itself (the evening
+// Below, folded to one line each until opened: its reports, what it does by itself (the weekly
 // report, the Zulip · Jira scan, ticking finished todos: a switch and a run-now each, the details
 // in their tooltips) and the files it remembers. A section's fold is kept per machine.
 const SIDE_OPEN = { watch: true, asks: true, rep: false, auto: false, mem: false };
@@ -4002,17 +4002,17 @@ function secSide(m, st, o) {
   const hourly = fd.kind === "cron" && fd.cron === "0 9-19 * * 1-5";
   const mins = ac.job ? ac.everyMinutes : 5;
   const evTip = o.sch.reports === false
-    ? T("Scheduled runs use the prompt you wrote in Scheduled; this switch turns evening reports on and replaces that prompt", "定时运行用的是你在定时任务里写的 prompt；打开这个开关会改成傍晚写报告，替换掉那个 prompt")
-    : `${o.when}${T(", weekly on Fridays", "，周五写周报")}${o.sch.next ? T(` · next: ${o.sch.next}`, ` · 下一次：${o.sch.next}`) : ""}`;
+    ? T("Scheduled runs use the prompt you wrote in Scheduled; this switch turns the weekly report on and replaces that prompt", "定时运行用的是你在定时任务里写的 prompt；打开这个开关会改成写周报，替换掉那个 prompt")
+    : `${o.when}${o.sch.next ? T(` · next: ${o.sch.next}`, ` · 下一次：${o.sch.next}`) : ""}`;
   const autos = [
     // Scheduled runs with a prompt of the user's own: say so on the row, since its switch replaces that prompt.
-    [o.evening, row("moon", o.sch.reports === false && o.sch.enabled ? T("Runs your own prompt", "在跑你自己的 prompt") : T("Evening report", "傍晚写报告"), evTip, o.evening, `data-action="secretary-reports" data-on="${o.sch.reports === false || !o.sch.enabled ? "1" : ""}"`, "")],
+    [o.evening, row("moon", o.sch.reports === false && o.sch.enabled ? T("Runs your own prompt", "在跑你自己的 prompt") : T("Weekly report", "写周报"), evTip, o.evening, `data-action="secretary-reports" data-on="${o.sch.reports === false || !o.sch.enabled ? "1" : ""}"`, "")],
     [fd.enabled, row("scan", T("Scan Zulip · Jira", "扫 Zulip · Jira"), `${hourly ? T("Weekdays, hourly 9–19", "工作日 9–19 点每小时") : T("As set in Scheduled", "按定时任务的设置")}\n${secFeedTip()}`, fd.enabled,
       `data-action="secretary-feed" data-on="${fd.enabled ? "" : "1"}"`, runBtn("secretary-feed-now", fd, T("Scan now", "现在扫一次"))), fd.last && fd.last.failed],
     [ac.enabled, row("tick", T("Tick finished todos", "自动勾完成的待办"), `${!ac.job || ac.kind === "every" ? T(`Every ${mins} min`, `每 ${mins} 分钟`) : T("As set in Scheduled", "按定时任务的设置")}\n${secCloseTip()}`, ac.enabled,
       `data-action="secretary-autoclose" data-on="${ac.enabled ? "" : "1"}"`, runBtn("secretary-autoclose-now", ac, T("Check now", "现在查一次"))), ac.last && ac.last.failed],
   ];
-  const names = [T("Evening report", "傍晚写报告"), T("Scan Zulip · Jira", "扫 Zulip · Jira"), T("Tick finished todos", "自动勾完成的待办")];
+  const names = [T("Weekly report", "写周报"), T("Scan Zulip · Jira", "扫 Zulip · Jira"), T("Tick finished todos", "自动勾完成的待办")];
   const dots = `<span class="dots" title="${esc(autos.map(([on], i) => `${names[i]}: ${on ? T("on", "开") : T("off", "关")}`).join("\n"))}">${autos.map(([on, , bad]) => `<i class="${bad ? "bad" : on ? "on" : ""}"></i>`).join("")}</span>`;
   const auto = sec("auto", T("Runs by itself", "自动做的事"), 0, dots, autos.map(([, h]) => h).join(""));
 
@@ -4059,8 +4059,10 @@ function drawSecretary(toBottom) {
   m.keys = rows ? rows.map((r) => r.key) : null;
 
   const sch = st.schedule || {}, reports = st.reports || [];
-  const hm = `${String(sch.hour ?? 18).padStart(2, "0")}:${String(sch.minute ?? 30).padStart(2, "0")}`;
-  const when = sch.kind === "weekdays" ? T(`weekdays ${hm}`, `工作日 ${hm}`) : sch.kind === "daily" ? T(`daily ${hm}`, `每天 ${hm}`) : T("as set in Scheduled", "按定时任务的设置");
+  const hm = `${String(sch.hour ?? 17).padStart(2, "0")}:${String(sch.minute ?? 0).padStart(2, "0")}`;
+  const DAYS = [null, T("Mondays", "每周一"), T("Tuesdays", "每周二"), T("Wednesdays", "每周三"), T("Thursdays", "每周四"), T("Fridays", "每周五"), T("Saturdays", "每周六"), T("Sundays", "每周日")];
+  const when = sch.kind === "weekly" && (sch.days || []).length === 1 && DAYS[sch.days[0]] ? `${DAYS[sch.days[0]]} ${hm}`
+    : sch.kind === "weekdays" ? T(`weekdays ${hm}`, `工作日 ${hm}`) : sch.kind === "daily" ? T(`daily ${hm}`, `每天 ${hm}`) : T("as set in Scheduled", "按定时任务的设置");
   const dayWord = (date) => { const n = Math.round((new Date(localDate(new Date().toISOString())) - new Date(date)) / 86400000);
     return n === 0 ? T("today", "今天") : n === 1 ? T("yesterday", "昨天") : T(`${n} days ago`, `${n} 天前`); };
   const repPop = `<div class="pop" role="menu"><div class="ph">${T("Reports", "报告")}</div>
@@ -4073,8 +4075,8 @@ function drawSecretary(toBottom) {
   const mem = Object.keys(st.files || {}).filter((f) => st.files[f]).sort((a, b) => memRank(a) - memRank(b) || a.localeCompare(b));
   const evening = sch.reports === false
     // Its scheduled runs ask what you wrote in Scheduled; turning reports on replaces that.
-    ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Evening report", "傍晚写报告")}<span class="switch"><span></span></span></button>`
-    : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Evening report", "傍晚写报告")}</span><span class="meta">${when}${T(", weekly on Fridays", "，周五写周报")}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
+    ? `<button class="pi" data-action="secretary-reports" data-on="1" title="${T("Turning reports on replaces the prompt you gave it in Scheduled", "开启定时报告会替换你在“定时任务”里给它的 prompt")}">${sch.enabled ? T("Scheduled runs use your own prompt — write reports instead", "定时运行用的是你自己的 prompt——改成写报告") : T("Weekly report", "写周报")}<span class="switch"><span></span></span></button>`
+    : `<button class="pi" data-action="secretary-reports" data-on="${sch.enabled ? "" : "1"}" title="${sch.next ? T(`Next: ${esc(sch.next)}`, `下一次：${esc(sch.next)}`) : ""}"><span class="lbl">${T("Weekly report", "写周报")}</span><span class="meta">${when}</span><span class="switch ${sch.enabled ? "on" : ""}"><span></span></span></button>`;
   const morePop = `<div class="pop" role="menu">${evening}<hr><div class="ph">Zulip · Jira</div>${secFeedItems(st, "pi")}<hr><div class="ph">${T("Finished todos", "完成的待办")}</div>${secCloseItems(st, "pi")}
     ${mem.length ? `<hr><div class="ph">${T("What it remembers", "它记着的")}</div>${mem.map((f) => `<button class="pi" data-action="open" data-path="${esc(st.memory + "/" + f)}" title="${T("Read it in the reading area; Open in editor there to edit", "在阅读区打开；要改就点那里的“用编辑器打开”")}">${esc(MEM[f] || f)}<span class="meta">${esc(f.replace(/\.md$/, ""))}</span></button>`).join("")}` : ""}
     <hr><button class="pi" data-action="copy-all">${T("Copy the conversation", "复制整段对话")}</button></div>`;
@@ -4931,7 +4933,7 @@ async function pumpSecretary(head) {
     if (!ui.outbox[SEC].length) delete ui.outbox[SEC];
     if (ui.modal && ui.modal.secretary && ui.modal.sec) { ui.modal.sec.running = true; ui.modal.sentMsg = { text: head.message, at: Date.now() }; }
   } catch (e) {
-    // A run that started in the meantime (the evening report): wait for it instead.
+    // A run that started in the meantime (the weekly report): wait for it instead.
     if (!(await free())) { head.state = "wait"; ui.sending.delete(SEC); outboxChanged(SEC); return later(); }
     head.state = "failed"; head.err = String(e.message || e);
     toast(T(`Not sent: ${head.err}`, `没发出去：${head.err}`), true);
@@ -5124,7 +5126,7 @@ document.addEventListener("click", async (ev) => {
     ui.drawer = null;
     render();
   }
-  // The secretary's menus close on any click but their own button's, or the evening report's
+  // The secretary's menus close on any click but their own button's, or the weekly report's
   // or the scan's switch (you see it flip).
   if (ui.modal && ui.modal.pop && !(el && ["sec-pop", "secretary-reports", "secretary-feed", "secretary-autoclose"].includes(el.dataset.action))) {
     ui.modal.pop = null;
@@ -5401,7 +5403,7 @@ document.addEventListener("click", async (ev) => {
       try { ui.secretary = await apiObj("secretary-reports", { on: d.on === "1" }); }
       catch (e) { return toast(String(e.message || e), true); }
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
-      return toast(d.on === "1" ? T("Evening report on", "定时报告已开启") : T("Evening report off", "定时报告已关闭"));
+      return toast(d.on === "1" ? T("Weekly report on", "周报已开启") : T("Weekly report off", "周报已关闭"));
     case "secretary-feed":
     case "secretary-feed-now":
       try { ui.secretary = await apiObj(d.action, { on: d.on === "1" }); }
@@ -5415,7 +5417,7 @@ document.addEventListener("click", async (ev) => {
       if (ui.modal && ui.modal.secretary) { ui.modal.sec = ui.secretary; drawPeek(false); }
       return toast(d.action === "secretary-autoclose-now" ? T("Checking…", "正在检查…") : d.on === "1" ? T("Auto-tick on", "自动勾选已开启") : T("Auto-tick off", "自动勾选已关闭"));
     case "secretary-report-now":
-      return sendSecretary(T("Write the report that is due now (hq report, then hq report keep).", "现在写今天该写的报告（hq report，写完 hq report keep）。"));
+      return sendSecretary(T("Write this week's report now (hq report weekly, then hq report keep).", "现在写本周的周报（hq report weekly，写完 hq report keep）。"));
     case "secretary-stop":
       try { await api("secretary-stop"); toast(T("Stopping…", "正在停止…")); } catch (e) { toast(String(e.message || e), true); }
       return refreshPeek();

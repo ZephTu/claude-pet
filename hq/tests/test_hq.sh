@@ -1628,6 +1628,37 @@ printf '# Weekly\n' > "$RD/$D-weekly.md"; "$HQ" report keep "$D-weekly.md" >/dev
 "$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["edits"]==[], r["edits"]' && ok "keeping the next report marks earlier edits as seen" || fail "edits seen"
 "$HQ" report list --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert sorted(x["kind"] for x in r)==["daily","weekly"], r' && ok "hq report list" || fail "report list"
 "$HQ" secretary --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["reports"])==2 and d["files"]["reports.md"] and d["ready"], d' && ok "secretary --json lists its reports" || fail "secretary reports"
+# The weekly report's answers to learn from: a no, or a note of 10+ characters; a bare or short yes isn't.
+"$HQ" ask add "$RT" "Cache the results?" >/dev/null; "$HQ" ask resolve "$RT.3" drop --via board
+"$HQ" ask add "$RT" "Open a PR?" >/dev/null; "$HQ" ask resolve "$RT.4" do "yes, and have a subagent review it first" --via board
+"$HQ" ask add "$RT" "Merge it?" >/dev/null; "$HQ" ask resolve "$RT.5" do "ok" --via board
+"$HQ" ask add "$RT" "Tell Atul?" >/dev/null; "$HQ" ask resolve "$RT.6" do "made an @me todo — the user will do it" --via board
+"$HQ" ask add "$RT" "Rerun it?" >/dev/null; "$HQ" ask resolve "$RT.7" do "will rerun it as suggested tonight" --via session
+"$HQ" report weekly --no-gh --json | python3 -c '
+import json,sys; r=json.load(sys.stdin); ids={a["id"]: a for a in r["learn"]}
+assert "'"$RT"'.3" in ids and ids["'"$RT"'.3"]["answer"]=="drop" and ids["'"$RT"'.4"]["task"]=="'"$RT"'", r["learn"]
+assert not {"'"$RT"'.5", "'"$RT"'.6", "'"$RT"'.7"} & set(ids), r["learn"]' && ok "weekly report lists the answers to learn from: the user's own words on the board" || fail "report learn"
+"$HQ" report weekly --no-gh | grep -q "^## Answers to learn from" && ok "weekly report text has the answers to learn from" || fail "report learn text"
+"$HQ" report daily --no-gh --json | python3 -c 'import json,sys; assert "learn" not in json.load(sys.stdin)' && ok "a daily report has no answers to learn from" || fail "daily learn"
+# The user's Preferences in profile.md: told to every bound session with the brief, once per change.
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "standing preferences" && fail "an empty Preferences section was told" || ok "an empty Preferences section tells nothing"
+python3 - "$T/root/secretary/profile.md" <<'PY2'
+import re, sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+s = re.sub(r"(## 偏好\n)", r"\1- 开 PR 后先用 subagent 做 code review\n", s)
+open(p, "w", encoding="utf-8").write(s)
+PY2
+c1="$(hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c1" | grep -q "standing preferences" && echo "$c1" | grep -q "先用 subagent 做 code review" && ! echo "$c1" | grep -q "keep it" && ok "new Preferences are told on the next prompt, without the template's comment" || fail "prefs told"
+hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}' | grep -q "standing preferences" && fail "prefs told twice" || ok "unchanged Preferences are not repeated"
+hook '{"session_id":"sess-p","hook_event_name":"SessionStart","source":"startup"}' | grep -q "先用 subagent 做 code review" && ok "SessionStart tells the Preferences" || fail "prefs at start"
+python3 - "$T/root/secretary/profile.md" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p, encoding="utf-8").read()
+open(p, "w", encoding="utf-8").write(s.replace("- 开 PR 后先用 subagent 做 code review\n", ""))
+PY2
+c1="$(hook '{"session_id":"sess-p","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
+echo "$c1" | grep -q "preferences were removed" && ! echo "$c1" | grep -q "no longer has a project brief" && ok "emptied Preferences are retracted on their own" || fail "prefs retracted"
 # Today's report written again (Write one now, then the evening run): the user's edits to it show.
 printf '# Daily\n\n## reportproj\n- loader merged (PR #7), my words\n' > "$RD/$D-daily.md"
 "$HQ" report daily --no-gh --json | python3 -c '
