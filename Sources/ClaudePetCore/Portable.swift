@@ -68,7 +68,7 @@ public enum Portable {
         for _ in 0..<attempts {
             var overlapped = OVERLAPPED()
             // LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY
-            if LockFileEx(handle, DWORD(0x2 | 0x1), 0, 1, 0, &overlapped).boolValue {
+            if LockFileEx(handle, DWORD(0x2 | 0x1), 0, 1, 0, &overlapped) {
                 defer {
                     var release = OVERLAPPED()
                     _ = UnlockFileEx(handle, 0, 1, 0, &release)

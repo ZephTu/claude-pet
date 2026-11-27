@@ -28,7 +28,7 @@ extension ProcessProbe {
         var entry = PROCESSENTRY32W()
         entry.dwSize = DWORD(MemoryLayout<PROCESSENTRY32W>.size)
         var all: [Entry] = []
-        var more = Process32FirstW(snap, &entry).boolValue
+        var more = Process32FirstW(snap, &entry)
         while more {
             let name = withUnsafeBytes(of: entry.szExeFile) { raw -> String in
                 String(decodingCString: raw.baseAddress!.assumingMemoryBound(to: UInt16.self), as: UTF16.self)
@@ -36,7 +36,7 @@ extension ProcessProbe {
             all.append(Entry(pid: Int32(bitPattern: entry.th32ProcessID),
                              parent: Int32(bitPattern: entry.th32ParentProcessID),
                              name: withoutExe(name)))
-            more = Process32NextW(snap, &entry).boolValue
+            more = Process32NextW(snap, &entry)
         }
         return all
         #else
@@ -75,7 +75,7 @@ extension ProcessProbe {
         defer { CloseHandle(process) }
         var buffer = [WCHAR](repeating: 0, count: 2048)
         var size = DWORD(buffer.count)
-        guard QueryFullProcessImageNameW(process, 0, &buffer, &size).boolValue else { return nil }
+        guard QueryFullProcessImageNameW(process, 0, &buffer, &size) else { return nil }
         return String(decoding: buffer.prefix(Int(size)), as: UTF16.self)
         #else
         return nil
@@ -89,7 +89,7 @@ extension ProcessProbe {
         else { return nil }
         defer { CloseHandle(process) }
         var created = FILETIME(), exited = FILETIME(), kernel = FILETIME(), user = FILETIME()
-        guard GetProcessTimes(process, &created, &exited, &kernel, &user).boolValue else { return nil }
+        guard GetProcessTimes(process, &created, &exited, &kernel, &user) else { return nil }
         // 100ns ticks since 1601-01-01.
         let ticks = UInt64(created.dwHighDateTime) << 32 | UInt64(created.dwLowDateTime)
         return Date(timeIntervalSince1970: Double(ticks) / 10_000_000 - 11_644_473_600)
@@ -110,7 +110,7 @@ extension ProcessProbe {
         else { return false }
         defer { CloseHandle(process) }
         var code: DWORD = 0
-        guard GetExitCodeProcess(process, &code).boolValue else { return false }
+        guard GetExitCodeProcess(process, &code) else { return false }
         return code == 259 /* STILL_ACTIVE */
         #else
         return false
