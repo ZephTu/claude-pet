@@ -708,10 +708,7 @@ public struct JobStore: Sendable {
         guard var line = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
         line.append(0x0a)
         try? FileManager.default.createDirectory(at: folder(id), withIntermediateDirectories: true)
-        let fd = open(runsURL(id).path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
-        line.withUnsafeBytes { _ = write(fd, $0.baseAddress, $0.count) }
+        Portable.append(line, toFile: runsURL(id).path)
     }
 
     public func runs(_ id: String, alive: (Int32) -> Bool = JobStore.isAlive) -> [JobRun] {
@@ -752,7 +749,13 @@ public struct JobStore: Sendable {
         try? data.write(to: stateURL(id), options: .atomic)
     }
 
-    public static func isAlive(_ pid: Int32) -> Bool { pid > 0 && (kill(pid, 0) == 0 || errno == EPERM) }
+    public static func isAlive(_ pid: Int32) -> Bool {
+        #if canImport(Darwin)
+        pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
+        #else
+        pid > 0 && Portable.processExists(pid)
+        #endif
+    }
 
     /// A new run's id: sortable, and unique enough for one job.
     public static func newRunID(_ now: Date = Date()) -> String {

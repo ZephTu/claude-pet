@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// Asks the kernel whether a process is still running, and what it is called.
@@ -41,7 +43,7 @@ public enum ProcessProbe {
     public static func looksLikeClaude(name: String, path: String?) -> Bool {
         if nameMatches(name, claudeProcessName) { return true }
         guard let path, !path.isEmpty else { return false }
-        let parts = path.split(separator: "/").map(String.init)
+        let parts = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).map(String.init)
         if let last = parts.last, nameMatches(last, claudeProcessName) { return true }
         // .../claude/versions/<version> — the native installer's layout.
         return parts.count >= 3
@@ -49,6 +51,7 @@ public enum ProcessProbe {
             && parts[parts.count - 3] == claudeProcessName
     }
 
+    #if canImport(Darwin)
     /// The full path of the executable `pid` is running, or nil if it is gone.
     public static func executablePath(pid: Int32) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
@@ -57,18 +60,27 @@ public enum ProcessProbe {
         return String(cString: buffer)
     }
 
+    #endif
+
     /// Is `pid` alive AND still running a process whose name starts with `name`?
     public static func isRunning(pid: Int32, named name: String) -> Bool {
         guard pid > 0, let actual = processName(pid: pid), !actual.isEmpty else { return false }
         return nameMatches(actual, name)
     }
 
+    #if canImport(Darwin)
+    static let nameLimit = Int(MAXCOMLEN)
+    #else
+    static let nameLimit = 255
+    #endif
+
     /// p_comm is truncated to 16 bytes by the kernel, which is the other reason
     /// this is a prefix test rather than equality.
     public static func nameMatches(_ actual: String, _ wanted: String) -> Bool {
-        !wanted.isEmpty && actual.hasPrefix(String(wanted.prefix(Int(MAXCOMLEN))))
+        !wanted.isEmpty && actual.hasPrefix(String(wanted.prefix(nameLimit)))
     }
 
+    #if canImport(Darwin)
     /// The kernel's short name for a running process, or nil when there is no
     /// such process.
     public static func processName(pid: Int32) -> String? {
@@ -109,6 +121,8 @@ public enum ProcessProbe {
         guard device != -1, device != 0, let name = devname(device, S_IFCHR) else { return nil }
         return "/dev/" + String(cString: name)
     }
+
+    #endif
 
     /// Walks up the process tree looking for a process with this name, starting
     /// at `pid`'s parent.
@@ -192,6 +206,7 @@ public enum ProcessProbe {
         arguments.contains("/shell-snapshots/snapshot-")
     }
 
+    #if canImport(Darwin)
     /// Is any process with this exact kernel name running?
     ///
     /// pet-emit asks this about the pet app before holding a permission prompt
@@ -264,4 +279,5 @@ public enum ProcessProbe {
         guard result == 0, size > 0 else { return nil }
         return info.kp_eproc.e_ppid
     }
+    #endif
 }

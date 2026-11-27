@@ -45,7 +45,24 @@ struct Entry {
                 rest.firstIndex(of: flag).flatMap { $0 + 1 < rest.count ? rest[$0 + 1] : nil }
             }
             let trigger = value("--trigger") ?? (rest.contains("--manual") ? "manual" : "schedule")
+            #if os(Windows)
+            _ = trigger
+            FileHandle.standardError.write(Data("pet-emit: scheduled jobs are not supported on Windows yet\n".utf8))
+            exit(2)
+            #else
             exit(JobRunner.run(id: arguments[1], trigger: trigger, promptFile: value("--prompt-file")))
+            #endif
+
+        case "--watch":
+            // The pet's state as JSON lines, for a shell other than the Mac app (PetWatch).
+            PetWatch.run()
+
+        case "--decide":
+            guard arguments.count == 4 else {
+                FileHandle.standardError.write(Data("usage: pet-emit --decide <session> <ask> allow|deny\n".utf8))
+                exit(2)
+            }
+            exit(PetWatch.decide(session: arguments[1], ask: arguments[2], behavior: arguments[3]))
 
         case "--version":
             print(petVersion)

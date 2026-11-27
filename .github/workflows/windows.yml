@@ -1,0 +1,89 @@
+name: Windows
+
+# The Windows spike (T-129): pet-emit built with Swift for Windows and smoke-tested with only its
+# own DLLs beside it, the Electron shell packaged, the window rendered once to a PNG, and the
+# lot uploaded as one bundle (install.ps1 inside) to try on a Windows machine.
+on:
+  push:
+    branches: [main, "Zeph-Tu/t129-*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.1.2-release
+          tag: 6.1.2-RELEASE
+
+      - name: Build pet-emit
+        run: swift build -c release --product PetEmit
+
+      - name: Collect pet-emit and the Swift runtime it needs
+        shell: pwsh
+        run: |
+          $out = "bundle\pet-emit"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item .build\release\PetEmit.exe "$out\pet-emit.exe"
+          $runtime = Split-Path ((where.exe swiftCore.dll) | Select-Object -First 1)
+          Write-Host "Swift runtime: $runtime"
+          Copy-Item "$runtime\*.dll" $out
+          Get-ChildItem $out | Format-Table Name, Length
+
+      - name: Smoke test pet-emit (no Swift toolchain on PATH)
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          powershell -ExecutionPolicy Bypass -File windows\scripts\smoke.ps1 (Resolve-Path bundle\pet-emit\pet-emit.exe)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Package the Electron shell
+        working-directory: windows
+        run: |
+          npm ci --no-audit --no-fund
+          npx electron-builder --win dir --x64 --publish never
+
+      - name: Assemble the bundle
+        shell: pwsh
+        run: |
+          Copy-Item windows\dist\win-unpacked bundle\app -Recurse
+          Copy-Item windows\scripts\install.ps1, windows\scripts\uninstall.ps1 bundle\
+
+      - name: Render the window once
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $home_ = Join-Path $env:RUNNER_TEMP pethome
+          New-Item -ItemType Directory -Force "$home_\sessions" | Out-Null
+          $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          '{"sessionId":"w1","project":"claude-pet","cwd":"C:\\w","state":"busy","tool":"Bash","detail":"","since":"' + $now + '","updatedAt":"' + $now + '","running":[{"id":"t","tool":"Bash","target":"swift build"}]}' |
+            Set-Content "$home_\sessions\w1.json"
+          '{"sessionId":"w2","project":"hq","cwd":"C:\\h","state":"waiting","tool":"Bash","detail":"","waitingOn":"rm -rf build/","since":"' + $now + '","updatedAt":"' + $now + '"}' |
+            Set-Content "$home_\sessions\w2.json"
+          $env:PET_HOME = $home_
+          $env:PET_EMIT = (Resolve-Path bundle\pet-emit\pet-emit.exe).Path
+          $env:PET_SHOT = Join-Path $env:RUNNER_TEMP "pet-window.png"
+          $env:PET_SHOT_JS = "window.togglePanel()"
+          $p = Start-Process bundle\app\ClaudePet.exe -PassThru
+          if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id -Force; throw "no shot in 60s" }
+          if (-not (Test-Path $env:PET_SHOT)) { throw "no PNG written" }
+          Get-Content "$env:APPDATA\ClaudePet\pet.log" -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pet-window-png
+          path: ${{ runner.temp }}/pet-window.png
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClaudePet-windows
+          path: bundle

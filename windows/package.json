@@ -1,0 +1,46 @@
+{
+  "name": "claude-pet-windows",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Claude Pet on Windows: the pet's web page in an Electron window, fed by pet-emit --watch (spike, T-129)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win zip --x64"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "dev.claude-pet.windows",
+    "productName": "ClaudePet",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../Resources/pet",
+        "to": "pet"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  },
+  "allowScripts": {
+    "electron@33.2.1": true
+  }
+}

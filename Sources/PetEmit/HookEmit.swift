@@ -51,10 +51,7 @@ enum HookEmit {
         // of this produced a file whose lines were spliced into each other,
         // which is a poor start for a tool whose whole job is to show you
         // exactly what arrived.
-        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
-        line.withUnsafeBytes { _ = Darwin.write(fd, $0.baseAddress, $0.count) }
+        Portable.append(line, toFile: path)
     }
 
     static func run(payload: Data) {
@@ -584,7 +581,7 @@ enum HookEmit {
         }
         // Written before the hold starts, so the app never sees an ask with nobody behind it.
         if holds {
-            ask["heldBy"] = Int(getpid())
+            ask["heldBy"] = Int(ProcessInfo.processInfo.processIdentifier)
             ask["heldUntil"] = iso8601(askedAt.addingTimeInterval(holdFor))
         }
         return ask
@@ -753,17 +750,7 @@ enum HookEmit {
     /// Runs `body` holding this session's lock. A hook may not hang, so after two seconds it
     /// gives up waiting and runs anyway — one lost update is better than a stuck session.
     private static func withSessionLock<T>(_ sessionID: String, _ body: () -> T) -> T {
-        let fd = open(lockURL(sessionID).path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return body() }
-        defer { close(fd) }
-        for _ in 0..<400 {
-            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-                defer { flock(fd, LOCK_UN) }
-                return body()
-            }
-            usleep(5_000)
-        }
-        return body()
+        Portable.withFileLock(lockURL(sessionID).path, attempts: 400, interval: 0.005, body)
     }
 
     /// Holds the PermissionRequest hook open until the user answers from the
@@ -814,7 +801,7 @@ enum HookEmit {
                     return
                 }
             }
-            usleep(250_000)
+            Thread.sleep(forTimeInterval: 0.25)
         }
     }
 
@@ -832,6 +819,10 @@ enum HookEmit {
 
     private static func projectName(fromCWD cwd: String) -> String {
         var trimmed = cwd
+        #if os(Windows)
+        // C:\work\demo: Windows hands the hook backslashes.
+        trimmed = trimmed.replacingOccurrences(of: "\\", with: "/")
+        #endif
         while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed.removeLast() }
         let name = (trimmed as NSString).lastPathComponent
         return name.isEmpty || name == "/" ? "~" : name

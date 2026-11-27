@@ -1,3 +1,5 @@
+// Scheduled jobs run under launchd, with POSIX process groups: macOS only for now.
+#if !os(Windows)
 import ClaudePetCore
 import Foundation
 
@@ -335,3 +337,4 @@ enum JobRunner {
         return f.string(from: d)
     }
 }
+#endif
