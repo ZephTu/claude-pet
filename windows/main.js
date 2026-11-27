@@ -23,6 +23,16 @@ const PET_HOME = process.env.PET_HOME || path.join(os.homedir(), ".claude", "pet
 const PET_EMIT = process.env.PET_EMIT || path.join(PET_HOME, process.platform === "win32" ? "pet-emit.exe" : "pet-emit");
 const PREFS = path.join(app.getPath("userData"), "prefs.json");
 const LOG = path.join(app.getPath("userData"), "pet.log");
+// Builds before productName was set kept their data under the package name: carry the saved
+// position and language over once.
+const OLD_DATA = path.join(app.getPath("appData"), "claude-pet-windows");
+try {
+  const old = path.join(OLD_DATA, "prefs.json");
+  if (!fs.existsSync(PREFS) && fs.existsSync(old)) {
+    fs.mkdirSync(path.dirname(PREFS), { recursive: true });
+    fs.copyFileSync(old, PREFS);
+  }
+} catch (_) {}
 
 // PetLayout.windowSize: the page is laid out for exactly this.
 const WIDTH = 480;

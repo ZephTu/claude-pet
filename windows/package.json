@@ -1,5 +1,6 @@
 {
   "name": "claude-pet-windows",
+  "productName": "ClaudePet",
   "private": true,
   "version": "0.1.0",
   "description": "Claude Pet on Windows: the pet's web page in an Electron window, fed by pet-emit --watch (spike, T-129)",

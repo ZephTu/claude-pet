@@ -23,6 +23,10 @@ Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Pet.ln
 $binaries = { Get-ChildItem $pet -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '\.(exe|dll)(\.old-\d+)?$' -or $_.Name -like 'pet-emit*' } }
 & $binaries | Remove-Item -Force -ErrorAction SilentlyContinue
+# The shell's prefs and log (claude-pet-windows is where builds before productName kept them).
+foreach ($d in 'ClaudePet', 'claude-pet-windows') {
+  Remove-Item (Join-Path $env:APPDATA $d) -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 $left = @(& $binaries) + @(if (Test-Path $app) { Get-Item $app })
 if ($left.Count) {

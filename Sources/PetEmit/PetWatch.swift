@@ -21,7 +21,10 @@ enum PetWatch {
             let line = render(state, now: now)
             if line != lastLine {
                 lastLine = line
-                FileHandle.standardOutput.write(Data((line + "\n").utf8))
+                // The reader went away (the shell quit or restarted us): stop quietly. The
+                // non-throwing write traps on a closed pipe on Windows.
+                do { try FileHandle.standardOutput.write(contentsOf: Data((line + "\n").utf8)) }
+                catch { exit(0) }
             }
             Thread.sleep(forTimeInterval: interval)
         }

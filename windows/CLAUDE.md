@@ -20,8 +20,8 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   panel (`setIgnoreMouseEvents(true, {forward:true})`), drag to move, click to `togglePanel` /
   `hitRow`. Tray menu: show/hide, back to the corner, language, log, quit.
 - Hooks in `settings.json` are written as `"$HOME/.claude/pet/pet-emit"` (quoted, forward
-  slashes), assuming Claude Code on Windows runs hook commands through Git Bash. **Not verified
-  on a real machine yet** — the first thing to check.
+  slashes): Claude Code on Windows runs hook commands through Git Bash. Verified on a real
+  machine (Claude Code 2.1.318) from Orca and Windows Terminal.
 - Windows-only Swift: `ProcessProbeWindows.swift` (Toolhelp32 etc.) and `Portable.swift`
   (append with `FILE_APPEND_DATA`, `LockFileEx` locks, `MoveFileExW` replace with retries,
   `processExists`).
@@ -30,12 +30,19 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
 
 ```powershell
 # Once: Swift 6.1.2 for Windows (with the VS Build Tools it asks for) and Node 20+.
-swift build --product PetEmit                       # debug build: .build\debug\PetEmit.exe
-powershell -ExecutionPolicy Bypass -File windows\scripts\smoke.ps1 (Resolve-Path .build\debug\PetEmit.exe)
+swift build --product PetEmit
+# The exe is in .build\x86_64-unknown-windows-msvc\debug (.build\debug is only a symlink to it,
+# and SwiftPM can't create it without Developer Mode).
+$bin = '.build\x86_64-unknown-windows-msvc\debug'
+powershell -ExecutionPolicy Bypass -File windows\scripts\smoke.ps1 (Resolve-Path $bin\PetEmit.exe)
+$env:PET_EMIT = (Resolve-Path $bin\PetEmit.exe).Path   # else ~\.claude\pet\pet-emit.exe
 cd windows; npm ci
-$env:PET_EMIT = (Resolve-Path ..\.build\debug\PetEmit.exe).Path   # else ~\.claude\pet\pet-emit.exe
 npx electron .
 ```
+
+- `npx electron .` (and a `PET_SHOT` render) exits at once, silently, while the installed pet
+  runs: both share `%APPDATA%\ClaudePet` and so the single-instance lock. Quit it from the tray
+  first.
 
 - `PET_HOME=<dir>` points both pet-emit and the shell at a scratch folder instead of
   `~\.claude\pet` (write fake `sessions\*.json` there to stage a state).
@@ -76,18 +83,34 @@ npx electron .
   `[char]0x4f60` for non-ASCII).
 - Every hook payload in tests needs `transcript_path`, or pet-emit ignores it.
 - `STILL_ACTIVE` (259) from `GetExitCodeProcess` means alive.
+- A shell started before the Swift install (Claude Code's own, say) lacks the toolchain on
+  PATH: reload it from the registry (Machine + User `Path`, User `SDKROOT`). A freshly built
+  `PetEmit.exe` run from Git Bash also needs `%LOCALAPPDATA%\Programs\Swift\Runtimes\6.1.2\usr\bin`
+  on PATH.
+- electron-builder fails unpacking `winCodeSign` without symlink rights (darwin `.dylib`
+  links). Turn on Developer Mode, or unpack the downloaded `.7z` yourself with
+  `node_modules\7zip-bin\win\x64\7za.exe` into
+  `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0` (the two link errors
+  are harmless).
+- To see a PermissionRequest, the test session must be in the default permission mode
+  (`claude --permission-mode default`): in `auto` mode the classifier approves the command and
+  no prompt (so no hook) happens. Writes to `/tmp` are allowed without asking too.
 
-## Next on the real machine (in order)
+## Verified on a real machine (Windows 11, two 2560x1440 screens at 150%)
 
-1. Install the CI bundle (or a local build) and start a Claude Code session in Windows Terminal /
-   PowerShell / Orca: does the hook run (sessions appear, the cat turns busy)? If hooks don't go
-   through Git Bash, change `SettingsPatch.hookCommand` for Windows (keep upgrading the old forms
-   via `legacyHookCommands`).
-2. Permission prompts: held, shown on the pet, Allow/Deny from the panel reaches Claude Code.
-3. Window behaviour: click-through outside the cat, drag, the panel, high-DPI scaling,
-   several monitors, the taskbar on another edge, tray menu, install/uninstall/reinstall while a
-   session runs.
-4. Backlog, roughly by value: jump to the session's terminal (Windows Terminal, Orca, VS Code);
-   finish notices and the hover detail card; start at login; scheduled jobs (`--run-job`, Task
-   Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
-   *kills* on Windows, Keychain → Credential Manager, a bundled Python).
+1. Hooks run (Orca and Windows Terminal): sessions appear, the cat turns busy. Orca sessions
+   record `terminal.kind = orca`; Windows Terminal ones record no terminal yet.
+2. Permission prompts: held, shown on the pet; Allow / Deny from the panel reach Claude Code
+   ("Denied by PermissionRequest hook", reason "The user denied this from Claude Pet").
+3. Window behaviour: sharp at 150%, click-through beside the cat and the open panel, drag,
+   click to open / close the panel, dragging to the second screen, tray menu. Reinstalling while
+   a session runs: pet-emit.exe was overwritten in place.
+
+Not checked yet: the taskbar on another edge; `uninstall.ps1`.
+
+## Next
+
+Backlog, roughly by value: jump to the session's terminal (Windows Terminal, Orca, VS Code);
+finish notices and the hover detail card; start at login; scheduled jobs (`--run-job`, Task
+Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
+*kills* on Windows, Keychain → Credential Manager, a bundled Python).
