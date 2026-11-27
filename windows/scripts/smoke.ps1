@@ -31,17 +31,17 @@ $v = & $Emit --version
 Check 'pet-emit starts with only its own DLLs' $LASTEXITCODE 0
 Write-Host "     version $v"
 
-Check 'SessionStart exits 0' (Emit '{"session_id":"s1","hook_event_name":"SessionStart","cwd":"C:\\work\\demo"}') 0
+Check 'SessionStart exits 0' (Emit '{"session_id":"s1","hook_event_name":"SessionStart","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo"}') 0
 Check 'SessionStart writes the session as idle' (Field s1 state) 'idle'
 Check '...under its folder name' (Field s1 project) 'demo'
-Emit '{"session_id":"s1","hook_event_name":"UserPromptSubmit","cwd":"C:\\work\\demo","prompt":"hi"}' | Out-Null
+Emit '{"session_id":"s1","hook_event_name":"UserPromptSubmit","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","prompt":"hi"}' | Out-Null
 Check 'UserPromptSubmit makes it busy' (Field s1 state) 'busy'
 
 # A held prompt, answered from "the pet".
 $env:PET_PERMISSION_WAIT = '20'
 $in = Join-Path $home_ 'ask.json'
 $out = Join-Path $home_ 'ask.out'
-[IO.File]::WriteAllText($in, '{"session_id":"s9","hook_event_name":"PermissionRequest","cwd":"C:\\work\\demo","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}')
+[IO.File]::WriteAllText($in, '{"session_id":"s9","hook_event_name":"PermissionRequest","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","tool_name":"Bash","tool_input":{"command":"rm -rf build/"}}')
 $held = Start-Process -FilePath $Emit -RedirectStandardInput $in -RedirectStandardOutput $out -NoNewWindow -PassThru
 $env:PET_PERMISSION_WAIT = '0'
 $ask = ''

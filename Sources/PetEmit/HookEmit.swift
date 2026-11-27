@@ -67,8 +67,8 @@ enum HookEmit {
 
         let sessionID = (hook["session_id"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // A session id with a slash would escape the sessions directory.
-        guard !sessionID.isEmpty, !sessionID.contains("/") else { return }
+        // A session id with a slash (or, on Windows, a backslash) would escape the sessions directory.
+        guard !sessionID.isEmpty, !sessionID.contains("/"), !sessionID.contains("\\") else { return }
         // Claude Code puts the transcript path on every hook payload. One without it was typed
         // by hand — another session testing this binary with `echo '{"session_id":"x"}' |
         // pet-emit` — and recording it would list a session that does not exist, kept alive for
