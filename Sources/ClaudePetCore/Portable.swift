@@ -83,6 +83,22 @@ public enum Portable {
         #endif
     }
 
+    /// Moves `source` over `destination` in one rename, replacing it. FileManager.replaceItemAt
+    /// on the Mac; on Windows Foundation has not implemented that call (it traps), so MoveFileExW
+    /// with MOVEFILE_REPLACE_EXISTING, which is the same single rename. Throws when it fails.
+    public static func replaceItem(at destination: URL, withItemAt source: URL) throws {
+        #if os(Windows)
+        let ok = nativePath(source.path).withCString(encodedAs: UTF16.self) { from in
+            nativePath(destination.path).withCString(encodedAs: UTF16.self) { to in
+                MoveFileExW(from, to, DWORD(0x1 /* MOVEFILE_REPLACE_EXISTING */))
+            }
+        }
+        if !ok { throw CocoaError(.fileWriteUnknown) }
+        #else
+        _ = try FileManager.default.replaceItemAt(destination, withItemAt: source)
+        #endif
+    }
+
     /// The path as the operating system spells it. On Windows Foundation can hand back
     /// "/C:/Users/…"; Win32 wants "C:\Users\…".
     public static func nativePath(_ path: String) -> String {

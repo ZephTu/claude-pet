@@ -945,7 +945,7 @@ enum HookEmit {
         let tmp = URL(fileURLWithPath: path.path
             + ".tmp.\(ProcessInfo.processInfo.processIdentifier).\(UInt32.random(in: 0...UInt32.max))")
         guard (try? data.write(to: tmp)) != nil else { return }
-        if (try? FileManager.default.replaceItemAt(path, withItemAt: tmp)) == nil {
+        if (try? Portable.replaceItem(at: path, withItemAt: tmp)) == nil {
             // replaceItemAt fails when the destination does not exist yet.
             if (try? FileManager.default.moveItem(at: tmp, to: path)) == nil {
                 try? FileManager.default.removeItem(at: tmp)

@@ -1,3 +1,4 @@
+import ClaudePetCore
 import Foundation
 
 /// Adds and removes the pet's hooks in ~/.claude/settings.json.
@@ -306,7 +307,7 @@ enum SettingsPatch {
     private static func atomicWrite(_ data: Data, to url: URL) -> Bool {
         let tmp = URL(fileURLWithPath: url.path + ".tmp")
         guard (try? data.write(to: tmp)) != nil else { return false }
-        if (try? FileManager.default.replaceItemAt(url, withItemAt: tmp)) != nil { return true }
+        if (try? Portable.replaceItem(at: url, withItemAt: tmp)) != nil { return true }
         // replaceItemAt fails when the destination does not exist yet.
         if (try? FileManager.default.moveItem(at: tmp, to: url)) != nil { return true }
         try? FileManager.default.removeItem(at: tmp)
