@@ -4797,6 +4797,17 @@ document.addEventListener("paste", (ev) => {
   ev.preventDefault();
   addImages(box.dataset.session || box.dataset.att, files);
 });
+// ⌘V with an image the web view can't read itself (a BMP, which Deskflow puts on the clipboard):
+// the Mac app hands it over as a PNG data URL. False when no message box has the focus.
+window.pasteImage = (dataURL) => {
+  const el = document.activeElement;
+  const box = el && el.closest && el.closest("textarea[data-session], [data-att]");
+  if (!box) return false;
+  fetch(dataURL).then((r) => r.blob())
+    .then((b) => addImages(box.dataset.session || box.dataset.att, [new File([b], "pasted.png", { type: b.type })]))
+    .catch((e) => toast(String(e.message || e), true));
+  return true;
+};
 document.addEventListener("dragover", (ev) => {
   const zone = !ui.dragging && ev.target.closest && ev.target.closest(".send, .card.ask, .capture, .c-foot");
   if (!zone || !ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
