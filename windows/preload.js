@@ -31,7 +31,16 @@ function setInteractive(on) {
   ipcRenderer.send("interactive", on);
 }
 
+// A press whose mouseup never came (focus taken mid-press, alt-tab) must not leave the window
+// holding on to clicks: let it go as soon as no button is down, or the window loses focus.
+function release() {
+  if (press && press.dragging) ipcRenderer.send("drag-end");
+  press = null;
+}
+window.addEventListener("blur", release);
+
 window.addEventListener("mousemove", (e) => {
+  if (press && e.buttons === 0) release();
   if (press) {
     if (!press.dragging && Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4 && press.onPet) {
       press.dragging = true;

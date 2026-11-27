@@ -168,7 +168,17 @@ function startWatcher() {
     setTimeout(startWatcher, 10000);
     return;
   }
-  watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const restart = () => { watcher = null; if (!quitting) setTimeout(startWatcher, 2000); };
+  try {
+    watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    log("pet-emit --watch did not start:", e.message);
+    return restart();
+  }
+  // Blocked by antivirus or AppLocker, say: logged and tried again, never an uncaught exception.
+  let restarted = false;
+  const again = () => { if (!restarted) { restarted = true; restart(); } };
+  watcher.on("error", (e) => { log("pet-emit --watch failed:", e.message); again(); });
   log("watching with", PET_EMIT, "pid", watcher.pid);
   readline.createInterface({ input: watcher.stdout }).on("line", (line) => {
     try { push(JSON.parse(line)); } catch (e) { log("bad line:", e.message); }
@@ -176,8 +186,7 @@ function startWatcher() {
   watcher.stderr.on("data", (d) => log("pet-emit:", String(d).trim()));
   watcher.on("exit", (code) => {
     log("pet-emit --watch exited", code);
-    watcher = null;
-    if (!quitting) setTimeout(startWatcher, 2000);
+    again();
   });
 }
 

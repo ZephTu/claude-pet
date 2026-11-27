@@ -7,6 +7,7 @@ $emit = Join-Path $pet 'pet-emit.exe'
 
 Write-Host '==> stopping the pet'
 Get-Process ClaudePet -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process ClaudePet -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 
 if (Test-Path $emit) {
   Write-Host '==> removing the hooks from settings.json (backed up first)'
@@ -15,10 +16,18 @@ if (Test-Path $emit) {
 }
 
 Write-Host '==> removing the app and the hook binary'
-Remove-Item (Join-Path $env:LOCALAPPDATA 'Programs\ClaudePet') -Recurse -Force -ErrorAction SilentlyContinue
+$app = Join-Path $env:LOCALAPPDATA 'Programs\ClaudePet'
+Remove-Item $app -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Pet.lnk') -Force -ErrorAction SilentlyContinue
-Get-ChildItem $pet -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Extension -in '.exe', '.dll' -or $_.Name -like 'pet-emit*' } |
-  Remove-Item -Force -ErrorAction SilentlyContinue
+# pet-emit.exe, the runtime DLLs, and the *.old-N copies install.ps1 left when one was in use.
+$binaries = { Get-ChildItem $pet -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '\.(exe|dll)(\.old-\d+)?$' -or $_.Name -like 'pet-emit*' } }
+& $binaries | Remove-Item -Force -ErrorAction SilentlyContinue
 
+$left = @(& $binaries) + @(if (Test-Path $app) { Get-Item $app })
+if ($left.Count) {
+  Write-Host 'Some files are still in use (a Claude Code session running a hook?). Close it and run this again:'
+  $left | ForEach-Object { Write-Host "  $($_.FullName)" }
+  exit 1
+}
 Write-Host "Removed. Session records in $pet were left in place."

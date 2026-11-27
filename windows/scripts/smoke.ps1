@@ -82,6 +82,37 @@ Check '...keeps what was there' (($patched | ConvertFrom-Json).model) 'opus'
 & $Emit --unpatch-settings $settings | Out-Null
 Check '--unpatch-settings removes it again' ((Get-Content $settings -Raw) -match 'pet-emit') 'False'
 
+# A settings.json shaped like a real one: booleans, 0/1, floats, non-ASCII, the user's own hooks,
+# a UTF-8 BOM. Whatever Windows Foundation makes of it, the user's values must come back intact.
+$real = @'
+{"model":"opus","includeCoAuthoredBy":false,"cleanupPeriodDays":1,"ratio":0.75,"zero":0,
+ "statusLine":{"type":"command","command":"bash ~/.claude/statusline.sh"},
+ "env":{"GREETING":"\u4f60\u597d \u2014 caf\u00e9"},
+ "hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo mine","timeout":3}]}]}}
+'@
+[IO.File]::WriteAllText($settings, $real, (New-Object Text.UTF8Encoding($true)))
+& $Emit --patch-settings $settings | Out-Null
+Check 'a real settings.json (with a BOM) patches' $LASTEXITCODE 0
+$p = Get-Content $settings -Raw -Encoding UTF8 | ConvertFrom-Json
+Check '...the hook command is quoted for Git Bash' ($p.hooks.Stop.hooks.command -contains '"$HOME/.claude/pet/pet-emit"') 'True'
+Check '...the user''s own Stop hook stays' ($p.hooks.Stop.hooks.command -contains 'echo mine') 'True'
+& $Emit --unpatch-settings $settings | Out-Null
+$u = Get-Content $settings -Raw -Encoding UTF8 | ConvertFrom-Json
+Check '...and after unpatching: false is still false' $u.includeCoAuthoredBy 'False'
+Check '...1 is still 1' $u.cleanupPeriodDays 1
+Check '...0.75 is still 0.75' $u.ratio 0.75
+Check '...0 is still 0' $u.zero 0
+$greeting = [string][char]0x4f60 + [char]0x597d + ' ' + [char]0x2014 + ' caf' + [char]0x00e9
+Check '...non-ASCII text survives' $u.env.GREETING $greeting
+Check '...the statusline is untouched' $u.statusLine.command 'bash ~/.claude/statusline.sh'
+Check '...the user''s hook is still there' (@($u.hooks.Stop.hooks.command) -join ',') 'echo mine'
+
+# The unquoted command an earlier spike build wrote is upgraded in place, not duplicated.
+[IO.File]::WriteAllText($settings, '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$HOME/.claude/pet/pet-emit","timeout":5}]}]}}')
+& $Emit --patch-settings $settings | Out-Null
+$p = Get-Content $settings -Raw | ConvertFrom-Json
+Check 'the old unquoted command is upgraded in place' ((@($p.hooks.Stop.hooks.command)) -join ',') '"$HOME/.claude/pet/pet-emit"'
+
 Remove-Item $home_ -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed) { Write-Host "$failed failed"; exit 1 }
 Write-Host 'all passed'

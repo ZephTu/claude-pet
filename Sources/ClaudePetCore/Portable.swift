@@ -88,12 +88,19 @@ public enum Portable {
     /// with MOVEFILE_REPLACE_EXISTING, which is the same single rename. Throws when it fails.
     public static func replaceItem(at destination: URL, withItemAt source: URL) throws {
         #if os(Windows)
-        let ok = nativePath(source.path).withCString(encodedAs: UTF16.self) { from in
-            nativePath(destination.path).withCString(encodedAs: UTF16.self) { to in
-                MoveFileExW(from, to, DWORD(0x1 /* MOVEFILE_REPLACE_EXISTING */))
+        // The destination can be open for a moment without FILE_SHARE_DELETE (a reader, an
+        // antivirus scan), which fails the rename with a sharing violation: try again briefly
+        // before giving the update up.
+        for attempt in 0..<10 {
+            let ok = nativePath(source.path).withCString(encodedAs: UTF16.self) { from in
+                nativePath(destination.path).withCString(encodedAs: UTF16.self) { to in
+                    MoveFileExW(from, to, DWORD(0x1 /* MOVEFILE_REPLACE_EXISTING */))
+                }
             }
+            if ok { return }
+            if attempt < 9 { Thread.sleep(forTimeInterval: 0.015) }
         }
-        if !ok { throw CocoaError(.fileWriteUnknown) }
+        throw CocoaError(.fileWriteUnknown)
         #else
         _ = try FileManager.default.replaceItemAt(destination, withItemAt: source)
         #endif

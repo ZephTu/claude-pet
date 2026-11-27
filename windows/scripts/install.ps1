@@ -15,7 +15,7 @@ Get-ChildItem $here -Recurse -File | Unblock-File
 
 Write-Host '==> stopping a running pet'
 Get-Process ClaudePet -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 500
+Get-Process ClaudePet -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 
 Write-Host "==> installing the hook to $pet"
 New-Item -ItemType Directory -Force -Path (Join-Path $pet 'sessions') | Out-Null
@@ -32,13 +32,15 @@ $emit = Join-Path $pet 'pet-emit.exe'
 & $emit --version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'pet-emit.exe does not start' }
 
+# The app goes in before the hooks, so a failure here leaves settings.json untouched.
+Write-Host "==> installing the app to $appDest"
+New-Item -ItemType Directory -Force (Split-Path $appDest) | Out-Null
+if (Test-Path $appDest) { Remove-Item $appDest -Recurse -Force }
+Copy-Item (Join-Path $here 'app') $appDest -Recurse
+
 Write-Host '==> wiring hooks (settings.json is backed up first)'
 & $emit --patch-settings (Join-Path $claude 'settings.json')
 if ($LASTEXITCODE -ne 0) { throw 'patching settings.json failed - it was left as it was' }
-
-Write-Host "==> installing the app to $appDest"
-if (Test-Path $appDest) { Remove-Item $appDest -Recurse -Force }
-Copy-Item (Join-Path $here 'app') $appDest -Recurse
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Pet.lnk'))
 $link.TargetPath = Join-Path $appDest 'ClaudePet.exe'
