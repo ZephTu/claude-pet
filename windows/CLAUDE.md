@@ -133,8 +133,20 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   (`pet-emit --jump`). What the Mac keeps in its defaults (BoardPrefs, BoardSeen, BoardPhrases)
   and the reading area are `pet-emit --board` (`PetBoard.swift`, `pet\board.json`, over
   QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `jobs` is
-  empty; the secretary and jobs answer "not on Windows yet". The board window gets no push
-  (BoardEvents): the page polls; phones get one (below).
+  empty; the secretary and jobs answer "not on Windows yet".
+  Pushes (BoardEvents, `board-events.js`, started with the pet): `fs.watch` recursive over the
+  HQ root, `~\.claude\hq` and the pet's folder, BoardPush.relevant and PushGate ported; each
+  push drops board.js's kept `board` / `sessions` / `status` reads (not `agents`: each phone's
+  refresh would start a Claude Code), then main.js calls `window.hqPush(n)` on the board window
+  (also while the page loads: its first read may be under way) and remote.js sends `changed` to
+  every phone's `/events`. The board's did-finish-load calls `hqPushOn()` while the HQ root
+  itself is watched (`running`, as the Mac's), so its timer reads only every 30 s. Nudges (no
+  file says it): a board.js write op or `card-seen` (`onChanged`), the pet's unread marks / dots
+  changing (`boardNudgeIfChanged` on each `--watch` line and the nap), the tray's click target.
+  hq's `config.json` written: the roots are looked at again at once, after 1 s and after 5 s
+  (install.sh writes the config before it makes the root's folders); otherwise each minute. Checked with a dev pet (`PET_SHOT_BOARD`,
+  a write into a scratch `PET_HOME`): the board read again ~0.3 s after the write, and not at
+  all for 13 s without one.
   Renders: `PET_SHOT_BOARD=1` shoots the board window (`=T-123`: opened at that task);
   `PET_HQ_HOME=<dir>` points board.js (and the hq it runs, as USERPROFILE) at a scratch home
   with its own `hq/install.sh`.
@@ -177,12 +189,25 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   the computer, never user text) then say "PC" / "电脑" for "Mac".
   Switches and devices are prefs.json `boardServerEnabled`, `boardServerTailnet`,
   `boardServerDevices` (ISO dates), `boardServerPort`. QR codes: the `qrcode` package (a runtime
-  dependency, packed into app.asar). `POST /events` (SSE) is fed by `board-events.js`:
-  `fs.watch` recursive over the HQ root, `~\.claude\hq` and the pet's folder, BoardPush.relevant
-  and PushGate ported, dropping board.js's kept `board` / `sessions` / `status` reads first
-  (not `agents`: each phone's refresh would start a Claude Code). Checked on this machine over
+  dependency, packed into app.asar). `POST /events` (SSE) is fed by the board's pushes (above).
+  Checked on this machine over
   loopback, the LAN address and this PC's own Tailscale address (whois of itself); not yet from a
   real phone.
+- Shortcuts and the quick note (the Mac's HotKey pair and QuickNotePanel): `globalShortcut`
+  Ctrl+Alt+J / Ctrl+Alt+N, prefs.json `jumpHotKey` / `noteHotKey`, registered at start when
+  on; a tick shows whether it is registered (a taken chord is stored as off, as AppMain.toggle).
+  Jump: the `--watch` row in `waiting` with the largest `waitedSeconds` and no `snoozedFor`
+  (PanelModel.jumpTarget), through `openSession`. The note box is `quicknote.html` +
+  `quicknote-preload.js` in a frameless transparent always-on-top window (20px margin for the
+  card's CSS shadow), reused after the first open; pasted images go through board.js
+  `saveImage` at once, the note through board.js `note-add` (`via: "hotkey"`) and `note-sort`,
+  and the cat says each step (`window.say`, AppMain.fileQuickNote / noteDestLabel). A failed
+  add reopens the box with the text and images (sent once the page has loaded). Alt+F4 only
+  hides the box (the draft stays). While it is up the pet window is unfocusable: hiding the box
+  activates the next window down, which would otherwise be the always-on-top pet. Enter waits
+  for images still being saved; a paste that carries text (Excel cells) pastes the text; other
+  image types (BMP) are redrawn as PNG. `PET_SHOT_NOTE=1` shoots the box (not after a script
+  hides it: capturePage on a hidden window never returns).
 - The cat opens the board: a double click toggles it (preload.js puts the list back as the
   first click found it, as WebBridge.handleDoubleClick; "in front" = focused, or lost focus in
   the last 1.5 s); tray → "Clicking a Session Opens" (prefs.json `clickTarget`, the board's
@@ -311,6 +336,10 @@ npx electron .
   "Error launching app" dialog on the user's screen. Git Bash's `timeout` can't run `npx` (127).
 - A test client must send a body with `Content-Length`: Node's default chunked body is refused
   (400), as on the Mac.
+- Chromium on Windows marks a window that other windows fully cover as hidden
+  (`document.hidden`): the board then holds a push until it is uncovered (`pushMissed`). To check
+  pushes in a dev run on a busy screen, start electron with
+  `--disable-features=CalculateNativeWinOcclusion`.
 - `PET_SHOT_JS` can drive preload.js: a `MouseEvent` dispatched on `window` from the page reaches
   its listeners (how the hover card was checked without a mouse).
 - `hq/tests/test_hq.sh` runs in Git Bash (`py` on PATH): 587 pass, 68 fail, every one from the
