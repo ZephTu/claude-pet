@@ -21,6 +21,8 @@
       "preload.js",
       "board.js",
       "board-preload.js",
+      "remote.js",
+      "board-events.js",
       "package.json"
     ],
     "extraResources": [
@@ -45,5 +47,8 @@
   },
   "allowScripts": {
     "electron@33.2.1": true
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
   }
 }

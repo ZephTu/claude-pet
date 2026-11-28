@@ -48,6 +48,7 @@ jobs:
         working-directory: windows
         run: |
           npm ci --no-audit --no-fund
+          node --test test/remote.test.js
           npx electron-builder --win dir --x64 --publish never
 
       - name: Assemble the bundle

@@ -6,7 +6,10 @@
 // page reloads when it changes. T("English", "中文") picks one — every word the board shows goes
 // through it. Technical terms (session, todo, ask, Resume…) may stay English in the Chinese.
 const LANG = window.PET_LANG === "zh" ? "zh" : "en";
-const T = (en, zh) => (LANG === "zh" ? zh : en);
+// On Windows (window.PET_OS, set by its board window and on a phone it serves) the computer the
+// board runs on is a PC: what the page says of "the Mac" says "the PC" / "电脑" there.
+const ON_PC = window.PET_OS === "windows";
+const T = (en, zh) => (LANG === "zh" ? (ON_PC ? zh.replace(/ ?\bMac\b ?/g, "电脑") : zh) : (ON_PC ? en.replace(/\bMac\b/g, "PC") : en));
 document.documentElement.lang = LANG;
 
 const ORDER = ["waiting-on-me", "blocked", "active", "done", "abandoned"];

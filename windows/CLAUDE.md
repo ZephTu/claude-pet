@@ -98,8 +98,8 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   (`pet-emit --jump`). What the Mac keeps in its defaults (BoardPrefs, BoardSeen, BoardPhrases)
   and the reading area are `pet-emit --board` (`PetBoard.swift`, `pet\board.json`, over
   QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `jobs` is
-  empty; the secretary, jobs and phone access answer "not on Windows yet". No push
-  (BoardEvents): the page polls.
+  empty; the secretary and jobs answer "not on Windows yet". The board window gets no push
+  (BoardEvents): the page polls; phones get one (below).
   Renders: `PET_SHOT_BOARD=1` shoots the board window (`=T-123`: opened at that task);
   `PET_HQ_HOME=<dir>` points board.js (and the hq it runs, as USERPROFILE) at a scratch home
   with its own `hq/install.sh`.
@@ -123,6 +123,23 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   but the user's CLAUDE_CODE_* settings kept). With `--focus`, `pet-emit --raise-orca` brings Orca
   forward. No reuse of an idle tab or of Orca's sleeping tab (the Mac's resumeInIdleTab /
   resumeInOrcaPlace).
+- Phone access (`remote.js`, BoardServer + RemoteAccess + Tailnet ported to Node): the board's
+  `remote*` ops go to it (board.js `configure({remote})`). A `net` server on `::` (dual stack,
+  `pauseOnConnect`) decides on the peer's address before a byte is read (`admission`: private /
+  on-link, or a Tailscale address while Tailscale is on, then `tailscale whois --json` from
+  `%ProgramFiles%\Tailscale\tailscale.exe` must name this PC's own untagged user), then hands
+  the socket to an `http` server. Same Host / Origin checks, SHA-256 token hashes, lockout, code
+  cancellation, ETag / gzip, `X-HQ-Have` "same" answers, phone-op allow list (`PHONE_OPS`;
+  test/remote.test.js checks every board.js op is on it or on `PC_ONLY`). `POST /api` runs
+  board.js `handle(body, null)` (`skip` from `pet\board.json`'s shared prefs); served pages get
+  `HQ_REMOTE`, `PET_LANG` and `PET_OS = "windows"` (the page then says "PC" / "电脑" for "Mac").
+  Switches and devices are prefs.json `boardServerEnabled`, `boardServerTailnet`,
+  `boardServerDevices` (ISO dates), `boardServerPort`. QR codes: the `qrcode` package (a runtime
+  dependency, packed into app.asar). `POST /events` (SSE) is fed by `board-events.js`:
+  `fs.watch` recursive over the HQ root, `~\.claude\hq` and the pet's folder, BoardPush.relevant
+  and PushGate ported, dropping board.js's kept reads first. Checked on this machine over
+  loopback, the LAN address and this PC's own Tailscale address (whois of itself); not yet from a
+  real phone.
 - The cat opens the board: a double click toggles it (preload.js puts the list back as the
   first click found it, as WebBridge.handleDoubleClick; "in front" = focused, or lost focus in
   the last 1.5 s); tray → "Clicking a Session Opens" (prefs.json `clickTarget`, the board's
@@ -169,6 +186,13 @@ npx electron .
 
 - `PET_HOME=<dir>` points both pet-emit and the shell at a scratch folder instead of
   `~\.claude\pet` (write fake `sessions\*.json` there to stage a state).
+- `node --test test/remote.test.js` (in `windows`): phone access's checks and its server on a
+  loopback port (CI runs it).
+- `ELECTRON_RUN_AS_NODE=1 npx electron scripts/serve-board.js 18790 [--tailnet]`: phone access
+  alone (the Mac's `--serve-board`), its prefs in a temp file, printing a pairing link.
+  `npx electron <full path>\scripts\render-url.js out.png [390x844] "<url>"` renders a page as a
+  phone's browser does (`RENDER_JS` runs first). Stop serve-board by its electron.exe process:
+  stopping the shell that started it leaves it holding the port.
 - `PET_SHOT=out.png` (plus `PET_SHOT_JS="window.togglePanel()"`, `PET_SHOT_DELAY=ms`) renders the
   window to a PNG and quits; read the PNG to check layout.
 - The shell's log: `%APPDATA%\ClaudePet\pet.log` (tray → Open the log).
@@ -229,6 +253,11 @@ npx electron .
   Start test windows from the Start menu, not from a shell inside Orca.
 - A debug `PetEmit.exe` is ~10x slower than release at scanning a transcript (`--detail` took
   3 s): time things with the release build.
+- Electron 33 on Windows exits at once with 127 when an `http://` argument is followed by another
+  argument (render-url.js takes the URL last). `electron -e …` isn't supported: it shows an
+  "Error launching app" dialog on the user's screen. Git Bash's `timeout` can't run `npx` (127).
+- A test client must send a body with `Content-Length`: Node's default chunked body is refused
+  (400), as on the Mac.
 - `PET_SHOT_JS` can drive preload.js: a `MouseEvent` dispatched on `window` from the page reaches
   its listeners (how the hover card was checked without a mouse).
 - `hq/tests/test_hq.sh` runs in Git Bash (`py` on PATH): 587 pass, 68 fail, every one from the
@@ -275,7 +304,7 @@ with a real claude-hud reading; the taskbar on another edge.
 The HQ board on Windows is done (hq, the board window, prompts, starting / resuming sessions,
 typing into them, the cat opening the board; `/hq-onboard` was run on this machine). Later or
 never: scheduled jobs (`--run-job`, Task Scheduler),
-the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
+the secretary, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).
 
 Other backlog: jump to VS Code's terminal; the cat's chatter (quota warnings, context-long

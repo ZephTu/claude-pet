@@ -477,7 +477,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li><b>打开看板</b>：双击小猫，或托盘图标 → <b>Task Board…</b>。</li>
 <li><b>开新 session、续上</b>：可选的地方是 Orca、Windows Terminal 和后台（没有 iTerm2）。<b>Windows Terminal</b> 是它的新标签页，<b>Orca</b> 是 Orca 的新标签页，<b>后台</b> 是 <code>claude --bg</code>。续上总是开新标签页，不复用空闲的。看板只用官方安装的 <code>claude.exe</code> 开 session，不用 npm 的 <code>claude.cmd</code>。</li>
 <li><b>给 session 打字</b>（发消息、Esc、■ 停止、批准计划）：Windows Terminal、控制台窗口和 Orca 都支持，标签页不用在最前面。文字按粘贴送进去，<code>/</code>、<code>@</code> 不会弹补全菜单。停止是在它的终端里按两次 Ctrl+C。</li>
-<li><b>还没有的</b>：秘书、定时任务、手机访问（会提示"Windows 版暂不支持"）；消息源和自动勾选完成的待办（凭据在 macOS 钥匙串里）；记一笔的快捷键 ⌃⌥⌘N。</li>
+<li><b>手机访问</b>：和 Mac 一样（见<a href="#zh-phone">在手机上用看板</a>），地址是这台电脑的局域网地址或 Tailscale 名字。第一次打开时 Windows 防火墙会问是否允许 ClaudePet 接受连接：勾选<b>专用网络</b>并允许（Windows 把 Wi-Fi 当成公用网络时，要把公用网络也勾上，或把 Wi-Fi 改成专用网络）。换端口：在 <code>%APPDATA%\ClaudePet\prefs.json</code> 里写 <code>"boardServerPort": 8791</code>，再关掉重开。</li>
+<li><b>还没有的</b>：秘书、定时任务（会提示"Windows 版暂不支持"）；消息源和自动勾选完成的待办（凭据在 macOS 钥匙串里）；记一笔的快捷键 ⌃⌥⌘N。</li>
 </ul>
 
 <h1 id="zh-files">安装会改什么 · 卸载</h1>
@@ -992,7 +993,8 @@ next: "run baseline on clusters A/C"
 <li><b>Opening the board</b>: double-click the cat, or the tray icon → <b>Task Board…</b>.</li>
 <li><b>New sessions and Resume</b>: the places to pick are Orca, Windows Terminal and Background (no iTerm2). <b>Windows Terminal</b> is a new tab in it, <b>Orca</b> a new Orca tab, <b>Background</b> <code>claude --bg</code>. Resume always opens a new tab rather than reusing an idle one. The board starts sessions only with the native <code>claude.exe</code>, not npm's <code>claude.cmd</code>.</li>
 <li><b>Typing into a session</b> (messages, Esc, ■ stop, approving a plan): Windows Terminal, console windows and Orca, with the tab in front or not. The text arrives as a paste, so <code>/</code> and <code>@</code> open no menu. Stop is Ctrl+C, twice, in its terminal.</li>
-<li><b>Not yet</b>: the secretary, scheduled jobs and phone access (the board says "not on Windows yet"); feeds and ticking finished todos (their credentials are in the macOS Keychain); the quick-note shortcut ⌃⌥⌘N.</li>
+<li><b>Phone access</b>: as on the Mac (see <a href="#en-phone">The board on your phone</a>), at this PC's local addresses or its Tailscale name. The first time, Windows Firewall asks whether ClaudePet may accept connections: allow it on <b>Private networks</b> (if Windows takes your Wi-Fi for a Public network, allow Public too, or set the Wi-Fi to Private). Another port: <code>"boardServerPort": 8791</code> in <code>%APPDATA%\ClaudePet\prefs.json</code>, then turn it off and on.</li>
+<li><b>Not yet</b>: the secretary and scheduled jobs (the board says "not on Windows yet"); feeds and ticking finished todos (their credentials are in the macOS Keychain); the quick-note shortcut ⌃⌥⌘N.</li>
 </ul>
 
 <h1 id="en-files">What install changes · uninstall</h1>
