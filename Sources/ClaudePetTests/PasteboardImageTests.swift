@@ -98,6 +98,14 @@ enum PasteboardImageTests {
         info += le32(0x00FF_0000) + le32(0x0000_FF00) + le32(0x0000_00FF) + le32(0xFF00_0000)
         info += Array("BGRs".utf8) + [UInt8](repeating: 0, count: 36 + 12) + le32(4) + le32(0) + le32(0) + le32(0)
         let offset = 14 + info.count
-        return Data([0x42, 0x4D] + le32(offset + px.count) + le32(0) + le32(offset) + info + px)
+        // Appended one part at a time: as one `+` chain starting from a literal, the type checker
+        // gives up (macOS CI: "unable to type-check this expression in reasonable time").
+        var file: [UInt8] = [0x42, 0x4D]
+        file += le32(offset + px.count)
+        file += le32(0)
+        file += le32(offset)
+        file += info
+        file += px
+        return Data(file)
     }
 }

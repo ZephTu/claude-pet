@@ -75,6 +75,9 @@ public enum PetLaunch {
     public static func acquireLock(at url: URL, wait: TimeInterval = 0) -> Lock {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
+        #if !canImport(Darwin)
+        return .unavailable("the one-pet lock is macOS only")
+        #else
         let fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fd >= 0 else { return .unavailable(String(cString: strerror(errno))) }
         let deadline = Date().addingTimeInterval(wait)
@@ -90,6 +93,7 @@ public enum PetLaunch {
         let pid = "\(getpid())\n"
         _ = pid.withCString { write(fd, $0, strlen($0)) }
         return .acquired(fd)
+        #endif
     }
 
     /// The pid the running pet wrote into its lock file, if it can be read.

@@ -210,9 +210,20 @@ public enum TranscriptStats {
     private static func find(_ needle: [UInt8], in base: UnsafePointer<UInt8>,
                              from: Int, to: Int) -> Int? {
         guard to - from >= needle.count else { return nil }
+        #if canImport(Darwin)
         return needle.withUnsafeBytes { n -> Int? in
             guard let found = memmem(base + from, to - from, n.baseAddress, n.count) else { return nil }
             return UnsafeRawPointer(found) - UnsafeRawPointer(base)
         }
+        #else
+        // No memmem on Windows: a plain scan for the first byte, then a compare.
+        guard let first = needle.first else { return from }
+        var i = from
+        while i <= to - needle.count {
+            if base[i] == first, (1..<needle.count).allSatisfy({ base[i + $0] == needle[$0] }) { return i }
+            i += 1
+        }
+        return nil
+        #endif
     }
 }

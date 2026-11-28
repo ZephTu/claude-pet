@@ -2,7 +2,7 @@
 import argparse
 import contextlib
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import io
 import json
 import os

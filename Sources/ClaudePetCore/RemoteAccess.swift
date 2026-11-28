@@ -1,3 +1,5 @@
+// Phone access needs CryptoKit and Compression: macOS only for now.
+#if canImport(CryptoKit)
 import Compression
 import CryptoKit
 import Foundation
@@ -521,3 +523,4 @@ public enum RemoteAccess {
         return html.replacingCharacters(in: head.upperBound..<head.upperBound, with: "\n" + tags)
     }
 }
+#endif

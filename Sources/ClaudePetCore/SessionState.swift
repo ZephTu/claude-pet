@@ -238,7 +238,7 @@ public struct SessionState: Sendable, Equatable, Decodable {
 
     /// Can a click outside the terminal answer this prompt right now? Only while a pet-emit is
     /// actually holding its hook open: alive, and before the end of its wait.
-    public func askAnswerable(now: Date, isAlive: (Int32) -> Bool = { kill($0, 0) == 0 }) -> Bool {
+    public func askAnswerable(now: Date, isAlive: (Int32) -> Bool = Portable.processExists) -> Bool {
         guard state == .waiting, !askId.isEmpty, let until = askHeldUntil, now < until,
               let holder = askHeldBy, holder > 0
         else { return false }

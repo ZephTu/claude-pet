@@ -29,12 +29,20 @@ public enum DocReader {
         if let r = path.range(of: #":\d+(:\d+)?$"#, options: .regularExpression) { path.removeSubrange(r) }
         path = expand(path)
         guard !path.isEmpty else { return nil }
-        if !path.hasPrefix("/") {
+        if !isAbsolute(path) {
             let dir = expand(cwd.trimmingCharacters(in: .whitespacesAndNewlines))
-            guard dir.hasPrefix("/") else { return nil }
+            guard isAbsolute(dir) else { return nil }
             path = (dir as NSString).appendingPathComponent(path)
         }
         return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    /// `/…`, and on Windows `C:\…` or `C:/…` too (not a share: `\\server\…` would reach that host).
+    private static func isAbsolute(_ p: String) -> Bool {
+        #if os(Windows)
+        if p.dropFirst().hasPrefix(":\\") || p.dropFirst().hasPrefix(":/") { return true }
+        #endif
+        return p.hasPrefix("/")
     }
 
     /// Whether the reading area shows this path (by its name alone; `read` checks the file).

@@ -51,10 +51,7 @@ enum HookEmit {
         // of this produced a file whose lines were spliced into each other,
         // which is a poor start for a tool whose whole job is to show you
         // exactly what arrived.
-        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-        guard fd >= 0 else { return }
-        defer { close(fd) }
-        line.withUnsafeBytes { _ = Darwin.write(fd, $0.baseAddress, $0.count) }
+        Portable.append(line, toFile: path)
     }
 
     static func run(payload: Data) {
@@ -70,8 +67,8 @@ enum HookEmit {
 
         let sessionID = (hook["session_id"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // A session id with a slash would escape the sessions directory.
-        guard !sessionID.isEmpty, !sessionID.contains("/") else { return }
+        // A session id with a slash (or, on Windows, a backslash) would escape the sessions directory.
+        guard !sessionID.isEmpty, !sessionID.contains("/"), !sessionID.contains("\\") else { return }
         // Claude Code puts the transcript path on every hook payload. One without it was typed
         // by hand — another session testing this binary with `echo '{"session_id":"x"}' |
         // pet-emit` — and recording it would list a session that does not exist, kept alive for
@@ -135,7 +132,7 @@ enum HookEmit {
             environment: ProcessInfo.processInfo.environment, sessionId: sessionID,
             parentArguments: pid.flatMap(ProcessProbe.parentPID).flatMap(ProcessProbe.arguments))
         let terminal = background ? nil
-            : terminalRef(cwd: cwd, tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "")
+            : terminalRef(cwd: cwd, tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "", pid: pid)
         // Who holds a prompt's hook open, and until when: the app offers Allow / Deny only
         // while that is true (SessionState.askAnswerable). Only while the app is there to be
         // clicked; a test that sets the wait itself is asking for it regardless.
@@ -182,6 +179,13 @@ enum HookEmit {
             if transcript.hasPrefix("/") {
                 document["transcript"] = transcript
             }
+#if os(Windows)
+            // C:\Users\…\.claude\projects\…\<session>.jsonl: absolute there too. hq's Sessions
+            // column and the board read a live session's transcript from here.
+            if transcript.dropFirst().hasPrefix(":\\") || transcript.dropFirst().hasPrefix(":/") {
+                document["transcript"] = transcript
+            }
+#endif
             if let pid { document["pid"] = pid }
             if background {
                 document["background"] = true
@@ -308,10 +312,19 @@ enum HookEmit {
     /// - Parameter tty: the Claude Code process's controlling terminal. The hook
     ///   cannot read its own — it is run detached — so this is resolved from the
     ///   pid instead, and is empty for a session that has no terminal at all.
-    private static func terminalRef(cwd: String, tty: String) -> [String: String]? {
+    /// - Parameter pid: the Claude Code process. Only Windows uses it, to ask the session's
+    ///   console whether it has a window (WindowsJump.identify).
+    private static func terminalRef(cwd: String, tty: String, pid: Int32?) -> [String: String]? {
+        #if os(Windows)
+        let env = ProcessInfo.processInfo.environment
+        guard let ref = TerminalTarget.identify(environment: env, cwd: cwd, tty: tty)
+                ?? WindowsJump.identify(environment: env, claudePID: pid)
+        else { return nil }
+        #else
         guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
                                                 cwd: cwd, tty: tty)
         else { return nil }
+        #endif
         return ["kind": ref.kind, "handle": ref.handle]
     }
 
@@ -584,7 +597,7 @@ enum HookEmit {
         }
         // Written before the hold starts, so the app never sees an ask with nobody behind it.
         if holds {
-            ask["heldBy"] = Int(getpid())
+            ask["heldBy"] = Int(ProcessInfo.processInfo.processIdentifier)
             ask["heldUntil"] = iso8601(askedAt.addingTimeInterval(holdFor))
         }
         return ask
@@ -753,17 +766,7 @@ enum HookEmit {
     /// Runs `body` holding this session's lock. A hook may not hang, so after two seconds it
     /// gives up waiting and runs anyway — one lost update is better than a stuck session.
     private static func withSessionLock<T>(_ sessionID: String, _ body: () -> T) -> T {
-        let fd = open(lockURL(sessionID).path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return body() }
-        defer { close(fd) }
-        for _ in 0..<400 {
-            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-                defer { flock(fd, LOCK_UN) }
-                return body()
-            }
-            usleep(5_000)
-        }
-        return body()
+        Portable.withFileLock(lockURL(sessionID).path, attempts: 400, interval: 0.005, body)
     }
 
     /// Holds the PermissionRequest hook open until the user answers from the
@@ -814,7 +817,7 @@ enum HookEmit {
                     return
                 }
             }
-            usleep(250_000)
+            Thread.sleep(forTimeInterval: 0.25)
         }
     }
 
@@ -832,6 +835,10 @@ enum HookEmit {
 
     private static func projectName(fromCWD cwd: String) -> String {
         var trimmed = cwd
+        #if os(Windows)
+        // C:\work\demo: Windows hands the hook backslashes.
+        trimmed = trimmed.replacingOccurrences(of: "\\", with: "/")
+        #endif
         while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed.removeLast() }
         let name = (trimmed as NSString).lastPathComponent
         return name.isEmpty || name == "/" ? "~" : name
@@ -954,7 +961,7 @@ enum HookEmit {
         let tmp = URL(fileURLWithPath: path.path
             + ".tmp.\(ProcessInfo.processInfo.processIdentifier).\(UInt32.random(in: 0...UInt32.max))")
         guard (try? data.write(to: tmp)) != nil else { return }
-        if (try? FileManager.default.replaceItemAt(path, withItemAt: tmp)) == nil {
+        if (try? Portable.replaceItem(at: path, withItemAt: tmp)) == nil {
             // replaceItemAt fails when the destination does not exist yet.
             if (try? FileManager.default.moveItem(at: tmp, to: path)) == nil {
                 try? FileManager.default.removeItem(at: tmp)

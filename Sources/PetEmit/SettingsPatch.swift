@@ -1,3 +1,4 @@
+import ClaudePetCore
 import Foundation
 
 /// Adds and removes the pet's hooks in ~/.claude/settings.json.
@@ -17,14 +18,25 @@ import Foundation
 ///    through to the file it points at; replacing the link itself would fail or
 ///    silently cut it off from the repo.
 enum SettingsPatch {
+    #if os(Windows)
+    /// Quoted on Windows: Claude Code runs hooks through Git Bash there, and a profile folder
+    /// with a space in it (C:\Users\John Smith) would split an unquoted path in two.
+    static let hookCommand = "\"$HOME/.claude/pet/pet-emit\""
+    #else
     static let hookCommand = "$HOME/.claude/pet/pet-emit"
-    /// The shell version shipped before the Swift rewrite. Uninstall and the
-    /// idempotency check must recognise it too, or upgrading leaves a hook
-    /// pointing at a script that is no longer there.
-    static let legacyHookCommand = "$HOME/.claude/pet/pet-emit.sh"
+    #endif
+    /// Earlier commands, upgraded in place to `hookCommand`. Uninstall and the idempotency
+    /// check must recognise them too, or upgrading leaves a hook pointing at a script that is
+    /// no longer there. The shell version shipped before the Swift rewrite; on Windows also
+    /// the unquoted command the first spike build wrote.
+    #if os(Windows)
+    static let legacyHookCommands = ["$HOME/.claude/pet/pet-emit.sh", "$HOME/.claude/pet/pet-emit"]
+    #else
+    static let legacyHookCommands = ["$HOME/.claude/pet/pet-emit.sh"]
+    #endif
 
     private static func isPetCommand(_ command: String?) -> Bool {
-        command == hookCommand || command == legacyHookCommand
+        command == hookCommand || legacyHookCommands.contains { $0 == command }
     }
     static let events = [
         "SessionStart", "UserPromptSubmit", "PreToolUse",
@@ -173,7 +185,7 @@ enum SettingsPatch {
                 continue
             }
 
-            if groups.contains(where: { groupContains($0, command: legacyHookCommand) }) {
+            if groups.contains(where: { g in legacyHookCommands.contains { groupContains(g, command: $0) } }) {
                 groups = groups.map { upgradeLegacy($0) }
                 hooks[event] = groups
                 touched.append(event)
@@ -195,7 +207,7 @@ enum SettingsPatch {
         guard let entries = group["hooks"] as? [[String: Any]] else { return group }
         var rebuilt = group
         rebuilt["hooks"] = entries.map { entry -> [String: Any] in
-            guard (entry["command"] as? String) == legacyHookCommand else { return entry }
+            guard let command = entry["command"] as? String, legacyHookCommands.contains(command) else { return entry }
             var updated = entry
             updated["command"] = hookCommand
             return updated
@@ -306,7 +318,7 @@ enum SettingsPatch {
     private static func atomicWrite(_ data: Data, to url: URL) -> Bool {
         let tmp = URL(fileURLWithPath: url.path + ".tmp")
         guard (try? data.write(to: tmp)) != nil else { return false }
-        if (try? FileManager.default.replaceItemAt(url, withItemAt: tmp)) != nil { return true }
+        if (try? Portable.replaceItem(at: url, withItemAt: tmp)) != nil { return true }
         // replaceItemAt fails when the destination does not exist yet.
         if (try? FileManager.default.moveItem(at: tmp, to: url)) != nil { return true }
         try? FileManager.default.removeItem(at: tmp)

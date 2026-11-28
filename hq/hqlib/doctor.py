@@ -1,6 +1,6 @@
 """`hq doctor`: a health check of HQ itself."""
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import json
 import os
 import re
@@ -30,6 +30,8 @@ HQ_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop")
 PET_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification",
                    "PermissionRequest", "Stop", "SessionEnd", "PreCompact", "StopFailure", "PostToolUseFailure")
 PET_EMIT = os.path.expanduser("~/.claude/pet/pet-emit")
+if os.name == "nt":   # the Windows pet's hook: "$HOME/.claude/pet/pet-emit", which Git Bash finds as .exe
+    PET_EMIT += ".exe"
 DOCTOR_DAYS = 30            # a binding whose session has been quiet this long is over
 DOCTOR_LIVE_SECONDS = 86400  # without the pet to say, a transcript written this recently may be running
 # Lock files HQ takes besides one per card (its folder's name) and one per project (its name).
@@ -90,19 +92,27 @@ def doctor_hooks():
             out.append(doctor_check("hooks", "error", f"the hq hook runs {tilde(HQ_BIN)}, which is not there — run hq/install.sh"))
         elif not os.access(HQ_BIN, os.X_OK):
             out.append(doctor_check("hooks", "error", f"{tilde(HQ_BIN)} is not executable — chmod +x it"))
-        elif ("hqlib" in open(HQ_BIN, encoding="utf-8", errors="replace").read()     # an hq of before the split has none
+        elif ("hqlib" in open(HQ_BIN + (".py" if os.name == "nt" else ""),   # Windows: bin/hq runs bin/hq.py
+                              encoding="utf-8", errors="replace").read()     # an hq of before the split has none
               and not os.path.isfile(os.path.join(HOME_DIR, "hqlib", "hooks.py"))):
             out.append(doctor_check("hooks", "error", f"hq's modules ({tilde(os.path.join(HOME_DIR, 'hqlib'))}) are missing: "
                                     "every hook fails — run hq/install.sh"))
-    py = shutil.which("python3")
     ver = ".".join(map(str, sys.version_info[:3]))
-    where = f"python3 on PATH is {py}" if py else "no python3 on PATH"
-    level = "ok" if py and sys.version_info >= (3, 9) else "error"
-    out.append(doctor_check("hooks", level, f"hq runs with {sys.executable} ({ver}); {where}"
-                            + ("" if sys.version_info >= (3, 9) else " — hq needs Python 3.9 or later")
-                            + ("" if py else " — the hook's `#!/usr/bin/env python3` finds nothing")))
+    if os.name == "nt":
+        # bin/hq is install.sh's sh script, which names its Python: no python3 on PATH is needed.
+        level = "ok" if sys.version_info >= (3, 9) else "error"
+        out.append(doctor_check("hooks", level, f"hq runs with {sys.executable} ({ver})"
+                                + ("" if sys.version_info >= (3, 9) else " — hq needs Python 3.9 or later")))
+    else:
+        py = shutil.which("python3")
+        where = f"python3 on PATH is {py}" if py else "no python3 on PATH"
+        level = "ok" if py and sys.version_info >= (3, 9) else "error"
+        out.append(doctor_check("hooks", level, f"hq runs with {sys.executable} ({ver}); {where}"
+                                + ("" if sys.version_info >= (3, 9) else " — hq needs Python 3.9 or later")
+                                + ("" if py else " — the hook's `#!/usr/bin/env python3` finds nothing")))
 
-    pet_cmd = lambda c: c.strip() in ("$HOME/.claude/pet/pet-emit", PET_EMIT)
+    pet_cmd = lambda c: c.strip() in ("$HOME/.claude/pet/pet-emit", PET_EMIT) or (
+        os.name == "nt" and c.strip() == '"$HOME/.claude/pet/pet-emit"')   # windows/install.ps1 quotes it
     legacy = any("/.claude/pet/pet-emit.sh" in c for ev in hooks for c in commands(ev))
     missing, twice, found = wiring(PET_HOOK_EVENTS, pet_cmd)
     if not found and not os.path.exists(PET_EMIT) and not legacy:
@@ -342,6 +352,15 @@ def doctor_fix(days=DOCTOR_DAYS):
     # The cards as they are now (one made during the binding pass has a lock already).
     for name in (orphan_locks(doctor_metas()) if shared else []):
         p = os.path.join(LOCK_DIR, name)
+        if os.name == "nt":
+            # Windows deletes no file any process has open, so a lock that is held (or being
+            # taken) stays; nor would it delete this one while it is open here to test it.
+            try:
+                os.remove(p)
+                removed += 1
+            except OSError:
+                pass
+            continue
         try:
             with open(p, "a") as f:
                 # Only a lock no one holds: unlinking a held one would let the next taker lock a

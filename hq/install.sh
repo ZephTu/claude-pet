@@ -34,6 +34,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Windows: run from Git Bash, which is also what Claude Code runs hooks and the slash commands'
+# `~/.claude/hq/bin/hq` with. `python3` there is usually the Store's stand-in, so the installer
+# finds a real Python once and bin/hq becomes a small sh script that runs it (see below).
+WINDOWS=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) WINDOWS=1 ;; esac
+if [ "$WINDOWS" = 1 ]; then
+  WINPY=""
+  for try in "py -3" python python3; do
+    # A Windows Python (an MSYS2 one would take hq's POSIX paths, os.kill on Windows pids).
+    WINPY="$($try -c 'import os, sys; print(sys.executable if sys.version_info >= (3, 9) and os.name == "nt" else "")' 2>/dev/null | tr -d '\r')" || WINPY=""
+    [ -n "$WINPY" ] && break
+  done
+  [ -n "$WINPY" ] || { echo "Python 3.9 or later is required (python.org, or: winget install Python.Python.3.12)" >&2; exit 1; }
+  # UTF-8 whatever the system's code page; ~ is $HOME, as it is for bash (python reads USERPROFILE).
+  python3() { USERPROFILE="$HOME" "$WINPY" -X utf8 "$@"; }
+  [ "$DEV" = 1 ] && echo "--dev: Git Bash copies where it is asked for a link — installing a copy" >&2
+  DEV=0
+fi
+
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 [ -d "$CLAUDE_DIR" ] || { echo "no $CLAUDE_DIR — Claude Code is not installed here" >&2; exit 1; }
 
@@ -109,7 +128,19 @@ rm -rf "$HQ_HOME/hqlib.old"
 # effort: where the bytecode can't be written, each run compiles again.
 [ "$DEV" = 1 ] || python3 -m compileall -q "$HQ_HOME/hqlib" >/dev/null 2>&1 || true
 chmod +x "$SRC/bin/hq"
-if [ "$DEV" = 1 ]; then
+if [ "$WINDOWS" = 1 ]; then
+  # The entry goes in as bin/hq.py, before the bin/hq that runs it.
+  cp "$SRC/bin/hq" "$HQ_HOME/bin/hq.py.new"
+  mv -f "$HQ_HOME/bin/hq.py.new" "$HQ_HOME/bin/hq.py"
+  cat > "$HQ_HOME/bin/hq.new" <<EOF
+#!/bin/sh
+# hq on Windows, written by hq/install.sh: runs hq.py beside it with the Python found at install
+# time, in UTF-8 whatever the code page, and with ~ as this shell's \$HOME.
+case "\$0" in */*) d="\${0%/*}" ;; *) d=. ;; esac
+USERPROFILE="\$HOME" exec "$(cygpath -u "$WINPY")" -X utf8 "\$d/hq.py" "\$@"
+EOF
+  chmod +x "$HQ_HOME/bin/hq.new"
+elif [ "$DEV" = 1 ]; then
   ln -s "$SRC/bin/hq" "$HQ_HOME/bin/hq.new"
 else
   cp "$SRC/bin/hq" "$HQ_HOME/bin/hq.new"

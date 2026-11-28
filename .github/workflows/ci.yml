@@ -39,5 +39,7 @@ jobs:
       - name: settings.json patch tests
         run: ./hooks/test-settings-patch.sh
 
+      # Python and bash only: it needs nothing built, so it runs when a step above fails too.
       - name: HQ tests
+        if: ${{ !cancelled() }}
         run: ./hq/tests/test_hq.sh

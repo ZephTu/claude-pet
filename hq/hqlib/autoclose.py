@@ -1,6 +1,6 @@
 """Autoclose: ticking todos whose PR merged, Jira issue is done or Jenkins build passed."""
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import json
 import os
 import re

@@ -1,0 +1,4 @@
+# Scripts bash runs: LF in every checkout. A Windows one (core.autocrlf) runs them in Git Bash,
+# which reads a CR as part of the command.
+*.sh text eol=lf
+hq/bin/hq text eol=lf

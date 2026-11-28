@@ -46,6 +46,7 @@
   <a href="#zh-card">任务卡格式</a>
   <a href="#zh-leads">负责人（lead）</a>
   <a href="#zh-limits">注意事项</a>
+  <a href="#zh-windows">Windows 版</a>
   <a href="#zh-files">安装会改什么 · 卸载</a>
 </aside>
 <div class="content">
@@ -64,8 +65,8 @@
 
 <h1 id="zh-start">开始使用</h1>
 <ol>
-<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。它会先列出要做的每一项改动，确认后才执行；只想要看板、不想动 Claude 的设置，加 <code>--no-hooks</code>。需要 <code>python3</code>。详见<a href="#zh-files">安装会改什么</a>。</li>
-<li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。看板开着时，Dock 和 Cmd-Tab 里会出现桌宠图标，像普通窗口一样切回来（点 Dock 图标也行，最小化了也会恢复）；关掉看板图标就消失。菜单栏里 <b>关闭任务看板</b>（Cmd-W）关窗口，<b>退出 Claude Pet</b> 故意不配 Cmd-Q，免得误按把桌宠也退掉。</li>
+<li>安装（一次）：在 claude-pet 仓库里运行 <code>hq/install.sh --root ~/claude-hq</code>（任务卡放在哪个目录都行）。它会先列出要做的每一项改动，确认后才执行；只想要看板、不想动 Claude 的设置，加 <code>--no-hooks</code>。需要 <code>python3</code>。详见<a href="#zh-files">安装会改什么</a>。Windows 上在 Git Bash 里运行同一条命令，见<a href="#zh-windows">Windows 版</a>。</li>
+<li>打开看板：<b>双击桌宠</b>（再双击收起），或者右键桌宠 → <b>Task Board…</b>。看板开着时，Dock 和 Cmd-Tab 里会出现桌宠图标，像普通窗口一样切回来（点 Dock 图标也行，最小化了也会恢复）；关掉看板图标就消失。菜单栏里 <b>关闭任务看板</b>（Cmd-W）关窗口，<b>退出 Claude Pet</b> 故意不配 Cmd-Q，免得误按把桌宠也退掉。Windows 上看板是一个普通窗口，从托盘图标 → <b>Task Board…</b> 或双击小猫打开。</li>
 <li>点底部状态栏的 session 数打开 session 列表，给正在跑的 session 选一个任务绑定，或点 <b>新建任务</b> 新建任务并顺手绑定。</li>
 <li>之后就在看板上处理 <b>Needs you</b> 里的事情；点任务卡片打开详情侧栏，在里面直接给它的 session 发消息。</li>
 </ol>
@@ -465,8 +466,18 @@ next: "fix 分支跑 Jenkins 并提 PR"
 <li>只有<b>绑定了任务</b>的 session，提的问题才会进台账。</li>
 <li>后台 session 只能在<b>信任过</b>的目录里启动（在那个目录里正常打开过一次 Claude Code 并同意信任即可）；否则看板会提示原因。</li>
 <li>看板上的回应：勾选 send now 时立刻送达（Orca / iTerm2 / Terminal / 两轮之间的后台 session）；否则在 session <b>下一轮</b>送达。</li>
-<li>直接发消息支持 <b>Orca</b>、<b>iTerm2</b> 和 macOS 自带的 <b>Terminal</b>（第一次发到 iTerm2 / Terminal 时 macOS 会请求授权，允许 Claude Pet 控制它；拒绝了可以在 系统设置 → 隐私与安全性 → 自动化 里再打开）。发到终端后 5 秒内没开始处理（session 也没在忙），发件区会标成可能没提交，提示你去那里按一下回车（Orca 要较新的版本才报得出来）；<code>/</code> 命令和 <code>!</code> 开头的消息不会开始新一轮，发出去就算成功。session 在等你确认或回答时不能发——先跳到终端处理。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。</li>
+<li>直接发消息支持 <b>Orca</b>、<b>iTerm2</b> 和 macOS 自带的 <b>Terminal</b>（第一次发到 iTerm2 / Terminal 时 macOS 会请求授权，允许 Claude Pet 控制它；拒绝了可以在 系统设置 → 隐私与安全性 → 自动化 里再打开）。发到终端后 5 秒内没开始处理（session 也没在忙），发件区会标成可能没提交，提示你去那里按一下回车（Orca 要较新的版本才报得出来）；<code>/</code> 命令和 <code>!</code> 开头的消息不会开始新一轮，发出去就算成功。session 在等你确认或回答时不能发——先跳到终端处理。Ghostty、VS Code 等其他终端的输入框会置灰，只能 Jump。Windows 上支持 <b>Orca</b>、<b>Windows Terminal</b> 和<b>控制台窗口</b>（见<a href="#zh-windows">Windows 版</a>）。</li>
 <li>session 列表依赖 Claude Pet 的 hook，桌宠安装之前就开着的 session 不会显示。</li>
+</ul>
+
+<h1 id="zh-windows">Windows 版</h1>
+<p>Windows 10 / 11 上的看板就是这个页面，由一个小的 Electron 程序显示，背后跑的是同一个 <code>hq</code>。安装步骤见仓库里的 <code>docs/windows.zh-CN.md</code>。和 Mac 不一样的地方：</p>
+<ul>
+<li><b>安装</b>：在 Git Bash 里运行 <code>hq/install.sh --root ~/claude-hq</code>，需要 python.org 的 Python 3.9 以上（微软商店的占位程序不算）。<code>~/.claude/hq/bin/hq</code> 是一个小 sh 脚本，用 UTF-8 运行 <code>hq.py</code>。任务根目录放在本机，Mac 和 PC 各有各的看板。</li>
+<li><b>打开看板</b>：双击小猫，或托盘图标 → <b>Task Board…</b>。</li>
+<li><b>开新 session、续上</b>：<b>Terminal</b> 是 Windows Terminal 的新标签页，<b>Orca</b> 是 Orca 的新标签页，<b>后台</b> 是 <code>claude --bg</code>。续上总是开新标签页，不复用空闲的。看板只用官方安装的 <code>claude.exe</code> 开 session，不用 npm 的 <code>claude.cmd</code>。</li>
+<li><b>给 session 打字</b>（发消息、Esc、■ 停止、批准计划）：Windows Terminal、控制台窗口和 Orca 都支持，标签页不用在最前面。文字按粘贴送进去，<code>/</code>、<code>@</code> 不会弹补全菜单。停止是在它的终端里按两次 Ctrl+C。</li>
+<li><b>还没有的</b>：秘书、定时任务、手机访问（会提示"Windows 版暂不支持"）；消息源和自动勾选完成的待办（凭据在 macOS 钥匙串里）；记一笔的快捷键 ⌃⌥⌘N。</li>
 </ul>
 
 <h1 id="zh-files">安装会改什么 · 卸载</h1>
@@ -525,6 +536,7 @@ next: "fix 分支跑 Jenkins 并提 PR"
   <a href="#en-card">Task card format</a>
   <a href="#en-leads">Leads</a>
   <a href="#en-limits">Good to know</a>
+  <a href="#en-windows">On Windows</a>
   <a href="#en-files">What install changes · uninstall</a>
 </aside>
 <div class="content">
@@ -543,8 +555,8 @@ next: "fix 分支跑 Jenkins 并提 PR"
 
 <h1 id="en-start">Getting started</h1>
 <ol>
-<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). It lists every change first and asks before doing anything; add <code>--no-hooks</code> to get the board without touching Claude's settings. Needs <code>python3</code>. See <a href="#en-files">What install changes</a>.</li>
-<li>Open the board: <b>double-click the pet</b> (double-click again to hide it), or right-click → <b>Task Board…</b>. While the board is open the pet shows in the Dock and in Cmd-Tab, so you switch back to it like any window (clicking the Dock icon works too, and restores it when minimised); closing the board takes the icon away. In the menu bar, <b>Close Task Board</b> (Cmd-W) closes it; <b>Quit Claude Pet</b> has no Cmd-Q on purpose, so a stray shortcut can't take the pet away with it.</li>
+<li>Install once, from the claude-pet repo: <code>hq/install.sh --root ~/claude-hq</code> (any directory for your cards). It lists every change first and asks before doing anything; add <code>--no-hooks</code> to get the board without touching Claude's settings. Needs <code>python3</code>. See <a href="#en-files">What install changes</a>. On Windows, run the same command in Git Bash; see <a href="#en-windows">On Windows</a>.</li>
+<li>Open the board: <b>double-click the pet</b> (double-click again to hide it), or right-click → <b>Task Board…</b>. While the board is open the pet shows in the Dock and in Cmd-Tab, so you switch back to it like any window (clicking the Dock icon works too, and restores it when minimised); closing the board takes the icon away. In the menu bar, <b>Close Task Board</b> (Cmd-W) closes it; <b>Quit Claude Pet</b> has no Cmd-Q on purpose, so a stray shortcut can't take the pet away with it. On Windows the board is an ordinary window, opened from the tray icon → <b>Task Board…</b> or by double-clicking the cat.</li>
 <li>Click the session count in the status bar at the bottom to open the session list, and bind a running session to a task there — or click <b>New task</b> to create one and bind it.</li>
 <li>From then on, work through <b>Needs you</b>; click a task card to open its drawer and message its sessions right there.</li>
 </ol>
@@ -969,8 +981,18 @@ next: "run baseline on clusters A/C"
 <li>Only sessions <b>bound to a task</b> have their questions tracked.</li>
 <li>A background session can only start in a folder you have <b>trusted</b> (open Claude Code there once and accept); otherwise the board says so.</li>
 <li>Board answers: with send now ticked they arrive at once (Orca / iTerm2 / Terminal / a background session between turns); otherwise at the session's <b>next turn</b>.</li>
-<li>Messaging works for <b>Orca</b>, <b>iTerm2</b> and macOS's own <b>Terminal</b> (iTerm2 and Terminal ask for Automation permission the first time — allow Claude Pet to control it; if you said no, turn it on in System Settings → Privacy &amp; Security → Automation). If a typed message hasn't started a turn within 5 seconds (and the session isn't busy), the outbox marks it "may not have gone in" — press Return there (Orca needs a recent version to tell); a <code>/</code> command or a <code>!</code> line starts no turn, so it counts as sent once typed. A session waiting on a prompt can't be sent to — answer it in the terminal first. In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only.</li>
+<li>Messaging works for <b>Orca</b>, <b>iTerm2</b> and macOS's own <b>Terminal</b> (iTerm2 and Terminal ask for Automation permission the first time — allow Claude Pet to control it; if you said no, turn it on in System Settings → Privacy &amp; Security → Automation). If a typed message hasn't started a turn within 5 seconds (and the session isn't busy), the outbox marks it "may not have gone in" — press Return there (Orca needs a recent version to tell); a <code>/</code> command or a <code>!</code> line starts no turn, so it counts as sent once typed. A session waiting on a prompt can't be sent to — answer it in the terminal first. In other terminals (Ghostty, VS Code, …) the box is greyed out — Jump only. On Windows: <b>Orca</b>, <b>Windows Terminal</b> and <b>console windows</b> (see <a href="#en-windows">On Windows</a>).</li>
 <li>The session list relies on Claude Pet's hooks; sessions started before the pet was installed don't appear.</li>
+</ul>
+
+<h1 id="en-windows">On Windows</h1>
+<p>On Windows 10 / 11 the board is this same page, shown by a small Electron app over the same <code>hq</code>. How to install: <code>docs/windows.md</code> in the repo. What differs from the Mac:</p>
+<ul>
+<li><b>Install</b>: run <code>hq/install.sh --root ~/claude-hq</code> in Git Bash, with Python 3.9+ from python.org (the Microsoft Store stand-in doesn't count). <code>~/.claude/hq/bin/hq</code> is a small sh script that runs <code>hq.py</code> in UTF-8. The task root is local: a Mac and a PC keep separate boards.</li>
+<li><b>Opening the board</b>: double-click the cat, or the tray icon → <b>Task Board…</b>.</li>
+<li><b>New sessions and Resume</b>: <b>Terminal</b> is a new Windows Terminal tab, <b>Orca</b> a new Orca tab, <b>Background</b> <code>claude --bg</code>. Resume always opens a new tab rather than reusing an idle one. The board starts sessions only with the native <code>claude.exe</code>, not npm's <code>claude.cmd</code>.</li>
+<li><b>Typing into a session</b> (messages, Esc, ■ stop, approving a plan): Windows Terminal, console windows and Orca, with the tab in front or not. The text arrives as a paste, so <code>/</code> and <code>@</code> open no menu. Stop is Ctrl+C, twice, in its terminal.</li>
+<li><b>Not yet</b>: the secretary, scheduled jobs and phone access (the board says "not on Windows yet"); feeds and ticking finished todos (their credentials are in the macOS Keychain); the quick-note shortcut ⌃⌥⌘N.</li>
 </ul>
 
 <h1 id="en-files">What install changes · uninstall</h1>

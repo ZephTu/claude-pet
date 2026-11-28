@@ -2,6 +2,13 @@
 # Remove HQ's hooks, commands and CLI. Your task root (cards, asks) is left untouched.
 set -euo pipefail
 CLAUDE_DIR="$HOME/.claude"
+# Windows (Git Bash): the Python bin/hq runs, as install.sh found it — `python3` there is usually
+# the Store's stand-in.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  WINPY="$(sed -n 's/^USERPROFILE=.* exec "\([^"]*\)".*/\1/p' "$CLAUDE_DIR/hq/bin/hq" 2>/dev/null || true)"
+  if [ -n "$WINPY" ]; then python3() { USERPROFILE="$HOME" "$WINPY" -X utf8 "$@"; }
+  else python3() { USERPROFILE="$HOME" py -3 -X utf8 "$@"; }; fi ;;
+esac
 
 python3 - "$CLAUDE_DIR/settings.json" <<'PY'
 import json, os, shutil, sys, time

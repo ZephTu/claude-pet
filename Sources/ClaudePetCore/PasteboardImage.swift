@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 
 /// An image on the pasteboard, as bytes the board and Claude can read.
@@ -98,3 +99,4 @@ public enum PasteboardImage {
         return Data(out)
     }
 }
+#endif
