@@ -11,7 +11,11 @@ import Foundation
 ///    "finished": [WebBridge's Finished rows], "dropped": unread finishes aged out (once),
 ///    "hidden": muted live sessions, "quota": [{"label", "percent", "resetsIn"}], "quotaFallback",
 ///    "usage": {"five_hour", "seven_day": {"used", "resets_at"}, "source"} while the reading is usable,
-///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished}
+///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished,
+///    "say": {"text", "emphasis", "variant", "holdMs"} and "flash": {"kind", "pose", "mark"}, only
+///    on the line where the cat speaks up or reacts (PetChatter)}
+///
+/// stdin: what the shell shows, one setting per line (`list 1`, `card 0`, `nap 1`; PetShellInput).
 enum PetWatch {
     static func run(interval: TimeInterval = 1) -> Never {
         var previous: GlobalState?
@@ -21,6 +25,9 @@ enum PetWatch {
         var lastRead: Set<String> = []
         var quota = PetQuota()
         var rows = PetRows()
+        var chatter = PetChatter()
+        let shell = PetShellInput()
+        shell.start()
         while true {
             let now = Date()
             var dropped = 0
@@ -38,8 +45,14 @@ enum PetWatch {
             let state = StateAggregator.aggregate(all, now: now, hidden: muted, snoozed: snoozed)
             PetMarks.prune(all: all, live: state.sessions, now: now)
             let settled = StateAggregator.settled(state, previous: previous, now: now)
-            let finished = doneNotices(previous: previous, current: settled, now: now)
-            previous = settled
+            let usage = quota.sample(now: now)
+            let extras = rows.extras(for: state.sessions, all: all, now: now)
+            // The name a row shows (Claude Code's own name for the session where the Mac has the
+            // tab title), for the notices and the cat's lines too.
+            let names = Dictionary(state.sessions.map {
+                ($0.sessionId, SessionLabels.displayName(for: $0, prefs: [:], title: extras[$0.sessionId]?.name ?? ""))
+            }, uniquingKeysWith: { a, _ in a })
+            let finished = doneNotices(previous: previous, current: settled, names: names, now: now)
 
             // The Finished group (the Mac's render): unread turns, minus the ones the user has
             // plainly seen - they typed into that session since.
@@ -55,10 +68,14 @@ enum PetWatch {
             lastRead = read
             let unread = CompletionQueue.shown(CompletionQueue.unread(cache.events, read: read),
                                                sessions: settled.sessions)
+            let spoken = chatter.tick(
+                state: state, settled: settled, previous: previous, usage: usage,
+                context: extras.compactMapValues(\.context), names: names, notices: finished,
+                events: cache.events, shell: shell.current, idle: PetChatter.idleSeconds(), now: now)
+            previous = settled
 
             let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped,
-                              snoozed: snoozed, usage: quota.sample(now: now),
-                              extras: rows.extras(for: state.sessions, all: all, now: now))
+                              snoozed: snoozed, usage: usage, extras: extras, spoken: spoken)
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -81,7 +98,8 @@ enum PetWatch {
     /// The Mac app's announceFinishes: one notice per session that just came to rest, saying
     /// the first line of Claude's last reply when the hook recorded one (events/, the last
     /// minute's).
-    static func doneNotices(previous: GlobalState?, current: GlobalState, now: Date) -> [Chatter.DoneNotice] {
+    static func doneNotices(previous: GlobalState?, current: GlobalState,
+                            names: [String: String] = [:], now: Date) -> [Chatter.DoneNotice] {
         let bare = Chatter.doneNotices(previous: previous, current: current)
         guard !bare.isEmpty else { return [] }
         // Only the finished sessions' files (CompletionQueue.fileName: "<session>~<turn>.json").
@@ -95,7 +113,8 @@ enum PetWatch {
             if let seen = summaries[event.sessionId], seen.0 >= event.finishedAt { continue }
             summaries[event.sessionId] = (event.finishedAt, event.summary)
         }
-        return Chatter.doneNotices(previous: previous, current: current, summaries: summaries.mapValues(\.1))
+        return Chatter.doneNotices(previous: previous, current: current, names: names,
+                                   summaries: summaries.mapValues(\.1))
     }
 
     /// Ages `events/` out as the Mac's CompletionStore does (CompletionQueue.prune), deleting
@@ -121,7 +140,8 @@ enum PetWatch {
     static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = [],
                        unread: [CompletionEvent] = [], dropped: Int = 0,
                        snoozed: [String: Snooze.Mark] = [:], usage: UsageSnapshot? = nil,
-                       extras: [String: PetRows.Extra] = [:]) -> String {
+                       extras: [String: PetRows.Extra] = [:],
+                       spoken: PetChatter.Out = PetChatter.Out()) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
         let finishedRows = PanelModel.completionRows(unread, live: sessions)
@@ -170,6 +190,16 @@ enum PetWatch {
                 ["sessionId": $0.sessionId, "text": $0.text, "emphasis": $0.emphasis,
                  "holdMs": Int(Chatter.noticeHold * 1000)] as [String: Any]
             }
+        }
+        // The cat speaking up (window.say) and its brief reactions (window.flash, as WebBridge's
+        // flash: a pose only for "done", the glyph for "trouble"): only on their line.
+        if let say = spoken.say {
+            doc["say"] = ["text": say.text, "emphasis": say.emphasis, "variant": say.variant.rawValue,
+                          "holdMs": Int(say.hold * 1000)] as [String: Any]
+        }
+        if let kind = spoken.flash {
+            doc["flash"] = ["kind": kind, "pose": CatSkin.flashPose(kind)?.rawValue ?? "",
+                            "mark": CatSkin.mark(mood: "", flash: kind, blockedOn: "").rawValue]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]) else { return "{}" }
         return String(decoding: data, as: UTF8.self)

@@ -103,6 +103,15 @@ task cards are kept.
 - Hover the cat to see your quota; the task board shows it too, on the right of its status bar. This needs a statusline that saves it, for example
   claude-hud with `display.externalUsageWritePath` set to
   `%USERPROFILE%\.claude\pet\hud-usage.json`.
+- **The cat speaks up**, as on the Mac: when the 5-hour or weekly quota crosses a warning line
+  (once per line per window, remembered across restarts) or is about to reset; when a session's
+  context passes two thirds of its auto-compact threshold; when a session has failed four times
+  in a row; when one has been working for over 20 minutes; and, after 10 minutes with no keyboard
+  or mouse input, a one-line summary of what finished, what is waiting and how much quota went
+  while you were away. It briefly strikes its "finished" pose when a turn ends and flashes a
+  warning mark when a tool call fails. Napping, it does none of this. While a hover card is up
+  its remarks wait (the away summary and the reactions still come), and so do the less urgent
+  ones while the list is open.
 - **Jump (↗) to a session's terminal:**
   - an **Orca** tab;
   - a **Windows Terminal** tab (the right tab among several);
@@ -150,7 +159,6 @@ be removed there.
 - **The secretary** and **Scheduled jobs.** The board answers "not on Windows yet".
 - **Feeds** (Zulip, Jira) and **ticking finished todos.** Their credentials live in the macOS
   Keychain.
-- **The cat's remarks**, such as quota warnings and "this context is getting long".
 - **Resume** always opens a new tab. It doesn't reuse an idle one.
 - **VS Code's terminal**: sessions there get no ↗.
 

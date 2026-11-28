@@ -179,6 +179,8 @@ function createWindow() {
     // Only the first load: a skin switch reloads the page and must not bring back a hidden pet.
     if (!shownOnce) { shownOnce = true; win.showInactive(); }
     if (last || paused) draw(true);
+    if (earlySay && Date.now() < earlySay.until && !paused) run(earlySay.script);
+    earlySay = null;
     // PET_SHOT=out.png [PET_SHOT_JS=script]: render the window to a PNG after a few seconds and
     // quit — how CI and a Mac without screen-capture permission check what the window draws.
     // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board);
@@ -209,6 +211,8 @@ function createWindow() {
 }
 
 let shownOnce = false;
+/** A line --watch said before the page was ready to show it (see push). */
+let earlySay = null;
 
 /** PetPanel.loadPetPage: the page picks its pictures from `?skin=`. */
 function loadPetPage() {
@@ -218,7 +222,9 @@ function loadPetPage() {
   // for on the old page must not land on the new one.
   win.setIgnoreMouseEvents(true, { forward: true });
   detailWanted = "";
-  cardUp = false;
+  setCardUp(false);
+  // The new page starts with the list shut; its layout reports say when it opens.
+  tellWatcher("list", false);
   // A second pick before the first page is in aborts that load (ERR_ABORTED).
   win.loadURL("pet://app/index.html?skin=" + skin()).catch((e) => { if (!/ERR_ABORTED/.test(e.message)) log("load failed:", e.message); });
 }
@@ -279,6 +285,7 @@ const NAP = {
 
 function togglePause() {
   paused = !paused;
+  tellWatcher("nap", paused);
   ipcHush();
   draw(true);
   updateTray(last);
@@ -309,6 +316,19 @@ function push(s) {
   if (!paused) {
     for (const n of s.notices || []) {
       run(`window.notify(${js(n.text)}, ${noticeHold() * 1000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${opensSomewhere(n.sessionId)});`);
+    }
+    // The cat speaking up (PetChatter: quota, long context, a rut, a long run, "done", back
+    // from away) and its brief reactions to a finish or trouble, as WebBridge.say / flash.
+    // --watch already kept quiet while the list, a card or the nap would hide them.
+    if (s.say && typeof s.say.text === "string") {
+      const hold = Number(s.say.holdMs) || 6000;
+      const script = `window.say(${js(s.say.text)}, ${hold}, ${js(s.say.emphasis || "")}, ${js(s.say.variant || "chat")});`;
+      // The page still loading (the pet just started, a skin switch): said once it is in,
+      // while still worth saying. --watch has already recorded it as said.
+      if (ready) run(script); else earlySay = { script, until: Date.now() + hold };
+    }
+    if (s.flash && typeof s.flash.kind === "string") {
+      run(`window.flash(${js(s.flash.kind)}, ${js(s.flash.pose || "")}, ${js(s.flash.mark || "")});`);
     }
   }
   updateTray(s);
@@ -840,7 +860,7 @@ function startWatcher() {
   }
   const restart = () => { watcher = null; if (!quitting) setTimeout(startWatcher, 2000); };
   try {
-    watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: emitEnv() });
+    watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: emitEnv() });
   } catch (e) {
     log("pet-emit --watch did not start:", e.message);
     return restart();
@@ -849,6 +869,9 @@ function startWatcher() {
   let restarted = false;
   const again = () => { if (!restarted) { restarted = true; restart(); } };
   watcher.on("error", (e) => { log("pet-emit --watch failed:", e.message); again(); });
+  watcher.stdin.on("error", () => {});
+  // A fresh --watch knows nothing of what the window shows: tell it all of it.
+  for (const [key, on] of Object.entries(shellState)) watcher.stdin.write(`${key} ${on ? 1 : 0}\n`);
   log("watching with", PET_EMIT, "pid", watcher.pid);
   readline.createInterface({ input: watcher.stdout }).on("line", (line) => {
     try { push(JSON.parse(line)); } catch (e) { log("bad line:", e.message); }
@@ -1091,6 +1114,20 @@ ipcMain.on("drag-end", () => {
 ipcMain.on("action", (_e, a) => act(a));
 // A double click on the cat (preload.js put the list back as the first click found it).
 ipcMain.on("board-toggle", () => toggleBoard());
+// What the window shows that decides whether the cat may speak (PetChatter.Shell): the list open
+// (the page's layout reports, as the Mac's isListOpen), a hover card or the quota up (the Mac's
+// dwellShowing), the nap. --watch hears each change on its stdin.
+const shellState = { list: false, card: false, nap: false };
+function tellWatcher(key, on) {
+  if (shellState[key] === on) return;
+  shellState[key] = on;
+  if (watcher && watcher.stdin && watcher.stdin.writable) watcher.stdin.write(`${key} ${on ? 1 : 0}\n`);
+}
+function setCardUp(on) {
+  cardUp = on;
+  tellWatcher("card", on);
+}
+
 // The hover card (preload.js's dwell): shown only if the pointer is still on that row when
 // pet-emit answers. window.hush takes down whatever the bubble says, so it runs only when a
 // card actually went up (the Mac's dwellShowing).
@@ -1104,7 +1141,7 @@ ipcMain.on("detail", (_e, sessionId) => {
     const json = String(out).trim();
     if (!json || detailWanted !== sessionId) return;
     try { JSON.parse(json); } catch (_) { return log("detail: not JSON"); }
-    cardUp = true;
+    setCardUp(true);
     run(`window.showDetail(${json});`);
   });
 });
@@ -1114,15 +1151,16 @@ ipcMain.on("detail", (_e, sessionId) => {
 ipcMain.on("quota", () => {
   if (!last || paused) return;
   detailWanted = "";
-  cardUp = true;
+  setCardUp(true);
   run(`window.showQuota(${js(last.quota || [])}, ${js(last.quotaFallback || "")});`);
 });
 function ipcHush() {
   detailWanted = "";
-  if (cardUp) { cardUp = false; run("window.hush();"); }
+  if (cardUp) { setCardUp(false); run("window.hush();"); }
 }
 ipcMain.on("hush", ipcHush);
-ipcMain.on("layout", () => {});
+// Only layout reports carry `panel` (the page also posts `{skinFailed}` on this channel).
+ipcMain.on("layout", (_e, m) => { if (m && "panel" in m) tellWatcher("list", !!m.panel); });
 ipcMain.on("menu", () => { if (tray) tray.popUpContextMenu(); });
 
 let quitting = false;
