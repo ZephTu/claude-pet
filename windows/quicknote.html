@@ -62,7 +62,12 @@ t.placeholder = L("Whatever's on your mind: a line, a link, or paste a screensho
 
 /** Pasted images, saved as files at once (BoardWindow.saveImage): { path, src }. */
 let images = [];
-let error = "";
+/** What went wrong, shown in red in place of the hint: a note that didn't file, an image that
+ * didn't save. Cleared when the box opens again. */
+let problem = "";
+/** Images still being saved; Enter waits for them, so a note never leaves without its picture. */
+let saving = 0;
+let submitWhenSaved = false;
 
 function fit() {
   t.style.height = "auto";
@@ -70,11 +75,10 @@ function fit() {
   note.size(document.getElementById("card").getBoundingClientRect().height + 40);
 }
 function updateHint() {
-  hint.classList.toggle("err", !!error);
-  hint.textContent = error
-    ? L(`Couldn't note that: ${error}`, `没记下：${error}`)
+  hint.classList.toggle("err", !!problem);
+  hint.textContent = problem || (saving ? L("Saving the image…", "正在保存图片…")
     : [L("Enter files it", "Enter 记下"), L("Shift+Enter: new line", "Shift+Enter 换行"),
-       L("paste a screenshot", "可粘贴截图"), L("Esc closes", "Esc 关闭")].join(" · ");
+       L("paste a screenshot", "可粘贴截图"), L("Esc closes", "Esc 关闭")].join(" · "));
 }
 function drawImages() {
   imgs.textContent = "";
@@ -93,39 +97,76 @@ function drawImages() {
   fit();
 }
 function submit() {
+  if (saving) { submitWhenSaved = true; updateHint(); return; }
+  submitWhenSaved = false;
   const text = t.value.trim();
   if (!text && !images.length) return;
   note.submit(text, images.map((i) => i.path));
-  t.value = ""; images = []; error = "";
+  t.value = ""; images = []; problem = "";
   drawImages(); updateHint();
 }
 t.addEventListener("input", fit);
 t.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { e.preventDefault(); note.close(); }
+  if (e.key === "Escape") { e.preventDefault(); submitWhenSaved = false; note.close(); }
   else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
 });
+
+const SAVABLE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** A data URL saveImage takes: other formats (a BMP copied in Explorer) redrawn as PNG. */
+function dataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(r.error);
+    r.onload = () => {
+      if (SAVABLE.has(file.type)) return resolve(r.result);
+      const img = new Image();
+      img.onerror = () => reject(new Error(L("not an image", "不是图片")));
+      img.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext("2d").drawImage(img, 0, 0);
+        resolve(c.toDataURL("image/png"));
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
 t.addEventListener("paste", (e) => {
+  // Text with a picture beside it (cells from Excel, a slide's text) pastes as text, as on the
+  // Mac: only a clipboard with no text is an image.
+  if (e.clipboardData.getData("text/plain")) return;
   const files = [...e.clipboardData.items].filter((it) => it.kind === "file" && it.type.startsWith("image/"));
   if (!files.length) return;
   e.preventDefault();
   for (const it of files) {
-    const r = new FileReader();
-    r.onload = async () => {
-      const saved = await note.saveImage(r.result);
-      if (saved.path) { images.push({ path: saved.path, src: r.result }); error = ""; drawImages(); }
-      else { error = saved.error || "?"; }
-      updateHint();
-    };
-    r.readAsDataURL(it.getAsFile());
+    const file = it.getAsFile();
+    if (!file) continue;
+    saving++;
+    updateHint();
+    dataURL(file)
+      .then(async (src) => {
+        const saved = await note.saveImage(src);
+        if (saved.path) { images.push({ path: saved.path, src }); drawImages(); }
+        else problem = saved.error || "?";
+      })
+      .catch((err) => { problem = String((err && err.message) || err); })
+      .finally(() => {
+        saving--;
+        updateHint();
+        if (!saving && submitWhenSaved) submit();
+      });
   }
 });
-document.getElementById("x").onclick = () => note.close();
-note.onShown(() => { t.focus(); fit(); });
+document.getElementById("x").onclick = () => { submitWhenSaved = false; note.close(); };
+note.onShown(() => { problem = ""; updateHint(); t.focus(); fit(); });
 // A note that couldn't be filed comes back, so nothing typed is lost (QuickNotePanel.restore).
 note.onRestore(({ text, images: back, error: err }) => {
   if (text) t.value = t.value ? t.value + "\n" + text : text;
   for (const b of back || []) images.push(b);
-  error = err || "";
+  problem = err ? L(`Couldn't note that: ${err}`, `没记下：${err}`) : "";
   drawImages(); updateHint(); t.focus();
 });
 updateHint(); fit();

@@ -168,7 +168,12 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   card's CSS shadow), reused after the first open; pasted images go through board.js
   `saveImage` at once, the note through board.js `note-add` (`via: "hotkey"`) and `note-sort`,
   and the cat says each step (`window.say`, AppMain.fileQuickNote / noteDestLabel). A failed
-  add reopens the box with the text and images. `PET_SHOT_NOTE=1` shoots the box.
+  add reopens the box with the text and images (sent once the page has loaded). Alt+F4 only
+  hides the box (the draft stays). While it is up the pet window is unfocusable: hiding the box
+  activates the next window down, which would otherwise be the always-on-top pet. Enter waits
+  for images still being saved; a paste that carries text (Excel cells) pastes the text; other
+  image types (BMP) are redrawn as PNG. `PET_SHOT_NOTE=1` shoots the box (not after a script
+  hides it: capturePage on a hidden window never returns).
 - The cat opens the board: a double click toggles it (preload.js puts the list back as the
   first click found it, as WebBridge.handleDoubleClick; "in front" = focused, or lost focus in
   the last 1.5 s); tray → "Clicking a Session Opens" (prefs.json `clickTarget`, the board's

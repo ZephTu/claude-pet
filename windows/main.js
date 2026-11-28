@@ -550,7 +550,7 @@ function jumpToNextWaiting() {
 // The Mac's QuickNotePanel (quicknote.html): a small box on top of everything, on the screen the
 // pointer is on. Enter files it (hq inbox add, via=hotkey), hq inbox sort files it further, and
 // the pet says where it went. The box takes the keyboard; Esc hides it and Windows hands the
-// keyboard back to the window before it.
+// keyboard back to the window before it (the pet is unfocusable meanwhile).
 const NOTE_WIDTH = 560;    // the card is 520 wide, with 20px all round for its shadow
 const NOTE_HEIGHT = 170;
 let noteWin = null;
@@ -561,7 +561,8 @@ function toggleQuickNote() {
   showQuickNote();
 }
 
-function showQuickNote() {
+/** `then` runs once the box is up and its page loaded (a failed note's restore). */
+function showQuickNote(then) {
   if (!noteWin) {
     noteWin = new BrowserWindow({
       width: NOTE_WIDTH, height: NOTE_HEIGHT, show: false, frame: false, transparent: true, resizable: false,
@@ -572,6 +573,12 @@ function showQuickNote() {
     noteWin.setAlwaysOnTop(true, "floating");
     noteWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     noteWin.webContents.on("will-navigate", (e) => e.preventDefault());
+    // Hiding the box activates the next window down, and the pet's (always on top) sits right
+    // under it: while the box is up the pet can't take the keyboard, so Esc and Enter hand it
+    // back to the window that had it (the Mac's non-activating panel never took it from there).
+    noteWin.on("hide", () => setTimeout(() => { if (win && !(noteWin && noteWin.isVisible())) win.setFocusable(true); }, 300));
+    // Alt+F4 hides it, as Esc does: the draft stays, as in the Mac's panel.
+    noteWin.on("close", (e) => { if (!quitting) { e.preventDefault(); noteWin.hide(); } });
     noteWin.on("closed", () => { noteWin = null; });
     noteWin.loadFile(path.join(__dirname, "quicknote.html"), { query: { lang: language() } });
   }
@@ -580,9 +587,11 @@ function showQuickNote() {
   noteWin.setPosition(Math.round(area.x + (area.width - NOTE_WIDTH) / 2), Math.round(area.y + area.height / 4 - 20));
   const reveal = () => {
     if (!noteWin) return;
+    if (win) win.setFocusable(false);
     noteWin.show();
     noteWin.focus();
     noteWin.webContents.send("quicknote:shown");
+    if (then) then(noteWin);
   };
   if (noteWin.webContents.isLoading()) noteWin.webContents.once("did-finish-load", reveal);
   else reveal();
@@ -618,10 +627,9 @@ async function fileQuickNote(text, images) {
     const err = added.error || "?";
     say(L(`Couldn't note that: ${err}`, `没记下：${err}`), 6);
     // Nothing typed is lost: the box comes back with it.
-    showQuickNote();
-    noteWin.webContents.send("quicknote:restore", {
+    showQuickNote((box) => box.webContents.send("quicknote:restore", {
       text, error: err, images: images.map((p) => ({ path: p, src: pathToFileURL(p).href })),
-    });
+    }));
     return;
   }
   say(L("Noted — sorting…", "记下了，正在分拣…"), 4);
