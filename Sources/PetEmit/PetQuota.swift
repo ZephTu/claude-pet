@@ -11,16 +11,16 @@ struct PetQuota {
     private var last: UsageSnapshot?
     private let petHome = HookEmit.baseDirectory
     private var seenURL: URL { petHome.appending(path: "usage-seen.json") }
-    private var claudeHome: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude")
-    }
 
     init(now: Date = Date()) {
         let saved = (try? Data(contentsOf: HookEmit.baseDirectory.appending(path: "usage-seen.json")))
         recency = saved.flatMap { UsageRecency(saved: $0, now: now) } ?? UsageRecency()
     }
 
-    mutating func sample(now: Date) -> UsageSnapshot? {
+    /// The readings each source holds now, unpicked.
+    static func candidates() -> [UsageSnapshot] {
+        let petHome = HookEmit.baseDirectory
+        let claudeHome = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude")
         var candidates: [UsageSnapshot] = []
         if let hud = (try? Data(contentsOf: UsageReader.cacheURL(claudeHome: claudeHome))).flatMap(UsageReader.parse) {
             candidates.append(hud)
@@ -31,7 +31,11 @@ struct PetQuota {
         if let line = (try? Data(contentsOf: StatuslineUsage.cacheURL(petHome: petHome))).flatMap(StatuslineUsage.decode) {
             candidates.append(line)
         }
-        let picked = UsageSources.pick(candidates, now: now)
+        return candidates
+    }
+
+    mutating func sample(now: Date) -> UsageSnapshot? {
+        let picked = UsageSources.pick(Self.candidates(), now: now)
         // Nothing readable this time (a file mid-write): keep what was known.
         var snapshot = picked ?? recency.current() ?? last
         if let picked, picked.percentagesUsable(now: now) {

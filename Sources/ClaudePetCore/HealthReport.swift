@@ -89,15 +89,22 @@ public enum HealthReport {
                         "还没收到 — hook 只对安装之后启动的 session 生效")
                     : L("none received yet", "还没收到"))
         }
-        let ago = now.timeIntervalSince(lastAt)
-        if ago > quietTooLong, liveSessions > 0 {
+        let when = ago(lastAt, now: now)
+        if now.timeIntervalSince(lastAt) > quietTooLong, liveSessions > 0 {
             return HealthCheck(name: L("Events", "事件"), status: .unknown,
-                               detail: L("last one \(Chatter.duration(until: now, now: lastAt)) ago, with sessions running",
-                                         "最近一次在 \(Chatter.duration(until: now, now: lastAt)) 前，而 session 都在运行"))
+                               detail: L("last one \(when), with sessions running",
+                                         "最近一次：\(when)，而 session 都在运行"))
         }
         return HealthCheck(name: L("Events", "事件"), status: .ok,
-                           detail: L("last one \(Chatter.duration(until: now, now: lastAt)) ago",
-                                     "最近一次在 \(Chatter.duration(until: now, now: lastAt)) 前"))
+                           detail: L("last one \(when)", "最近一次：\(when)"))
+    }
+
+    /// "5m ago", or "just now" under a minute: Chatter.duration says "now" there, which
+    /// read "last one now ago".
+    static func ago(_ date: Date, now: Date) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return L("just now", "刚刚") }
+        let d = Chatter.duration(until: now, now: date)
+        return L("\(d) ago", "\(d) 前")
     }
 
     /// The distinction the panel cannot show: processes that exist versus
@@ -136,10 +143,10 @@ public enum HealthReport {
                                detail: L("no source — install claude-hud, or the statusline hook",
                                          "没有数据来源 — 装上 claude-hud，或 statusline hook"))
         }
-        let age = Chatter.duration(until: now, now: capturedAt)
+        let when = ago(capturedAt, now: now)
         return HealthCheck(name: L("Quota", "额度"), status: stale ? .unknown : .ok,
-                           detail: stale ? L("\(source), last read \(age) ago (stale)", "\(source)，最后读到是 \(age) 前（已过时）")
-                                         : L("\(source), read \(age) ago", "\(source)，\(age) 前读到"))
+                           detail: stale ? L("\(source), last read \(when) (stale)", "\(source)，最后读到：\(when)（已过时）")
+                                         : L("\(source), read \(when)", "\(source)，\(when)读到"))
     }
 
     public static func stateFiles(writable: Bool, count: Int, corrupt: Int) -> HealthCheck {

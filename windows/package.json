@@ -25,6 +25,8 @@
       "board-events.js",
       "quicknote.html",
       "quicknote-preload.js",
+      "health.html",
+      "health-preload.js",
       "package.json"
     ],
     "extraResources": [

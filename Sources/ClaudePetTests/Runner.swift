@@ -1952,6 +1952,16 @@ struct Runner {
                 HealthReport.recentEvents(lastAt: t0.addingTimeInterval(-30),
                                           liveSessions: 1, now: t0).status == .ok)
 
+        t.check("an event under a minute old reads \"just now\", not \"now ago\"",
+                HealthReport.recentEvents(lastAt: t0.addingTimeInterval(-30),
+                                          liveSessions: 1, now: t0).detail == L("last one just now", "最近一次：刚刚"))
+        t.check("an older one says how long ago",
+                HealthReport.recentEvents(lastAt: t0.addingTimeInterval(-300),
+                                          liveSessions: 1, now: t0).detail == L("last one 5m ago", "最近一次：5m 前"))
+        t.check("a quota read under a minute ago reads \"just now\" too",
+                HealthReport.usage(source: "claude-hud", capturedAt: t0.addingTimeInterval(-10),
+                                   now: t0, stale: false).detail == L("claude-hud, read just now", "claude-hud，刚刚读到"))
+
         t.check("processes we have not heard from are explained, not alarmed about",
                 HealthReport.sessions(running: 3, known: 1).status == .unknown)
         t.check("an unreadable state file is skipped, not called broken",
