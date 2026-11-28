@@ -200,6 +200,8 @@ function startWatcher() {
   });
 }
 
+const jumping = new Set();
+
 /** What preload.js found under a click in the panel (window.hitRow). */
 function act(a) {
   if (!a || !a.action) return;
@@ -209,7 +211,20 @@ function act(a) {
     });
     return;
   }
-  // Jumping to a terminal, the board, snooze and mute are not in the spike yet.
+  if (a.action === "jump") {
+    // pet-emit brings the session's tab to the front. Started by the pet just clicked, so
+    // Windows lets it take the foreground.
+    // One jump per session at a time: a double click must not retitle the console twice.
+    if (!a.sessionId || jumping.has(a.sessionId)) return;
+    jumping.add(a.sessionId);
+    execFile(PET_EMIT, ["--jump", a.sessionId], { windowsHide: true, timeout: 15000 }, (err, _out, stderr) => {
+      jumping.delete(a.sessionId);
+      if (err) log("jump failed:", err.message.trim());
+      else if (stderr) log("jump:", String(stderr).trim());
+    });
+    return;
+  }
+  // The board, snooze and mute are not in the spike yet.
   log("not handled yet:", JSON.stringify(a));
 }
 

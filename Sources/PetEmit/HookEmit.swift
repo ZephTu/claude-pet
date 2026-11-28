@@ -132,7 +132,7 @@ enum HookEmit {
             environment: ProcessInfo.processInfo.environment, sessionId: sessionID,
             parentArguments: pid.flatMap(ProcessProbe.parentPID).flatMap(ProcessProbe.arguments))
         let terminal = background ? nil
-            : terminalRef(cwd: cwd, tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "")
+            : terminalRef(cwd: cwd, tty: pid.flatMap(ProcessProbe.controllingTTY) ?? "", pid: pid)
         // Who holds a prompt's hook open, and until when: the app offers Allow / Deny only
         // while that is true (SessionState.askAnswerable). Only while the app is there to be
         // clicked; a test that sets the wait itself is asking for it regardless.
@@ -305,10 +305,19 @@ enum HookEmit {
     /// - Parameter tty: the Claude Code process's controlling terminal. The hook
     ///   cannot read its own — it is run detached — so this is resolved from the
     ///   pid instead, and is empty for a session that has no terminal at all.
-    private static func terminalRef(cwd: String, tty: String) -> [String: String]? {
+    /// - Parameter pid: the Claude Code process. Only Windows uses it, to ask the session's
+    ///   console whether it has a window (WindowsJump.identify).
+    private static func terminalRef(cwd: String, tty: String, pid: Int32?) -> [String: String]? {
+        #if os(Windows)
+        let env = ProcessInfo.processInfo.environment
+        guard let ref = TerminalTarget.identify(environment: env, cwd: cwd, tty: tty)
+                ?? WindowsJump.identify(environment: env, claudePID: pid)
+        else { return nil }
+        #else
         guard let ref = TerminalTarget.identify(environment: ProcessInfo.processInfo.environment,
                                                 cwd: cwd, tty: tty)
         else { return nil }
+        #endif
         return ["kind": ref.kind, "handle": ref.handle]
     }
 

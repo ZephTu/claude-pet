@@ -25,6 +25,18 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
 - Windows-only Swift: `ProcessProbeWindows.swift` (Toolhelp32 etc.) and `Portable.swift`
   (append with `FILE_APPEND_DATA`, `LockFileEx` locks, `MoveFileExW` replace with retries,
   `processExists`).
+- Jump to the terminal (`Sources/PetEmit/WindowsJump.swift`): the hook records `orca` (as on the
+  Mac), `wt` (`WT_SESSION`, no `TERM_PROGRAM`) or `console` (no terminal variables, and the
+  session's console has a window). A row click runs `pet-emit --jump <session>`: Orca's CLI
+  (`%LOCALAPPDATA%\Programs\orca\resources\bin\orca.exe terminal switch`) then raises Orca;
+  otherwise it attaches to the session's console (`pid` = claude.exe). Under Windows Terminal the
+  console window is a hidden ConPTY window *owned by* the WT window; the tab is found by setting
+  the console title to a one-off mark, selecting the tab of that name through UI Automation
+  (`Sources/PetUIA`, a C target that `Package.swift` declares on Windows only, because Swift's
+  WinSDK module lacks UIAutomationClient.h), and putting the title back (only if the mark still
+  shows; the mark is set again on every UIA try, since Claude Code animates its title while it
+  works). conhost: the console window itself is raised. `wt` / `console` rows are clickable only
+  when the session has a `pid` (Claude Code run by `node.exe` has none).
 
 ## Dev loop on Windows
 
@@ -92,6 +104,16 @@ npx electron .
   `node_modules\7zip-bin\win\x64\7za.exe` into
   `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0` (the two link errors
   are harmless).
+- `FileHandle.nullDevice` as a child's stdout/stderr breaks the child on Windows Foundation
+  (Orca's CLI printed nothing at all): give it a `Pipe` and read it.
+- `AttachConsole` swaps a process's standard handles for the console's unless it was started
+  with its own: the hook saves and restores all three around it (`WindowsJump.withConsole`),
+  or a held prompt's answer would miss Claude Code's pipe.
+- `preload.js` must forward pointer moves to `window.setHoverAt` (as `PetHostView` does): a
+  row's ↗ shows only on hover, so without it nothing looks clickable.
+- A Windows Terminal started *from* an Orca terminal (`wt.exe` typed there) inherits
+  `TERM_PROGRAM=Orca` and `ORCA_TERMINAL_HANDLE`: its sessions are recorded as that Orca tab.
+  Start test windows from the Start menu, not from a shell inside Orca.
 - To see a PermissionRequest, the test session must be in the default permission mode
   (`claude --permission-mode default`): in `auto` mode the classifier approves the command and
   no prompt (so no hook) happens. Writes to `/tmp` are allowed without asking too.
@@ -106,11 +128,15 @@ npx electron .
    click to open / close the panel, dragging to the second screen, tray menu. Reinstalling while
    a session runs: pet-emit.exe was overwritten in place.
 
-Not checked yet: the taskbar on another edge; `uninstall.ps1`.
+4. `uninstall.ps1` with a session running: removes only our hooks (the user's Orca hooks stay),
+   the app, the binaries and the data folders; reinstall restores them.
+5. Jump to the terminal from the panel: Orca, Windows Terminal (the right tab of several),
+   a conhost PowerShell window (restored from minimized).
+
+Not checked yet: the taskbar on another edge.
 
 ## Next
 
-Backlog, roughly by value: jump to the session's terminal (Windows Terminal, Orca, VS Code);
-finish notices and the hover detail card; start at login; scheduled jobs (`--run-job`, Task
+Backlog, roughly by value: jump to VS Code's terminal; finish notices and the hover detail card; start at login; scheduled jobs (`--run-job`, Task
 Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
 *kills* on Windows, Keychain → Credential Manager, a bundled Python).

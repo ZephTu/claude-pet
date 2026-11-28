@@ -71,6 +71,39 @@ $state = $line | ConvertFrom-Json
 Check '--watch prints a JSON line with the mood' ([bool]$state.mood) 'True'
 Check '...and both sessions' (@($state.sessions).Count) 2
 
+# Which terminal a session is in: Windows Terminal from WT_SESSION, but not under a terminal that
+# names itself (VS Code inherits WT_SESSION when started from one).
+$saved = @{ TERM_PROGRAM = $env:TERM_PROGRAM; ORCA_TERMINAL_HANDLE = $env:ORCA_TERMINAL_HANDLE; WT_SESSION = $env:WT_SESSION }
+$env:TERM_PROGRAM = $null; $env:ORCA_TERMINAL_HANDLE = $null
+$env:WT_SESSION = '9fe93318-97be-4312-aa76-aebcb40de3ea'
+Emit '{"session_id":"w1","hook_event_name":"SessionStart","transcript_path":"C:\\t\\w.jsonl","cwd":"C:\\work\\wt"}' | Out-Null
+Check 'WT_SESSION records Windows Terminal' (Field w1 terminal).kind 'wt'
+Check '...with the session as its handle' (Field w1 terminal).handle '9fe93318-97be-4312-aa76-aebcb40de3ea'
+$env:TERM_PROGRAM = 'vscode'
+Emit '{"session_id":"w2","hook_event_name":"SessionStart","transcript_path":"C:\\t\\w.jsonl","cwd":"C:\\work\\code"}' | Out-Null
+Check '...but not under a terminal that names itself' ([bool](Field w2 terminal)) 'False'
+foreach ($k in $saved.Keys) {
+  if ($saved[$k]) { Set-Item "env:$k" $saved[$k] } else { Remove-Item "env:$k" -ErrorAction SilentlyContinue }
+}
+# The jump to a Windows Terminal tab goes through the session's pid: no pid, no jump offered.
+# (A row with a pid needs a live Claude Code behind it, which CI doesn't have.)
+$doc = Get-Content (Join-Path $home_ 'sessions\w1.json') -Raw | ConvertFrom-Json
+$doc.sessionId = 'w4'
+$doc.PSObject.Properties.Remove('pid')
+[IO.File]::WriteAllText((Join-Path $home_ 'sessions\w4.json'), ($doc | ConvertTo-Json -Depth 10 -Compress))
+$w = Start-Process -FilePath $Emit -ArgumentList '--watch' -RedirectStandardOutput $wout -NoNewWindow -PassThru
+Start-Sleep -Seconds 3
+Stop-Process -Id $w.Id -Force
+$row = @((Get-Content $wout -TotalCount 1 | ConvertFrom-Json).sessions) | Where-Object { $_.sessionId -eq 'w4' }
+Check '--watch lists a Windows Terminal session without a pid' ([bool]$row) 'True'
+Check '...but offers no jump to it' ([bool]$row.termKind) 'False'
+function Jump($session) {
+  $err = Join-Path $home_ 'jump.err'
+  return (Start-Process -FilePath $Emit -ArgumentList '--jump', $session -RedirectStandardError $err -NoNewWindow -PassThru -Wait).ExitCode
+}
+Check '--jump refuses a session id with a path in it' (Jump 'w1\..\x') 1
+Check '--jump fails cleanly for an unknown session' (Jump 'nosuch') 1
+
 # settings.json: patched and unpatched.
 $settings = Join-Path $home_ 'settings.json'
 [IO.File]::WriteAllText($settings, '{"model":"opus"}')

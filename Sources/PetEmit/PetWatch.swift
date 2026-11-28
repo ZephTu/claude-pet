@@ -64,8 +64,11 @@ enum PetWatch {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// A subset of WebBridge.setSessions' row: what the panel needs to draw a row and offer
-    /// Allow / Deny. No terminal handles (nothing on Windows can jump yet), no HQ task, no context.
+    /// Terminals `pet-emit --jump` can bring up (WindowsJump): only these rows are clickable.
+    static let jumpKinds: Set<String> = ["orca", "wt", "console"]
+
+    /// A subset of WebBridge.setSessions' row: what the panel needs to draw a row, offer
+    /// Allow / Deny, and jump to the terminal. No HQ task, no context, no tab title.
     static func row(_ s: SessionState, now: Date) -> [String: Any] {
         var item: [String: Any] = [
             "sessionId": s.sessionId,
@@ -75,6 +78,12 @@ enum PetWatch {
             "detail": SessionCopy.note(state: s.state, detail: s.detail, waitingOn: s.waitingOn),
             "waitedSeconds": Int(max(0, now.timeIntervalSince(s.since))),
         ]
+        // wt and console are reached through the session's pid: without one (Claude Code run
+        // by node.exe, say) the row would offer a jump that can only fail.
+        if let t = s.terminal, jumpKinds.contains(t.kind), t.kind == "orca" || s.pid != nil {
+            item["termKind"] = t.kind
+            item["termHandle"] = t.handle
+        }
         if StateAggregator.isQuiet(s, now: now) { item["quiet"] = true }
         if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
         if s.askAnswerable(now: now) { item.merge(BoardPrompt.dotFields(of: s)) { _, new in new } }

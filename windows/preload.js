@@ -50,9 +50,19 @@ window.addEventListener("mousemove", (e) => {
     return;
   }
   setInteractive(solidAt(e.clientX, e.clientY));
+  hover(e.clientX, e.clientY);
 });
 
-window.addEventListener("mouseleave", () => { if (!press) setInteractive(false); });
+// The row under the pointer lights up and shows its ↗, as PetHostView forwards it on the Mac
+// (window.setHoverAt; it returns early when the row is the same).
+function hover(x, y) {
+  webFrame.executeJavaScript(`window.setHoverAt && window.setHoverAt(${x}, ${y})`).catch(() => {});
+}
+
+window.addEventListener("mouseleave", () => {
+  if (!press) setInteractive(false);
+  hover(-1, -1);
+});
 
 window.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
