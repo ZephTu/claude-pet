@@ -94,6 +94,27 @@ $notices = @($lines | ForEach-Object { $_.notices } | Where-Object { $_ })
 Check 'a finished session gets one notice' $notices.Count 1
 Check '...naming the session' ($notices[0].text -like 'demo*') 'True'
 Write-Host "     notice: $($notices[0].text)"
+$fin = @($lines[-1].finished | Where-Object { $_.sessionId -eq 's1' })
+Check 'the finish is listed under Finished' $fin.Count 1
+Check '...with its summary' $fin[0].summary 'All 12 tests pass'
+Check '...and counted in the badge' ([int]$lines[-1].badge -ge 1) 'True'
+$fin[0].eventIds[0] | & $Emit --mark-read -
+Check '--mark-read (ids on stdin) exits 0' $LASTEXITCODE 0
+Check '...and records the mark' ((Get-Content (Join-Path $home_ 'read.json') -Raw) -match [regex]::Escape($fin[0].eventIds[0])) 'True'
+& $Emit --mark-read --all
+Check '--mark-read --all exits 0' $LASTEXITCODE 0
+# A read.json that can't be read right now is not "nothing read": left as it is.
+$readJson = Join-Path $home_ 'read.json'
+$good = Get-Content $readJson -Raw
+[IO.File]::WriteAllText($readJson, '{"read":')
+$p = Start-Process -FilePath $Emit -ArgumentList '--mark-read', '--all' -RedirectStandardError (Join-Path $home_ 'mr.err') -NoNewWindow -PassThru -Wait
+Check '--mark-read refuses an unreadable read.json' $p.ExitCode 1
+Check '...and leaves it alone' (Get-Content $readJson -Raw) '{"read":'
+[IO.File]::WriteAllText($readJson, $good)
+$w = Start-Process -FilePath $Emit -ArgumentList '--watch' -RedirectStandardOutput $wout -NoNewWindow -PassThru
+Start-Sleep -Seconds 3
+Stop-Process -Id $w.Id -Force
+Check '...and the row goes' (@((Get-Content $wout -TotalCount 1 | ConvertFrom-Json).finished).Count) 0
 $detail = & $Emit --detail s1
 Check '--detail prints the hover card' ((($detail | ConvertFrom-Json).path) -eq 'C:\work\demo') 'True'
 

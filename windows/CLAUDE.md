@@ -25,6 +25,13 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   last reply's first line from `events/`) on the one line where a session finished; main.js calls
   `window.notify`; a click on one jumps to its terminal or opens the list. The rows themselves
   show the unsettled state, as on the Mac.
+- The list's Finished group (`PetFinished.swift`, the Mac's CompletionStore over the same
+  `events/` + `read.json`): `--watch` adds `finished` rows and counts them in the badge (the cat
+  looks up while the badge shows, as on the Mac), marks a finish read once the user typed into
+  that session, and ages `events/` out hourly. Clicks (✓, Clear, a finished row, a notice) run
+  `pet-emit --mark-read --all | --session <id> | <event id>...`. A row click that jumps closes
+  the list, as on the Mac.
+- main.js injects a thin scrollbar: Chromium's default on Windows is a wide grey bar.
 - Hover card: `preload.js` times the dwell (450 ms, as `updateDwell`), main.js runs
   `pet-emit --detail <session>` (`PetDetail.swift`: insight, transcript, context budget, last
   call, background shells — the Mac's `hoverDetail`) and hands the JSON to `window.showDetail`.
@@ -149,12 +156,12 @@ npx electron .
    a conhost PowerShell window (restored from minimized).
 
 Not checked yet on the machine (built, smoke-tested or rendered only): launch at login; finish
-notices (and clicking one); the hover card; the taskbar on another edge.
+notices (and clicking one); the hover card; the Finished group, its ✓ / Clear and row clicks,
+scrolling the list with the wheel; the taskbar on another edge.
 
 ## Next
 
-Backlog, roughly by value: the Finished group and unread marks in the list (CompletionStore is
-app-side on the Mac); the quota readout on resting over the cat (needs the statusline capture);
-jump to VS Code's terminal; scheduled jobs (`--run-job`, Task
+Backlog, roughly by value: the quota readout on resting over the cat (needs the statusline
+capture); jump to VS Code's terminal; snooze and mute (the row's clock and ×); scheduled jobs (`--run-job`, Task
 Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
 *kills* on Windows, Keychain → Credential Manager, a bundled Python).

@@ -122,6 +122,12 @@ function createWindow() {
   win.loadURL("pet://app/index.html");
   win.webContents.on("did-finish-load", () => {
     ready = true;
+    // WKWebView draws a thin overlay scrollbar; Chromium on Windows a wide grey one that eats
+    // into the list. Made thin here, leaving the Mac's page as it is.
+    win.webContents.insertCSS(
+      "::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }"
+      + " ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.45); border-radius: 3px; }"
+      + " ::-webkit-scrollbar-button { display: none; }").catch(() => {});
     win.showInactive();
     if (last) push(last, true);
     // PET_SHOT=out.png [PET_SHOT_JS=script]: render the window to a PNG after a few seconds and
@@ -167,7 +173,8 @@ function push(s, force) {
   if (!prev || prev.pose !== s.pose || prev.mark !== s.mark) run(`window.setCatLook(${js(s.pose)}, ${js(s.mark)});`);
   if (!prev || prev.phase !== s.phase) run(`window.setPhase(${js(s.phase)});`);
   if (!prev || prev.badge !== s.badge) run(`window.setBadge(${js(s.badge)});`);
-  run(`window.setSessions(${js(s.sessions || [])}, 0, [], 0, [], []);`);
+  pendingDropped += Number(s.dropped) || 0;
+  drawSessions(s);
   // Sessions that just finished, each in a notice of its own (the page skips them while the
   // list is open). Only on the line they came on: a redraw (force) does not repeat them.
   if (!force) {
@@ -176,6 +183,18 @@ function push(s, force) {
     }
   }
   updateTray(s);
+}
+
+// Unread finishes that aged out unseen. --watch says so on one line, usually when it starts,
+// before the list is ever opened: kept for the footer until the list has been open a while.
+let pendingDropped = 0;
+ipcMain.on("panel-opened", () => {
+  if (pendingDropped) setTimeout(() => { pendingDropped = 0; }, 10000);
+});
+
+/** The rows and the Finished group. No HQ asks or jobs yet. */
+function drawSessions(s) {
+  run(`window.setSessions(${js(s.sessions || [])}, 0, ${js(s.finished || [])}, ${pendingDropped}, [], []);`);
 }
 
 /** The terminal a session's row can jump to, or "" (PetWatch.row's termKind). */
@@ -230,29 +249,89 @@ function act(a) {
     return;
   }
   if (a.action === "openNotice") {
-    // As the Mac's openNotice: the notice goes, and its session's terminal comes up; with
-    // nowhere to go, the list opens, where the session's row is.
+    // As the Mac's openNotice: the notice goes, and its session's terminal comes up and its
+    // finishes count as seen; with nowhere to go, the list opens, where the session's row is.
     if (!a.sessionId) return;
     run(`window.dismissNotice(${js(a.sessionId)});`);
-    if (jumpKind(a.sessionId)) act({ action: "jump", sessionId: a.sessionId });
-    else run("window.setPanelOpen(true);");
+    if (jumpKind(a.sessionId)) {
+      jump(a.sessionId);
+      markRead({ session: a.sessionId });
+    } else {
+      run("window.setPanelOpen(true);");
+    }
     return;
   }
   if (a.action === "jump") {
-    // pet-emit brings the session's tab to the front. Started by the pet just clicked, so
-    // Windows lets it take the foreground.
-    // One jump per session at a time: a double click must not retitle the console twice.
-    if (!a.sessionId || jumping.has(a.sessionId)) return;
-    jumping.add(a.sessionId);
-    execFile(PET_EMIT, ["--jump", a.sessionId], { windowsHide: true, timeout: 15000 }, (err, _out, stderr) => {
-      jumping.delete(a.sessionId);
-      if (err) log("jump failed:", err.message.trim());
-      else if (stderr) log("jump:", String(stderr).trim());
-    });
+    // As the Mac: the list has served its purpose once we are jumping away.
+    if (jump(a.sessionId)) run("window.setPanelOpen(false);");
     return;
   }
+  if (a.action === "openFinished") {
+    // Go there, then call it seen (WebBridge's openFinished). A row whose session is gone has
+    // nowhere to go: the click only clears it and says why; the list stays up.
+    const ids = eventIds(a.eventIds);
+    if (a.kind) {
+      if (jump(a.sessionId)) {   // false: that jump is already under way
+        markRead(ids);
+        run("window.setPanelOpen(false);");
+      }
+    } else {
+      markRead(ids);
+      run("window.explainClosedRow();");
+    }
+    return;
+  }
+  if (a.action === "read") { markRead(eventIds(a.eventIds)); return; }   // the ✓; the list stays up
+  if (a.action === "readAll") { markRead("all"); return; }
   // The board, snooze and mute are not in the spike yet.
   log("not handled yet:", JSON.stringify(a));
+}
+
+/** pet-emit brings the session's tab to the front. Started by the pet just clicked, so Windows
+ * lets it take the foreground. One jump per session at a time: a double click must not retitle
+ * the console twice. False when there was nothing to start. */
+function jump(sessionId) {
+  if (!sessionId || jumping.has(sessionId)) return false;
+  jumping.add(sessionId);
+  execFile(PET_EMIT, ["--jump", sessionId], { windowsHide: true, timeout: 15000 }, (err, _out, stderr) => {
+    jumping.delete(sessionId);
+    if (err) log("jump failed:", err.message.trim());
+    else if (stderr) log("jump:", String(stderr).trim());
+  });
+  return true;
+}
+
+/** Event ids from the page: strings only, one per line on pet-emit's stdin. */
+function eventIds(ids) {
+  return (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id && !/[\r\n]/.test(id) && id.length <= 256);
+}
+
+/**
+ * `pet-emit --mark-read`: "all", { session }, or a list of event ids (on stdin: a row can stand
+ * for hundreds of turns, past the command line's length). The rows go from the list at once,
+ * as on the Mac; the next --watch line settles the badge.
+ */
+function markRead(what) {
+  let args, input = "";
+  if (what === "all") args = ["--all"];
+  else if (what && what.session) args = ["--session", what.session];
+  else if (Array.isArray(what) && what.length) { args = ["-"]; input = what.join("\n") + "\n"; }
+  else return;
+  const child = spawn(PET_EMIT, ["--mark-read", ...args], { windowsHide: true, stdio: ["pipe", "ignore", "pipe"] });
+  let complaint = "";
+  child.stderr.on("data", (d) => { complaint += d; });
+  child.on("error", (e) => log("mark read failed:", e.message));
+  child.on("exit", (code) => { if (code) log("mark read failed:", code, complaint.trim()); });
+  child.stdin.on("error", () => {});
+  child.stdin.end(input);
+  const timer = setTimeout(() => child.kill(), 10000);
+  child.on("exit", () => clearTimeout(timer));
+
+  if (!last || !last.finished) return;
+  const ids = new Set(Array.isArray(what) ? what : []);
+  last.finished = last.finished.filter((r) => !(what === "all" || (what && r.sessionId === what.session)
+    || (r.eventIds || []).some((id) => ids.has(id))));
+  drawSessions(last);
 }
 
 const ICONS = { idle: "idle", busy: "working", waiting: "waiting", urgent: "urgent" };

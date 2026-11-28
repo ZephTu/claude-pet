@@ -86,6 +86,10 @@ struct Entry {
             }
             exit(PetDetail.run(session: arguments[1]))
 
+        case "--mark-read":
+            // Finished turns seen, from the Windows shell's list (PetFinished).
+            exit(PetFinished.runMarkRead(Array(arguments.dropFirst())))
+
         case "--version":
             print(petVersion)
             exit(0)

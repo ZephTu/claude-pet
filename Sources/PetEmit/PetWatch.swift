@@ -8,16 +8,20 @@ import Foundation
 /// One line:
 ///   {"mood", "phase", "pose", "mark", "waitingProject", "waitingOn", "waitingSessionId",
 ///    "waitingAskId", "badge", "sessions": [rows shaped like WebBridge's setSessions items],
+///    "finished": [WebBridge's Finished rows], "dropped": unread finishes aged out (once),
 ///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished}
 enum PetWatch {
     static func run(interval: TimeInterval = 1) -> Never {
         var previous: GlobalState?
         var lastLine = ""
         var prunedAt = Date.distantPast
+        var cache = PetFinished.Cache()
+        var lastRead: Set<String> = []
         while true {
             let now = Date()
-            if now.timeIntervalSince(prunedAt) > 3600 {
-                pruneEvents(now: now)
+            var dropped = 0
+            if now.timeIntervalSince(prunedAt) > 3600, let marks = PetFinished.read() {
+                dropped = pruneEvents(now: now, read: marks)
                 prunedAt = now
             }
             let all = scan(HookEmit.sessionsDirectory)
@@ -27,7 +31,23 @@ enum PetWatch {
             let settled = StateAggregator.settled(state, previous: previous, now: now)
             let finished = doneNotices(previous: previous, current: settled, now: now)
             previous = settled
-            let line = render(state, now: now, notices: finished)
+
+            // The Finished group (the Mac's render): unread turns, minus the ones the user has
+            // plainly seen - they typed into that session since.
+            cache.reload(now: now)
+            // Unreadable for a moment: last tick's marks, not none.
+            var read = PetFinished.read() ?? lastRead
+            let replied = CompletionQueue.answered(CompletionQueue.unread(cache.events, read: read),
+                                                   sessions: state.sessions)
+            if !replied.isEmpty {
+                PetFinished.markRead(replied)
+                read.formUnion(replied)
+            }
+            lastRead = read
+            let unread = CompletionQueue.shown(CompletionQueue.unread(cache.events, read: read),
+                                               sessions: settled.sessions)
+
+            let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped)
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -69,31 +89,36 @@ enum PetWatch {
 
     /// Ages `events/` out as the Mac's CompletionStore does (CompletionQueue.prune), deleting
     /// the files of what it drops: the hook adds one per turn, and nothing else on Windows
-    /// removes them.
-    static func pruneEvents(now: Date) {
+    /// removes them. Returns how many unread ones went (the list says so once).
+    static func pruneEvents(now: Date, read: Set<String>) -> Int {
         let fm = FileManager.default
         let urls = ((try? fm.contentsOfDirectory(at: HookEmit.eventsDirectory, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == "json" }
-        let read = ReadMarks.decode((try? Data(contentsOf: HookEmit.baseDirectory.appending(path: "read.json"))) ?? Data())
         let events = CompletionQueue.dedupe(CompletionQueue.decode(urls.compactMap { try? Data(contentsOf: $0) }))
-        let keeping = Set(CompletionQueue.prune(events, read: read, now: now).keep.map(CompletionQueue.fileName(for:)))
-        // A file that doesn't decode is left alone: it may be one being written right now.
-        let named = Set(events.map(CompletionQueue.fileName(for:)))
-        for url in urls where named.contains(url.lastPathComponent) && !keeping.contains(url.lastPathComponent) {
-            try? fm.removeItem(at: url)
+        let keeping = Set(CompletionQueue.prune(events, read: read, now: now).keep.map(\.eventId))
+        // Only files named for their event go (one that doesn't decode may be being written
+        // right now), and only what really went is counted, so nothing is reported twice.
+        var droppedUnread = 0
+        for e in events where !keeping.contains(e.eventId) {
+            let url = HookEmit.eventsDirectory.appending(path: CompletionQueue.fileName(for: e))
+            guard (try? fm.removeItem(at: url)) != nil else { continue }
+            if !read.contains(e.eventId) { droppedUnread += 1 }
         }
+        return droppedUnread
     }
 
-    static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = []) -> String {
+    static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = [],
+                       unread: [CompletionEvent] = [], dropped: Int = 0) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
-        let waitingSession = sessions.first { $0.sessionId == state.waitingSessionId }
-        // Awake with something answered and unread, asleep with nothing at all.
-        let wanted = sessions.contains { $0.state == .idle && !$0.detail.isEmpty }
-        let look = CatSkin.look(mood: state.mood.rawValue, phase: phase, flash: "", wanted: wanted,
-                                blockedOn: waitingSession?.waitingOn ?? "",
+        let finishedRows = PanelModel.completionRows(unread, live: sessions)
+        // As the Mac's render: one number for "how many things want me", and the cat looks up
+        // while it is not zero.
+        let badge = PanelModel.badge(needsYou: PanelModel.needsYou(sessions).count,
+                                     unreadFinishes: finishedRows.count)
+        let look = CatSkin.look(mood: state.mood.rawValue, phase: phase, flash: "", wanted: !badge.isEmpty,
+                                blockedOn: state.waitingOn,
                                 struggling: sessions.contains(where: Struggle.isStruggling))
-        let needsYou = sessions.filter { $0.state == .waiting }.count
         var doc: [String: Any] = [
             "mood": state.mood.rawValue,
             "phase": phase,
@@ -103,9 +128,11 @@ enum PetWatch {
             "waitingOn": state.waitingOn,
             "waitingSessionId": state.waitingSessionId,
             "waitingAskId": state.waitingAskId,
-            "badge": PanelModel.badge(needsYou: needsYou, unreadFinishes: 0),
+            "badge": badge,
             "sessions": sessions.map { row($0, now: now) },
+            "finished": finishedRows.map { finishedRow($0, live: sessions, now: now) },
         ]
+        if dropped > 0 { doc["dropped"] = dropped }
         // Only on the line where they happen: the shell shows each one once (window.notify).
         if !notices.isEmpty {
             doc["notices"] = notices.map {
@@ -119,6 +146,25 @@ enum PetWatch {
 
     /// Terminals `pet-emit --jump` can bring up (WindowsJump): only these rows are clickable.
     static let jumpKinds: Set<String> = ["orca", "wt", "console"]
+
+    /// WebBridge's Finished row. Jumpable on the same terms as a session row (`row`).
+    static func finishedRow(_ r: CompletionRow, live: [SessionState], now: Date) -> [String: Any] {
+        var item: [String: Any] = [
+            "sessionId": r.sessionId,
+            "eventIds": r.eventIds,
+            "label": r.label,
+            "count": r.count,
+            "closed": r.sessionClosed,
+            "agoSeconds": Int(max(0, now.timeIntervalSince(r.latestAt))),
+            "summary": r.summary,
+        ]
+        if let t = r.terminal, jumpKinds.contains(t.kind),
+           t.kind == "orca" || live.first(where: { $0.sessionId == r.sessionId })?.pid != nil {
+            item["termKind"] = t.kind
+            item["termHandle"] = t.handle
+        }
+        return item
+    }
 
     /// A subset of WebBridge.setSessions' row: what the panel needs to draw a row, offer
     /// Allow / Deny, and jump to the terminal. No HQ task, no context, no tab title.

@@ -43,7 +43,8 @@ window.addEventListener("blur", release);
 window.addEventListener("mousemove", (e) => {
   if (press && e.buttons === 0) release();
   if (press) {
-    if (!press.dragging && Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4 && press.onPet) {
+    if (Math.hypot(e.screenX - press.x, e.screenY - press.y) > 4) press.moved = true;
+    if (!press.dragging && press.moved && press.onPet) {
       press.dragging = true;
       ipcRenderer.send("drag-start");
     }
@@ -108,7 +109,7 @@ window.addEventListener("mouseleave", () => {
 window.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   const el = document.elementFromPoint(e.clientX, e.clientY);
-  press = { x: e.screenX, y: e.screenY, onPet: !!(el && el.closest && el.closest("#pet")), dragging: false };
+  press = { x: e.screenX, y: e.screenY, onPet: !!(el && el.closest && el.closest("#pet")), dragging: false, moved: false };
 });
 
 window.addEventListener("mouseup", async (e) => {
@@ -116,7 +117,14 @@ window.addEventListener("mouseup", async (e) => {
   const p = press;
   press = null;
   if (p.dragging) { ipcRenderer.send("drag-end"); return; }
-  if (p.onPet) { await webFrame.executeJavaScript("window.togglePanel()"); return; }
+  // A press that moved is a drag of the list's scrollbar (or a slip), not a click on where it
+  // ended up: that could open a session and clear its finishes.
+  if (p.moved || Math.hypot(e.screenX - p.x, e.screenY - p.y) > 4) return;
+  if (p.onPet) {
+    await webFrame.executeJavaScript("window.togglePanel()");
+    if (panelOpen()) ipcRenderer.send("panel-opened");
+    return;
+  }
   const hit = await webFrame.executeJavaScript(`window.hitRow(${e.clientX}, ${e.clientY})`);
   if (hit) ipcRenderer.send("action", hit);
 });
