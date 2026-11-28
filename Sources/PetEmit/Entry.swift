@@ -90,6 +90,10 @@ struct Entry {
             }
             exit(PetDetail.run(session: arguments[1]))
 
+        case "--board":
+            // What the HQ board keeps beside hq, and its reading area, in the Windows shell (PetBoard).
+            exit(PetBoard.run())
+
         case "--mark-read":
             // Finished turns seen, from the Windows shell's list (PetFinished).
             exit(PetFinished.runMarkRead(Array(arguments.dropFirst())))

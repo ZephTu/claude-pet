@@ -246,6 +246,26 @@ Check '...the user''s hook is still there' (@($u.hooks.Stop.hooks.command) -join
 $p = Get-Content $settings -Raw | ConvertFrom-Json
 Check 'the old unquoted command is upgraded in place' ((@($p.hooks.Stop.hooks.command)) -join ',') '"$HOME/.claude/pet/pet-emit"'
 
+# The task board's store and reading area (pet-emit --board, PetBoard): one JSON request on stdin.
+function Board($json) {
+  $in = Join-Path $home_ 'board-in.json'
+  $out = Join-Path $home_ 'board-out.json'
+  [IO.File]::WriteAllText($in, $json)
+  Start-Process -FilePath $Emit -ArgumentList '--board' -RedirectStandardInput $in -RedirectStandardOutput $out -NoNewWindow -Wait | Out-Null
+  return (Get-Content $out -Raw | ConvertFrom-Json)
+}
+Check '--board store starts empty' (@((Board '{"op":"store"}').result.phrases).Count) 0
+Board '{"op":"phrases","action":"add","text":"looks good"}' | Out-Null
+Check '--board phrases: one added' ((Board '{"op":"phrases","action":"add","text":"Looks good."}').result.phrases -join ',') 'looks good'
+Board '{"op":"board-prefs","prefs":{"hq-launch":"wt","other":"x"}}' | Out-Null
+$st = (Board '{"op":"store"}').result
+Check '...prefs keep only the board''s keys' (($st.prefs.PSObject.Properties.Name) -join ',') 'hq-launch'
+$doc = Join-Path $home_ 'note.md'
+[IO.File]::WriteAllText($doc, '# hi')
+$req = @{ op = 'read-doc'; path = 'note.md:3'; cwd = $home_ } | ConvertTo-Json -Compress
+Check '--board read-doc: a relative path under a C:\ folder' (Board $req).result.text '# hi'
+Check '--board: an unknown op is an error' ([bool](Board '{"op":"nope"}').error) 'True'
+
 Remove-Item $home_ -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed) { Write-Host "$failed failed"; exit 1 }
 Write-Host 'all passed'

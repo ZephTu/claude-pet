@@ -13,6 +13,7 @@ const fs = require("fs");
 const os = require("os");
 const readline = require("readline");
 const { spawn, execFile } = require("child_process");
+const hqBoard = require("./board");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "pet", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -133,12 +134,15 @@ function createWindow() {
     if (last) push(last, true);
     // PET_SHOT=out.png [PET_SHOT_JS=script]: render the window to a PNG after a few seconds and
     // quit — how CI and a Mac without screen-capture permission check what the window draws.
+    // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board).
     if (process.env.PET_SHOT) {
+      if (process.env.PET_SHOT_BOARD) openBoard();
       setTimeout(async () => {
         try {
-          if (process.env.PET_SHOT_JS) await win.webContents.executeJavaScript(process.env.PET_SHOT_JS);
+          const shot = process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
+          if (process.env.PET_SHOT_JS) await shot.webContents.executeJavaScript(process.env.PET_SHOT_JS);
           await new Promise((r) => setTimeout(r, 800));
-          const img = await win.webContents.capturePage();
+          const img = await shot.webContents.capturePage();
           fs.writeFileSync(process.env.PET_SHOT, img.toPNG());
           console.log("wrote", process.env.PET_SHOT, JSON.stringify(last && { mood: last.mood, pose: last.pose, sessions: (last.sessions || []).length }));
         } catch (e) {
@@ -302,6 +306,93 @@ function jumpKind(sessionId) {
 function emitEnv() {
   return { ...process.env, CLAUDE_PET_LANG: language() };
 }
+
+// ------------------------------------------------------------------ the HQ task board
+// BoardWindow on the Mac: an ordinary window (it takes the keyboard) showing the unchanged
+// Resources/pet/board page; its requests go to board.js. Opened from the tray menu (the cat's
+// right click shows it too).
+let boardWin = null;
+
+function openBoard() {
+  if (boardWin) {
+    if (boardWin.isMinimized()) boardWin.restore();
+    boardWin.show();
+    boardWin.focus();
+    boardWin.webContents.executeJavaScript("window.hqRefresh && window.hqRefresh();").catch(() => {});
+    return;
+  }
+  const saved = readPrefs().board || {};
+  const onScreen = Number.isFinite(saved.x) && screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    return saved.x + 200 > a.x && saved.x < a.x + a.width && saved.y + 100 > a.y && saved.y < a.y + a.height;
+  });
+  const area = (onScreen ? screen.getDisplayNearestPoint({ x: saved.x, y: saved.y }) : screen.getPrimaryDisplay()).workArea;
+  boardWin = new BrowserWindow({
+    width: Math.min(saved.width || 1180, area.width), height: Math.min(saved.height || 760, area.height),
+    minWidth: 760, minHeight: 480,
+    ...(onScreen ? { x: saved.x, y: saved.y } : {}),
+    title: "HQ", backgroundColor: "#23201d", show: false, autoHideMenuBar: true,
+    icon: path.join(PET_ROOT, "skins", "cat", "assets", "idle.png"),
+    webPreferences: {
+      preload: path.join(__dirname, "board-preload.js"),
+      contextIsolation: true,
+      additionalArguments: ["--pet-lang=" + language()],
+    },
+  });
+  boardWin.removeMenu();
+  if (saved.maximized) boardWin.maximize();
+  const wc = boardWin.webContents;
+  // The board's own pages only (BoardNavigation): a web link opens in the browser, anything
+  // else goes nowhere, and no new windows.
+  const outside = (url) => { if (/^(https?|mailto):/i.test(url)) shell.openExternal(url); };
+  wc.setWindowOpenHandler(({ url }) => { outside(url); return { action: "deny" }; });
+  wc.on("will-navigate", (e, url) => {
+    if (url.startsWith("pet://app/")) return;
+    e.preventDefault();
+    outside(url);
+  });
+  wc.on("console-message", (_e, level, message) => { if (level >= 2) log("board:", message); });
+  boardWin.once("ready-to-show", () => boardWin && boardWin.show());
+  const remember = () => {
+    if (!boardWin || boardWin.isMinimized()) return;
+    const maximized = boardWin.isMaximized();
+    const b = maximized ? (readPrefs().board || {}) : boardWin.getBounds();
+    writePrefs({ ...readPrefs(), board: { x: b.x, y: b.y, width: b.width, height: b.height, maximized } });
+  };
+  boardWin.on("resized", remember);
+  boardWin.on("moved", remember);
+  boardWin.on("maximize", remember);
+  boardWin.on("unmaximize", remember);
+  boardWin.on("closed", () => { boardWin = null; });
+  boardWin.loadURL("pet://app/board/board.html");
+}
+
+hqBoard.configure({
+  L: (en, zh) => (language() === "zh" ? zh : en),
+  petEmit: PET_EMIT,
+  petEnv: emitEnv,
+  // BoardWindow's "pet" read: unread finishes per session (the list's Finished group).
+  petState: () => {
+    const unread = {};
+    for (const r of (last && last.finished) || []) if (r.sessionId) unread[r.sessionId] = (unread[r.sessionId] || 0) + (r.count || 1);
+    return { unread, dots: {} };
+  },
+  // A reply read on the board: its finishes leave the pet's list too, once (the drawer and Peek
+  // say so on every refresh).
+  onSeen: (sid) => {
+    if (!(((last && last.finished) || []).some((r) => r.sessionId === sid))) return;
+    markRead({ session: sid });
+  },
+});
+
+// Only the board window's own page (BoardNavigation.trusted): its main frame, on pet://app.
+ipcMain.handle("hq", (e, body) => {
+  if (!boardWin || e.sender !== boardWin.webContents || !e.senderFrame || e.senderFrame !== e.sender.mainFrame
+      || !e.senderFrame.url.startsWith("pet://app/")) {
+    return { error: "not from the board" };
+  }
+  return hqBoard.handle(body, boardWin);
+});
 
 function startWatcher() {
   if (!fs.existsSync(PET_EMIT)) {
@@ -481,6 +572,8 @@ function buildTray() {
     // As the Mac's menu: only while something is muted.
     ...(muted ? [{ label: zh ? `取消所有静音 (${muted})` : `Unmute All (${muted})`, click: () => { pending.muted.clear(); marks(["--unmute-all"]); } },
       { type: "separator" }] : []),
+    { label: zh ? "任务看板…" : "Task Board…", click: () => openBoard() },
+    { type: "separator" },
     { label: zh ? "显示 / 隐藏桌宠" : "Show / hide the pet", click: () => win && (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: zh ? "放回右下角" : "Move back to the corner", click: () => {
       writePrefs({ ...readPrefs(), x: undefined, y: undefined });

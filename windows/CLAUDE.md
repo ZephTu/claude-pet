@@ -79,6 +79,20 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   that a reader blocks. The user's task root here is `C:\Users\28332\claude-hq`, separate from
   the Mac's. pet-emit records `transcript` for a `C:\` path too (it only took `/`-paths), so hq
   finds a live session's transcript.
+- The HQ board (tray → "Task Board..."): `openBoard` in main.js shows the unchanged
+  `Resources/pet/board/board.html` in an ordinary window (bounds kept in prefs.json `board`).
+  `board-preload.js` plays `window.webkit.messageHandlers.hq` (a promise per message, rejecting
+  with the error, as WKScriptMessageHandlerWithReply) and `PET_LANG`; `ipcMain.handle("hq")`
+  takes only the board window's main frame on `pet://app/`. `board.js` is BoardWindow.perform:
+  the same `hq` argument lists (runs `bin/hq.py` with the Python named in `bin/hq`), the shared
+  reads of SharedReads, copy / openURL / openPath / open / pick-folder / saveImage / jump
+  (`pet-emit --jump`). What the Mac keeps in its defaults (BoardPrefs, BoardSeen, BoardPhrases)
+  and the reading area are `pet-emit --board` (`PetBoard.swift`, `pet\board.json`, over
+  QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `agents` is
+  `[]`, `jobs` empty; sending to / launching / stopping sessions, prompts, the secretary, jobs
+  and phone access answer "not on Windows yet". No push (BoardEvents): the page polls.
+  Renders: `PET_SHOT_BOARD=1` shoots the board window; `PET_HQ_HOME=<dir>` points board.js
+  (and the hq it runs, as USERPROFILE) at a scratch home with its own `hq/install.sh`.
 
 ## Dev loop on Windows
 
@@ -166,6 +180,8 @@ npx electron .
   symlinks (Git Bash copies). It takes ~5 minutes. Not in Windows CI yet.
 - Python's `os.kill(pid, 0)` on Windows sends CTRL_C_EVENT (0) to the process group, and `$$`
   in Git Bash is an MSYS pid (`/proc/$$/winpid` is the Windows one).
+- Electron started with `USERPROFILE` pointed elsewhere dies at once ("Failed to get 'userData'
+  path", in a dialog on the user's screen): use `PET_HQ_HOME` for a scratch hq instead.
 - A Windows checkout (`core.autocrlf`) gave the `.sh` scripts CRLF, which bash can't run:
   `.gitattributes` keeps them LF.
 - To see a PermissionRequest, the test session must be in the default permission mode
@@ -195,13 +211,12 @@ with a real claude-hud reading; the taskbar on another edge.
 ## Next
 
 The HQ board on Windows, in steps (the user's order): 1. hq itself (done: CLI, hooks, /task);
-2. the board window: an Electron window on `Resources/pet/board/board.html`, a preload that
-plays `window.webkit.messageHandlers.hq` (a promise per message, as
-WKScriptMessageHandlerWithReply) and main.js doing what `BoardWindow.perform` does for the ops
-that only run `hq` (most of them), plus copy / open / jump; a tray item "Task Board..."; 3.
-answering prompts and questions from the board, launching / resuming a session in a new Windows
-Terminal tab (`wt.exe new-tab`); 4. sending text to and interrupting a session (no AppleScript
-here: look at Orca's CLI first). Later or never: scheduled jobs (`--run-job`, Task Scheduler),
+2. the board window (done: see above); 3. answering prompts and questions from the board (the
+`pet` read's `dots` from the watcher's held asks, `decide` → `pet-emit --decide`),
+launching / resuming a session in a new Windows Terminal tab (`wt.exe new-tab`), opening the
+board from a click on the cat (the Mac's double-click and ClickTarget); 4. sending text to and
+interrupting a session (no AppleScript here: look at Orca's CLI first). After the board: the
+user wants `/hq-onboard` run on this machine (46 sessions) and reviewed on the board. Later or never: scheduled jobs (`--run-job`, Task Scheduler),
 the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).
 

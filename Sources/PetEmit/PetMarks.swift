@@ -36,7 +36,7 @@ enum PetMarks {
     /// click adds. Replaced as read.json is (PetFinished.markRead): the watcher reads these
     /// files every second and a scanner may hold them, and Portable.replaceItem retries where a
     /// plain atomic write would fail once and lose the click.
-    private static func update(_ file: URL, _ change: () -> Data?) {
+    static func update(_ file: URL, _ change: () -> Data?) {
         let fm = FileManager.default
         try? fm.createDirectory(at: HookEmit.baseDirectory, withIntermediateDirectories: true)
         Portable.withFileLock(lockFile.path, attempts: 200, interval: 0.005) {
