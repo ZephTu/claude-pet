@@ -122,6 +122,8 @@ task cards are kept.
 on the Mac:
 
 - Focus, Projects & duties, and Needs you.
+- The board updates itself as things change: a card edited in a terminal, a question answered,
+  a session starting, finishing or waiting on you.
 - The task drawer, the session list, and Peek.
 - Answering prompts from the board: Allow / Deny, **Answer…** for multiple-choice questions,
   and approving a plan or sending feedback on it.

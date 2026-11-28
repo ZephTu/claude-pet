@@ -287,6 +287,7 @@ function togglePause() {
   paused = !paused;
   tellWatcher("nap", paused);
   ipcHush();
+  boardNudgeIfChanged();
   draw(true);
   updateTray(last);
   buildTray();
@@ -305,6 +306,7 @@ function run(script) {
 function push(s) {
   overlay(s);
   last = s;
+  boardNudgeIfChanged();
   pendingDropped += Number(s.dropped) || 0;
   // Pinned open, the list is always being looked at: the note gets its ten seconds from now.
   if (Number(s.dropped) && keepListOpen()) panelOpened();
@@ -474,6 +476,7 @@ function setClickTarget(value) {
   const v = value === "board" ? "board" : "terminal";
   if (v === clickTarget()) return;
   writePrefs({ ...readPrefs(), clickTarget: v });
+  boardEvents.nudge();
   // Rows bound to a task but with no terminal become clickable, or stop being.
   lastDrawn = "";
   if (last) drawSessions(last);
@@ -785,6 +788,8 @@ function openBoard(task = "", session = "") {
   boardWin.on("blur", () => { boardBlurAt = Date.now(); });
   if (task) boardReveal = revealScript(task, session);
   wc.on("did-finish-load", () => {
+    // Changes are pushed to this page: its timer can slow down.
+    if (boardEvents.running) wc.executeJavaScript("window.hqPushOn && window.hqPushOn();").catch(() => {});
     const script = boardReveal;
     if (!script) return;
     boardReveal = null;
@@ -802,6 +807,30 @@ function toggleBoard() {
   else openBoard();
 }
 
+/** What the board shows of the pet: unread finishes per session, and each row's dots. */
+function boardShown() {
+  const unread = {};
+  for (const r of (last && last.finished) || []) if (r.sessionId) unread[r.sessionId] = (unread[r.sessionId] || 0) + (r.count || 1);
+  const dots = {};
+  for (const r of (!paused && last && last.sessions) || []) {
+    if (!r.sessionId) continue;
+    dots[r.sessionId] = Object.fromEntries(Object.entries(r).filter(([k]) => DOT_KEYS.has(k)));
+  }
+  return { unread, dots };
+}
+
+/** The Mac's boardNudgeIfChanged: the pet's unread marks and dots change in memory as well as
+ * with the files (a finish counts only once it has held, and no file is written then), so the
+ * open boards are told when what they show of them changes. */
+let boardShownKey = "";
+function boardNudgeIfChanged() {
+  const key = JSON.stringify(boardShown());
+  if (key === boardShownKey) return;
+  const first = !boardShownKey;
+  boardShownKey = key;
+  if (!first) boardEvents.nudge();
+}
+
 // WebBridge.dotKeys: what the board reads of a pet row.
 const DOT_KEYS = new Set(["state", "quiet", "asks", "agent", "struggle", "background", "activity", "replied",
   "context", "contextTokens", "contextBudget", "askId", "approveText", "promptAsk", "askKind"]);
@@ -813,17 +842,9 @@ hqBoard.configure({
   // BoardWindow's "pet" read: unread finishes per session (the list's Finished group), and each
   // row's state and held prompt as WebBridge.dotState (the page offers Allow / Deny, a question's
   // picks or a plan's feedback from these). None while napping.
-  petState: () => {
-    const unread = {};
-    for (const r of (last && last.finished) || []) if (r.sessionId) unread[r.sessionId] = (unread[r.sessionId] || 0) + (r.count || 1);
-    const dots = {};
-    for (const r of (!paused && last && last.sessions) || []) {
-      if (!r.sessionId) continue;
-      dots[r.sessionId] = Object.fromEntries(Object.entries(r).filter(([k]) => DOT_KEYS.has(k)));
-    }
+  petState: () => ({ ...boardShown(), clickTarget: clickTarget(),
     // The status bar's quota, as --watch last read it (absent when there is no usable reading).
-    return { unread, dots, clickTarget: clickTarget(), usage: (last && last.usage) || null };
-  },
+    usage: (last && last.usage) || null }),
   onClickTarget: setClickTarget,
   // A reply read on the board: its finishes leave the pet's list too, once (the drawer and Peek
   // say so on every refresh).
@@ -831,11 +852,23 @@ hqBoard.configure({
     if (!(((last && last.finished) || []).some((r) => r.sessionId === sid))) return;
     markRead({ session: sid });
   },
+  onChanged: () => boardEvents.nudge(),
 });
 
+// BoardEvents: the board window and phones are told when hq's or the pet's files change (a
+// watch started with the pet, board-events.js), so their pages poll only now and then.
+const boardEvents = new BoardEvents({
+  roots: () => hqBoard.watchRoots().concat([PET_HOME]), root: hqBoard.hqRootDir, config: hqBoard.HQ_CONFIG,
+  dropReads: hqBoard.dropReads, log,
+});
+// Also while the page is loading: its first read may already be under way (a page whose script
+// hasn't run yet skips it, and reads afterwards anyway).
+boardEvents.on((n) => {
+  if (!boardWin) return;
+  boardWin.webContents.executeJavaScript(`window.hqPush && window.hqPush(${Number(n) || 0});`).catch(() => {});
+});
 // Phone access (remote.js): the board served to paired phones, off until turned on in the
-// board's settings; told of changes by a watch on hq's and the pet's files (board-events.js).
-const boardEvents = new BoardEvents({ roots: () => hqBoard.watchRoots().concat([PET_HOME]), dropReads: hqBoard.dropReads, log });
+// board's settings.
 const phoneAccess = new BoardServer({
   handle: hqBoard.handle, readPrefs, writePrefs, root: PET_ROOT, petHome: PET_HOME, events: boardEvents, log,
   L: () => (en, zh) => (language() === "zh" ? zh : en), lang: language,
@@ -1176,6 +1209,7 @@ if (!app.requestSingleInstanceLock()) {
     registerHotKeys();
     buildTray();
     startWatcher();
+    boardEvents.start();
     phoneAccess.startIfEnabled();
   });
   app.on("window-all-closed", () => app.quit());
