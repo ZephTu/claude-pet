@@ -64,6 +64,10 @@ struct Entry {
             }
             exit(PetWatch.decide(session: arguments[1], ask: arguments[2], behavior: arguments[3]))
 
+        case "--mute", "--unmute-all", "--snooze":
+            // A row's × and ⏱, and the tray's Unmute All, in the Windows shell (PetMarks).
+            exit(PetMarks.run(arguments))
+
         case "--jump":
             // Bring a session's terminal tab to the front: the Windows shell's row click
             // (WindowsJump). The Mac app jumps on its own (TerminalJump).

@@ -3,7 +3,7 @@
 //    they fall through to the desktop (main.js toggles setIgnoreMouseEvents);
 //  - press on the cat and move: drag the window; press and release: open or close the list;
 //  - a click in the list is looked up with the page's own window.hitRow and sent to main.js;
-//  - resting on a row of the open list: that session's detail card;
+//  - resting on a row of the open list: that session's detail card; on the cat: the quota;
 //  - right click: the tray's menu.
 "use strict";
 
@@ -56,11 +56,13 @@ window.addEventListener("mousemove", (e) => {
   updateDwell(e.clientX, e.clientY);
 });
 
-// Resting the pointer on a row of the open list shows that session's detail card, as
-// PetHostView's updateDwell does: the page says which row (window.rowSessionId), main.js asks
-// pet-emit --detail, and window.hush takes the card down once the pointer moves on.
+// Resting the pointer shows something without being asked, as the Mac's updateDwell does: on a
+// row of the open list, that session's detail card (the page says which row,
+// window.rowSessionId; main.js asks pet-emit --detail); on the cat with the list closed, the
+// quota. window.hush takes either down once the pointer moves on.
 const ROW_DWELL_MS = 450;
-const dwell = { timer: null, y: null, showing: false, ticket: 0 };
+const PET_DWELL_MS = 1000;
+const dwell = { timer: null, y: null, target: null, showing: false, ticket: 0 };
 
 function panelOpen() {
   const p = document.getElementById("panel");
@@ -71,18 +73,31 @@ function endDwell() {
   clearTimeout(dwell.timer);
   dwell.timer = null;
   dwell.y = null;
+  dwell.target = null;
   dwell.ticket++;
   if (dwell.showing) { dwell.showing = false; ipcRenderer.send("hush"); }
 }
 
 function updateDwell(x, y) {
   const el = document.elementFromPoint(x, y);
-  if (!panelOpen() || (el && el.closest && el.closest("#pet"))) return endDwell();
-  // Onto another row: the first row's card must not stay up.
-  if (dwell.y !== null && Math.abs(y - dwell.y) > 2) endDwell();
+  const onPet = !!(el && el.closest && el.closest("#pet"));
+  const target = panelOpen() ? (onPet ? null : "row") : (onPet ? "pet" : null);
+  if (!target) return endDwell();
+  // From the cat onto the list or back, or onto another row: what was up must not stay.
+  if (dwell.target !== target || (target === "row" && dwell.y !== null && Math.abs(y - dwell.y) > 2)) endDwell();
+  dwell.target = target;
   dwell.y = y;
   if (dwell.timer || dwell.showing) return;
   const ticket = dwell.ticket;
+  if (target === "pet") {
+    dwell.timer = setTimeout(() => {
+      if (ticket !== dwell.ticket) return;
+      dwell.timer = null;
+      dwell.showing = true;
+      ipcRenderer.send("quota");
+    }, PET_DWELL_MS);
+    return;
+  }
   dwell.timer = setTimeout(async () => {
     // dwell.timer stays set while the page answers, so no second timer starts meanwhile.
     const id = await webFrame.executeJavaScript(`window.rowSessionId(${x}, ${y})`).catch(() => "");
@@ -96,9 +111,13 @@ function updateDwell(x, y) {
 
 // The row under the pointer lights up and shows its ↗, as PetHostView forwards it on the Mac
 // (window.setHoverAt; it returns early when the row is the same).
+let pointer = null;
 function hover(x, y) {
+  pointer = x < 0 ? null : { x, y };
   webFrame.executeJavaScript(`window.setHoverAt && window.setHoverAt(${x}, ${y})`).catch(() => {});
 }
+// main.js redrew the list, which forgets the highlighted row.
+ipcRenderer.on("redrawn", () => { if (pointer) hover(pointer.x, pointer.y); });
 
 window.addEventListener("mouseleave", () => {
   if (!press) setInteractive(false);
@@ -109,6 +128,8 @@ window.addEventListener("mouseleave", () => {
 window.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   const el = document.elementFromPoint(e.clientX, e.clientY);
+  // A press (a click that opens the list, a drag) takes down the quota or card that was up.
+  endDwell();
   press = { x: e.screenX, y: e.screenY, onPet: !!(el && el.closest && el.closest("#pet")), dragging: false, moved: false };
 });
 

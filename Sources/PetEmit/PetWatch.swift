@@ -9,6 +9,7 @@ import Foundation
 ///   {"mood", "phase", "pose", "mark", "waitingProject", "waitingOn", "waitingSessionId",
 ///    "waitingAskId", "badge", "sessions": [rows shaped like WebBridge's setSessions items],
 ///    "finished": [WebBridge's Finished rows], "dropped": unread finishes aged out (once),
+///    "hidden": muted live sessions, "quota": [{"label", "percent", "resetsIn"}], "quotaFallback",
 ///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished}
 enum PetWatch {
     static func run(interval: TimeInterval = 1) -> Never {
@@ -17,6 +18,7 @@ enum PetWatch {
         var prunedAt = Date.distantPast
         var cache = PetFinished.Cache()
         var lastRead: Set<String> = []
+        var quota = PetQuota()
         while true {
             let now = Date()
             var dropped = 0
@@ -25,9 +27,14 @@ enum PetWatch {
                 prunedAt = now
             }
             let all = scan(HookEmit.sessionsDirectory)
+            // Muted sessions leave the list and the mood; snoozed ones stay listed but stop the
+            // waving and the badge (PetMarks; the Mac keeps these in its defaults).
+            let muted = PetMarks.muted()
+            let snoozed = PetMarks.snoozed()
             // As on the Mac: the settled state (a finish held back settleAfter) decides only
             // "it finished"; the rows and the figure show the state as it is.
-            let state = StateAggregator.aggregate(all, now: now)
+            let state = StateAggregator.aggregate(all, now: now, hidden: muted, snoozed: snoozed)
+            PetMarks.prune(all: all, live: state.sessions, now: now)
             let settled = StateAggregator.settled(state, previous: previous, now: now)
             let finished = doneNotices(previous: previous, current: settled, now: now)
             previous = settled
@@ -47,7 +54,8 @@ enum PetWatch {
             let unread = CompletionQueue.shown(CompletionQueue.unread(cache.events, read: read),
                                                sessions: settled.sessions)
 
-            let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped)
+            let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped,
+                              snoozed: snoozed, usage: quota.sample(now: now))
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -108,14 +116,16 @@ enum PetWatch {
     }
 
     static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = [],
-                       unread: [CompletionEvent] = [], dropped: Int = 0) -> String {
+                       unread: [CompletionEvent] = [], dropped: Int = 0,
+                       snoozed: [String: Snooze.Mark] = [:], usage: UsageSnapshot? = nil) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
         let finishedRows = PanelModel.completionRows(unread, live: sessions)
         // As the Mac's render: one number for "how many things want me", and the cat looks up
-        // while it is not zero.
-        let badge = PanelModel.badge(needsYou: PanelModel.needsYou(sessions).count,
-                                     unreadFinishes: finishedRows.count)
+        // while it is not zero. A postponed wait is not counted: the user said "not now".
+        let badge = PanelModel.badge(
+            needsYou: PanelModel.needsYou(sessions).filter { !Snooze.isSnoozed($0, marks: snoozed, now: now) }.count,
+            unreadFinishes: finishedRows.count)
         let look = CatSkin.look(mood: state.mood.rawValue, phase: phase, flash: "", wanted: !badge.isEmpty,
                                 blockedOn: state.waitingOn,
                                 struggling: sessions.contains(where: Struggle.isStruggling))
@@ -129,8 +139,15 @@ enum PetWatch {
             "waitingSessionId": state.waitingSessionId,
             "waitingAskId": state.waitingAskId,
             "badge": badge,
-            "sessions": sessions.map { row($0, now: now) },
+            "sessions": sessions.map { row($0, now: now, snoozed: snoozed) },
             "finished": finishedRows.map { finishedRow($0, live: sessions, now: now) },
+            "hidden": state.hiddenCount,
+            // What resting on the cat shows (the Mac's showQuota): meters, or this line when
+            // there is no usable reading.
+            "quota": Chatter.quotaRows(usage: usage, now: now).map {
+                ["label": $0.label, "percent": $0.percent, "resetsIn": $0.resetsIn] as [String: Any]
+            },
+            "quotaFallback": Chatter.fallbackLine(state: state),
         ]
         if dropped > 0 { doc["dropped"] = dropped }
         // Only on the line where they happen: the shell shows each one once (window.notify).
@@ -168,7 +185,7 @@ enum PetWatch {
 
     /// A subset of WebBridge.setSessions' row: what the panel needs to draw a row, offer
     /// Allow / Deny, and jump to the terminal. No HQ task, no context, no tab title.
-    static func row(_ s: SessionState, now: Date) -> [String: Any] {
+    static func row(_ s: SessionState, now: Date, snoozed: [String: Snooze.Mark] = [:]) -> [String: Any] {
         var item: [String: Any] = [
             "sessionId": s.sessionId,
             "project": s.project,
@@ -192,6 +209,8 @@ enum PetWatch {
         }
         if s.state == .idle, !s.detail.isEmpty { item["replied"] = true }
         if s.state == .waiting, SessionCopy.isUrgent(waitedFor: now.timeIntervalSince(s.since)) { item["urgent"] = true }
+        let left = Snooze.remaining(s, marks: snoozed, now: now)
+        if !left.isEmpty { item["snoozedFor"] = left }
         if !s.backgroundAgents.isEmpty {
             item["activity"] = BackgroundWork.phrase(s.backgroundAgents)
         } else if s.running.count > 1 {

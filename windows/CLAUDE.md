@@ -31,7 +31,21 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   that session, and ages `events/` out hourly. Clicks (✓, Clear, a finished row, a notice) run
   `pet-emit --mark-read --all | --session <id> | <event id>...`. A row click that jumps closes
   the list, as on the Mac.
+- Snooze and mute (`PetMarks.swift`): the Mac keeps these marks in its defaults; here they are
+  `pet\muted.json` (HiddenSessions marks, as seconds since 1970 so a mark never reads a fraction
+  earlier than `lastPromptAt`) and `pet\snoozed.json` (Snooze.encode). `--watch` passes them to
+  `StateAggregator.aggregate`, prunes them, adds `snoozedFor` to rows, leaves snoozed waits out of
+  the badge, and reports `hidden` (the footer's "N muted", the tray's Unmute All). A row's ×
+  runs `pet-emit --mute`, its clock pops a 5 / 15 / 30 minute menu that runs `--snooze`.
+- Quota (`PetQuota.swift`, the Mac's sampleUsage on the watcher's tick, with `usage-seen.json`):
+  `--watch` adds `quota` (Chatter.quotaRows) and `quotaFallback`; resting 1 s on the cat with the
+  list closed calls `window.showQuota`. A reading comes from claude-hud's
+  `display.externalUsageWritePath` = `%USERPROFILE%\.claude\pet\hud-usage.json` (what this
+  machine uses), older claude-hud's `.usage-cache.json`, or `pet-emit --statusline`.
 - main.js injects a thin scrollbar: Chromium's default on Windows is a wide grey bar.
+- main.js skips a `setSessions` payload it just drew (as WebBridge), and after each redraw
+  preload.js re-sends the pointer to `setHoverAt`: rows' ages change every second here, and a
+  rebuild drops the hovered row's ↗ / clock / ×.
 - Hover card: `preload.js` times the dwell (450 ms, as `updateDwell`), main.js runs
   `pet-emit --detail <session>` (`PetDetail.swift`: insight, transcript, context budget, last
   call, background shells — the Mac's `hoverDetail`) and hands the JSON to `window.showDetail`.
@@ -157,11 +171,11 @@ npx electron .
 
 Not checked yet on the machine (built, smoke-tested or rendered only): launch at login; finish
 notices (and clicking one); the hover card; the Finished group, its ✓ / Clear and row clicks,
-scrolling the list with the wheel; the taskbar on another edge.
+scrolling the list with the wheel; snooze (the menu) and mute, Unmute All; the quota readout
+with a real claude-hud reading; the taskbar on another edge.
 
 ## Next
 
-Backlog, roughly by value: the quota readout on resting over the cat (needs the statusline
-capture); jump to VS Code's terminal; snooze and mute (the row's clock and ×); scheduled jobs (`--run-job`, Task
-Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
+Backlog, roughly by value: jump to VS Code's terminal; the cat's chatter (quota warnings,
+context-long notes: Chatter.next / QuotaAlarm); scheduled jobs (`--run-job`, Task Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
 *kills* on Windows, Keychain → Credential Manager, a bundled Python).

@@ -122,6 +122,7 @@ function createWindow() {
   win.loadURL("pet://app/index.html");
   win.webContents.on("did-finish-load", () => {
     ready = true;
+    lastDrawn = "";
     // WKWebView draws a thin overlay scrollbar; Chromium on Windows a wide grey one that eats
     // into the list. Made thin here, leaving the Mac's page as it is.
     win.webContents.insertCSS(
@@ -164,6 +165,7 @@ function run(script) {
 /** One line from pet-emit --watch, drawn. */
 function push(s, force) {
   const prev = force ? null : last;
+  if (!force) overlay(s);
   last = s;
   if (!prev || prev.mood !== s.mood || prev.waitingProject !== s.waitingProject || prev.waitingOn !== s.waitingOn
       || prev.waitingAskId !== s.waitingAskId) {
@@ -175,6 +177,7 @@ function push(s, force) {
   if (!prev || prev.badge !== s.badge) run(`window.setBadge(${js(s.badge)});`);
   pendingDropped += Number(s.dropped) || 0;
   drawSessions(s);
+  syncTray(s);
   // Sessions that just finished, each in a notice of its own (the page skips them while the
   // list is open). Only on the line they came on: a redraw (force) does not repeat them.
   if (!force) {
@@ -192,9 +195,101 @@ ipcMain.on("panel-opened", () => {
   if (pendingDropped) setTimeout(() => { pendingDropped = 0; }, 10000);
 });
 
-/** The rows and the Finished group. No HQ asks or jobs yet. */
+/** The rows, the muted count (the footer's "N muted") and the Finished group. No HQ asks or
+ * jobs yet. */
+let lastDrawn = "";
 function drawSessions(s) {
-  run(`window.setSessions(${js(s.sessions || [])}, 0, ${js(s.finished || [])}, ${pendingDropped}, [], []);`);
+  const script = `window.setSessions(${js(s.sessions || [])}, ${Number(s.hidden) || 0}, ${js(s.finished || [])}, ${pendingDropped}, [], []);`;
+  // As WebBridge: the same payload is not drawn twice (did-finish-load clears it).
+  if (script === lastDrawn || !win || !ready) return;
+  lastDrawn = script;
+  // Rebuilding the list drops the row under the pointer's highlight (and with it the row's ↗,
+  // clock and ×); the rows' ages tick every second here, not every five as on the Mac, so
+  // preload.js puts it back once the list is redrawn.
+  win.webContents.executeJavaScript(script)
+    .then(() => { if (win) win.webContents.send("redrawn"); })
+    .catch((e) => log("js failed:", e.message));
+}
+
+/** A session id from the page, safe as one argument. */
+function sessionToken(id) {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : "";
+}
+
+/** `pet-emit --mute | --unmute-all | --snooze`; the next --watch line shows the result. */
+function marks(args) {
+  execFile(PET_EMIT, args, { windowsHide: true, timeout: 10000 }, (err, _out, stderr) => {
+    if (err) log(args[0], "failed:", err.message.trim(), String(stderr || "").trim());
+  });
+}
+
+// What a click changed, shown at once (as the Mac redraws at once) and kept on top of the
+// --watch lines that arrive before pet-emit has written it — rows' ages make one every second —
+// so a muted row does not flicker back. Each holds until a line agrees, or PENDING_MS.
+const PENDING_MS = 3000;
+const pending = { muted: new Map(), snoozed: new Map(), read: [] };
+
+function overlay(s) {
+  const now = Date.now();
+  const rows = () => s.sessions || [];
+  for (const [id, until] of pending.muted) {
+    if (now > until || !rows().some((r) => r.sessionId === id)) { pending.muted.delete(id); continue; }
+    s.sessions = rows().filter((r) => r.sessionId !== id);
+    s.hidden = (Number(s.hidden) || 0) + 1;
+  }
+  for (const [id, p] of pending.snoozed) {
+    const row = rows().find((r) => r.sessionId === id);
+    if (now > p.until || !row || row.snoozedFor) { pending.snoozed.delete(id); continue; }
+    row.snoozedFor = p.text;
+  }
+  pending.read = pending.read.filter((p) => now <= p.until);
+  if (pending.read.length && s.finished) s.finished = s.finished.filter((r) => !pending.read.some((p) => p.match(r)));
+}
+
+/** The tray offers Unmute All while something is muted: rebuilt when that count moves. */
+let trayMuted = 0;
+function syncTray(s) {
+  const n = Number(s && s.hidden) || 0;
+  if (n === trayMuted) return;
+  trayMuted = n;
+  buildTray();
+}
+
+/** The row's ×. The list stays open, as on the Mac: muting several in a row is the common case. */
+function mute(sessionId) {
+  const id = sessionToken(sessionId);
+  if (!id) return;
+  marks(["--mute", id]);
+  if (!last || !last.sessions || !last.sessions.some((r) => r.sessionId === id)) return;
+  pending.muted.set(id, Date.now() + PENDING_MS);
+  last.sessions = last.sessions.filter((r) => r.sessionId !== id);
+  last.hidden = (Number(last.hidden) || 0) + 1;
+  drawSessions(last);
+  syncTray(last);
+}
+
+function snooze(id, minutes) {
+  marks(["--snooze", id, String(minutes)]);
+  const row = last && (last.sessions || []).find((r) => r.sessionId === id);
+  if (!row) return;
+  // Snooze.remaining's wording for a fresh delay (Chatter.duration).
+  const text = `${minutes}m`;
+  pending.snoozed.set(id, { text, until: Date.now() + PENDING_MS });
+  row.snoozedFor = text;
+  drawSessions(last);
+}
+
+/** The row's clock: 5 / 15 / 30 minutes at the pointer (the Mac's askSnooze). A menu rather
+ * than a fixed delay: "later" without saying when is how an item gets lost. */
+const SNOOZE_MINUTES = [5, 15, 30];
+function askSnooze(sessionId) {
+  const id = sessionToken(sessionId);
+  if (!id || !win) return;
+  const zh = language() === "zh";
+  Menu.buildFromTemplate([
+    { label: zh ? "多久后提醒我…" : "Remind me in…", enabled: false },
+    ...SNOOZE_MINUTES.map((m) => ({ label: zh ? `${m} 分钟` : `${m} minutes`, click: () => snooze(id, m) })),
+  ]).popup({ window: win });
 }
 
 /** The terminal a session's row can jump to, or "" (PetWatch.row's termKind). */
@@ -283,7 +378,9 @@ function act(a) {
   }
   if (a.action === "read") { markRead(eventIds(a.eventIds)); return; }   // the ✓; the list stays up
   if (a.action === "readAll") { markRead("all"); return; }
-  // The board, snooze and mute are not in the spike yet.
+  if (a.action === "mute") { mute(a.sessionId); return; }
+  if (a.action === "snooze") { askSnooze(a.sessionId); return; }
+  // The board is not in the spike yet.
   log("not handled yet:", JSON.stringify(a));
 }
 
@@ -327,10 +424,13 @@ function markRead(what) {
   const timer = setTimeout(() => child.kill(), 10000);
   child.on("exit", () => clearTimeout(timer));
 
-  if (!last || !last.finished) return;
   const ids = new Set(Array.isArray(what) ? what : []);
-  last.finished = last.finished.filter((r) => !(what === "all" || (what && r.sessionId === what.session)
-    || (r.eventIds || []).some((id) => ids.has(id))));
+  const match = (r) => what === "all" || (!!what.session && r.sessionId === what.session)
+    || (r.eventIds || []).some((id) => ids.has(id));
+  // Kept off the lines that come before pet-emit has written read.json (see overlay).
+  pending.read.push({ match, until: Date.now() + PENDING_MS });
+  if (!last || !last.finished) return;
+  last.finished = last.finished.filter((r) => !match(r));
   drawSessions(last);
 }
 
@@ -376,7 +476,11 @@ function buildTray() {
   if (!tray) tray = new Tray(trayImage(last ? last.mood : "idle"));
   const zh = language() === "zh";
   const setLang = (lang) => { writePrefs({ ...readPrefs(), lang }); app.relaunch(); app.quit(); };
+  const muted = trayMuted;
   tray.setContextMenu(Menu.buildFromTemplate([
+    // As the Mac's menu: only while something is muted.
+    ...(muted ? [{ label: zh ? `取消所有静音 (${muted})` : `Unmute All (${muted})`, click: () => { pending.muted.clear(); marks(["--unmute-all"]); } },
+      { type: "separator" }] : []),
     { label: zh ? "显示 / 隐藏桌宠" : "Show / hide the pet", click: () => win && (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: zh ? "放回右下角" : "Move back to the corner", click: () => {
       writePrefs({ ...readPrefs(), x: undefined, y: undefined });
@@ -423,6 +527,14 @@ ipcMain.on("detail", (_e, sessionId) => {
     cardUp = true;
     run(`window.showDetail(${json});`);
   });
+});
+// Resting on the cat (preload.js, with the list closed): the quota meters from the last --watch
+// line, or a line about the sessions when there is no usable reading (the Mac's showQuota).
+ipcMain.on("quota", () => {
+  if (!last) return;
+  detailWanted = "";
+  cardUp = true;
+  run(`window.showQuota(${js(last.quota || [])}, ${js(last.quotaFallback || "")});`);
 });
 ipcMain.on("hush", () => {
   detailWanted = "";

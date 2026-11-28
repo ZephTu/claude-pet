@@ -118,6 +118,58 @@ Check '...and the row goes' (@((Get-Content $wout -TotalCount 1 | ConvertFrom-Js
 $detail = & $Emit --detail s1
 Check '--detail prints the hover card' ((($detail | ConvertFrom-Json).path) -eq 'C:\work\demo') 'True'
 
+# Snooze and mute (the row's clock and x), and the quota readout, as --watch reports them.
+function WatchOnce {
+  $o = Join-Path $home_ ("w-" + [guid]::NewGuid() + ".out")
+  $p = Start-Process -FilePath $Emit -ArgumentList '--watch' -RedirectStandardOutput $o -NoNewWindow -PassThru
+  for ($i = 0; $i -lt 50 -and -not ((Test-Path $o) -and (Get-Content $o -TotalCount 1)); $i++) { Start-Sleep -Milliseconds 200 }
+  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+  $l = if (Test-Path $o) { Get-Content $o -TotalCount 1 } else { $null }
+  if (-not $l) { Write-Host 'FAIL --watch printed no line'; $script:failed++; return [pscustomobject]@{ sessions = @(); quota = @() } }
+  return ($l | ConvertFrom-Json)
+}
+function RowOf($doc, $session) { @($doc.sessions | Where-Object { $_.sessionId -eq $session }) }
+Emit '{"session_id":"m1","hook_event_name":"PermissionRequest","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","tool_name":"Bash","tool_input":{"command":"ls"}}' | Out-Null
+Check 'a second prompt waits' (Field m1 state) 'waiting'
+$before = WatchOnce
+& $Emit --snooze m1 15
+Check '--snooze exits 0' $LASTEXITCODE 0
+$p = Start-Process -FilePath $Emit -ArgumentList '--snooze', 'm1', '7' -RedirectStandardError (Join-Path $home_ 'sn.err') -NoNewWindow -PassThru -Wait
+Check '--snooze refuses a delay it does not offer' $p.ExitCode 2
+$after = WatchOnce
+Check 'a snoozed row says when it comes back' ((RowOf $after m1)[0].snoozedFor -match '^1[45]m$') 'True'
+Check '...and leaves the badge' ([int]("0" + $after.badge)) ([int]("0" + $before.badge) - 1)
+& $Emit --mute m1
+Check '--mute exits 0' $LASTEXITCODE 0
+$after = WatchOnce
+Check 'a muted session leaves the list' @(RowOf $after m1).Count 0
+Check '...and is counted as muted' $after.hidden 1
+Emit '{"session_id":"m1","hook_event_name":"UserPromptSubmit","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","prompt":"go on"}' | Out-Null
+$after = WatchOnce
+Check 'typing into it brings it back' @(RowOf $after m1).Count 1
+& $Emit --mute m1
+& $Emit --unmute-all
+Check '--unmute-all exits 0' $LASTEXITCODE 0
+Check '...and brings it back' @(RowOf (WatchOnce) m1).Count 1
+# PET_HOME does not move ~\.claude: an old claude-hud's own cache there would be read too.
+$hudCache = Join-Path $env:USERPROFILE '.claude\plugins\claude-hud\.usage-cache.json'
+if (Test-Path $hudCache) {
+  Write-Host "skip the quota checks: $hudCache exists on this machine"
+} else {
+  Check 'no quota reading: the fallback line' ([bool]$after.quotaFallback -and @($after.quota).Count -eq 0) 'True'
+  $inv = [Globalization.CultureInfo]::InvariantCulture
+  $fmt = 'yyyy-MM-ddTHH:mm:ssZ'
+  $at = [DateTime]::UtcNow
+  $hud = '{"updated_at":"' + $at.ToString($fmt, $inv) + '","five_hour":{"used_percentage":42,"resets_at":"' +
+    $at.AddMinutes(90).ToString($fmt, $inv) + '"},"seven_day":{"used_percentage":17.4,"resets_at":"' +
+    $at.AddDays(3).ToString($fmt, $inv) + '"}}'
+  [IO.File]::WriteAllText((Join-Path $home_ 'hud-usage.json'), $hud)
+  $q = @((WatchOnce).quota)
+  Check 'claude-hud''s snapshot gives two meters' $q.Count 2
+  Check '...the five-hour one' "$($q[0].label) $($q[0].percent)" '5h 42'
+  Check '...and the week' "$($q[1].label) $($q[1].percent)" 'week 17'
+}
+
 # Which terminal a session is in: Windows Terminal from WT_SESSION, but not under a terminal that
 # names itself (VS Code inherits WT_SESSION when started from one).
 $saved = @{ TERM_PROGRAM = $env:TERM_PROGRAM; ORCA_TERMINAL_HANDLE = $env:ORCA_TERMINAL_HANDLE; WT_SESSION = $env:WT_SESSION }
