@@ -23,6 +23,8 @@
       "board-preload.js",
       "remote.js",
       "board-events.js",
+      "quicknote.html",
+      "quicknote-preload.js",
       "package.json"
     ],
     "extraResources": [

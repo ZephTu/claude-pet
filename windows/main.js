@@ -7,12 +7,13 @@
 // part: click-through outside the cat and the panel, drag to move, click to open the list.
 "use strict";
 
-const { app, BrowserWindow, protocol, ipcMain, screen, Tray, Menu, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, protocol, ipcMain, screen, Tray, Menu, nativeImage, shell, globalShortcut } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const readline = require("readline");
 const { spawn, execFile } = require("child_process");
+const { pathToFileURL } = require("url");
 const hqBoard = require("./board");
 const { BoardServer } = require("./remote");
 const { BoardEvents } = require("./board-events");
@@ -186,9 +187,12 @@ function createWindow() {
     // PET_SHOT_BOARD=T-123: opened at that task, as a click on a session bound to it does.
     if (process.env.PET_SHOT) {
       if (process.env.PET_SHOT_BOARD) openBoard(/^T-\d+$/.test(process.env.PET_SHOT_BOARD) ? process.env.PET_SHOT_BOARD : "");
+      // PET_SHOT_NOTE=1: the quick-note box (the script runs on it).
+      if (process.env.PET_SHOT_NOTE) showQuickNote();
       setTimeout(async () => {
         try {
-          const shot = process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
+          const shot = process.env.PET_SHOT_NOTE && noteWin ? noteWin
+            : process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
           if (process.env.PET_SHOT_JS) await shot.webContents.executeJavaScript(process.env.PET_SHOT_JS);
           await new Promise((r) => setTimeout(r, 800));
           const img = await shot.webContents.capturePage();
@@ -501,6 +505,204 @@ function openSession(sessionId, termKind) {
 function jumpKind(sessionId) {
   const row = ((last && last.sessions) || []).find((r) => r.sessionId === sessionId);
   return (row && row.termKind) || "";
+}
+
+// ------------------------------------------------------------------ global shortcuts
+// The Mac's HotKey pair (⌃⌥⌘J, ⌃⌥⌘N), as Ctrl+Alt+J / Ctrl+Alt+N: Windows has no Command key.
+// Off until switched on in the tray (prefs.json `jumpHotKey` / `noteHotKey`): on keyboard
+// layouts where Ctrl+Alt is AltGr, the chord takes AltGr+J / AltGr+N's character away.
+const HOTKEYS = {
+  jump: { pref: "jumpHotKey", accelerator: "Control+Alt+J", name: "Ctrl+Alt+J", run: () => jumpToNextWaiting() },
+  note: { pref: "noteHotKey", accelerator: "Control+Alt+N", name: "Ctrl+Alt+N", run: () => toggleQuickNote() },
+};
+
+function hotKeyOn(which) {
+  return globalShortcut.isRegistered(HOTKEYS[which].accelerator);
+}
+
+/** At start: the ones switched on. One another app already holds stays off, its tick too. */
+function registerHotKeys() {
+  for (const [which, k] of Object.entries(HOTKEYS)) {
+    if (readPrefs()[k.pref] !== true) continue;
+    if (!globalShortcut.register(k.accelerator, k.run)) log(`hotkey ${k.name} is taken (${which})`);
+  }
+}
+
+/** AppMain.toggle: kept as on only if it took — a tick that lies is worse than no feature. */
+function toggleHotKey(which) {
+  const k = HOTKEYS[which];
+  if (hotKeyOn(which)) {
+    globalShortcut.unregister(k.accelerator);
+    writePrefs({ ...readPrefs(), [k.pref]: false });
+  } else {
+    const ok = globalShortcut.register(k.accelerator, k.run);
+    writePrefs({ ...readPrefs(), [k.pref]: ok });
+    if (!ok) say(L(`${k.name} is taken by another app`, `${k.name} 已被别的应用占用`), 5);
+  }
+  buildTray();
+}
+
+function L(en, zh) {
+  return language() === "zh" ? zh : en;
+}
+
+/** WebBridge.say: a line in the pet's bubble, `emphasis` in bold. */
+function say(text, holdSeconds, emphasis = "") {
+  run(`window.say(${js(text)}, ${Math.round(holdSeconds * 1000)}, ${js(emphasis)});`);
+}
+
+/** AppMain.jumpToNextWaiting: whatever has been waiting on the user longest, unless snoozed
+ * (PanelModel.jumpTarget; muted sessions are not in the rows at all), opened where a click on it
+ * goes. Every outcome says something: a shortcut that does nothing visible stops being trusted. */
+function jumpToNextWaiting() {
+  const target = ((last && last.sessions) || [])
+    .filter((r) => r.state === "waiting" && !r.snoozedFor)
+    .sort((a, b) => (b.waitedSeconds || 0) - (a.waitedSeconds || 0))[0];
+  if (!target) { say(L("nothing is waiting on you", "没有在等你的 session"), 3); return; }
+  if (jumping.has(target.sessionId)) return;   // the last press is still on its way there
+  if (!openSession(target.sessionId, target.termKind || "")) {
+    const name = target.project || "";
+    say(L(`${name} is waiting, but its terminal cannot be addressed`, `${name} 在等你，但跳不到它的终端`), 5, name);
+  }
+}
+
+// ------------------------------------------------------------------ quick note
+// The Mac's QuickNotePanel (quicknote.html): a small box on top of everything, on the screen the
+// pointer is on. Enter files it (hq inbox add, via=hotkey), hq inbox sort files it further, and
+// the pet says where it went. The box takes the keyboard; Esc hides it and Windows hands the
+// keyboard back to the window before it (the pet is unfocusable meanwhile).
+const NOTE_WIDTH = 560;    // the card is 520 wide, with 20px all round for its shadow
+const NOTE_HEIGHT = 170;
+let noteWin = null;
+
+/** The shortcut again while the box is up closes it. */
+function toggleQuickNote() {
+  if (noteWin && noteWin.isVisible()) { noteWin.hide(); return; }
+  showQuickNote();
+}
+
+/** `then` runs once the box is up and its page loaded (a failed note's restore). */
+function showQuickNote(then) {
+  if (!noteWin) {
+    noteWin = new BrowserWindow({
+      width: NOTE_WIDTH, height: NOTE_HEIGHT, show: false, frame: false, transparent: true, resizable: false,
+      alwaysOnTop: true, skipTaskbar: true, fullscreenable: false, maximizable: false, minimizable: false,
+      title: L("Quick note", "记一笔"),
+      webPreferences: { preload: path.join(__dirname, "quicknote-preload.js"), contextIsolation: true, sandbox: true },
+    });
+    noteWin.setAlwaysOnTop(true, "floating");
+    noteWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    noteWin.webContents.on("will-navigate", (e) => e.preventDefault());
+    // Hiding the box activates the next window down, and the pet's (always on top) sits right
+    // under it: while the box is up the pet can't take the keyboard, so Esc and Enter hand it
+    // back to the window that had it (the Mac's non-activating panel never took it from there).
+    noteWin.on("hide", () => setTimeout(() => { if (win && !(noteWin && noteWin.isVisible())) win.setFocusable(true); }, 300));
+    // Alt+F4 hides it, as Esc does: the draft stays, as in the Mac's panel.
+    noteWin.on("close", (e) => { if (!quitting) { e.preventDefault(); noteWin.hide(); } });
+    noteWin.on("closed", () => { noteWin = null; });
+    noteWin.loadFile(path.join(__dirname, "quicknote.html"), { query: { lang: language() } });
+  }
+  // Where the pointer is: the screen being looked at, a quarter of the way down.
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  noteWin.setPosition(Math.round(area.x + (area.width - NOTE_WIDTH) / 2), Math.round(area.y + area.height / 4 - 20));
+  const reveal = () => {
+    if (!noteWin) return;
+    if (win) win.setFocusable(false);
+    noteWin.show();
+    noteWin.focus();
+    noteWin.webContents.send("quicknote:shown");
+    if (then) then(noteWin);
+  };
+  if (noteWin.webContents.isLoading()) noteWin.webContents.once("did-finish-load", reveal);
+  else reveal();
+}
+
+function fromNote(e) {
+  return !!noteWin && e.sender === noteWin.webContents;
+}
+
+ipcMain.on("quicknote:size", (e, height) => {
+  if (!fromNote(e)) return;
+  noteWin.setSize(NOTE_WIDTH, Math.max(NOTE_HEIGHT, Math.min(420, Math.ceil(Number(height) || 0))));
+});
+ipcMain.on("quicknote:close", (e) => { if (fromNote(e)) noteWin.hide(); });
+ipcMain.handle("quicknote:image", async (e, dataURL) => {
+  if (!fromNote(e)) return { error: "not from the note box" };
+  const r = await hqBoard.handle({ op: "saveImage", data: String(dataURL) }, null);
+  return r.error ? { error: r.error } : { path: r.result.path };
+});
+ipcMain.on("quicknote:submit", (e, what) => {
+  if (!fromNote(e) || !what) return;
+  noteWin.hide();
+  const text = typeof what.text === "string" ? what.text : "";
+  const images = (Array.isArray(what.images) ? what.images : []).filter((i) => typeof i === "string");
+  fileQuickNote(text, images);
+});
+
+/** AppMain.fileQuickNote: hq inbox add, then sort (a few seconds), saying each step. */
+async function fileQuickNote(text, images) {
+  const added = await hqBoard.handle({ op: "note-add", text, images, via: "hotkey" }, null);
+  const note = added.error ? null : parseJSON(added.result);
+  if (!note || typeof note.id !== "string") {
+    const err = added.error || "?";
+    say(L(`Couldn't note that: ${err}`, `没记下：${err}`), 6);
+    // Nothing typed is lost: the box comes back with it.
+    showQuickNote((box) => box.webContents.send("quicknote:restore", {
+      text, error: err, images: images.map((p) => ({ path: p, src: pathToFileURL(p).href })),
+    }));
+    return;
+  }
+  say(L("Noted — sorting…", "记下了，正在分拣…"), 4);
+  const sorted = await hqBoard.handle({ op: "note-sort", id: note.id }, null);
+  const result = sorted.error ? null : parseJSON(sorted.result);
+  if (!result) {
+    say(L("Noted, but sorting failed — it's in Needs you", "记下了，但分拣出错——在 Needs you 里"), 6);
+  } else if (result.state === "sorted" && result.dest && typeof result.dest === "object") {
+    const label = noteDestLabel(result.dest);
+    say(L(`Filed: ${label}`, `已放到：${label}`), 6, label);
+  } else {
+    say(L("Not sure where that goes — it's waiting in Needs you", "没把握放哪——在 Needs you 里等你挑"), 6);
+  }
+}
+
+function parseJSON(text) {
+  try { const v = JSON.parse(text); return v && typeof v === "object" ? v : null; } catch (_) { return null; }
+}
+
+const STATUS_WORD = { active: ["ready", "待推进"], blocked: ["blocked", "卡住"], "waiting-on-me": ["needs you", "等你"],
+  done: ["done", "完成"], abandoned: ["abandoned", "放弃"] };
+
+/** Where a note went, as the board says it (board.js destLabel, AppMain.noteDestLabel). */
+function noteDestLabel(d) {
+  const task = typeof d.task === "string" ? d.task : "";
+  switch (d.kind) {
+    case "task": return L(`new task “${d.title || ""}”`, `新任务「${d.title || ""}」`);
+    case "todo": return `${task} ${L("todo", "待办")} @${d.owner || "me"}`;
+    case "note": return `${task} ${L("log", "记录")}`;
+    case "update": return `${task} ${L("update", "更新")}${updateDetail(d)}`;
+    default: return L("your todo", "我的待办");
+  }
+}
+
+/** What an update changes beyond its log line (board.js updateDetail, AppMain.updateDetail). */
+function updateDetail(d) {
+  const bits = [];
+  if (typeof d.status === "string" && d.status) {
+    const w = STATUS_WORD[d.status];
+    bits.push("→ " + (w ? L(w[0], w[1]) : d.status));
+  }
+  if (d.next) bits.push(L("next", "下一步"));
+  if (d.state) bits.push(L("state", "状态说明"));
+  const done = Array.isArray(d.done) ? d.done : [];
+  if (done.length === 1) {
+    // The todo itself, without its owner, shortened as the board does.
+    let t = String(done[0]).replace(/^@\S+\s+/, "");
+    if ([...t].length > 24) t = [...t].slice(0, 23).join("") + "…";
+    bits.push(`✓ ${t}`);
+  } else if (done.length > 1) {
+    bits.push(L(`✓ ${done.length} todos`, `勾掉 ${done.length} 条待办`));
+  }
+  return bits.length ? " · " + bits.join(" · ") : "";
 }
 
 // What pet-emit prints in the pet's language (the hover card, notices): the tray's choice.
@@ -842,6 +1044,7 @@ function buildTray() {
   // is set once under Settings.
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: zh ? "任务看板…" : "Task Board…", click: () => openBoard() },
+    { label: zh ? "记一笔…" : "Quick Note…", click: () => showQuickNote() },
     { type: "separator" },
     { label: paused ? (zh ? "醒来" : "Wake Up") : (zh ? "小睡一会" : "Take a Nap"), click: togglePause },
     { label: zh ? "保持列表展开" : "Keep List Open", type: "checkbox", checked: keepListOpen(),
@@ -858,6 +1061,11 @@ function buildTray() {
     { label: zh ? "设置" : "Settings", submenu: [
       ...(app.isPackaged ? [{ label: zh ? "登录时启动" : "Launch at Login", type: "checkbox",
         checked: launchesAtLogin(), click: (item) => setLaunchAtLogin(item.checked) }] : []),
+      // The two global shortcuts (the Mac's HotKey pair), each ticked only while it is registered.
+      { label: zh ? `跳到等待中的 session (${HOTKEYS.jump.name})` : `Jump to Waiting Session (${HOTKEYS.jump.name})`,
+        type: "checkbox", checked: hotKeyOn("jump"), click: () => toggleHotKey("jump") },
+      { label: zh ? `记一笔 (${HOTKEYS.note.name})` : `Quick Note (${HOTKEYS.note.name})`,
+        type: "checkbox", checked: hotKeyOn("note"), click: () => toggleHotKey("note") },
       // Where a click on a row or a notice takes you (the Mac's ClickTarget).
       { label: zh ? "点击 session 时打开" : "Clicking a Session Opens", submenu: [
         { label: zh ? "它的终端" : "Its Terminal", type: "radio", checked: clickTarget() === "terminal", click: () => setClickTarget("terminal") },
@@ -957,6 +1165,7 @@ ipcMain.on("menu", () => { if (tray) tray.popUpContextMenu(); });
 
 let quitting = false;
 app.on("before-quit", () => { quitting = true; if (watcher) watcher.kill(); });
+app.on("will-quit", () => globalShortcut.unregisterAll());
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -964,6 +1173,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     serveFiles();
     createWindow();
+    registerHotKeys();
     buildTray();
     startWatcher();
     phoneAccess.startIfEnabled();
