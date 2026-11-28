@@ -39,7 +39,8 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   runs `pet-emit --mute`, its clock pops a 5 / 15 / 30 minute menu that runs `--snooze`.
 - Quota (`PetQuota.swift`, the Mac's sampleUsage on the watcher's tick, with `usage-seen.json`):
   `--watch` adds `quota` (Chatter.quotaRows) and `quotaFallback`; resting 1 s on the cat with the
-  list closed calls `window.showQuota`. A reading comes from claude-hud's
+  list closed calls `window.showQuota`. `usage` (the Mac's BoardBridge.usage, only while the
+  reading is usable) goes to the board's "pet" read for the status bar's meters. A reading comes from claude-hud's
   `display.externalUsageWritePath` = `%USERPROFILE%\.claude\pet\hud-usage.json` (what this
   machine uses), older claude-hud's `.usage-cache.json`, or `pet-emit --statusline`.
 - main.js injects a thin scrollbar: Chromium's default on Windows is a wide grey bar.

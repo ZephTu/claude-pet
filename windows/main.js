@@ -459,7 +459,8 @@ hqBoard.configure({
       if (!r.sessionId) continue;
       dots[r.sessionId] = Object.fromEntries(Object.entries(r).filter(([k]) => DOT_KEYS.has(k)));
     }
-    return { unread, dots, clickTarget: clickTarget() };
+    // The status bar's quota, as --watch last read it (absent when there is no usable reading).
+    return { unread, dots, clickTarget: clickTarget(), usage: (last && last.usage) || null };
   },
   onClickTarget: setClickTarget,
   // A reply read on the board: its finishes leave the pet's list too, once (the drawer and Peek
