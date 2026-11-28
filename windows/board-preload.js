@@ -1,13 +1,16 @@
 // The board window's bridge: what WKWebView gives the page on the Mac.
 //  - window.webkit.messageHandlers.hq.postMessage(body) returns a promise of the answer, or
 //    rejects with the error, as a WKScriptMessageHandlerWithReply does (main.js → board.js);
-//  - window.PET_LANG, as installLanguageScript sets it.
+//  - window.PET_LANG, as installLanguageScript sets it;
+//  - window.PET_OS = "windows" (unset on the Mac).
 "use strict";
 
 const { contextBridge, ipcRenderer } = require("electron");
 
 const lang = (process.argv.find((a) => a.startsWith("--pet-lang=")) || "").split("=")[1] === "zh" ? "zh" : "en";
 contextBridge.exposeInMainWorld("PET_LANG", lang);
+// The page offers Windows' own places to open sessions in (no iTerm2).
+contextBridge.exposeInMainWorld("PET_OS", "windows");
 contextBridge.exposeInMainWorld("webkit", {
   messageHandlers: {
     hq: {

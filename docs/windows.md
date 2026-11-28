@@ -100,7 +100,7 @@ on the Mac:
 - Answering prompts from the board: Allow / Deny, **Answer…** for multiple-choice questions,
   and approving a plan or sending feedback on it.
 - Starting and resuming sessions in three places:
-  - **Terminal** opens a new Windows Terminal tab;
+  - **Windows Terminal** opens a new tab in it;
   - **Orca** opens a new Orca tab;
   - **Background** runs `claude --bg`.
 - Typing into a session: messages, **Esc** to interrupt, and **■** to stop.

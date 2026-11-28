@@ -1006,7 +1006,11 @@ function mergeBackground(sessions, agents) {
 }
 
 // Where "New session" opens: the user's choice, else the terminal most sessions run in.
-const PLACES = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: T("Background", "后台") };
+// On Windows (window.PET_OS, set by its board window) "terminal" is a Windows Terminal tab, and
+// there is no iTerm2.
+const PLACES = window.PET_OS === "windows"
+  ? { orca: "Orca", terminal: "Windows Terminal", bg: T("Background", "后台") }
+  : { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", bg: T("Background", "后台") };
 // Sessions the board starts or resumes skip Claude Code's permission prompts — the user's choice,
 // remembered; off unless ticked.
 const skipPerms = () => pref("hq-skip-perms", "0") === "1";
@@ -1073,7 +1077,7 @@ function launchPlace() {
   const saved = pref("hq-launch", "");
   if (PLACES[saved]) return saved;
   const counts = {};
-  for (const s of ui.sessions) { const k = s.terminal && s.terminal.kind; if (k === "orca" || k === "iterm2") counts[k] = (counts[k] || 0) + 1; }
+  for (const s of ui.sessions) { const k = s.terminal && s.terminal.kind; if ((k === "orca" || k === "iterm2") && PLACES[k]) counts[k] = (counts[k] || 0) + 1; }
   return Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || "terminal";
 }
 function launchDir(t) {
