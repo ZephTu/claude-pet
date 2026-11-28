@@ -75,6 +75,17 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   call, background shells — the Mac's `hoverDetail`) and hands the JSON to `window.showDetail`.
   It reads the whole transcript each time (~0.4 s for a long session, release build); the Mac
   caches. pet-emit gets the pet's language as `CLAUDE_PET_LANG`.
+- HQ questions (the Mac's TaskIndex.openAsks, announceAsks): `PetRows.Tasks` also folds each
+  card's `asks.jsonl` (a "Later" one is out until its `until`) and reads every card's status;
+  `--watch` adds `hqAsks` (`{id, task, text, status}`, WebBridge's) and counts them in the badge
+  (so the cat looks up). A question new since the last read is a `notices` entry with
+  `"kind": "ask"` ("T-012 asks: …", cut at 90, held 25 s, for its session); the first read after
+  a start only records, and every ask once announced stays remembered. While napping main.js
+  keeps those notices (`askId`) and says the ones still open on waking (the Mac's announceAsks
+  does not run while paused; keeping it in main.js leaves no race with the `nap` line on stdin).
+  `asks.jsonl` is split on "\n" / "\r\n" only: hq writes U+2028 raw. main.js passes `hqAsks` as
+  setSessions' fifth argument (a row click opens the board at the task). `PET_HQ_HOME` moves the
+  home `~\.claude\hq` is looked for in, as for board.js; smoke.ps1 sets it to a scratch folder.
 - Hooks in `settings.json` are written as `"$HOME/.claude/pet/pet-emit"` (quoted, forward
   slashes): Claude Code on Windows runs hook commands through Git Bash. Verified on a real
   machine (Claude Code 2.1.318) from Orca and Windows Terminal.

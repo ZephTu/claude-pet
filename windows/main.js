@@ -272,11 +272,13 @@ function setNoticeCount(n) {
 // current (the board's quota and unread counts); the pet draws the fixed state below, and the
 // board's dots go empty, as the Mac's come from what the nap pushed. Notices come
 // only on the line where a session finished, and those lines are not shown while napping, so
-// waking up does not replay what happened meanwhile.
+// waking up does not replay what happened meanwhile. A new HQ question is kept instead and said
+// on waking if it is still open, as the Mac's announceAsks (which does not run while paused).
 let paused = false;
+let napAsks = [];
 const NAP = {
   mood: "idle", phase: "", pose: "sleeping", mark: "none", waitingProject: null, waitingOn: "",
-  waitingSessionId: "", waitingAskId: "", badge: "", sessions: [], finished: [], hidden: 0,
+  waitingSessionId: "", waitingAskId: "", badge: "", sessions: [], finished: [], hidden: 0, hqAsks: [],
 };
 
 function togglePause() {
@@ -286,6 +288,18 @@ function togglePause() {
   draw(true);
   updateTray(last);
   buildTray();
+  if (!paused) {
+    const open = new Set(((last && last.hqAsks) || []).map((a) => a.id));
+    for (const n of napAsks.filter((n) => open.has(n.askId))) notify(n);
+    napAsks = [];
+  }
+}
+
+/** A notice from --watch: a finish, up for the hold picked in the tray, or a new HQ question,
+ * up for its own 25 s. A click goes where its session's would. */
+function notify(n) {
+  const hold = n.kind === "ask" ? Number(n.holdMs) || 25000 : noticeHold() * 1000;
+  run(`window.notify(${js(n.text)}, ${hold}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${!!n.sessionId && opensSomewhere(n.sessionId)});`);
 }
 
 function js(value) {
@@ -308,11 +322,12 @@ function push(s) {
   syncTray(s);
   // Sessions that just finished, each in a notice of its own (the page skips them while the
   // list is open), up for the hold picked in the tray. Only on the line they came on: a redraw
-  // does not repeat them. None while napping (the Mac's announceFinishes).
-  if (!paused) {
-    for (const n of s.notices || []) {
-      run(`window.notify(${js(n.text)}, ${noticeHold() * 1000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${opensSomewhere(n.sessionId)});`);
-    }
+  // does not repeat them. None while napping (the Mac's announceFinishes); a new HQ question is
+  // kept for waking up (togglePause).
+  if (paused) {
+    for (const n of s.notices || []) if (n.kind === "ask") napAsks.push(n);
+  } else {
+    for (const n of s.notices || []) notify(n);
     // The cat speaking up (PetChatter: quota, long context, a rut, a long run, "done", back
     // from away) and its brief reactions to a finish or trouble, as WebBridge.say / flash.
     // --watch already kept quiet while the list, a card or the nap would hide them.
@@ -357,8 +372,8 @@ function panelOpened() {
 }
 ipcMain.on("panel-opened", panelOpened);
 
-/** The rows, the muted count (the footer's "N muted") and the Finished group. No HQ asks or
- * jobs yet. */
+/** The rows, the muted count (the footer's "N muted"), the Finished group and the questions open
+ * on the HQ board (a click opens the board at the task). No scheduled jobs on Windows. */
 let lastDrawn = "";
 function drawSessions(s) {
   // Napping: an empty list, whatever changed underneath (a mute, a read).
@@ -366,7 +381,7 @@ function drawSessions(s) {
   if (!s) return;
   // Clicks that go to the board (see clickTarget) make a row clickable even with no terminal.
   const boardRows = (rows) => (rows || []).map((r) => (routeOf(r.sessionId, r.termKind).task ? { ...r, opensBoard: true } : r));
-  const script = `window.setSessions(${js(boardRows(s.sessions))}, ${Number(s.hidden) || 0}, ${js(boardRows(s.finished))}, ${paused ? 0 : pendingDropped}, [], []);`;
+  const script = `window.setSessions(${js(boardRows(s.sessions))}, ${Number(s.hidden) || 0}, ${js(boardRows(s.finished))}, ${paused ? 0 : pendingDropped}, ${js(s.hqAsks || [])}, []);`;
   // As WebBridge: the same payload is not drawn twice (did-finish-load clears it).
   if (script === lastDrawn || !win || !ready) return;
   lastDrawn = script;
