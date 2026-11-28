@@ -702,17 +702,23 @@ let mentionedProblem = null;    // its key once the cat said it
 function healthReport(args) {
   return new Promise((resolve) => {
     if (!fs.existsSync(PET_EMIT)) return resolve(null);
+    // execFile answers on the pipes' close: a process `claude --version` left behind holding them
+    // would keep it waiting past its own timeout.
+    const giveUp = setTimeout(() => { log("pet-emit --health: no answer"); resolve(null); }, 25000);
     execFile(PET_EMIT, ["--health", ...args], { windowsHide: true, timeout: 20000, env: emitEnv() }, (err, out) => {
+      clearTimeout(giveUp);
       if (err) { log("pet-emit --health failed:", err.message.trim()); return resolve(null); }
       try { resolve(JSON.parse(String(out))); } catch (e) { log("pet-emit --health:", e.message); resolve(null); }
     });
   });
 }
 
-/** WindowsJump's own words for why the jump failed (pet-emit's `fail`), else the exec error's. */
+/** Why the jump failed, for the report's "Terminal jump": WindowsJump's own words (pet-emit's
+ * `fail`), never the exec error's text, which carries pet-emit's path and the session id. */
 function jumpFailure(err, stderr) {
-  const line = String(stderr || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop()
-    || (err.killed ? "timed out" : err.message.trim().split(/\r?\n/)[0]);
+  if (err.killed) return "timed out";
+  const line = String(stderr || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop();
+  if (!line) return typeof err.code === "number" ? `exit ${err.code}` : "did not run";
   return line.replace(/^pet-emit:\s*/, "").slice(0, 200);
 }
 
@@ -752,7 +758,8 @@ function placeHealth(height) {
  * timer). Shown without taking the keyboard from what the user was typing in; a click on it
  * gives it the keyboard, and then Esc closes it. */
 function showHealth() {
-  mentionedProblem = null;
+  // Not the Mac's `mentionedProblem = nil`: there the cat speaks only at page load, here
+  // checkProblem's minute would say the same problem again right after the user read the report.
   if (!healthWin) {
     healthWin = new BrowserWindow({
       width: 362, height: 120, show: false, frame: false, transparent: true, resizable: false,
@@ -772,11 +779,11 @@ function showHealth() {
     healthWin.on("closed", () => { healthWin = null; healthDoc = null; });
     healthWin.loadFile(path.join(__dirname, "health.html"));
   }
-  healthDoc = null;
   const target = healthWin;
   healthReport(lastJumpFailure ? ["--jump-failure", lastJumpFailure] : []).then((doc) => {
     if (healthWin !== target) return;
-    healthDoc = doc;
+    // The page shows the report Copy copies: until a new one is in, the one already up.
+    if (doc) healthDoc = doc;
     const send = () => target.webContents.executeJavaScript(`window.showHealth(${js(doc || {})});`).catch(() => {});
     if (target.webContents.isLoading()) target.webContents.once("did-finish-load", send);
     else send();

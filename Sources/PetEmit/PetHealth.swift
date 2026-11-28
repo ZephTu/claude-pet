@@ -29,7 +29,10 @@ enum PetHealth {
         if quick {
             doc = quickProblem().map { ["problem": item($0.key, $0.check)] } ?? [:]
         } else {
-            let checks = collect(jumpFailure: jumpFailure)
+            let checks = collect(jumpFailure: jumpFailure).map {
+                (key: $0.key, check: HealthCheck(name: $0.check.name, status: $0.check.status,
+                                                 detail: redactHome($0.check.detail)))
+            }
             doc = ["checks": checks.map { item($0.key, $0.check) },
                    "summary": HealthReport.summary(checks.map(\.check))]
         }
@@ -144,7 +147,8 @@ enum PetHealth {
     static func writable() -> Bool {
         let home = HookEmit.baseDirectory
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let probe = home.appending(path: ".health-\(ProcessInfo.processInfo.processIdentifier)")
+        // `.tmp`: the board's file watch ignores it, so a check every minute pushes nothing to phones.
+        let probe = home.appending(path: ".health-\(ProcessInfo.processInfo.processIdentifier).tmp")
         guard (try? Data().write(to: probe)) != nil else { return false }
         try? FileManager.default.removeItem(at: probe)
         return true
@@ -169,6 +173,22 @@ enum PetHealth {
         let version = run(path, ["--version"], timeout: 5)
             .split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         return (version, shown(path))
+    }
+
+    /// The home folder as `~` anywhere in `text` (a jump failure can name a path), `\` or `/`.
+    static func redactHome(_ text: String) -> String {
+        #if os(Windows)
+        var home = FileManager.default.homeDirectoryForCurrentUser.path.replacingOccurrences(of: "/", with: "\\")
+        if home.hasSuffix("\\") { home.removeLast() }
+        guard home.count > 3 else { return text }
+        var out = text
+        for form in [home, home.replacingOccurrences(of: "\\", with: "/")] {
+            out = out.replacingOccurrences(of: form, with: "~", options: .caseInsensitive)
+        }
+        return out
+        #else
+        return text
+        #endif
     }
 
     /// A path as the report shows it: Windows' separators, the home folder as `~` (Foundation's
