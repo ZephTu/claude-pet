@@ -62,6 +62,8 @@ let petEnv = () => process.env;
 let petState = () => ({});
 let onSeen = () => {};
 let onClickTarget = () => {};
+// A write from any board (or a card read): main.js tells every open board (BoardEvents.nudge).
+let onChanged = () => {};
 // Phone access (remote.js), set by main.js: the board's `remote*` settings ops.
 let remote = null;
 // Sessions a Resume is under way for: a double click must not open the session twice. And those
@@ -677,7 +679,9 @@ async function perform(body, win) {
       const text = str(body, "text").trim();
       const images = Array.isArray(body.images) ? body.images.filter((i) => typeof i === "string") : [];
       if (!text && !images.length) return { error: L("empty note", "内容是空的") };
-      return hq(["inbox", "--json", "--via=board"].concat(images.map((i) => `--image=${i}`), ["--", "add", text]));
+      // The quick-note box (main.js) files as "hotkey", as the Mac's does.
+      const via = body.via === "hotkey" ? "hotkey" : "board";
+      return hq(["inbox", "--json", `--via=${via}`].concat(images.map((i) => `--image=${i}`), ["--", "add", text]));
     }
     case "note-sort": {
       const claude = await findClaude();
@@ -744,9 +748,19 @@ async function perform(body, win) {
 async function handle(body, win) {
   if (!body || typeof body !== "object") return { error: L("bad request", "请求有误") };
   const op = str(body, "op");
-  if (READ_ONLY.has(op)) return perform(body, win);
+  if (READ_ONLY.has(op)) {
+    const r = await perform(body, win);
+    // Leaves hq's answers as they were, but which cards were read is shown on every board.
+    if (op === "card-seen") onChanged();
+    return r;
+  }
   kept.clear();
-  try { return await perform(body, win); } finally { kept.clear(); }
+  try { return await perform(body, win); } finally {
+    kept.clear();
+    // Every other open board hears of it too: what changed may be in no watched file (a setting,
+    // a quick phrase).
+    onChanged();
+  }
 }
 
 function configure(opts) {
@@ -757,13 +771,19 @@ function configure(opts) {
   if (opts.onSeen) onSeen = opts.onSeen;
   if (opts.onClickTarget) onClickTarget = opts.onClickTarget;
   if (opts.remote) remote = opts.remote;
+  if (opts.onChanged) onChanged = opts.onChanged;
 }
 
 /** The folders whose changes can change what the board reads (BoardEvents.roots): the HQ root,
  * as hq reads it (HQ_ROOT first), and hq's own folder. */
 function watchRoots() {
-  const root = (process.env.HQ_ROOT || hqRoot()).replace(/^~(?=$|[\\/])/, HOME);
+  const root = hqRootDir();
   return (root ? [root] : []).concat([HQ_DIR]);
+}
+
+/** The HQ root as hq reads it (HQ_ROOT first), or "" when none is set up. */
+function hqRootDir() {
+  return (process.env.HQ_ROOT || hqRoot()).replace(/^~(?=$|[\\/])/, HOME);
 }
 
 /** A change on disk: the reads it can make stale are dropped (BoardPush.staleReads). `claude
@@ -771,4 +791,5 @@ function watchRoots() {
  * starts or ends. */
 const dropReads = () => { for (const k of ["board", "sessions", "status"]) kept.delete(k); };
 
-module.exports = { configure, handle, hqCommand, taskBySession, tabCommand, openInTerminal, watchRoots, dropReads };
+module.exports = { configure, handle, hqCommand, taskBySession, tabCommand, openInTerminal, watchRoots, hqRootDir, dropReads,
+  HQ_CONFIG: path.join(HQ_DIR, "config.json") };

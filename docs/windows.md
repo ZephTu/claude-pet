@@ -72,16 +72,31 @@ task cards are kept.
 
 - The cat sits in the corner of the screen, always on top. Clicks beside it go through to the
   window underneath, and you can drag the cat to another screen.
-- The tray icon's menu is laid out as the Mac's: Task Board…; **Take a Nap** / **Wake Up**
+- The tray icon's menu is laid out as the Mac's: Task Board…; **Quick Note…**; **Take a Nap** / **Wake Up**
   (the cat sleeps with an empty list, no notices and no badge; what finished meanwhile is not
-  announced when it wakes); **Keep List Open**; Unmute All while something is muted; show / hide
-  and back to the corner. Under **Settings**: launch at login, clicking a session opens (its
-  terminal or its task), **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once**
-  (1–3) for finish notices, **Character** (Cat or Cultivator), language, and the log. The
-  settings are kept across restarts; a nap is not, as on the Mac.
+  announced when it wakes, a question that came up on the HQ board is); **Keep List Open**;
+  Unmute All while something is muted; show / hide and back to the corner. Under **Settings**:
+  launch at login, the two shortcuts (below), clicking a session opens (its terminal or its task),
+  **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once** (1–3) for finish notices,
+  **Character** (Cat or Cultivator), language, and the log. The settings are kept across
+  restarts; a nap is not, as on the Mac.
+- **Shortcuts**, off until you tick them under tray → **Settings** (the Mac's ⌃⌥⌘N and ⌃⌥⌘J):
+  - **Ctrl+Alt+N** opens the quick-note box (also tray → **Quick Note…**), on the screen the
+    pointer is on. Enter files the note into the HQ inbox, Shift+Enter starts a new line, a
+    pasted screenshot shows as a thumbnail (✕ takes it out), Esc closes. The cat then says
+    where the note went, or that it waits in Needs you. A note that couldn't be filed comes
+    back in the box.
+  - **Ctrl+Alt+J** goes to the session that has waited on you longest (snoozed ones are
+    skipped), where a click on it goes: its terminal or its task. With none, the cat says so.
+  - A shortcut another app already holds stays unticked, and the cat says it is taken. On
+    keyboard layouts where Ctrl+Alt is AltGr (Polish, say), AltGr+N / AltGr+J stop typing
+    their character while it is on.
 - From the session list:
   - **Allow** or **Deny** a permission prompt.
   - Read finish notices and the **Finished** group.
+  - See the questions waiting on the HQ board (the **Asks** group at the top; a click opens the
+    board at that task). They count in the badge, and a new one pops a notice, "T-012 asks: …",
+    for 25 seconds.
   - Snooze and mute sessions.
   - Rest the pointer on a row for its detail card.
 - Each row shows what it does on the Mac: the HQ task it is bound to, how many turns it has had,
@@ -110,6 +125,8 @@ task cards are kept.
 on the Mac:
 
 - Focus, Projects & duties, and Needs you.
+- The board updates itself as things change: a card edited in a terminal, a question answered,
+  a session starting, finishing or waiting on you.
 - The task drawer, the session list, and Peek.
 - Answering prompts from the board: Allow / Deny, **Answer…** for multiple-choice questions,
   and approving a plan or sending feedback on it.
@@ -154,7 +171,6 @@ be removed there.
 - **The secretary** and **Scheduled jobs.** The board answers "not on Windows yet".
 - **Feeds** (Zulip, Jira) and **ticking finished todos.** Their credentials live in the macOS
   Keychain.
-- **The quick-note shortcut** (⌃⌥⌘N).
 - **VS Code's terminal**: sessions there get no ↗.
 
 ## Good to know
