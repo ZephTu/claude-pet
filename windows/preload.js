@@ -22,6 +22,9 @@ let interactive = false;
 let press = null;
 // The last click on the cat that toggled the list, and whether the list was open before it.
 let lastToggle = null;
+// Keep List Open (main.js): a click on the cat is then not a request to close the list.
+let pinned = false;
+ipcRenderer.on("pinned", (_e, on) => { pinned = !!on; });
 
 function solidAt(x, y) {
   const el = document.elementFromPoint(x, y);
@@ -150,12 +153,14 @@ window.addEventListener("mouseup", async (e) => {
     if (e.detail >= 2 && lastToggle && Date.now() - lastToggle.at < 1000) {
       const wasOpen = lastToggle.wasOpen;
       lastToggle = null;
-      await webFrame.executeJavaScript(`window.setPanelOpen(${wasOpen})`);
+      await webFrame.executeJavaScript(`window.setPanelOpen(${wasOpen || pinned})`);
       ipcRenderer.send("board-toggle");
       return;
     }
     const wasOpen = panelOpen();
-    await webFrame.executeJavaScript("window.togglePanel()");
+    // Pinned: nothing to open and nothing to close, but the list is put up should it be shut
+    // (WebBridge.togglePanel).
+    await webFrame.executeJavaScript(pinned ? "window.setPanelOpen(true)" : "window.togglePanel()");
     lastToggle = { at: Date.now(), wasOpen };
     if (panelOpen()) ipcRenderer.send("panel-opened");
     return;
