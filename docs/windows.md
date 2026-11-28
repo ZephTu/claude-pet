@@ -164,5 +164,5 @@ Node 20+. The build steps, the dev loop and how each piece maps to the Mac's cod
 
 To build this checkout and install it in one go (instead of downloading the bundle), run
 `powershell -ExecutionPolicy Bypass -File windows\scripts\install-local.ps1`. It builds
-what CI builds, smoke-tests it and runs the bundle's `install.ps1`. It refuses a checkout that
+what CI builds, runs CI's checks and then the bundle's `install.ps1`. It refuses a checkout that
 is missing commits on `origin/main`.
