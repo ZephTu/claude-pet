@@ -19,6 +19,7 @@ enum PetWatch {
         var cache = PetFinished.Cache()
         var lastRead: Set<String> = []
         var quota = PetQuota()
+        var rows = PetRows()
         while true {
             let now = Date()
             var dropped = 0
@@ -55,7 +56,8 @@ enum PetWatch {
                                                sessions: settled.sessions)
 
             let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped,
-                              snoozed: snoozed, usage: quota.sample(now: now))
+                              snoozed: snoozed, usage: quota.sample(now: now),
+                              extras: rows.extras(for: state.sessions, all: all, now: now))
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -117,7 +119,8 @@ enum PetWatch {
 
     static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = [],
                        unread: [CompletionEvent] = [], dropped: Int = 0,
-                       snoozed: [String: Snooze.Mark] = [:], usage: UsageSnapshot? = nil) -> String {
+                       snoozed: [String: Snooze.Mark] = [:], usage: UsageSnapshot? = nil,
+                       extras: [String: PetRows.Extra] = [:]) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
         let finishedRows = PanelModel.completionRows(unread, live: sessions)
@@ -139,7 +142,7 @@ enum PetWatch {
             "waitingSessionId": state.waitingSessionId,
             "waitingAskId": state.waitingAskId,
             "badge": badge,
-            "sessions": sessions.map { row($0, now: now, snoozed: snoozed) },
+            "sessions": sessions.map { row($0, now: now, snoozed: snoozed, extra: extras[$0.sessionId]) },
             "finished": finishedRows.map { finishedRow($0, live: sessions, now: now) },
             "hidden": state.hiddenCount,
             // What resting on the cat shows (the Mac's showQuota): meters, or this line when
@@ -183,12 +186,15 @@ enum PetWatch {
         return item
     }
 
-    /// A subset of WebBridge.setSessions' row: what the panel needs to draw a row, offer
-    /// Allow / Deny, and jump to the terminal. No HQ task, no context, no tab title.
-    static func row(_ s: SessionState, now: Date, snoozed: [String: Snooze.Mark] = [:]) -> [String: Any] {
+    /// WebBridge.setSessions' row: what the panel needs to draw a row, offer Allow / Deny and
+    /// jump to the terminal, plus what PetRows gathered (turns, context, the HQ task, commands
+    /// left running, and Claude Code's name for the session where the Mac has the tab title).
+    /// No aliases or pins (the Mac keeps those in its defaults).
+    static func row(_ s: SessionState, now: Date, snoozed: [String: Snooze.Mark] = [:],
+                    extra: PetRows.Extra? = nil) -> [String: Any] {
         var item: [String: Any] = [
             "sessionId": s.sessionId,
-            "project": s.project,
+            "project": SessionLabels.displayName(for: s, prefs: [:], title: extra?.name ?? ""),
             "state": s.state.rawValue,
             "tool": s.tool,
             "detail": SessionCopy.note(state: s.state, detail: s.detail, waitingOn: s.waitingOn),
@@ -203,6 +209,21 @@ enum PetWatch {
         if StateAggregator.isQuiet(s, now: now) { item["quiet"] = true }
         if s.state == .waiting, !s.waitingOn.isEmpty { item["asks"] = "permission" }
         if s.askAnswerable(now: now) { item.merge(BoardPrompt.dotFields(of: s)) { _, new in new } }
+        if let extra {
+            if let turns = extra.turns { item["turns"] = turns }
+            if let task = extra.task {
+                item["task"] = task
+                item["taskStatus"] = extra.taskStatus ?? ""
+            }
+            if let reading = extra.context {
+                item["context"] = reading.percent
+                if reading.hasTokens {
+                    item["contextTokens"] = reading.tokens
+                    item["contextBudget"] = reading.budget
+                }
+            }
+            if extra.background > 0 { item["background"] = extra.background }
+        }
         if s.state == .busy, s.phase == "awaiting-agent" { item["agent"] = true }
         if Struggle.isStruggling(s) {
             item["struggle"] = "\(s.failStreak) failed in a row" + (s.failTarget.isEmpty ? "" : " · " + s.failTarget)

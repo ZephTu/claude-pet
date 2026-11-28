@@ -54,7 +54,16 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
 - Hooks in `settings.json` are written as `"$HOME/.claude/pet/pet-emit"` (quoted, forward
   slashes): Claude Code on Windows runs hook commands through Git Bash. Verified on a real
   machine (Claude Code 2.1.318) from Orca and Windows Terminal.
-- Windows-only Swift: `ProcessProbeWindows.swift` (Toolhelp32 etc.) and `Portable.swift`
+- The rows' extras (`PetRows.swift`, the Mac's TranscriptCache / readContext / TaskIndex /
+  findBackgroundShells): turns and context from the transcript (only what was appended, opened
+  with full sharing so Claude Code keeps writing, at most 64 MB a tick; a row shows them once
+  its transcript was read to the end: a 250 MB one takes ~4 s after the pet starts), the HQ task and status from hq's files every 8 s, the count
+  of commands an idle session left running (BackgroundShells), and Claude Code's name for the
+  session (`~\.claude\sessions\<pid>.json` `name`) as the Mac's tab title. `context*` and
+  `background` are dot fields, so the board's rows get them too.
+- Windows-only Swift: `ProcessProbeWindows.swift` (Toolhelp32; a process's command line through
+  ntdll's NtQueryInformationProcess, split by the C runtime's rules, so BackgroundShells and
+  startedToolShell work as on the Mac) and `Portable.swift`
   (append with `FILE_APPEND_DATA`, `LockFileEx` locks, `MoveFileExW` replace with retries,
   `processExists`).
 - Jump to the terminal (`Sources/PetEmit/WindowsJump.swift`): the hook records `orca` (as on the

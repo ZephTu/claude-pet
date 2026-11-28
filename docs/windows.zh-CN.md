@@ -64,6 +64,7 @@ hq/install.sh --root ~/claude-hq
   - 看完成提示和 **Finished** 分组；
   - 稍后提醒、静音某个 session；
   - 鼠标停在一行上，显示它的详情卡。
+- 每一行显示的内容和 Mac 一样：绑定的 HQ 任务、对话轮数、上下文（`210k·70%`）；这一轮结束后它启动的命令还在跑时，显示"后台 N 个"。行名用 Claude Code 里的会话名（`/rename` 起的），没有就用文件夹名。
 - 鼠标停在小猫上看额度。需要有状态栏程序把额度存下来，比如 claude-hud，把 `display.externalUsageWritePath` 设成 `%USERPROFILE%\.claude\pet\hud-usage.json`。
 - **跳到 session 的终端（↗）：**
   - **Orca** 的标签页；

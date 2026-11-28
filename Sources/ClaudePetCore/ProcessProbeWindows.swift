@@ -8,9 +8,8 @@ import WinSDK
 /// Toolhelp snapshot. Names come back without ".exe", so "ClaudePet.exe" is "ClaudePet" here as it
 /// is on the Mac.
 ///
-/// Not answered on Windows: a process's controlling tty (there is none) and its command line
-/// (would need NtQueryInformationProcess). Both return nil, which every caller already reads as
-/// "can't tell": no Ghostty handle, no "the user approved it in the terminal" shortcut.
+/// Not answered on Windows: a process's controlling tty (there is none). It returns nil, which
+/// every caller already reads as "can't tell" (no Ghostty handle).
 /// Elsewhere (Linux) everything returns "can't tell"; nothing ships there.
 extension ProcessProbe {
     struct Entry {
@@ -100,7 +99,53 @@ extension ProcessProbe {
 
     public static func controllingTTY(pid: Int32) -> String? { nil }
 
-    public static func arguments(pid: Int32) -> String? { nil }
+    /// The process's argv joined by spaces, as the Mac's KERN_PROCARGS2 reading gives it: the
+    /// command line read from the process (NtQueryInformationProcess, ProcessCommandLineInformation)
+    /// and split as the C runtime splits it, so Claude Code's tool shell
+    /// (`bash.exe -c "source …/shell-snapshots/snapshot-… && eval '…' && pwd -P …"`) reads as
+    /// it does on the Mac. nil when it is gone or not ours.
+    public static func arguments(pid: Int32) -> String? {
+        #if os(Windows)
+        guard pid > 0, let line = commandLine(pid: pid) else { return nil }
+        let argv = WindowsCommandLine.split(line)
+        return argv.isEmpty ? nil : argv.joined(separator: " ")
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(Windows)
+    private typealias NtQueryInformationProcess = @convention(c) (
+        HANDLE?, Int32, UnsafeMutableRawPointer?, ULONG, UnsafeMutablePointer<ULONG>?) -> LONG
+
+    /// A process's command line as it was started. ntdll's NtQueryInformationProcess with class 60
+    /// (Windows 8.1+) needs only PROCESS_QUERY_LIMITED_INFORMATION; it fills a UNICODE_STRING
+    /// whose buffer follows it in the same block. Looked up at run time: the WinSDK module does
+    /// not declare it.
+    static func commandLine(pid: Int32) -> String? {
+        guard let process = OpenProcess(DWORD(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */), false, DWORD(pid))
+        else { return nil }
+        defer { CloseHandle(process) }
+        guard let ntdll = "ntdll.dll".withCString(encodedAs: UTF16.self, { GetModuleHandleW($0) }),
+              let found = GetProcAddress(ntdll, "NtQueryInformationProcess")
+        else { return nil }
+        let query = unsafeBitCast(found, to: NtQueryInformationProcess.self)
+        var needed: ULONG = 0
+        _ = query(process, 60, nil, 0, &needed)   // STATUS_INFO_LENGTH_MISMATCH, with the size
+        guard needed > 0, needed < 1 << 20 else { return nil }
+        let block = UnsafeMutableRawPointer.allocate(byteCount: Int(needed), alignment: 16)
+        defer { block.deallocate() }
+        guard query(process, 60, block, needed, &needed) >= 0 else { return nil }
+        // UNICODE_STRING: USHORT Length (bytes), USHORT MaximumLength, then the buffer pointer
+        // at the next pointer-aligned offset.
+        let bytes = Int(block.load(as: UInt16.self))
+        guard bytes > 0,
+              let chars = block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.stride,
+                                     as: UnsafePointer<UInt16>?.self)
+        else { return nil }
+        return String(decoding: UnsafeBufferPointer(start: chars, count: bytes / 2), as: UTF16.self)
+    }
+    #endif
 
     /// Is a process with this id still there? `kill(pid, 0)` on the Mac.
     public static func exists(pid: Int32) -> Bool {
