@@ -75,6 +75,7 @@ hq/install.sh --root ~/claude-hq
 **任务看板。** 双击小猫，或者托盘 → **Task Board…**。下面这些都和 Mac 一样能用：
 
 - Focus、项目与职责、Needs you。
+- 看板跟着变化自己刷新：在终端里改了卡片、答复了提问、session 开始、结束或在等你时都会更新。
 - 任务侧栏、session 列表、Peek。
 - 在看板上回应确认：允许 / 拒绝、多选题点 **Answer…**、批准计划或写修改意见。
 - 在三个地方开新 session、续上旧的：
