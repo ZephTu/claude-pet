@@ -182,9 +182,12 @@ const INLINE_MAX = 8000;
 
 /** The command line a tab runs: `command` (an .exe, then its arguments) started in `dir`.
  * { line, file }: `file` is the script's temp file, if it needed one (deleted by the tab, or by
- * the caller when the tab did not open). */
-function tabCommand(dir, command) {
+ * the caller when the tab did not open). In an Orca tab, `ORCA_*` and `TERM_PROGRAM` are that
+ * tab's own (Orca sets them for each terminal it creates): they stay, or the hook records the
+ * session with no terminal and the board can neither type into it nor jump to it. */
+function tabCommand(dir, command, place) {
   const [file, ...args] = command.map((a) => String(a).replace(/\0/g, ""));
+  const ownTab = place === "orca" ? " -and $k -notmatch '^(ORCA_.*|TERM_PROGRAM(_VERSION)?)$'" : "";
   const script = [
     "$i = New-Object System.Diagnostics.ProcessStartInfo",
     `$i.FileName = ${psQuote(file)}`,
@@ -192,7 +195,7 @@ function tabCommand(dir, command) {
     `$i.WorkingDirectory = ${psQuote(dir)}`,
     "$i.UseShellExecute = $false",
     // Not the variables of a session the terminal itself may have been started from.
-    `foreach ($k in @($i.EnvironmentVariables.Keys)) { if ($k -match ${psQuote(SESSION_VARS.source)}) { $i.EnvironmentVariables.Remove($k) } }`,
+    `foreach ($k in @($i.EnvironmentVariables.Keys)) { if ($k -match ${psQuote(SESSION_VARS.source)}${ownTab}) { $i.EnvironmentVariables.Remove($k) } }`,
     // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
     ...(process.env.HQ_ROOT ? [`$i.EnvironmentVariables['HQ_ROOT'] = ${psQuote(process.env.HQ_ROOT)}`] : []),
     "$p = [System.Diagnostics.Process]::Start($i)",
@@ -222,7 +225,7 @@ async function openInTerminal(place, dir, command, title, focus, win) {
   if (place === "iterm2") return { error: L("iTerm2 is a Mac app — pick Windows Terminal or Orca", "iTerm2 是 Mac 上的应用——选 Windows Terminal 或 Orca") };
   if (place !== "terminal" && place !== "orca") return { error: L(`unknown place to open: ${place}`, `不知道要在哪里打开：${place}`) };
   if (place === "orca" && !fs.existsSync(ORCA_CLI)) return { error: L("Orca is not installed", "没有安装 Orca") };
-  const { line, file } = tabCommand(dir, command);
+  const { line, file } = tabCommand(dir, command, place);
   const opened = await (place === "terminal" ? openInWT(line, title, focus, win) : openInOrca(line, dir, title, focus));
   if (opened.error && file) fs.rm(file, { force: true }, () => {});
   return opened;

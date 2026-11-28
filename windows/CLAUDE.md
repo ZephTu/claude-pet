@@ -145,6 +145,9 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   (message, plan approval, Esc, stop) and with a raw-mode stand-in in conhost.
   `CLAUDE_ENV` also drops `CLAUDE_CODE_CHILD_SESSION` (inherited, it turns the new session's
   transcript off), the other per-session `CLAUDE_CODE_*` markers, `ORCA_*` and `TERM_PROGRAM`.
+  The tab's stub drops the same from claude's environment, except `ORCA_*` / `TERM_PROGRAM` in an
+  Orca tab: there they are the new tab's own, and without them the hook records no terminal (the
+  board can't message or jump to the session).
 
 ## Dev loop on Windows
 
