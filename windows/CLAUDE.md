@@ -125,19 +125,27 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   resumeInOrcaPlace).
 - Phone access (`remote.js`, BoardServer + RemoteAccess + Tailnet ported to Node): the board's
   `remote*` ops go to it (board.js `configure({remote})`). A `net` server on `::` (dual stack,
-  `pauseOnConnect`) decides on the peer's address before a byte is read (`admission`: private /
-  on-link, or a Tailscale address while Tailscale is on, then `tailscale whois --json` from
+  `pauseOnConnect`) decides on the peer's address before a byte is read (`admission`: private,
+  or public IPv6 on a non-tunnel adapter's /64; or a Tailscale address while Tailscale is on —
+  also any peer that arrived on this PC's own Tailscale address (a subnet router keeps far
+  private sources) — then `tailscale whois --json` from
   `%ProgramFiles%\Tailscale\tailscale.exe` must name this PC's own untagged user), then hands
-  the socket to an `http` server. Same Host / Origin checks, SHA-256 token hashes, lockout, code
+  the socket to an `http` server. That server never listens, so its own timeouts never run:
+  `accept` holds each connection to 60 s until its request is in (not `/events`), every answer
+  is `Connection: close` (each request is let in afresh, as on the Mac), a refusal cuts off a
+  body it never read, 100-continue waits for the token check, and `stop()` / Tailscale off end
+  every open socket. Same Host / Origin checks, SHA-256 token hashes, lockout, code
   cancellation, ETag / gzip, `X-HQ-Have` "same" answers, phone-op allow list (`PHONE_OPS`;
   test/remote.test.js checks every board.js op is on it or on `PC_ONLY`). `POST /api` runs
   board.js `handle(body, null)` (`skip` from `pet\board.json`'s shared prefs); served pages get
-  `HQ_REMOTE`, `PET_LANG` and `PET_OS = "windows"` (the page then says "PC" / "电脑" for "Mac").
+  `HQ_REMOTE`, `PET_LANG` and `PET_OS = "windows"`: the page's `TM()` strings (the ones naming
+  the computer, never user text) then say "PC" / "电脑" for "Mac".
   Switches and devices are prefs.json `boardServerEnabled`, `boardServerTailnet`,
   `boardServerDevices` (ISO dates), `boardServerPort`. QR codes: the `qrcode` package (a runtime
   dependency, packed into app.asar). `POST /events` (SSE) is fed by `board-events.js`:
   `fs.watch` recursive over the HQ root, `~\.claude\hq` and the pet's folder, BoardPush.relevant
-  and PushGate ported, dropping board.js's kept reads first. Checked on this machine over
+  and PushGate ported, dropping board.js's kept `board` / `sessions` / `status` reads first
+  (not `agents`: each phone's refresh would start a Claude Code). Checked on this machine over
   loopback, the LAN address and this PC's own Tailscale address (whois of itself); not yet from a
   real phone.
 - The cat opens the board: a double click toggles it (preload.js puts the list back as the

@@ -6,10 +6,12 @@
 // page reloads when it changes. T("English", "中文") picks one — every word the board shows goes
 // through it. Technical terms (session, todo, ask, Resume…) may stay English in the Chinese.
 const LANG = window.PET_LANG === "zh" ? "zh" : "en";
-// On Windows (window.PET_OS, set by its board window and on a phone it serves) the computer the
-// board runs on is a PC: what the page says of "the Mac" says "the PC" / "电脑" there.
+const T = (en, zh) => (LANG === "zh" ? zh : en);
+// TM: words about the computer the board runs on. On Windows (window.PET_OS, set by its board
+// window and on a phone it serves) that is a PC: "the Mac" reads "the PC" / "电脑" there. Only for
+// the page's own wording — never a title or anything else the user wrote.
 const ON_PC = window.PET_OS === "windows";
-const T = (en, zh) => (LANG === "zh" ? (ON_PC ? zh.replace(/ ?\bMac\b ?/g, "电脑") : zh) : (ON_PC ? en.replace(/\bMac\b/g, "PC") : en));
+const TM = (en, zh) => T(ON_PC ? en.replace(/\bMac\b/g, "PC") : en, ON_PC ? zh.replace(/ ?\bMac\b ?/g, "电脑") : zh);
 document.documentElement.lang = LANG;
 
 const ORDER = ["waiting-on-me", "blocked", "active", "done", "abandoned"];
@@ -248,7 +250,7 @@ async function claimPairing(code) {
       return true;
     }
     msg = r.status === 429 && j.error ? j.error
-      : T("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
+      : TM("That code is mistyped, used already or lapsed — check it, or press Pair a phone on the Mac for a new one", "这个配对码输错了、已经用过或过期了——核对一下，或者在 Mac 上再点一次「配对手机」");
   } catch (e) {
     msg = e.message;
   }
@@ -264,7 +266,7 @@ async function post(token, body, have) {
   try {
     r = await fetch("/api", { method: "POST", cache: "no-store", headers, body: JSON.stringify(body) });
   } catch (e) {
-    throw new Error(T("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
+    throw new Error(TM("Can't reach the Mac — is it awake, on this Wi-Fi, with phone access on?", "连不上 Mac——它醒着吗？和手机在同一个 Wi-Fi 吗？手机访问开着吗？"));
   }
   let j = {};
   try { j = await r.json(); } catch (e) { /* not JSON: a status line says enough */ }
@@ -362,7 +364,7 @@ function remoteLocal(op, args) {
     return Promise.resolve({ ok: true });
   }
   // Opening a file or a terminal happens on the Mac's screen, where no one is looking.
-  if (["open", "openPath", "attach"].includes(op)) return Promise.reject(new Error(T("That opens on the Mac — not from the phone", "这个要在 Mac 上打开，手机上打不开")));
+  if (["open", "openPath", "attach"].includes(op)) return Promise.reject(new Error(TM("That opens on the Mac — not from the phone", "这个要在 Mac 上打开，手机上打不开")));
   if (op === "openURL") {
     // As the Mac opens them: the web and mail only, nothing that runs script.
     if (!/^\s*(https?:|mailto:)/i.test(args.url || "")) return Promise.reject(new Error(T("Not a web link", "不是网页链接")));
@@ -370,7 +372,7 @@ function remoteLocal(op, args) {
     return Promise.resolve({ ok: true });
   }
   if (op === "pick-folder") {
-    const p = window.prompt(args.message || T("Folder on the Mac (e.g. ~/code/app)", "Mac 上的目录（比如 ~/code/app）"), args.path || "");
+    const p = window.prompt(args.message || TM("Folder on the Mac (e.g. ~/code/app)", "Mac 上的目录（比如 ~/code/app）"), args.path || "");
     return Promise.resolve({ path: (p || "").trim() });
   }
   return null;
@@ -398,10 +400,10 @@ function showPairing(why) {
   if (!box.hidden && box.innerHTML && (!why || box.dataset.why === why)) return;
   box.dataset.why = why;
   box.innerHTML = `<div class="panel">
-    <h2>${T("Pair this phone with the Mac", "把这台手机和 Mac 配对")}</h2>
+    <h2>${TM("Pair this phone with the Mac", "把这台手机和 Mac 配对")}</h2>
     ${why ? `<p class="meta warn">${esc(why)}</p>` : ""}
     <ol>
-      <li>${T("On the Mac, open the board's <b>Settings → Phone access</b> and turn it on.", "在 Mac 上打开看板的 <b>设置 → 手机访问</b>，打开它。")}</li>
+      <li>${TM("On the Mac, open the board's <b>Settings → Phone access</b> and turn it on.", "在 Mac 上打开看板的 <b>设置 → 手机访问</b>，打开它。")}</li>
       <li>${T("Press <b>Pair a phone</b>, then type the 8-character code shown under the QR code here — or scan the QR code with the camera (that pairs Safari, not a Home Screen app).", "点 <b>配对手机</b>，把二维码下面的 8 位配对码输到这里——或者用相机扫二维码（扫码配对的是 Safari，不是主屏幕上的 App）。")}</li>
     </ol>
     <div class="row"><input id="pair-link" type="text" placeholder="${T("Pairing code, e.g. K7QM-3XPA", "配对码，比如 K7QM-3XPA")}" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
@@ -428,7 +430,7 @@ async function pairFromLink(text) {
   const fail = (msg) => { if (err) { err.textContent = msg; err.hidden = false; } else toast(msg, true); };
   if (!code) {
     return fail(/^\s*(https?:\/\/|\d+\.\d+\.)/i.test(String(text || ""))
-      ? T("That's the Mac's address, not a pairing code: press Pair a phone on the Mac and type the 8-character code under the QR code.", "这是 Mac 的地址，不是配对码：在 Mac 上点「配对手机」，输入二维码下面的 8 位配对码。")
+      ? TM("That's the Mac's address, not a pairing code: press Pair a phone on the Mac and type the 8-character code under the QR code.", "这是 Mac 的地址，不是配对码：在 Mac 上点「配对手机」，输入二维码下面的 8 位配对码。")
       : T("A pairing code has 8 letters and digits, like K7QM-3XPA", "配对码是 8 位字母和数字，比如 K7QM-3XPA"));
   }
   if (err) err.hidden = true;
@@ -871,7 +873,7 @@ async function readBoard(force) {
   // On a phone over a slow link the first board can take a while: say so, rather than an empty page.
   if (REMOTE && !ui.board && !ui.loadNote) {
     ui.loadNote = setTimeout(() => {
-      if (!ui.board && remoteToken()) toast(T("Loading the board from the Mac… over a slow connection this takes a while", "正在从 Mac 加载看板……网络慢时要等一会儿"));
+      if (!ui.board && remoteToken()) toast(TM("Loading the board from the Mac… over a slow connection this takes a while", "正在从 Mac 加载看板……网络慢时要等一会儿"));
     }, 3000);
   }
   const readNo = ++ui.readNo;
@@ -3279,7 +3281,7 @@ function renderPhraseSettings() {
   }
   const sugg = (ui.phraseSugg || []).filter((x) => !ps.some((p) => phraseKey(p) === phraseKey(x.text)));
   return `<div class="set-h" id="set-phrases">${T("Quick phrases", "快捷短语")}</div><div class="set-list phrase-set">
-    <div class="meta">${T("Replies you send often. While you type in a session's message box or an ask's answer box, they show above it: a tap puts one in at the cursor, without sending. Or type ; and a few letters to pick one with the keyboard. One list for this Mac and your phones.",
+    <div class="meta">${TM("Replies you send often. While you type in a session's message box or an ask's answer box, they show above it: a tap puts one in at the cursor, without sending. Or type ; and a few letters to pick one with the keyboard. One list for this Mac and your phones.",
       "常发的回复。在 session 的消息框、问题的回答框里打字时，它们列在框的上方：点一下插到光标处，不会直接发出。也可以打 ; 再接几个字，用键盘挑。这台 Mac 和手机共用一份。")}</div>
     ${loading ? `<div class="meta">${T("Loading…", "读取中…")}</div>` : ""}
     ${ps.map((p, i) => `<div class="phrase-row"><span class="ptxt">${esc(p)}</span>
@@ -3368,7 +3370,7 @@ function renderPhoneAccess() {
         <button class="btn small primary" data-action="remote-pair">${T("Pair a phone", "配对手机")}</button></div>
       ${pairPanel("")}
       ${row(T("Also over Tailscale", "也通过 Tailscale 访问"),
-        T("For away from home: the board also answers your own devices on this Mac's tailnet — logged in as the same Tailscale user as this Mac, not tagged servers or other people's devices. Tailscale encrypts the way. A phone pairs once more for this address.", "出门在外用：看板也接受这台 Mac 所在 tailnet 上你自己的设备——和这台 Mac 登录同一个 Tailscale 用户的设备，不接受带标签的服务器或别人的设备。Tailscale 一路加密。这个地址要让手机再配对一次。"),
+        TM("For away from home: the board also answers your own devices on this Mac's tailnet — logged in as the same Tailscale user as this Mac, not tagged servers or other people's devices. Tailscale encrypts the way. A phone pairs once more for this address.", "出门在外用：看板也接受这台 Mac 所在 tailnet 上你自己的设备——和这台 Mac 登录同一个 Tailscale 用户的设备，不接受带标签的服务器或别人的设备。Tailscale 一路加密。这个地址要让手机再配对一次。"),
         `<input type="checkbox" data-action="remote-tailnet" ${tn.on ? "checked" : ""}>`)}
       ${tn.on && tn.problem ? `<div class="meta warn">${esc(tn.problem)}</div>` : ""}
       ${tn.on && tn.url ? `<div class="set-row remote-pair"><div><b>${T("Tailscale address", "Tailscale 地址")}</b>
@@ -3387,7 +3389,7 @@ function renderPhoneAccess() {
 function renderThisPhone() {
   return `<div class="set-h">${T("This phone", "这台手机")}</div><div class="set-list">
     <div class="set-row"><div><b>${T("Paired with", "已配对")} ${esc(location.host)}</b>
-      <div class="meta">${T("Skip permissions and where sessions open are the Mac's settings: changing them here changes them there too.", "跳过权限确认、session 开在哪，跟 Mac 上的设置是同一份：在这里改，Mac 上也跟着改。")}</div></div>
+      <div class="meta">${TM("Skip permissions and where sessions open are the Mac's settings: changing them here changes them there too.", "跳过权限确认、session 开在哪，跟 Mac 上的设置是同一份：在这里改，Mac 上也跟着改。")}</div></div>
       <button class="btn small ghost" data-confirm="${T("Unpair?", "取消配对？")}" data-action="remote-forget">${T("Unpair", "取消配对")}</button></div>
   </div>`;
 }

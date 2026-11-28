@@ -711,7 +711,9 @@ function watchRoots() {
   return (root ? [root] : []).concat([HQ_DIR]);
 }
 
-/** A change on disk: the kept reads are stale (BoardEvents drops SharedReads). */
-const dropReads = () => kept.clear();
+/** A change on disk: the reads it can make stale are dropped (BoardPush.staleReads). `claude
+ * agents` is kept: it starts a whole Claude Code, and changes only when a background session
+ * starts or ends. */
+const dropReads = () => { for (const k of ["board", "sessions", "status"]) kept.delete(k); };
 
 module.exports = { configure, handle, hqCommand, taskBySession, tabCommand, openInTerminal, watchRoots, dropReads };

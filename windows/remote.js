@@ -44,6 +44,8 @@ const MAX_OPEN = 48;
 // BoardPush: a quiet stream is pinged (a NAT or Tailscale's relay drops a silent one), and only so
 // many phones hold one at once.
 const KEEP_ALIVE = 25 * 1000;
+// How long a connection may take to send its request and be answered (the Mac's 60 s).
+const CONNECTION_MS = 60 * 1000;
 const MAX_STREAMS = 8;
 const CLAIM_OP = "pair";
 
@@ -415,17 +417,21 @@ function interfaces() {
   return out;
 }
 
-/** A peer in a network this PC is on itself (a public IPv6 address from the home router, say).
- * Tunnels don't count: their peers are anywhere. */
+/** A peer with a public IPv6 address in a network this PC is on itself (the home router hands
+ * those out). IPv6 only: a private IPv4 peer is local anyway, and on Windows a VPN's adapter is
+ * often just "Ethernet 2", so an IPv4 subnet can't be trusted by its adapter's name. */
 function onLink(peer) {
-  const address = isMapped(peer) ? peer.slice(12) : peer;
-  return interfaces().some((i) => !i.tunnel && inSubnet(address, i.bytes, i.mask));
+  if (peer.length !== 16 || isMapped(peer)) return false;
+  return interfaces().some((i) => !i.tunnel && i.bytes.length === 16 && inSubnet(peer, i.bytes, i.mask));
 }
 
 /** Who may connect at all: "local" (a private address, or one in a network this PC is on),
  * "tailnet" (a Tailscale address, with Tailscale turned on: still to be asked whose device it
- * is), or null (turned away before a byte is read). */
-function admission(bytes, tailnetOn, linked = onLink) {
+ * is), or null (turned away before a byte is read). A connection that arrived on this PC's own
+ * Tailscale address is a Tailscale one whatever its source says: a subnet router that keeps the
+ * source address brings a far network's private addresses in that way. */
+function admission(bytes, tailnetOn, linked = onLink, localBytes = null) {
+  if (localBytes && isTailnet(localBytes)) return tailnetOn ? "tailnet" : null;
   if (isLocal(bytes) || linked(bytes)) return "local";
   return tailnetOn && isTailnet(bytes) ? "tailnet" : null;
 }
@@ -464,6 +470,9 @@ class BoardServer {
     this.codeFailures = 0;
     this.notice = null;
     this.open = 0;
+    // Every connection let in, so turning phone access (or Tailscale) off ends them all.
+    this.sockets = new Set();
+    this.connectionMs = CONNECTION_MS;
     this.gzipped = new Map();
     this.streams = [];
     this.pinger = null;
@@ -507,24 +516,32 @@ class BoardServer {
   start() {
     if (this.server) return Promise.resolve();
     this.lastError = null;
-    this.http = http.createServer({ maxHeaderSize: MAX_HEADER, requestTimeout: 60000, headersTimeout: 30000 },
-      (req, res) => this.request(req, res).catch((e) => {
-        this.log("phone access: " + (e && e.stack || e));
-        if (!res.headersSent) this.send(res, 500, "text/plain", Buffer.alloc(0)); else res.destroy();
-      }));
-    this.http.keepAliveTimeout = 5000;
+    // Sockets come from the net server below (emit("connection")): this server never listens, so
+    // its own request timeouts never run — accept() holds each connection to CONNECTION_MS instead.
+    const handler = (req, res) => this.request(req, res).catch((e) => {
+      this.log("phone access: " + (e && e.stack || e));
+      if (!res.headersSent) this.send(res, 500, "text/plain", Buffer.alloc(0)); else res.destroy();
+    });
+    this.http = http.createServer({ maxHeaderSize: MAX_HEADER }, handler);
+    // Expect: 100-continue is answered only once the request is let in (request() → readBody).
+    this.http.on("checkContinue", handler);
+    this.http.on("clientError", (_e, socket) => socket.destroy());
     // Turned away before a byte is read: a peer outside the local network, unless it comes over
     // Tailscale (turned on) from a device of this PC's own user.
     const server = net.createServer({ pauseOnConnect: true }, (socket) => this.accept(socket));
     this.server = server;
     return new Promise((resolve) => {
-      server.once("error", (e) => {
+      const failed = (e) => {
         this.lastError = e.code === "EADDRINUSE" ? this.L()("the port is taken by another program", "端口被别的程序占用了") : e.message;
         this.log("phone access did not start: " + e.message);
         if (this.server === server) this.server = null;
         resolve();
-      });
+      };
+      server.once("error", failed);
       server.listen({ port: this.port, host: "::", ipv6Only: false }, () => {
+        // From here an error (too many open files, say) is logged; it doesn't stop the server.
+        server.off("error", failed);
+        server.on("error", (e) => this.log("phone access: " + e.message));
         this.log(`phone access listening on port ${this.port}`);
         if (!this.watching && this.events) {
           this.watching = true;
@@ -541,16 +558,21 @@ class BoardServer {
     this.server = null;
     this.lastError = null;
     this.closeStreams(() => true);
+    for (const s of this.sockets) s.destroy();
   }
 
   accept(socket) {
     const bytes = ipBytes(socket.remoteAddress);
-    const way = bytes && this.open < MAX_OPEN ? admission(bytes, this.tailnetOn) : null;
+    const way = bytes && this.open < MAX_OPEN ? admission(bytes, this.tailnetOn, onLink, ipBytes(socket.localAddress)) : null;
     if (!way) return socket.destroy();
     const name = String(socket.remoteAddress).replace(/^::ffff:/, "").replace(/%.*$/, "");
     const tailnet = way === "tailnet";
     this.open += 1;
-    socket.once("close", () => { this.open -= 1; });
+    this.sockets.add(socket);
+    // One request per connection (send() says Connection: close), and no connection outlives
+    // CONNECTION_MS — one whose request never finishes arriving included — but a phone's /events.
+    socket.hold = setTimeout(() => socket.destroy(), this.connectionMs);
+    socket.once("close", () => { this.open -= 1; this.sockets.delete(socket); clearTimeout(socket.hold); });
     socket.on("error", () => {});
     socket.peer = { name, key: lockKey(bytes), tailnet };
     const go = () => { this.http.emit("connection", socket); socket.resume(); };
@@ -565,6 +587,8 @@ class BoardServer {
 
   async request(req, res) {
     const peer = req.socket.peer || { name: "?", key: "?" };
+    // Turned off (or Tailscale turned off) while this connection was opening.
+    if (!this.running || (peer.tailnet && !this.tailnetOn)) return req.socket.destroy();
     const urlPath = String(req.url || "").split("?")[0];
     const L = this.L();
     // Chunked bodies are not something a browser sends with fetch(); refusing them keeps the
@@ -604,8 +628,11 @@ class BoardServer {
     const length = Number(req.headers["content-length"] || 0);
     if (!Number.isFinite(length) || length < 0) return this.text(res, 400, "bad request");
     if (length > MAX_BODY) return this.text(res, 413, "");
+    if (String(req.headers.expect || "").toLowerCase() === "100-continue") res.writeContinue();
     const body = await readBody(req, MAX_BODY);
     if (body === null) return this.text(res, 413, "");
+    // The request is in: answering it may take as long as the op does (a sort, a new session).
+    clearTimeout(req.socket.hold);
     if (urlPath === "/events") return this.stream(req, res, peer);
     return this.api(req, res, body, peer);
   }
@@ -688,7 +715,8 @@ class BoardServer {
     const i = match(this.presented(req), all, Date.now());
     if (i === null || !all[i].paired) return this.unpaired(res);
     if (this.seen(all[i], peer.name)) this.devices = all;
-    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store",
+    res.shouldKeepAlive = false;
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "close",
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Accel-Buffering": "no" });
     // Long enough that a browser hands over what it has at once rather than waiting for more.
     res.write(": " + " ".repeat(2048) + "\n\n");
@@ -792,9 +820,14 @@ class BoardServer {
     return this.send(res, 200, type, body, extra, Boolean(tag));
   }
 
+  /** A whole response, then the connection closes (as the Mac's): each request is let in afresh,
+   * so turning phone access or Tailscale off, or a device no longer the user's own, holds for the
+   * next one. A request whose body never got read (refused on its head) is cut off, not drained. */
   send(res, status, type, body, extra = {}, cached = false) {
-    res.writeHead(status, Object.assign({ "Content-Type": type, "Content-Length": body.length,
+    res.shouldKeepAlive = false;
+    res.writeHead(status, Object.assign({ "Content-Type": type, "Content-Length": body.length, Connection: "close",
       "Cache-Control": cached ? "no-cache" : "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" }, extra));
+    if (res.req && !res.req.complete) res.once("finish", () => res.socket && res.socket.destroy());
     res.end(body);
   }
 
@@ -823,8 +856,8 @@ class BoardServer {
 
   async setTailnet(on) {
     this.setPref("boardServerTailnet", on);
-    // A phone's stream over Tailscale must not outlive the switch.
-    if (!on) this.closeStreams((_, s) => s.peer.tailnet);
+    // Nothing over Tailscale outlives the switch: its streams, or a request still in flight.
+    if (!on) for (const s of this.sockets) if (s.peer && s.peer.tailnet) s.destroy();
     if (on) await this.tailnet.current(true);
     return { result: this.status() };
   }

@@ -89,7 +89,7 @@ hq/install.sh --root ~/claude-hq
 
 **手机访问。** 和 Mac 一样，在手机浏览器里用看板。在看板的**设置（⚙）→ 手机访问**里打开，点**配对手机**，用手机扫二维码。配对过的手机也在那里移除。
 
-- **同一个 Wi-Fi 里。** 桌宠监听 8790 端口，并列出这台电脑在局域网里的地址。第一次打开时，Windows 防火墙会问是否允许 ClaudePet 接受连接：勾选**专用网络**并允许。如果 Windows 把这个 Wi-Fi 当成公用网络，要同时允许公用网络，或者把这个 Wi-Fi 改成专用网络，手机才连得上。
+- **同一个 Wi-Fi 里。** 桌宠监听 8790 端口，并列出这台电脑在局域网里的地址。第一次打开时，Windows 防火墙会问是否允许 ClaudePet 接受连接：勾选**专用网络**并允许。如果 Windows 把家里的 Wi-Fi 当成公用网络，手机连不上：把这个 Wi-Fi 改成专用网络（设置 → 网络和 Internet → WLAN → 它的属性）。不要允许公用网络，否则咖啡馆 Wi-Fi 上的人也能摸到看板的门口。
 - **出门在外，走 Tailscale。** 电脑和手机都开着 Tailscale、登录同一个账号，再勾选**也通过 Tailscale 访问**，点**用 Tailscale 配对**，再配对一次。地址是这台电脑在 Tailscale 里的名字，比如 `http://my-pc.tailxxxx.ts.net:8790`。只放行这台电脑所属 Tailscale 用户自己的设备；在公司的 tailnet 里，同事的设备和带标签的服务器即使连得到这台电脑，也会被拒绝。
 - 换端口：在 `%APPDATA%\ClaudePet\prefs.json` 里写 `"boardServerPort": 8791`，再把手机访问关掉重开。
 

@@ -35,6 +35,12 @@ test("who may connect: the local network, and Tailscale only when on", () => {
   assert.strictEqual(r.admission(r.ipBytes("100.96.1.2"), true, never), "tailnet");
   assert.strictEqual(r.admission(r.ipBytes("8.8.8.8"), true, never), null);
   assert.strictEqual(r.admission(r.ipBytes("2409:8920:1100:abcd::1"), false, () => true), "local");
+  // Through a Tailscale subnet router a far network's private address arrives on this PC's
+  // Tailscale address: it is asked about as a Tailscale peer, not let in as local.
+  const viaTailscale = r.ipBytes("100.67.91.59");
+  assert.strictEqual(r.admission(r.ipBytes("192.168.5.7"), true, never, viaTailscale), "tailnet");
+  assert.strictEqual(r.admission(r.ipBytes("192.168.5.7"), false, never, viaTailscale), null);
+  assert.strictEqual(r.admission(r.ipBytes("192.168.5.7"), false, never, r.ipBytes("192.168.0.16")), "local");
 });
 
 test("a network this PC is on; lock keys", () => {
@@ -262,6 +268,61 @@ test("refusals: a foreign Host, other origins, methods, files outside the pages,
   s.lockout = new r.Lockout();
   for (let i = 0; i < 100; i++) { s.lockout = new r.Lockout(); await req(port, "POST", "/api", { "X-HQ-Token": "x" + i }, { op: "status" }); }
   assert.ok(s.status().notice && s.status().devices.length === 0, "the code was cancelled");
+});
+
+// A raw connection: what a stranger's script can do that a browser won't.
+function raw(port, text) {
+  const net = require("net");
+  return new Promise((resolve) => {
+    const c = net.connect(port, "127.0.0.1");
+    let got = "", closed = false;
+    c.on("data", (d) => { got += d; });
+    c.on("error", () => {});
+    c.on("close", () => { closed = true; });
+    c.write(text);
+    resolve({ c, got: () => got, closed: () => closed });
+  });
+}
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("connections: one request each, refused bodies cut off, all ended when turned off", async (t) => {
+  const { s } = harness(t);
+  await s.setEnabled(true);
+  const port = s.server.address().port;
+  // Answered with Connection: close, and closed.
+  const a = await raw(port, `GET /board/board.html HTTP/1.1\r\nHost: localhost:${port}\r\n\r\n`);
+  await wait(300);
+  assert.match(a.got(), /^HTTP\/1.1 200/);
+  assert.match(a.got(), /connection: close/i);
+  assert.ok(a.closed(), "closed after one answer");
+  // A stranger announcing a huge body gets its 401 and is cut off, its body never taken.
+  const b = await raw(port, `POST /api HTTP/1.1\r\nHost: localhost:${port}\r\nContent-Length: 1000000000\r\n\r\n` + "x".repeat(1000));
+  await wait(300);
+  assert.match(b.got(), /^HTTP\/1.1 401/);
+  assert.ok(b.closed(), "cut off");
+  // Expect: 100-continue is not answered for a stranger.
+  const e = await raw(port, `POST /api HTTP/1.1\r\nHost: localhost:${port}\r\nContent-Length: 10\r\nExpect: 100-continue\r\n\r\n`);
+  await wait(300);
+  assert.ok(!/100 Continue/.test(e.got()) && /^HTTP\/1.1 401/.test(e.got()));
+  // A request still arriving when phone access is turned off is ended.
+  const c = await raw(port, `GET /board/board.html HTTP/1.1\r\nHost: localhost:${port}\r\n`);
+  await wait(100);
+  await s.setEnabled(false);
+  await wait(100);
+  assert.ok(c.closed(), "ended when turned off");
+});
+
+test("a request that never finishes arriving is cut off", async (t) => {
+  const { s } = harness(t);
+  s.connectionMs = 300;   // 60 s in the pet
+  await s.setEnabled(true);
+  const port = s.server.address().port;
+  const slow = await raw(port, `GET / HTTP/1.1\r\nHost: localhost:${port}\r\n`);
+  await wait(100);
+  assert.ok(!slow.closed() && s.open === 1);
+  await wait(400);
+  assert.ok(slow.closed(), "cut off after the hold");
+  assert.strictEqual(s.open, 0);
 });
 
 test("settings: off, on, a port taken", async (t) => {

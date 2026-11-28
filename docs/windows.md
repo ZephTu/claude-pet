@@ -116,8 +116,9 @@ be removed there.
 
 - **On the same Wi-Fi.** The pet listens on port 8790 and lists this PC's addresses on the local
   network. The first time, Windows Firewall asks whether ClaudePet may accept connections: allow
-  it on **Private networks**. If the Wi-Fi is set as a Public network in Windows, the phone can't
-  connect until you allow Public too, or set the Wi-Fi to Private.
+  it on **Private networks**. If Windows has your home Wi-Fi as a Public network, the phone can't
+  connect: set that Wi-Fi to Private (Settings → Network & internet → Wi-Fi → its properties).
+  Don't allow Public networks: then anyone on a café's Wi-Fi could reach the board's door.
 - **Away from home, over Tailscale.** With Tailscale on both the PC and the phone, logged in as
   the same user, also tick **Also over Tailscale**. Then press **Pair over Tailscale** and pair
   once more. The address is the PC's Tailscale name, for example
