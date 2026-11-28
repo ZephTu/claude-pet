@@ -166,6 +166,7 @@ if (Test-Path $hudCache) {
   Write-Host "skip the quota checks: $hudCache exists on this machine"
 } else {
   Check 'no quota reading: the fallback line' ([bool]$after.quotaFallback -and @($after.quota).Count -eq 0) 'True'
+  Check '...and nothing for the board''s status bar' ($null -eq $after.usage) 'True'
   $inv = [Globalization.CultureInfo]::InvariantCulture
   $fmt = 'yyyy-MM-ddTHH:mm:ssZ'
   $at = [DateTime]::UtcNow
@@ -173,10 +174,13 @@ if (Test-Path $hudCache) {
     $at.AddMinutes(90).ToString($fmt, $inv) + '"},"seven_day":{"used_percentage":17.4,"resets_at":"' +
     $at.AddDays(3).ToString($fmt, $inv) + '"}}'
   [IO.File]::WriteAllText((Join-Path $home_ 'hud-usage.json'), $hud)
-  $q = @((WatchOnce).quota)
+  $w = WatchOnce
+  $q = @($w.quota)
   Check 'claude-hud''s snapshot gives two meters' $q.Count 2
   Check '...the five-hour one' "$($q[0].label) $($q[0].percent)" '5h 42'
   Check '...and the week' "$($q[1].label) $($q[1].percent)" 'week 17'
+  Check 'the board''s status bar gets the same reading' "$($w.usage.five_hour.used) $($w.usage.seven_day.used)" '42 17'
+  Check '...with when the five-hour window resets' ([bool]$w.usage.five_hour.resets_at) 'True'
 }
 
 # Which terminal a session is in: Windows Terminal from WT_SESSION, but not under a terminal that

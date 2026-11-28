@@ -10,6 +10,7 @@ import Foundation
 ///    "waitingAskId", "badge", "sessions": [rows shaped like WebBridge's setSessions items],
 ///    "finished": [WebBridge's Finished rows], "dropped": unread finishes aged out (once),
 ///    "hidden": muted live sessions, "quota": [{"label", "percent", "resetsIn"}], "quotaFallback",
+///    "usage": {"five_hour", "seven_day": {"used", "resets_at"}, "source"} while the reading is usable,
 ///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished}
 enum PetWatch {
     static func run(interval: TimeInterval = 1) -> Never {
@@ -153,6 +154,16 @@ enum PetWatch {
             "quotaFallback": Chatter.fallbackLine(state: state),
         ]
         if dropped > 0 { doc["dropped"] = dropped }
+        // The board's status bar (the Mac's BoardBridge.usage): percent used and when each window
+        // resets, only while the reading is usable.
+        if let u = usage, u.percentagesUsable(now: now) {
+            let iso = ISO8601DateFormatter()
+            doc["usage"] = [
+                "five_hour": ["used": u.fiveHourPercent, "resets_at": iso.string(from: u.fiveHourResetAt)],
+                "seven_day": ["used": u.sevenDayPercent, "resets_at": iso.string(from: u.sevenDayResetAt)],
+                "source": u.source,
+            ] as [String: Any]
+        }
         // Only on the line where they happen: the shell shows each one once (window.notify).
         if !notices.isEmpty {
             doc["notices"] = notices.map {

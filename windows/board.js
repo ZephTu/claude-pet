@@ -509,11 +509,12 @@ async function perform(body, win) {
       for (const sid of Array.isArray(body.sessions) ? body.sessions : []) if (SESSION_ID.test(String(sid))) onSeen(String(sid));
       return { result: { ok: true } };
     case "pet": {
-      // BoardWindow's "pet": the pet's unread finishes and held prompts, and what PetBoard keeps.
+      // BoardWindow's "pet": the pet's unread finishes and held prompts, the quota for the status
+      // bar, and what PetBoard keeps.
       const store = await board({ op: "store" });
       const s = petState();
       return { result: JSON.stringify(Object.assign({ unread: s.unread || {}, dots: s.dots || {}, skin: "cat",
-        clickTarget: s.clickTarget || "terminal" }, store.result || {})) };
+        clickTarget: s.clickTarget || "terminal" }, s.usage ? { usage: s.usage } : {}, store.result || {})) };
     }
     // Prompts a pet-emit holds open (PetBoard checks the prompt is still the one up).
     case "prompt": case "decide": return board(body);
