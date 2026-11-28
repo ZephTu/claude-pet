@@ -66,6 +66,19 @@ extension ProcessProbe {
         snapshot().contains { $0.name == name }
     }
 
+    /// The Claude Code processes running now, by `isClaude`'s rules over one snapshot (asking
+    /// `isClaude` per pid would take a snapshot each time). A Claude Code started by another one
+    /// is not counted, so this is one per session. The connection report's count (PetHealth).
+    public static func claudePIDs() -> [Int32] {
+        let all = snapshot()
+        let claude = Set(all.filter { entry in
+            // The path is read only for a name that could be the native installer's version.
+            looksLikeClaude(name: entry.name,
+                            path: entry.name.first?.isNumber == true ? executablePath(pid: entry.pid) : nil)
+        }.map(\.pid))
+        return all.filter { claude.contains($0.pid) && !claude.contains($0.parent) }.map(\.pid)
+    }
+
     public static func executablePath(pid: Int32) -> String? {
         #if os(Windows)
         guard pid > 0,

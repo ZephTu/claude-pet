@@ -102,6 +102,10 @@ struct Entry {
             // What the HQ board keeps beside hq, and its reading area, in the Windows shell (PetBoard).
             exit(PetBoard.run())
 
+        case "--health":
+            // The connection report, for the Windows tray's "Connection Status..." (PetHealth).
+            exit(PetHealth.run(Array(arguments.dropFirst())))
+
         case "--mark-read":
             // Finished turns seen, from the Windows shell's list (PetFinished).
             exit(PetFinished.runMarkRead(Array(arguments.dropFirst())))
