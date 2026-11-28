@@ -14,6 +14,8 @@ const os = require("os");
 const readline = require("readline");
 const { spawn, execFile } = require("child_process");
 const hqBoard = require("./board");
+const { BoardServer } = require("./remote");
+const { BoardEvents } = require("./board-events");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "pet", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -471,6 +473,15 @@ hqBoard.configure({
   },
 });
 
+// Phone access (remote.js): the board served to paired phones, off until turned on in the
+// board's settings; told of changes by a watch on hq's and the pet's files (board-events.js).
+const boardEvents = new BoardEvents({ roots: () => hqBoard.watchRoots().concat([PET_HOME]), dropReads: hqBoard.dropReads, log });
+const phoneAccess = new BoardServer({
+  handle: hqBoard.handle, readPrefs, writePrefs, root: PET_ROOT, petHome: PET_HOME, events: boardEvents, log,
+  L: () => (en, zh) => (language() === "zh" ? zh : en), lang: language,
+});
+hqBoard.configure({ remote: phoneAccess });
+
 // Only the board window's own page (BoardNavigation.trusted): its main frame, on pet://app.
 ipcMain.handle("hq", (e, body) => {
   if (!boardWin || e.sender !== boardWin.webContents || !e.senderFrame || e.senderFrame !== e.sender.mainFrame
@@ -746,6 +757,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     buildTray();
     startWatcher();
+    phoneAccess.startIfEnabled();
   });
   app.on("window-all-closed", () => app.quit());
 }

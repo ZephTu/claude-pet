@@ -110,10 +110,27 @@ on the Mac:
   - The tab doesn't have to be in front.
 - `/task`, `/board` and `/hq-onboard` in any session.
 
+**Phone access.** The board on your phone's browser, as on the Mac. Turn it on in the board's
+**Settings (⚙) → Phone access**, press **Pair a phone** and scan the QR code. Paired phones can
+be removed there.
+
+- **On the same Wi-Fi.** The pet listens on port 8790 and lists this PC's addresses on the local
+  network. The first time, Windows Firewall asks whether ClaudePet may accept connections: allow
+  it on **Private networks**. If Windows has your home Wi-Fi as a Public network, the phone can't
+  connect: set that Wi-Fi to Private (Settings → Network & internet → Wi-Fi → its properties).
+  Don't allow Public networks: then anyone on a café's Wi-Fi could reach the board's door.
+- **Away from home, over Tailscale.** With Tailscale on both the PC and the phone, logged in as
+  the same user, also tick **Also over Tailscale**. Then press **Pair over Tailscale** and pair
+  once more. The address is the PC's Tailscale name, for example
+  `http://my-pc.tailxxxx.ts.net:8790`. Only devices of the PC's own Tailscale user get in. On a
+  company tailnet, colleagues' devices and tagged servers are turned away even when they can
+  reach the PC.
+- Another port: set `"boardServerPort": 8791` in `%APPDATA%\ClaudePet\prefs.json`, then turn
+  phone access off and on.
+
 ## Not on Windows yet
 
-- **The secretary**, **Scheduled jobs** and **phone access.** The board answers "not on Windows
-  yet".
+- **The secretary** and **Scheduled jobs.** The board answers "not on Windows yet".
 - **Feeds** (Zulip, Jira) and **ticking finished todos.** Their credentials live in the macOS
   Keychain.
 - **The quick-note shortcut** (⌃⌥⌘N).

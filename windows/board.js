@@ -62,6 +62,8 @@ let petEnv = () => process.env;
 let petState = () => ({});
 let onSeen = () => {};
 let onClickTarget = () => {};
+// Phone access (remote.js), set by main.js: the board's `remote*` settings ops.
+let remote = null;
 // Sessions a Resume is under way for: a double click must not open the session twice.
 const resuming = new Set();
 // Plans Enter was pressed for (BoardWindow.approvedPlans).
@@ -675,8 +677,10 @@ async function perform(body, win) {
       onClickTarget(str(body, "value"));
       return { result: "ok" };
     case "jobs": return { result: JSON.stringify({ jobs: [], runner: false }) };
+    case "remote": case "remote-enable": case "remote-tailnet": case "remote-pair": case "remote-revoke":
+      return remote ? remote.op(op, body) : notOnWindows();
     default:
-      // The secretary, scheduled jobs, phone access: Mac only for now.
+      // The secretary and scheduled jobs: Mac only for now.
       return notOnWindows();
   }
 }
@@ -698,6 +702,19 @@ function configure(opts) {
   if (opts.petState) petState = opts.petState;
   if (opts.onSeen) onSeen = opts.onSeen;
   if (opts.onClickTarget) onClickTarget = opts.onClickTarget;
+  if (opts.remote) remote = opts.remote;
 }
 
-module.exports = { configure, handle, hqCommand, taskBySession, tabCommand, openInTerminal };
+/** The folders whose changes can change what the board reads (BoardEvents.roots): the HQ root,
+ * as hq reads it (HQ_ROOT first), and hq's own folder. */
+function watchRoots() {
+  const root = (process.env.HQ_ROOT || hqRoot()).replace(/^~(?=$|[\\/])/, HOME);
+  return (root ? [root] : []).concat([HQ_DIR]);
+}
+
+/** A change on disk: the reads it can make stale are dropped (BoardPush.staleReads). `claude
+ * agents` is kept: it starts a whole Claude Code, and changes only when a background session
+ * starts or ends. */
+const dropReads = () => { for (const k of ["board", "sessions", "status"]) kept.delete(k); };
+
+module.exports = { configure, handle, hqCommand, taskBySession, tabCommand, openInTerminal, watchRoots, dropReads };
