@@ -10,7 +10,8 @@ import WinSDK
 ///   what was appended since the last read, at most `perTick` bytes a tick in all, so a first
 ///   read of long transcripts can't hold up the line (the Mac reads off the main thread); a
 ///   transcript shows its numbers once it has been read to the end;
-/// - the HQ task a session is bound to and its status (the Mac's TaskIndex), every 8 s;
+/// - the HQ task a session is bound to and its status, and the questions open on the board (the
+///   Mac's TaskIndex), every 8 s;
 /// - commands an idle session left running (the Mac's findBackgroundShells);
 /// - Claude Code's own name for the session (`~/.claude/sessions/<pid>.json`), in place of the
 ///   Mac's terminal tab title, which Windows terminals don't give out.
@@ -33,7 +34,8 @@ struct PetRows {
     static let perTick = 64 << 20
     private var settings = ContextBudget.Settings()
     private var settingsStamp: Date?
-    private var tasks = Tasks()
+    /// HQ's bindings and open asks as last read (every 8 s).
+    private(set) var tasks = Tasks()
     private var tasksAt = Date.distantPast
     private var names: [Int32: String] = [:]
 
@@ -43,7 +45,7 @@ struct PetRows {
         reloadSettings()
         if now.timeIntervalSince(tasksAt) >= 8 {
             tasksAt = now
-            tasks = Tasks.read()
+            tasks = Tasks.read(now: now)
             names = Self.names(of: sessions)
         }
         var out: [String: Extra] = [:]
@@ -180,43 +182,111 @@ struct PetRows {
         return out
     }
 
-    /// The part of the Mac's TaskIndex the rows need, read straight from HQ's files: the task
+    /// The part of the Mac's TaskIndex the pet needs, read straight from HQ's files: the task
     /// root from `~/.claude/hq/config.json`, each card's title and status from the top of its
-    /// TASK.md, and the bindings from `state/sessions.json`. Empty without HQ.
+    /// TASK.md, its open questions from `asks.jsonl`, and the bindings from `state/sessions.json`.
+    /// Empty without HQ. `PET_HQ_HOME` stands in for the home folder, as for board.js.
     struct Tasks {
+        struct Ask: Equatable {
+            let id: String
+            let task: String
+            let text: String
+            let session: String
+        }
+
         /// sessionId → "T-062 Claude-pet Dashboard"
         var taskBySession: [String: String] = [:]
         /// sessionId → that task's status
         var statusBySession: [String: String] = [:]
+        /// taskId → status
+        var statusByTask: [String: String] = [:]
+        /// Questions waiting for an answer, card by card, oldest first within a card.
+        var openAsks: [Ask] = []
 
-        static func read() -> Tasks {
+        static var home: URL {
+            if let h = ProcessInfo.processInfo.environment["PET_HQ_HOME"], !h.isEmpty { return URL(fileURLWithPath: h) }
+            return URL(fileURLWithPath: NSHomeDirectory())
+        }
+
+        static func read(now: Date = Date()) -> Tasks {
             var out = Tasks()
-            let hq = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".claude/hq")
+            let hq = home.appending(path: ".claude/hq")
             guard let config = json(hq.appending(path: "config.json")) as? [String: Any],
-                  let root = config["root"] as? String,
-                  let state = json(hq.appending(path: "state/sessions.json")) as? [String: [String: Any]]
+                  let root = config["root"] as? String
             else { return out }
             let tasksDir = URL(fileURLWithPath: root).appending(path: "tasks")
-            let dirs = (try? FileManager.default.contentsOfDirectory(atPath: tasksDir.path)) ?? []
-            var folders: [String: String] = [:]
+            let dirs = ((try? FileManager.default.contentsOfDirectory(atPath: tasksDir.path)) ?? []).sorted()
+            var titles: [String: String] = [:]
             for dir in dirs where dir.hasPrefix("T-") {
-                folders[dir.split(separator: "-").prefix(2).joined(separator: "-")] = dir
-            }
-            for (sid, entry) in state {
-                guard let task = entry["task"] as? String else { continue }
-                var title = "", status = ""
-                if let dir = folders[task],
-                   let head = try? String(contentsOf: tasksDir.appending(path: dir).appending(path: "TASK.md"), encoding: .utf8) {
-                    for line in head.split(separator: "\n", omittingEmptySubsequences: false).prefix(30) {
-                        let line = line.hasSuffix("\r") ? line.dropLast() : line
-                        if line.hasPrefix("title:") { title = clean(line.dropFirst(6)) }
-                        if line.hasPrefix("status:") { status = clean(line.dropFirst(7)) }
+                let folder = tasksDir.appending(path: dir)
+                let id = dir.split(separator: "-").prefix(2).joined(separator: "-")
+                if let head = try? String(contentsOf: folder.appending(path: "TASK.md"), encoding: .utf8) {
+                    for line in head.split(omittingEmptySubsequences: false, whereSeparator: lineBreak).prefix(30) {
+                        if line.hasPrefix("title:") { titles[id] = clean(line.dropFirst(6)) }
+                        if line.hasPrefix("status:") { out.statusByTask[id] = clean(line.dropFirst(7)) }
                     }
                 }
-                out.taskBySession[sid] = title.isEmpty ? task : "\(task) \(title)"
-                if !status.isEmpty { out.statusBySession[sid] = status }
+                out.openAsks += asks(in: folder, task: id, now: now)
+            }
+            if let state = json(hq.appending(path: "state/sessions.json")) as? [String: [String: Any]] {
+                for (sid, entry) in state {
+                    guard let task = entry["task"] as? String else { continue }
+                    let title = titles[task] ?? ""
+                    out.taskBySession[sid] = title.isEmpty ? task : "\(task) \(title)"
+                    if let status = out.statusByTask[task], !status.isEmpty { out.statusBySession[sid] = status }
+                }
             }
             return out
+        }
+
+        /// The asks ledger is an event log: folded into the ones still open, as TaskIndex.asks.
+        /// One put off with "Later" is out until its `until` passes.
+        static func asks(in folder: URL, task: String, now: Date) -> [Ask] {
+            guard let text = try? String(contentsOf: folder.appending(path: "asks.jsonl"), encoding: .utf8) else { return [] }
+            var open: [String: Ask] = [:]
+            var seen: [String: Ask] = [:]
+            var order: [String] = []
+            var resolved: Set<String> = []
+            for line in text.split(whereSeparator: lineBreak) {
+                guard let e = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+                      let id = e["id"] as? String else { continue }
+                switch e["type"] as? String {
+                case "open":
+                    let ask = Ask(id: id, task: task, text: e["text"] as? String ?? "", session: e["session"] as? String ?? "")
+                    open[id] = ask
+                    seen[id] = ask
+                    order.append(id)
+                case "resolve":
+                    open[id] = nil
+                    resolved.insert(id)
+                case "reopen":
+                    open[id] = seen[id]
+                    resolved.remove(id)
+                case "snooze":
+                    let until = (e["until"] as? String).flatMap(localTime)
+                    if let until, until > now { open[id] = nil }
+                    else if open[id] == nil, let a = seen[id], !resolved.contains(id) { open[id] = a }
+                default:
+                    break
+                }
+            }
+            return order.compactMap { open[$0] }.reduce(into: [Ask]()) { if !$0.contains($1) { $0.append($1) } }
+        }
+
+        /// "\n", or "\r\n" (one Character, which a split on "\n" never matches). Not
+        /// Character.isNewline: hq writes U+2028 and the like raw inside its JSON strings.
+        static func lineBreak(_ c: Character) -> Bool { c == "\n" || c == "\r\n" }
+
+        /// `2026-11-21T00:00:00` as written by `hq ask snooze`: local time, no zone.
+        static func localTime(_ text: String) -> Date? {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = .current
+            for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ssXXXXX", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd"] {
+                f.dateFormat = format
+                if let d = f.date(from: text) { return d }
+            }
+            return nil
         }
 
         private static func json(_ url: URL) -> Any? {

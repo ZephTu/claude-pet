@@ -13,6 +13,8 @@ function Check($name, $actual, $expected) {
 $home_ = Join-Path ([IO.Path]::GetTempPath()) ("pet-smoke-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force $home_ | Out-Null
 $env:PET_HOME = $home_
+# No HQ until the checks that stage one: this machine's own would add its questions to the badge.
+$env:PET_HQ_HOME = Join-Path $home_ 'hq-home'
 $env:PET_PERMISSION_WAIT = '0'
 
 function Emit($json) {
@@ -215,6 +217,43 @@ function Jump($session) {
 }
 Check '--jump refuses a session id with a path in it' (Jump 'w1\..\x') 1
 Check '--jump fails cleanly for an unknown session' (Jump 'nosuch') 1
+
+# HQ's open questions (PetRows.Tasks, the Mac's TaskIndex): listed, counted in the badge, and a
+# new one announced once, in a notice of its own.
+$noHq = WatchOnce
+$hqRoot = Join-Path $home_ 'hq-root'
+$card = Join-Path $hqRoot 'tasks\T-007-demo'
+New-Item -ItemType Directory -Force (Join-Path $env:PET_HQ_HOME '.claude\hq\state'), $card | Out-Null
+[IO.File]::WriteAllText((Join-Path $env:PET_HQ_HOME '.claude\hq\config.json'), ('{"root":"' + $hqRoot.Replace('\', '\\') + '"}'))
+[IO.File]::WriteAllText((Join-Path $card 'TASK.md'), "---`r`nid: T-007`r`ntitle: `"Demo card`"`r`nstatus: waiting-on-me`r`n---`r`n")
+$asks = Join-Path $card 'asks.jsonl'
+[IO.File]::WriteAllText($asks, ('{"type":"open","id":"a1","text":"Ship it?","session":"s1"}' + "`n" +
+  '{"type":"open","id":"a2","text":"Old"}' + "`n" + '{"type":"resolve","id":"a2"}' + "`n" +
+  '{"type":"open","id":"a3","text":"Later"}' + "`n" + '{"type":"snooze","id":"a3","until":"2999-01-01T09:00:00"}' + "`n" +
+  # hq writes U+2028 raw inside its strings (ensure_ascii=False): not a line break here.
+  '{"type":"open","id":"a5","text":"Two' + [char]0x2028 + 'lines"}' + "`n"), (New-Object Text.UTF8Encoding($false)))
+$withHq = WatchOnce
+$ask = @($withHq.hqAsks)
+Check 'open HQ questions are listed (not a resolved or a put-off one)' (($ask | ForEach-Object { $_.id }) -join ',') 'a1,a5'
+Check '...with its task, text and the task''s status' "$($ask[0].task)|$($ask[0].text)|$($ask[0].status)" 'T-007|Ship it?|waiting-on-me'
+Check '...and counted in the badge' ([int]("0" + $withHq.badge)) ([int]("0" + $noHq.badge) + 2)
+Check '...but not announced when --watch starts' (@($withHq.notices | Where-Object { $_.kind -eq 'ask' }).Count) 0
+$savedLang = $env:CLAUDE_PET_LANG
+$env:CLAUDE_PET_LANG = 'en'
+$aout = Join-Path $home_ 'asks.out'
+$w = Start-Process -FilePath $Emit -ArgumentList '--watch' -RedirectStandardOutput $aout -NoNewWindow -PassThru
+for ($i = 0; $i -lt 50 -and -not ((Test-Path $aout) -and (Get-Content $aout -TotalCount 1)); $i++) { Start-Sleep -Milliseconds 200 }
+[IO.File]::AppendAllText($asks, '{"type":"open","id":"a4","text":"Which port?","session":"s1"}' + "`n")
+function AskNotices { @(Get-Content $aout | ForEach-Object { try { $_ | ConvertFrom-Json } catch {} } | ForEach-Object { @($_.notices) } | Where-Object { $_.kind -eq 'ask' }) }
+# HQ is read every 8 s: wait for the next read, then a few more lines to see it is not repeated.
+for ($i = 0; $i -lt 60 -and @(AskNotices).Count -eq 0; $i++) { Start-Sleep -Milliseconds 500 }
+Start-Sleep -Seconds 3
+Stop-Process -Id $w.Id -Force
+$env:CLAUDE_PET_LANG = $savedLang
+$said = @(AskNotices)
+Check 'a new HQ question is announced once' $said.Count 1
+Check '...saying which task asks what' $said[0].text 'T-007 asks: Which port?'
+Check '...for its session, up 25 s' "$($said[0].sessionId) $($said[0].holdMs) $($said[0].askId)" 's1 25000 a4'
 
 # settings.json: patched and unpatched.
 $settings = Join-Path $home_ 'settings.json'

@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const r = require("../remote");
-const { PushGate, relevant } = require("../board-events");
+const { BoardEvents, PushGate, relevant } = require("../board-events");
 
 test("addresses as bytes", () => {
   assert.deepStrictEqual(r.ipBytes("192.168.1.5"), [192, 168, 1, 5]);
@@ -158,6 +158,53 @@ test("board events: what counts as a change, and when to push", () => {
   assert.strictEqual(g.note(2400), 2500, "a burst that never goes quiet is pushed maxWait after it began");
   g.fired(2500);
   assert.strictEqual(g.note(3000), 6500, "pushes no closer together than the gap");
+});
+
+test("board events: a watch that pushes, and follows a root set up in hq's config", async (t) => {
+  const os = require("os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "board-events-"));
+  const hqDir = path.join(tmp, "hq"), root = path.join(tmp, "root");
+  fs.mkdirSync(hqDir);
+  const config = path.join(hqDir, "config.json");
+  const rootOf = () => { try { return JSON.parse(fs.readFileSync(config, "utf8")).root; } catch (_) { return ""; } };
+  const roots = () => (rootOf() ? [rootOf(), hqDir] : [hqDir]);
+  let dropped = 0;
+  const ev = new BoardEvents({ roots, root: rootOf, config, dropReads: () => { dropped += 1; } });
+  ev.gate = new PushGate(30, 100, 0);
+  const pushes = [];
+  ev.on((n) => pushes.push(n));
+  t.after(() => { ev.stop(); fs.rmSync(tmp, { recursive: true, force: true }); });
+  const until = async (ok, what) => {
+    for (let i = 0; i < 100 && !ok(); i++) await new Promise((res) => setTimeout(res, 30));
+    assert.ok(ok(), what);
+  };
+  ev.start();
+  assert.strictEqual(ev.watchers.size, 1);
+  assert.ok(!ev.running, "no HQ root watched: the pages keep polling");
+  // Set up a root as install.sh does, the config before the folder: watched within moments (not
+  // at the next minute), and the boards told.
+  fs.writeFileSync(config, JSON.stringify({ root }));
+  await new Promise((res) => setTimeout(res, 150));
+  fs.mkdirSync(root);
+  await until(() => ev.watchers.size === 2, "the new root is watched");
+  assert.ok(ev.running);
+  await until(() => pushes.length >= 1, "a push");
+  const n = pushes.length;
+  // A card written there: one push for the burst, the kept reads dropped first.
+  fs.mkdirSync(path.join(root, "tasks"));
+  fs.writeFileSync(path.join(root, "tasks", "TASK.md"), "a");
+  fs.writeFileSync(path.join(root, "tasks", "TASK.md"), "b");
+  await until(() => pushes.length > n, "a card's change is pushed");
+  assert.strictEqual(dropped, pushes.length);
+  // Git's own files are not a change.
+  await new Promise((res) => setTimeout(res, 200));
+  const m = pushes.length;
+  fs.mkdirSync(path.join(root, ".git"));
+  fs.writeFileSync(path.join(root, ".git", "index"), "x");
+  await new Promise((res) => setTimeout(res, 300));
+  assert.strictEqual(pushes.length, m, "no push for .git");
+  ev.nudge();
+  await until(() => pushes.length === m + 1, "a nudge pushes");
 });
 
 // ---- the server on a loopback port, with a stand-in for board.js
