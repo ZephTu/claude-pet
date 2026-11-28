@@ -38,10 +38,28 @@ public enum IdleTab {
             .last(where: { !$0.isEmpty }), last.count < 300 else { return false }
         let tui: Set<Character> = ["│", "█", "░", "▓", "╭", "╰", "─", "⏵", "✻", "⎿"]
         if last.contains(where: { tui.contains($0) }) || last.contains("Context") || last.contains("##") { return false }
+        #if os(Windows)
+        // PowerShell ("PS D:\work>") and cmd ("D:\work>") end in ">", which alone would also take
+        // a REPL's ">" or ">>>": only those two shapes count.
+        if last.range(of: #"^(PS [^<>|]+|[A-Za-z]:\\[^<>|]*)>$"#, options: .regularExpression) != nil { return true }
+        #endif
         guard let end = last.last, ["%", "$", "#", "❯", "➜"].contains(end) else { return false }
         if let before = last.dropLast().last, "=-#(".contains(before) || (end == "%" && before.isNumber) { return false }
         return true
     }
+
+    #if os(Windows)
+    /// Did `session` end in this terminal and leave it at a shell prompt? Claude Code's last
+    /// words are "Resume this session with: claude --resume <id>", and the prompt follows. On
+    /// Windows nothing else finds that tab: Orca forgets the agent's place once it exits, the
+    /// pet drops the session's record, and the shell takes the tab's title back.
+    public static func endedHere(session: String, preview: String) -> Bool {
+        let lines = preview.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !session.isEmpty, lines.count >= 2, atShellPrompt(preview) else { return false }
+        return lines.dropLast().suffix(3).contains { $0.hasSuffix("--resume " + session) }
+    }
+    #endif
 
     /// Lists every Terminal.app tab as `tty<TAB>custom title<TAB>busy<TAB>process,process…`.
     public static let terminalListScript = """

@@ -111,6 +111,13 @@ enum PetBoard {
             #else
             return (nil, L("not supported here", "这里不支持"))
             #endif
+        case "resume-orca", "resume-orca-watch", "resume-wt":
+            // Resume going back to the session's tab (PetResume).
+            #if os(Windows)
+            return PetResume.handle(body)
+            #else
+            return (nil, L("not supported here", "这里不支持"))
+            #endif
         default:
             return (nil, L("unknown operation", "未知操作"))
         }

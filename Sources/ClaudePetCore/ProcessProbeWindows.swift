@@ -12,14 +12,14 @@ import WinSDK
 /// every caller already reads as "can't tell" (no Ghostty handle).
 /// Elsewhere (Linux) everything returns "can't tell"; nothing ships there.
 extension ProcessProbe {
-    struct Entry {
-        let pid: Int32
-        let parent: Int32
-        let name: String
+    public struct Entry {
+        public let pid: Int32
+        public let parent: Int32
+        public let name: String
     }
 
     /// Every running process, or empty when the snapshot cannot be taken.
-    static func snapshot() -> [Entry] {
+    public static func snapshot() -> [Entry] {
         #if os(Windows)
         let snap = CreateToolhelp32Snapshot(DWORD(0x2 /* TH32CS_SNAPPROCESS */), 0)
         guard let snap, snap != HANDLE(bitPattern: -1) else { return [] }

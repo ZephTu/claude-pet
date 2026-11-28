@@ -134,6 +134,13 @@ on the Mac:
   - **Windows Terminal** opens a new tab in it;
   - **Orca** opens a new Orca tab;
   - **Background** runs `claude --bg`.
+- **Resume** goes back to a tab when it can, as on the Mac: in Orca, the tab Orca keeps the
+  session in (switched to when it runs there; woken after an Orca restart, and Orca resumes
+  the session there itself; at a shell prompt, it is typed in there), then a tab of the
+  session's name at a shell prompt. A tab you opened yourself, where the session ended (Stop,
+  `/exit`) and that still shows Claude Code's `claude --resume <id>` line above the prompt, is
+  reused in Orca and in Windows Terminal alike. Tabs the board opens close with their session.
+  Only failing all that does it open a new tab.
 - Typing into a session: messages, **Esc** to interrupt, and **■** to stop.
   - These work in Windows Terminal, console windows and Orca.
   - A background session gets your message between turns; the board continues it.
@@ -164,7 +171,6 @@ be removed there.
 - **The secretary** and **Scheduled jobs.** The board answers "not on Windows yet".
 - **Feeds** (Zulip, Jira) and **ticking finished todos.** Their credentials live in the macOS
   Keychain.
-- **Resume** always opens a new tab. It doesn't reuse an idle one.
 - **VS Code's terminal**: sessions there get no ↗.
 
 ## Good to know

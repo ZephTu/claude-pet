@@ -103,7 +103,7 @@ enum WindowsJump {
     /// Attaches to the session's console to find its window. Under Windows Terminal that is the
     /// pseudo window's owner, and the tab is found by its title: the console's title is set to a
     /// one-off mark, UI Automation selects the tab showing it, and the title is put back.
-    private static func jumpConsole(pid: Int32) -> Int32 {
+    static func jumpConsole(pid: Int32) -> Int32 {
         let outcome: Int32? = withConsole(of: pid) {
             guard let console = GetConsoleWindow() else { return fail("pid \(pid) has no console window") }
             guard let host = GetWindow(console, UINT(GW_OWNER)) else {
@@ -221,6 +221,37 @@ enum WindowsJump {
     /// The keys that type `text` (UTF-16 units, as the console carries them).
     static func keys(typing text: String) -> [Key] { text.utf16.map { Key(char: $0) } }
 
+    /// The last `rows` lines of `pid`'s console up to the cursor, as text: what its tab shows
+    /// above and at the prompt; and every other process attached to that console (this one left
+    /// out), whatever its parent. Nil when the console can't be read.
+    static func screen(of pid: Int32, rows: Int = 12) -> (text: String, attached: [Int32])? {
+        withConsole(of: pid) { () -> (text: String, attached: [Int32])? in
+            var pids = [DWORD](repeating: 0, count: 64)
+            let count = Int(GetConsoleProcessList(&pids, DWORD(pids.count)))
+            guard count > 0, count <= pids.count else { return nil }
+            let me = GetCurrentProcessId()
+            let attached = pids.prefix(count).filter { $0 != me }.map { Int32(bitPattern: $0) }
+            let output = "CONOUT$".withCString(encodedAs: UTF16.self) {
+                CreateFileW($0, DWORD(0xC000_0000), DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE), nil,
+                            DWORD(OPEN_EXISTING), 0, nil)
+            }
+            guard let output, output != INVALID_HANDLE_VALUE else { return nil }
+            defer { CloseHandle(output) }
+            var info = CONSOLE_SCREEN_BUFFER_INFO()
+            guard GetConsoleScreenBufferInfo(output, &info), info.dwSize.X > 0 else { return nil }
+            let width = Int(info.dwSize.X), last = Int(info.dwCursorPosition.Y)
+            var lines: [String] = []
+            for y in max(0, last - rows + 1)...max(0, last) {
+                var buffer = [WCHAR](repeating: 0, count: width)
+                var read: DWORD = 0
+                guard ReadConsoleOutputCharacterW(output, &buffer, DWORD(width), COORD(X: 0, Y: SHORT(y)), &read) else { return nil }
+                let line = String(decoding: buffer.prefix(Int(read)), as: UTF16.self)
+                lines.append(String(line.reversed().drop(while: { $0 == " " }).reversed()))
+            }
+            return (lines.joined(separator: "\n"), attached)
+        } ?? nil
+    }
+
     // MARK: Orca
 
     private static func jumpOrca(handle: String) -> Int32 {
@@ -274,7 +305,7 @@ enum WindowsJump {
 
     /// The CLI Orca's installer puts in its resources, as on the Mac (per user, or for all
     /// users). Not one from PATH: another program may be called orca.exe.
-    private static func orcaCLI() -> URL? {
+    static func orcaCLI() -> URL? {
         let env = ProcessInfo.processInfo.environment
         var candidates: [String] = []
         if let local = env["LOCALAPPDATA"] { candidates.append(local + "\\Programs\\orca\\resources\\bin\\orca.exe") }

@@ -66,8 +66,10 @@ let onClickTarget = () => {};
 let onChanged = () => {};
 // Phone access (remote.js), set by main.js: the board's `remote*` settings ops.
 let remote = null;
-// Sessions a Resume is under way for: a double click must not open the session twice.
+// Sessions a Resume is under way for: a double click must not open the session twice. And those
+// whose woken Orca tab is still watched after Resume answered (resumeInOrca).
 const resuming = new Set();
+const watching = new Set();
 // Plans Enter was pressed for (BoardWindow.approvedPlans).
 const approvedPlans = new Set();
 let lastAgents = null;
@@ -132,8 +134,8 @@ function shared(key, ttl, fetch) {
   return entry.promise;
 }
 
-async function board(body) {
-  const r = await exec(petEmit, ["--board"], { timeout: READ_TIMEOUT, input: JSON.stringify(body), env: petEnv() });
+async function board(body, timeout = READ_TIMEOUT) {
+  const r = await exec(petEmit, ["--board"], { timeout, input: JSON.stringify(body), env: petEnv() });
   if (r.timedOut) return { error: L("no answer in time — look in its terminal", "没有及时回应 — 去它的终端看看"), timedOut: true };
   try { return JSON.parse(r.out); } catch (_) { return { error: (r.err || "pet-emit --board failed").trim() }; }
 }
@@ -313,14 +315,14 @@ async function launchBackground(claude, task, name, dir, prompt, skip) {
 }
 
 /** BoardWindow.resume: `claude --resume <id>` in the folder it ran in (Claude Code keeps a
- * conversation under that folder), bound to the task again, in a new tab. A background place
- * opens a terminal instead: there is nothing to attach to. */
+ * conversation under that folder), bound to the task again. It goes back to the tab Orca has the
+ * session in, or a tab it ended in (resumeInOrca, resumeInWT); otherwise it opens a new tab. A background place opens a terminal instead: there is nothing to attach to. */
 async function resume(body, win) {
   const sid = str(body, "session");
   if (!UUID.test(sid)) return { error: L("not a session id", "不是有效的 session id") };
   const dir = startDir(str(body, "dir"));
   if (!dir) return { error: L(`no such directory: ${str(body, "dir")}`, `没有这个目录：${str(body, "dir")}`) };
-  if (resuming.has(sid)) return { error: L("Already resuming this session — give it a moment", "正在续上这个 session，稍等一下") };
+  if (resuming.has(sid) || watching.has(sid)) return { error: L("Already resuming this session — give it a moment", "正在续上这个 session，稍等一下") };
   resuming.add(sid);
   try {
     const claude = await findClaude();
@@ -331,13 +333,65 @@ async function resume(body, win) {
     const into = str(body, "where") === "bg" ? "terminal" : str(body, "where");
     // The tab keeps the session's own name, as the pet and the board show it.
     const title = str(body, "name") ? str(body, "name").slice(0, 60) : `${task} ${sid.slice(0, 8)}`;
-    const opened = await openInTerminal(into, dir, [claude, "--resume", sid].concat(body.skip === true ? [SKIP_FLAG] : []),
-      title, body.focus !== false, win);
+    const command = [claude, "--resume", sid].concat(body.skip === true ? [SKIP_FLAG] : []);
+    const back = into === "orca" ? await resumeInOrca(sid, title, dir, command, body.focus !== false)
+      : into === "terminal" ? await resumeInWT(sid, dir, command, body.focus !== false) : null;
+    if (back) return back;
+    const opened = await openInTerminal(into, dir, command, title, body.focus !== false, win);
     return opened.error ? opened : { result: { ok: true, session: sid, where: into } };
   } finally {
     // Held a little past the answer: the tab is still starting, and a second click would open another.
     setTimeout(() => resuming.delete(sid), 3000);
   }
+}
+
+/** BoardWindow.resumeInOrcaPlace and the Orca half of resumeInIdleTab, as `pet-emit --board` ops
+ * (PetResume.swift): the tab Orca has the session in — brought forward when it runs the session,
+ * woken when it sleeps after a restart (Orca resumes the session there itself), given the command
+ * at a shell prompt — or else the tab the session ended in, at a prompt under its `claude --resume`
+ * line, or a tab with the session's title at a prompt. null when there is no
+ * such tab: the caller opens a new one. The command typed is the new tab's without its `; exit`:
+ * the tab's shell may be cmd, where `;` is no separator, and a tab of your own stays open. */
+async function resumeInOrca(sid, title, dir, command, focus) {
+  if (!fs.existsSync(ORCA_CLI)) return null;
+  const { line, file } = tabCommand(dir, command, "orca");
+  laterRemove(file);
+  const typed = line.join(" ");
+  const r = await board({ op: "resume-orca", session: sid, title: tabTitle(title), line: typed, focus }, 45000);
+  if (r.error) return r;
+  const res = r.result || {};
+  const done = (extra) => ({ result: Object.assign({ ok: true, session: sid, where: "orca" }, extra) });
+  if (res.reused) return done({ reused: res.reused });
+  if (!res.woke || !res.watch) return null;
+  // Woken: watched for up to 10 s, brought forward once live, and typed into if it stays at a
+  // bare prompt (its session had ended before the restart). Staying on the board answers now.
+  const watch = () => board(Object.assign({ op: "resume-orca-watch", session: sid, line: typed, focus }, res.watch), 120000);
+  if (!focus) {
+    watching.add(sid);
+    watch().finally(() => watching.delete(sid));
+    return done({ woke: true });
+  }
+  const w = await watch();
+  if (w.error) return w;
+  return done(Object.assign({ woke: true }, w.result && w.result.reused ? { reused: w.result.reused } : {}));
+}
+
+/** A long command's script file (tabCommand), for a line typed into a tab that may never run it
+ * (nothing typed, or a tab only brought forward): the line deletes it when it runs, and this
+ * once the longest watch is long over. */
+function laterRemove(file) {
+  if (file) setTimeout(() => fs.rm(file, { force: true }, () => {}), 300000).unref();
+}
+
+/** The Windows Terminal tab the session ended in, still at its prompt (PetResume's resume-wt):
+ * the command typed there, as in Orca without `; exit`. null when there is none. */
+async function resumeInWT(sid, dir, command, focus) {
+  const { line, file } = tabCommand(dir, command, "terminal");
+  laterRemove(file);
+  const r = await board({ op: "resume-wt", session: sid, line: line.join(" "), focus }, 30000);
+  if (r.error) return r;
+  if (!(r.result && r.result.reused)) return null;
+  return { result: { ok: true, session: sid, where: "terminal", reused: r.result.reused } };
 }
 
 /** Background sessions: `claude agents --json`, shared like the board's reads. A failed read
