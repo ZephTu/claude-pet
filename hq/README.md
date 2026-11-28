@@ -18,6 +18,16 @@ carries on. You look at one board instead of twelve terminals.
 
 Requires macOS or Linux, Claude Code, and `python3` (3.9+, standard library only).
 
+**Windows:** run the same command in Git Bash, which is also where Claude Code runs hooks and
+the slash commands' `~/.claude/hq/bin/hq`. It needs a Windows Python 3.9+ (python.org or
+`winget install Python.Python.3.12`; the Microsoft Store stand-in that `python3` opens doesn't
+count, and neither does an MSYS2 Python). The installer looks for `py -3`, then `python`, then
+installs the CLI as `bin/hq.py` and writes `bin/hq` as a sh script that runs it with that Python,
+in UTF-8 (`-X utf8`, whatever the console's code page), with `USERPROFILE` set to the shell's
+`$HOME`. File locks use `msvcrt.locking` instead of `fcntl`. The cards, hooks and board are the
+same as on the Mac. What the Windows board can't do yet, and how to install the pet there:
+[docs/windows.md](../docs/windows.md).
+
 ```bash
 hq/install.sh --root ~/claude-hq      # where your task cards will live (any directory)
 ```

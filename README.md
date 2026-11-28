@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml/badge.svg)](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml)
 
-Two things for people who run many Claude Code sessions at once on a Mac:
+Two things for people who run many Claude Code sessions at once on a Mac — or on Windows ([how it differs](docs/windows.md)):
 
 - **The pet** — a cat on your desktop that shows, at a glance, what every session is doing: working, finished, or waiting for you.
 - **The Task Board** — a window behind the cat that keeps track of the *work*: what each session is for, what it asked you, what you still owe it — so any session can be closed and the next one picks up where it left off.
@@ -36,7 +36,7 @@ The cat's posture is the state of all your sessions together — asleep when eve
 - **Multiple-choice questions** (`AskUserQuestion`) get no buttons on the pet — the picks are the answer, so its row takes you to the terminal. The Task Board can answer them: the session's row there has **Answer…**, which sends your picks to Claude Code as if chosen in the terminal (while the pet is running).
 - **Jumping and messaging depend on the terminal.** Jump: Orca, iTerm2, Terminal, Ghostty 1.4+; VS Code-family editors only to the right window, not the tab; anything else has no ↗. Sending a message from the Task Board: Orca, iTerm2 and Terminal, plus background `claude --bg` sessions between turns (the board continues them with the message). Stop works for both; Resume reuses an idle tab of the same name.
 - **Quota, context and model need your statusline.** Claude Code hands them only to the statusline command; [claude-hud](https://github.com/jarrodwatts/claude-hud) or `pet-emit --statusline` has to save them ([how](docs/pet.md#optional-reading-quota-from-your-statusline)). Without that, everything else works.
-- **macOS 14+ only**, and not signed by an Apple Developer ID (the installer strips the quarantine flag; Gatekeeper may still ask). Click-through is a rectangle, not the cat's outline. Animating costs about 7% of one core and 310 MB.
+- **macOS 14+**, or Windows 10 / 11 (see [docs/windows.md](docs/windows.md): some board features are Mac only there). On the Mac it is not signed by an Apple Developer ID (the installer strips the quarantine flag; Gatekeeper may still ask). Click-through is a rectangle, not the cat's outline. Animating costs about 7% of one core and 310 MB.
 
 ## The Task Board
 
@@ -123,6 +123,8 @@ hq/install.sh --root ~/claude-hq                  # optional: the Task Board; li
 hq/install.sh --root ~/claude-hq --no-hooks       # the board and CLI only, settings.json untouched
 ```
 
+**Windows:** install the pet from the CI bundle with `install.ps1`, and HQ with the same `hq/install.sh` from Git Bash. Step by step: [docs/windows.md](docs/windows.md).
+
 ### Install with Claude
 
 Open Claude Code anywhere and paste:
@@ -130,6 +132,8 @@ Open Claude Code anywhere and paste:
 > Install Claude Pet and its Task Board from https://github.com/ZephTu/claude-pet — follow "Install with Claude" in its README — then set the board up from my existing sessions.
 
 **For Claude, doing that install** — in this order, and ask the user wherever it says so:
+
+On Windows: in step 1 check for Windows 10 / 11, `claude.exe`, Git Bash and a python.org Python instead of macOS and Swift; in step 4 install the pet from the CI bundle as [docs/windows.md](docs/windows.md) says; run every `hq/install.sh` in Git Bash.
 
 1. **Check** macOS 14+ (`sw_vers -productVersion`), a Swift toolchain (`swift --version`; if missing, the user runs `xcode-select --install` — a system dialog — and tells you when it is done), `python3`, and that `~/.claude` exists. Stop and say what is missing.
 2. **Clone** `main` to a folder the user is fine keeping (it is what gets built; e.g. `~/claude-pet`), and install from that checkout only — never a branch, never `--force`.
@@ -184,6 +188,7 @@ Your transcripts are read on your machine. The drafting is done by Claude in the
 ## More
 
 - [docs/pet.md](docs/pet.md) — the pet in full
+- [docs/windows.md](docs/windows.md) — Claude Pet on Windows: install, what works, what doesn't yet
 - [hq/README.md](hq/README.md) — the Task Board: how it works, the `hq` CLI, the card format
 - [promo/](promo/README.md) — the 3:09 demo film (Chinese narration) and how it is built
 - [docs/development.md](docs/development.md) — tests, debugging hooks, and three things to know before changing anything

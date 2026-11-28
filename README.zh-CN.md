@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml/badge.svg)](https://github.com/ZephTu/claude-pet/actions/workflows/ci.yml)
 
-给在 Mac 上同时开着很多个 Claude Code session 的人用的两样东西：
+给在 Mac 上（或者 Windows 上，[有哪些不同](docs/windows.zh-CN.md)）同时开着很多个 Claude Code session 的人用的两样东西：
 
 - **桌宠**：一只坐在桌面上的猫，一眼就能看出所有 session 在干什么——在干活、干完了、还是在等你。
 - **任务看板**：猫背后的一个窗口，记的是**事情**本身：每个 session 是为了什么、它问过你什么、你还欠它什么。session 随时可以关，下一个接着干。
@@ -36,7 +36,7 @@
 - **多选题提问**（`AskUserQuestion`）没法在桌宠上回答——你勾的选项就是答案，所以点这一行会跳回终端。
 - **跳转和发消息取决于终端。** 跳转：Orca、iTerm2、Terminal、Ghostty 1.4+；VS Code 系编辑器只能跳到对的窗口、不一定是对的终端标签；其他终端没有 ↗。从任务看板发消息：Orca、iTerm2 和 Terminal，以及两轮之间的后台 `claude --bg` session（看板带着消息让它接着跑）。Stop 两种都支持；Resume 会复用同名的空闲标签页。
 - **额度、context、模型要靠状态栏。** Claude Code 只把这些交给状态栏命令，得有 [claude-hud](https://github.com/jarrodwatts/claude-hud) 或 `pet-emit --statusline` 把它们存下来（[配置方法](docs/pet.zh-CN.md#可选从你的-statusline-读额度)）。不配的话其他功能照常。
-- **只支持 macOS 14 以上**，没有 Apple 开发者签名（安装脚本会去掉隔离标记，Gatekeeper 可能还会再问一次）。点击穿透按矩形算，不是按猫的轮廓。动画时大约占一个核的 7%、310 MB 内存。
+- **支持 macOS 14 以上**，以及 Windows 10 / 11（见 [docs/windows.zh-CN.md](docs/windows.zh-CN.md)，那边看板有几项功能还没有）。Mac 版没有 Apple 开发者签名（安装脚本会去掉隔离标记，Gatekeeper 可能还会再问一次）。点击穿透按矩形算，不是按猫的轮廓。动画时大约占一个核的 7%、310 MB 内存。
 
 ## 任务看板
 
@@ -123,6 +123,8 @@ hq/install.sh --root ~/claude-hq                  # 可选：任务看板；先�
 hq/install.sh --root ~/claude-hq --no-hooks       # 只装看板和命令行，不碰 settings.json
 ```
 
+**Windows：** 桌宠用 CI 构建的安装包里的 `install.ps1` 安装，HQ 在 Git Bash 里运行同一个 `hq/install.sh`。详细步骤见 [docs/windows.zh-CN.md](docs/windows.zh-CN.md)。
+
 ### 让 Claude 帮你安装
 
 在任意目录打开 Claude Code，粘贴：
@@ -130,6 +132,8 @@ hq/install.sh --root ~/claude-hq --no-hooks       # 只装看板和命令行，�
 > 从 https://github.com/ZephTu/claude-pet 安装 Claude Pet 和它的任务看板（按 README 里"让 Claude 帮你安装"一节做），然后用我已有的 session 把看板初始化好。
 
 **给执行安装的 Claude**——按下面的顺序做，写了"问"的地方要先问用户：
+
+Windows 上：第 1 步检查 Windows 10 / 11、`claude.exe`、Git Bash 和 python.org 的 Python，不查 macOS 和 Swift；第 4 步按 [docs/windows.zh-CN.md](docs/windows.zh-CN.md) 用 CI 安装包安装桌宠；`hq/install.sh` 都在 Git Bash 里运行。
 
 1. **检查**：macOS 14+（`sw_vers -productVersion`）、Swift 工具链（`swift --version`；没有的话让用户运行 `xcode-select --install`，会弹系统对话框，装好后告诉你）、`python3`、`~/.claude` 存在。缺什么就停下来说清楚。
 2. **克隆** `main` 到用户愿意长期保留的目录（编译用的就是它，比如 `~/claude-pet`），只从这份代码安装——不切分支，不加 `--force`。
@@ -183,6 +187,7 @@ hq/uninstall.sh             # 摘掉 HQ 的 hook 和命令；任务卡保留
 ## 更多
 
 - [docs/pet.zh-CN.md](docs/pet.zh-CN.md)：桌宠的完整说明
+- [docs/windows.zh-CN.md](docs/windows.zh-CN.md)：Windows 上的 Claude Pet：安装、能用的、还没有的
 - [hq/README.md](hq/README.md)：任务看板的原理、`hq` 命令行、任务卡格式
 - [promo/](promo/README.md)：3 分 9 秒的中文配音演示片，以及它是怎么做出来的
 - [docs/development.zh-CN.md](docs/development.zh-CN.md)：测试、调试 hook、改代码之前要知道的三件事

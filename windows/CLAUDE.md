@@ -1,7 +1,7 @@
 # Claude Pet on Windows — notes for agents working here
 
-The Windows port (HQ task T-129) lives on branch `Zeph-Tu/t129-windows-spike`, draft PR #156.
-It is a spike: it shows the pet and answers permission prompts; everything else is backlog.
+The Windows port (HQ task T-129, PR #156). The pet and the Task Board run on Windows; what is
+still Mac only is listed in `docs/windows.md` (the user-facing doc, with `docs/windows.zh-CN.md`).
 The repo-root `CLAUDE.md` still applies; this file adds what is specific to Windows.
 
 ## How it fits together
@@ -178,10 +178,12 @@ npx electron .
   GitHub comments) and fix them all on the same PR.
 - Reply to the user in Chinese; code, comments, commits and the PR stay in English.
 - UI changes or big features: show a clickable prototype first, code after the user agrees.
-- HQ is not installed on this machine. Record progress in commit messages and the PR
-  description (keep its "what works / what doesn't / next" up to date); the user carries it to
-  the T-129 card on the Mac.
-- Don't touch README / the HQ guide yet (the user said so for the spike).
+- HQ on this machine has its own task root (`C:\Users\28332\claude-hq`, separate from the
+  Mac's); the port's card here is T-030. The T-129 card lives on the Mac: the user carries
+  progress there.
+- Docs: a change to what works on Windows updates `docs/windows.md` and `docs/windows.zh-CN.md`,
+  and the guide's "On Windows" / "Windows 版" sections when the board is concerned (the
+  repo-root rule on keeping the guide in sync applies to Windows too).
 
 ## Gotchas already hit
 
@@ -258,11 +260,9 @@ with a real claude-hud reading; the taskbar on another edge.
 
 ## Next
 
-The HQ board on Windows, in steps (the user's order): 1. hq itself (done: CLI, hooks, /task);
-2. the board window (done: see above); 3. prompts on the board, starting / resuming sessions,
-the cat opening the board (done: see above); 4. sending text to, interrupting and stopping a
-session, approving a plan (done: see above). Now: the user wants `/hq-onboard` run on this
-machine (46 sessions) and reviewed on the board. Later or never: scheduled jobs (`--run-job`, Task Scheduler),
+The HQ board on Windows is done (hq, the board window, prompts, starting / resuming sessions,
+typing into them, the cat opening the board; `/hq-onboard` was run on this machine). Later or
+never: scheduled jobs (`--run-job`, Task Scheduler),
 the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).
 
