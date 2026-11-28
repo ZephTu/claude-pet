@@ -78,6 +78,14 @@ struct Entry {
             exit(2)
             #endif
 
+        case "--detail":
+            // The hover card for a row in the Windows shell's panel (PetDetail).
+            guard arguments.count == 2 else {
+                FileHandle.standardError.write(Data("usage: pet-emit --detail <session>\n".utf8))
+                exit(2)
+            }
+            exit(PetDetail.run(session: arguments[1]))
+
         case "--version":
             print(petVersion)
             exit(0)

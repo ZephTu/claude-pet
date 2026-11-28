@@ -3,6 +3,7 @@
 //    they fall through to the desktop (main.js toggles setIgnoreMouseEvents);
 //  - press on the cat and move: drag the window; press and release: open or close the list;
 //  - a click in the list is looked up with the page's own window.hitRow and sent to main.js;
+//  - resting on a row of the open list: that session's detail card;
 //  - right click: the tray's menu.
 "use strict";
 
@@ -51,7 +52,46 @@ window.addEventListener("mousemove", (e) => {
   }
   setInteractive(solidAt(e.clientX, e.clientY));
   hover(e.clientX, e.clientY);
+  updateDwell(e.clientX, e.clientY);
 });
+
+// Resting the pointer on a row of the open list shows that session's detail card, as
+// PetHostView's updateDwell does: the page says which row (window.rowSessionId), main.js asks
+// pet-emit --detail, and window.hush takes the card down once the pointer moves on.
+const ROW_DWELL_MS = 450;
+const dwell = { timer: null, y: null, showing: false, ticket: 0 };
+
+function panelOpen() {
+  const p = document.getElementById("panel");
+  return !!p && !p.hidden;
+}
+
+function endDwell() {
+  clearTimeout(dwell.timer);
+  dwell.timer = null;
+  dwell.y = null;
+  dwell.ticket++;
+  if (dwell.showing) { dwell.showing = false; ipcRenderer.send("hush"); }
+}
+
+function updateDwell(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!panelOpen() || (el && el.closest && el.closest("#pet"))) return endDwell();
+  // Onto another row: the first row's card must not stay up.
+  if (dwell.y !== null && Math.abs(y - dwell.y) > 2) endDwell();
+  dwell.y = y;
+  if (dwell.timer || dwell.showing) return;
+  const ticket = dwell.ticket;
+  dwell.timer = setTimeout(async () => {
+    // dwell.timer stays set while the page answers, so no second timer starts meanwhile.
+    const id = await webFrame.executeJavaScript(`window.rowSessionId(${x}, ${y})`).catch(() => "");
+    if (ticket !== dwell.ticket) return;
+    dwell.timer = null;
+    if (!id) return;
+    dwell.showing = true;
+    ipcRenderer.send("detail", id);
+  }, ROW_DWELL_MS);
+}
 
 // The row under the pointer lights up and shows its ↗, as PetHostView forwards it on the Mac
 // (window.setHoverAt; it returns early when the row is the same).
@@ -62,6 +102,7 @@ function hover(x, y) {
 window.addEventListener("mouseleave", () => {
   if (!press) setInteractive(false);
   hover(-1, -1);
+  endDwell();
 });
 
 window.addEventListener("mousedown", (e) => {

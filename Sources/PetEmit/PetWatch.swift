@@ -7,18 +7,27 @@ import Foundation
 ///
 /// One line:
 ///   {"mood", "phase", "pose", "mark", "waitingProject", "waitingOn", "waitingSessionId",
-///    "waitingAskId", "badge", "sessions": [rows shaped like WebBridge's setSessions items]}
+///    "waitingAskId", "badge", "sessions": [rows shaped like WebBridge's setSessions items],
+///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished}
 enum PetWatch {
     static func run(interval: TimeInterval = 1) -> Never {
         var previous: GlobalState?
         var lastLine = ""
+        var prunedAt = Date.distantPast
         while true {
             let now = Date()
+            if now.timeIntervalSince(prunedAt) > 3600 {
+                pruneEvents(now: now)
+                prunedAt = now
+            }
             let all = scan(HookEmit.sessionsDirectory)
-            let state = StateAggregator.settled(StateAggregator.aggregate(all, now: now),
-                                                previous: previous, now: now)
-            previous = state
-            let line = render(state, now: now)
+            // As on the Mac: the settled state (a finish held back settleAfter) decides only
+            // "it finished"; the rows and the figure show the state as it is.
+            let state = StateAggregator.aggregate(all, now: now)
+            let settled = StateAggregator.settled(state, previous: previous, now: now)
+            let finished = doneNotices(previous: previous, current: settled, now: now)
+            previous = settled
+            let line = render(state, now: now, notices: finished)
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -38,7 +47,44 @@ enum PetWatch {
         }
     }
 
-    static func render(_ state: GlobalState, now: Date) -> String {
+    /// The Mac app's announceFinishes: one notice per session that just came to rest, saying
+    /// the first line of Claude's last reply when the hook recorded one (events/, the last
+    /// minute's).
+    static func doneNotices(previous: GlobalState?, current: GlobalState, now: Date) -> [Chatter.DoneNotice] {
+        let bare = Chatter.doneNotices(previous: previous, current: current)
+        guard !bare.isEmpty else { return [] }
+        // Only the finished sessions' files (CompletionQueue.fileName: "<session>~<turn>.json").
+        let prefixes = bare.map { $0.sessionId + "~" }
+        let files = ((try? FileManager.default.contentsOfDirectory(
+            at: HookEmit.eventsDirectory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { url in url.pathExtension == "json" && prefixes.contains { url.lastPathComponent.hasPrefix($0) } }
+        var summaries: [String: (Date, String)] = [:]
+        for event in CompletionQueue.decode(files.compactMap { try? Data(contentsOf: $0) })
+        where !event.summary.isEmpty && now.timeIntervalSince(event.finishedAt) < 60 {
+            if let seen = summaries[event.sessionId], seen.0 >= event.finishedAt { continue }
+            summaries[event.sessionId] = (event.finishedAt, event.summary)
+        }
+        return Chatter.doneNotices(previous: previous, current: current, summaries: summaries.mapValues(\.1))
+    }
+
+    /// Ages `events/` out as the Mac's CompletionStore does (CompletionQueue.prune), deleting
+    /// the files of what it drops: the hook adds one per turn, and nothing else on Windows
+    /// removes them.
+    static func pruneEvents(now: Date) {
+        let fm = FileManager.default
+        let urls = ((try? fm.contentsOfDirectory(at: HookEmit.eventsDirectory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+        let read = ReadMarks.decode((try? Data(contentsOf: HookEmit.baseDirectory.appending(path: "read.json"))) ?? Data())
+        let events = CompletionQueue.dedupe(CompletionQueue.decode(urls.compactMap { try? Data(contentsOf: $0) }))
+        let keeping = Set(CompletionQueue.prune(events, read: read, now: now).keep.map(CompletionQueue.fileName(for:)))
+        // A file that doesn't decode is left alone: it may be one being written right now.
+        let named = Set(events.map(CompletionQueue.fileName(for:)))
+        for url in urls where named.contains(url.lastPathComponent) && !keeping.contains(url.lastPathComponent) {
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    static func render(_ state: GlobalState, now: Date, notices: [Chatter.DoneNotice] = []) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
         let waitingSession = sessions.first { $0.sessionId == state.waitingSessionId }
@@ -48,7 +94,7 @@ enum PetWatch {
                                 blockedOn: waitingSession?.waitingOn ?? "",
                                 struggling: sessions.contains(where: Struggle.isStruggling))
         let needsYou = sessions.filter { $0.state == .waiting }.count
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "mood": state.mood.rawValue,
             "phase": phase,
             "pose": look.pose.rawValue,
@@ -60,6 +106,13 @@ enum PetWatch {
             "badge": PanelModel.badge(needsYou: needsYou, unreadFinishes: 0),
             "sessions": sessions.map { row($0, now: now) },
         ]
+        // Only on the line where they happen: the shell shows each one once (window.notify).
+        if !notices.isEmpty {
+            doc["notices"] = notices.map {
+                ["sessionId": $0.sessionId, "text": $0.text, "emphasis": $0.emphasis,
+                 "holdMs": Int(Chatter.noticeHold * 1000)] as [String: Any]
+            }
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }

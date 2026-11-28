@@ -71,6 +71,32 @@ $state = $line | ConvertFrom-Json
 Check '--watch prints a JSON line with the mood' ([bool]$state.mood) 'True'
 Check '...and both sessions' (@($state.sessions).Count) 2
 
+# A session that finishes gets a notice, once, on the line where it happens.
+$nout = Join-Path $home_ 'notice.out'
+$w = Start-Process -FilePath $Emit -ArgumentList '--watch' -RedirectStandardOutput $nout -NoNewWindow -PassThru
+# The watcher must have seen s1 busy first, or there is nothing to finish.
+function Lines { if (Test-Path $nout) { @(Get-Content $nout | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json }) } else { @() } }
+for ($i = 0; $i -lt 100 -and (Lines).Count -eq 0; $i++) { Start-Sleep -Milliseconds 200 }
+Emit '{"session_id":"s1","hook_event_name":"Stop","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","last_assistant_message":"All 12 tests pass"}' | Out-Null
+# A finish is announced once it has held for StateAggregator.settleAfter (10 s); the row
+# shows idle at once.
+for ($i = 0; $i -lt 100 -and -not @((Lines) | Where-Object { $_.notices }).Count; $i++) { Start-Sleep -Milliseconds 250 }
+Stop-Process -Id $w.Id -Force
+$lines = Lines
+$idleAt = -1; $noticeAt = -1
+for ($i = 0; $i -lt $lines.Count; $i++) {
+  $s1 = @($lines[$i].sessions | Where-Object { $_.sessionId -eq 's1' })
+  if ($idleAt -lt 0 -and $s1.Count -and $s1[0].state -eq 'idle') { $idleAt = $i }
+  if ($noticeAt -lt 0 -and $lines[$i].notices) { $noticeAt = $i }
+}
+Check 'the finished row shows idle before the notice' ($idleAt -ge 0 -and $idleAt -lt $noticeAt) 'True'
+$notices = @($lines | ForEach-Object { $_.notices } | Where-Object { $_ })
+Check 'a finished session gets one notice' $notices.Count 1
+Check '...naming the session' ($notices[0].text -like 'demo*') 'True'
+Write-Host "     notice: $($notices[0].text)"
+$detail = & $Emit --detail s1
+Check '--detail prints the hover card' ((($detail | ConvertFrom-Json).path) -eq 'C:\work\demo') 'True'
+
 # Which terminal a session is in: Windows Terminal from WT_SESSION, but not under a terminal that
 # names itself (VS Code inherits WT_SESSION when started from one).
 $saved = @{ TERM_PROGRAM = $env:TERM_PROGRAM; ORCA_TERMINAL_HANDLE = $env:ORCA_TERMINAL_HANDLE; WT_SESSION = $env:WT_SESSION }

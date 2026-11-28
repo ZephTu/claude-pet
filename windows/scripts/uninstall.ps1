@@ -19,6 +19,10 @@ Write-Host '==> removing the app and the hook binary'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\ClaudePet'
 Remove-Item $app -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Pet.lnk') -Force -ErrorAction SilentlyContinue
+# Launch at login (the tray's checkbox), and the state Task Manager keeps for it.
+foreach ($key in 'Run', 'Explorer\StartupApproved\Run') {
+  Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\$key" -Name ClaudePet -ErrorAction SilentlyContinue
+}
 # pet-emit.exe, the runtime DLLs, and the *.old-N copies install.ps1 left when one was in use.
 $binaries = { Get-ChildItem $pet -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match '\.(exe|dll)(\.old-\d+)?$' -or $_.Name -like 'pet-emit*' } }

@@ -168,7 +168,25 @@ function push(s, force) {
   if (!prev || prev.phase !== s.phase) run(`window.setPhase(${js(s.phase)});`);
   if (!prev || prev.badge !== s.badge) run(`window.setBadge(${js(s.badge)});`);
   run(`window.setSessions(${js(s.sessions || [])}, 0, [], 0, [], []);`);
+  // Sessions that just finished, each in a notice of its own (the page skips them while the
+  // list is open). Only on the line they came on: a redraw (force) does not repeat them.
+  if (!force) {
+    for (const n of s.notices || []) {
+      run(`window.notify(${js(n.text)}, ${Number(n.holdMs) || 30000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${!!jumpKind(n.sessionId)});`);
+    }
+  }
   updateTray(s);
+}
+
+/** The terminal a session's row can jump to, or "" (PetWatch.row's termKind). */
+function jumpKind(sessionId) {
+  const row = ((last && last.sessions) || []).find((r) => r.sessionId === sessionId);
+  return (row && row.termKind) || "";
+}
+
+// What pet-emit prints in the pet's language (the hover card, notices): the tray's choice.
+function emitEnv() {
+  return { ...process.env, CLAUDE_PET_LANG: language() };
 }
 
 function startWatcher() {
@@ -180,7 +198,7 @@ function startWatcher() {
   }
   const restart = () => { watcher = null; if (!quitting) setTimeout(startWatcher, 2000); };
   try {
-    watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    watcher = spawn(PET_EMIT, ["--watch"], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: emitEnv() });
   } catch (e) {
     log("pet-emit --watch did not start:", e.message);
     return restart();
@@ -209,6 +227,15 @@ function act(a) {
     execFile(PET_EMIT, ["--decide", a.sessionId, a.askId, a.behavior], { windowsHide: true }, (err) => {
       if (err) log("decide failed:", err.message);
     });
+    return;
+  }
+  if (a.action === "openNotice") {
+    // As the Mac's openNotice: the notice goes, and its session's terminal comes up; with
+    // nowhere to go, the list opens, where the session's row is.
+    if (!a.sessionId) return;
+    run(`window.dismissNotice(${js(a.sessionId)});`);
+    if (jumpKind(a.sessionId)) act({ action: "jump", sessionId: a.sessionId });
+    else run("window.setPanelOpen(true);");
     return;
   }
   if (a.action === "jump") {
@@ -243,8 +270,31 @@ function updateTray(s) {
   tray.setToolTip(`Claude Pet — ${s.mood}, ${n} session${n === 1 ? "" : "s"}`);
 }
 
+// Launch at login, off until asked for, as on the Mac: a value under HKCU\...\Run named
+// ClaudePet (uninstall.ps1 removes it). Only for the installed app: `npx electron .` would
+// register electron.exe.
+// The path is quoted: Electron writes it into the Run value as given, and an unquoted path with
+// a space in it (C:\Users\John Smith\...) runs the wrong thing.
+const LOGIN_ITEM = { name: "ClaudePet", path: `"${process.execPath}"` };
+
+/** On Windows openAtLogin only looks for a value named after the AppUserModelID, so the value
+ * is found by name among launchItems (checked with Electron 33). Off in Task Manager counts. */
+function launchesAtLogin() {
+  try {
+    return (app.getLoginItemSettings({ path: LOGIN_ITEM.path }).launchItems || [])
+      .some((i) => i.name === LOGIN_ITEM.name && i.enabled !== false);
+  } catch (_) { return false; }
+}
+
+function setLaunchAtLogin(on) {
+  // enabled: ticking it again undoes a "Disabled" set in Task Manager's Startup tab.
+  app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin: on, enabled: on });
+  if (launchesAtLogin() !== on) log("launch at login: could not turn it", on ? "on" : "off");
+  buildTray();
+}
+
 function buildTray() {
-  tray = new Tray(trayImage("idle"));
+  if (!tray) tray = new Tray(trayImage(last ? last.mood : "idle"));
   const zh = language() === "zh";
   const setLang = (lang) => { writePrefs({ ...readPrefs(), lang }); app.relaunch(); app.quit(); };
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -257,6 +307,8 @@ function buildTray() {
       { label: "English", type: "radio", checked: !zh, click: () => setLang("en") },
       { label: "中文", type: "radio", checked: zh, click: () => setLang("zh") },
     ] },
+    ...(app.isPackaged ? [{ label: zh ? "登录时启动" : "Launch at Login", type: "checkbox",
+      checked: launchesAtLogin(), click: (item) => setLaunchAtLogin(item.checked) }] : []),
     { label: zh ? "打开日志" : "Open the log", click: () => shell.openPath(LOG) },
     { type: "separator" },
     { label: zh ? "退出" : "Quit", click: () => app.quit() },
@@ -276,6 +328,27 @@ ipcMain.on("drag-end", () => {
   dragOrigin = null;
 });
 ipcMain.on("action", (_e, a) => act(a));
+// The hover card (preload.js's dwell): shown only if the pointer is still on that row when
+// pet-emit answers. window.hush takes down whatever the bubble says, so it runs only when a
+// card actually went up (the Mac's dwellShowing).
+let detailWanted = "";
+let cardUp = false;
+ipcMain.on("detail", (_e, sessionId) => {
+  if (typeof sessionId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return;
+  detailWanted = sessionId;
+  execFile(PET_EMIT, ["--detail", sessionId], { windowsHide: true, timeout: 10000, env: emitEnv() }, (err, out) => {
+    if (err) return log("detail failed:", err.message.trim());
+    const json = String(out).trim();
+    if (!json || detailWanted !== sessionId) return;
+    try { JSON.parse(json); } catch (_) { return log("detail: not JSON"); }
+    cardUp = true;
+    run(`window.showDetail(${json});`);
+  });
+});
+ipcMain.on("hush", () => {
+  detailWanted = "";
+  if (cardUp) { cardUp = false; run("window.hush();"); }
+});
 ipcMain.on("layout", () => {});
 ipcMain.on("menu", () => { if (tray) tray.popUpContextMenu(); });
 

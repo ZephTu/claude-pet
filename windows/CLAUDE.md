@@ -18,7 +18,18 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   feeds it each `--watch` line (`setMood`, `setCatLook`, `setPhase`, `setBadge`, `setSessions`).
   `preload.js` does what `PetHostView` does on the Mac: click-through outside the cat and the
   panel (`setIgnoreMouseEvents(true, {forward:true})`), drag to move, click to `togglePanel` /
-  `hitRow`. Tray menu: show/hide, back to the corner, language, log, quit.
+  `hitRow`, rest on a row for its detail card. Tray menu: show/hide, back to the corner,
+  language, launch at login (installed app only; a `ClaudePet` value under HKCU `...\Run`), log,
+  quit.
+- Finish notices: `--watch` puts `notices` (Chatter.doneNotices over the settled state, with the
+  last reply's first line from `events/`) on the one line where a session finished; main.js calls
+  `window.notify`; a click on one jumps to its terminal or opens the list. The rows themselves
+  show the unsettled state, as on the Mac.
+- Hover card: `preload.js` times the dwell (450 ms, as `updateDwell`), main.js runs
+  `pet-emit --detail <session>` (`PetDetail.swift`: insight, transcript, context budget, last
+  call, background shells — the Mac's `hoverDetail`) and hands the JSON to `window.showDetail`.
+  It reads the whole transcript each time (~0.4 s for a long session, release build); the Mac
+  caches. pet-emit gets the pet's language as `CLAUDE_PET_LANG`.
 - Hooks in `settings.json` are written as `"$HOME/.claude/pet/pet-emit"` (quoted, forward
   slashes): Claude Code on Windows runs hook commands through Git Bash. Verified on a real
   machine (Claude Code 2.1.318) from Orca and Windows Terminal.
@@ -114,6 +125,10 @@ npx electron .
 - A Windows Terminal started *from* an Orca terminal (`wt.exe` typed there) inherits
   `TERM_PROGRAM=Orca` and `ORCA_TERMINAL_HANDLE`: its sessions are recorded as that Orca tab.
   Start test windows from the Start menu, not from a shell inside Orca.
+- A debug `PetEmit.exe` is ~10x slower than release at scanning a transcript (`--detail` took
+  3 s): time things with the release build.
+- `PET_SHOT_JS` can drive preload.js: a `MouseEvent` dispatched on `window` from the page reaches
+  its listeners (how the hover card was checked without a mouse).
 - To see a PermissionRequest, the test session must be in the default permission mode
   (`claude --permission-mode default`): in `auto` mode the classifier approves the command and
   no prompt (so no hook) happens. Writes to `/tmp` are allowed without asking too.
@@ -133,10 +148,13 @@ npx electron .
 5. Jump to the terminal from the panel: Orca, Windows Terminal (the right tab of several),
    a conhost PowerShell window (restored from minimized).
 
-Not checked yet: the taskbar on another edge.
+Not checked yet on the machine (built, smoke-tested or rendered only): launch at login; finish
+notices (and clicking one); the hover card; the taskbar on another edge.
 
 ## Next
 
-Backlog, roughly by value: jump to VS Code's terminal; finish notices and the hover detail card; start at login; scheduled jobs (`--run-job`, Task
+Backlog, roughly by value: the Finished group and unread marks in the list (CompletionStore is
+app-side on the Mac); the quota readout on resting over the cat (needs the statusline capture);
+jump to VS Code's terminal; scheduled jobs (`--run-job`, Task
 Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
 *kills* on Windows, Keychain → Credential Manager, a bundled Python).
