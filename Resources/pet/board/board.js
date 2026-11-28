@@ -4721,7 +4721,9 @@ function restoreTextScrolls(root, saved) {
 }
 
 // The button a two-click confirm is waiting on, and how it is drawn after every rebuild.
-function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm").sort().map((k) => `${k}=${d[k]}`).join("&"); }
+// Leaves out `unarmed`, which paintArmed adds to the armed button: with it the second click's key
+// differed from the first's, so it armed again instead of acting.
+function confirmKey(d) { return Object.keys(d).filter((k) => k !== "confirm" && k !== "unarmed").sort().map((k) => `${k}=${d[k]}`).join("&"); }
 // Also disarms: a button in the modal isn't redrawn by render(), so it would stay armed.
 function paintArmed() {
   for (const b of document.querySelectorAll("[data-confirm]")) {
