@@ -192,7 +192,7 @@ function tabCommand(dir, command) {
     `$i.WorkingDirectory = ${psQuote(dir)}`,
     "$i.UseShellExecute = $false",
     // Not the variables of a session the terminal itself may have been started from.
-    ...[...SESSION_VARS].map((k) => `$i.EnvironmentVariables.Remove('${k}')`),
+    `foreach ($k in @($i.EnvironmentVariables.Keys)) { if ($k -match ${psQuote(SESSION_VARS.source)}) { $i.EnvironmentVariables.Remove($k) } }`,
     // A board started with HQ_ROOT (tests, a second root) passes it on to the new session.
     ...(process.env.HQ_ROOT ? [`$i.EnvironmentVariables['HQ_ROOT'] = ${psQuote(process.env.HQ_ROOT)}`] : []),
     "$p = [System.Diagnostics.Process]::Start($i)",
@@ -219,7 +219,7 @@ const tabTitle = (t) => String(t).replace(/[\u0000-\u001f\u007f;]/g, " ").trim()
  * leaves the board in front (Orca opens the tab without switching; Windows Terminal always comes
  * forward, so the board is brought back after it). */
 async function openInTerminal(place, dir, command, title, focus, win) {
-  if (place === "iterm2") return { error: L("iTerm2 is a Mac app — pick Terminal or Orca", "iTerm2 是 Mac 上的应用——选 Terminal 或 Orca") };
+  if (place === "iterm2") return { error: L("iTerm2 is a Mac app — pick Windows Terminal or Orca", "iTerm2 是 Mac 上的应用——选 Windows Terminal 或 Orca") };
   if (place !== "terminal" && place !== "orca") return { error: L(`unknown place to open: ${place}`, `不知道要在哪里打开：${place}`) };
   if (place === "orca" && !fs.existsSync(ORCA_CLI)) return { error: L("Orca is not installed", "没有安装 Orca") };
   const { line, file } = tabCommand(dir, command);

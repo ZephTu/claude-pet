@@ -77,7 +77,7 @@ hq/install.sh --root ~/claude-hq
 - 任务侧栏、session 列表、Peek。
 - 在看板上回应确认：允许 / 拒绝、多选题点 **Answer…**、批准计划或写修改意见。
 - 在三个地方开新 session、续上旧的：
-  - **Terminal** 开一个新的 Windows Terminal 标签页；
+  - **Windows Terminal** 开一个新标签页；
   - **Orca** 开一个新的 Orca 标签页；
   - **后台** 运行 `claude --bg`。
 - 给 session 打字：发消息、**Esc** 中断、**■** 停止。
