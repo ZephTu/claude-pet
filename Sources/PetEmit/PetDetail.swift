@@ -33,7 +33,9 @@ enum PetDetail {
         let path = s.transcript.isEmpty
             ? TranscriptStats.defaultTranscript(cwd: s.cwd, sessionId: s.sessionId, home: NSHomeDirectory())
             : s.transcript
-        let transcript = (try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped))
+        // Opened as PetRows opens it, so Claude Code can go on appending meanwhile.
+        let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int
+        let transcript = size.flatMap { PetRows.read(path, from: 0, count: $0) }
             .map { TranscriptStats.advance(TranscriptStats.Progress(), through: $0) }
 
         var context: ContextBudget.Reading?

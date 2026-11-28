@@ -152,6 +152,14 @@ Check 'typing into it brings it back' @(RowOf $after m1).Count 1
 & $Emit --unmute-all
 Check '--unmute-all exits 0' $LASTEXITCODE 0
 Check '...and brings it back' @(RowOf (WatchOnce) m1).Count 1
+# Turns and context from the transcript (PetRows), as the Mac's rows show them.
+$tp = Join-Path $home_ 'm1.jsonl'
+[IO.File]::WriteAllText($tp, ('{"type":"user","origin":{"kind":"human"},"promptId":"p1","message":{"role":"user","content":"hi"}}' + "`n" +
+  '{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":2000,"cache_read_input_tokens":3000,"output_tokens":5}}}' + "`n"))
+Emit ('{"session_id":"m1","hook_event_name":"Stop","transcript_path":"' + $tp.Replace('\', '\\') + '","cwd":"C:\\work\\demo"}') | Out-Null
+$m1 = (RowOf (WatchOnce) m1)[0]
+Check 'a row counts the transcript''s turns' $m1.turns 1
+Check '...and its context in tokens' $m1.contextTokens 6000
 # PET_HOME does not move ~\.claude: an old claude-hud's own cache there would be read too.
 $hudCache = Join-Path $env:USERPROFILE '.claude\plugins\claude-hud\.usage-cache.json'
 if (Test-Path $hudCache) {

@@ -79,6 +79,10 @@ task cards are kept.
   - Read finish notices and the **Finished** group.
   - Snooze and mute sessions.
   - Rest the pointer on a row for its detail card.
+- Each row shows what it does on the Mac: the HQ task it is bound to, how many turns it has had,
+  its context (`210k·70%`), and "N in background" when commands it started are still running
+  after its turn. A row is named by Claude Code's own name for the session (`/rename`), else its
+  folder.
 - Hover the cat to see your quota. This needs a statusline that saves it, for example
   claude-hud with `display.externalUsageWritePath` set to
   `%USERPROFILE%\.claude\pet\hud-usage.json`.

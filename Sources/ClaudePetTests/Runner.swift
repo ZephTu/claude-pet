@@ -2756,6 +2756,7 @@ struct Runner {
         ContextTests.run(t)
         SkinTests.run(t)
         IdleTabTests.run(t)
+        WindowsCommandLineTests.run(t)
         SessionControlTests.run(t)
         OrcaPlaceTests.run(t)
         LanguageTests.run(t)
