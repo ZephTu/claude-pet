@@ -72,8 +72,13 @@ task cards are kept.
 
 - The cat sits in the corner of the screen, always on top. Clicks beside it go through to the
   window underneath, and you can drag the cat to another screen.
-- The tray icon has: show / hide, back to the corner, Task Board…, clicking a session opens
-  (its terminal or its task), language, launch at login, the log, and quit.
+- The tray icon's menu is laid out as the Mac's: Task Board…; **Take a Nap** / **Wake Up**
+  (the cat sleeps with an empty list, no notices and no badge; what finished meanwhile is not
+  announced when it wakes); **Keep List Open**; Unmute All while something is muted; show / hide
+  and back to the corner. Under **Settings**: launch at login, clicking a session opens (its
+  terminal or its task), **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once**
+  (1–3) for finish notices, **Character** (Cat or Cultivator), language, and the log. The
+  settings are kept across restarts; a nap is not, as on the Mac.
 - From the session list:
   - **Allow** or **Deny** a permission prompt.
   - Read finish notices and the **Finished** group.

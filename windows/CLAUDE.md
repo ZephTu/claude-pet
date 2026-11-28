@@ -18,9 +18,19 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   feeds it each `--watch` line (`setMood`, `setCatLook`, `setPhase`, `setBadge`, `setSessions`).
   `preload.js` does what `PetHostView` does on the Mac: click-through outside the cat and the
   panel (`setIgnoreMouseEvents(true, {forward:true})`), drag to move, click to `togglePanel` /
-  `hitRow`, rest on a row for its detail card. Tray menu: show/hide, back to the corner,
-  language, launch at login (installed app only; a `ClaudePet` value under HKCU `...\Run`), log,
-  quit.
+  `hitRow`, rest on a row for its detail card. Tray menu (laid out as PetMenu):
+  Task Board, nap, Keep List Open, Unmute All, show/hide, back to the corner, and Settings: launch
+  at login (installed app only; a `ClaudePet` value under HKCU `...\Run`), click target, bubble
+  duration / count, character, language, log; quit.
+- The Mac's menu settings are prefs.json keys: `keepListOpen` (main.js sends `pinned` to
+  preload.js, which then puts the list up instead of toggling it; `closePanel` is WebBridge's, a
+  no-op while pinned), `noticeHoldSeconds` (overrides `--watch`'s `holdMs`), `noticeCount`
+  (`window.setMaxNotices` on every page load), `skin` (`index.html?skin=<id>`, a reload, as
+  PetPanel.setSkin; a skin missing one of the nine stills is greyed out; the tray icon follows
+  it). The nap (`paused`, in memory only, as on the Mac): `--watch` keeps running and `last`
+  stays current, but `draw` shows the fixed `NAP` state, the board's dots are empty (as the Mac's
+  petDots), and notices are skipped, so waking does not replay them; no quota on dwell. A skin
+  switch reloads the page: `loadPetPage` puts click-through back and drops a pending hover card.
 - Finish notices: `--watch` puts `notices` (Chatter.doneNotices over the settled state, with the
   last reply's first line from `events/`) on the one line where a session finished; main.js calls
   `window.notify`; a click on one jumps to its terminal or opens the list. The rows themselves
@@ -191,7 +201,8 @@ npx electron .
 
 - `npx electron .` (and a `PET_SHOT` render) exits at once, silently, while the installed pet
   runs: both share `%APPDATA%\ClaudePet` and so the single-instance lock. Quit it from the tray
-  first.
+  first, or add `--user-data-dir=<scratch dir>` (its own lock and prefs.json: stage settings such
+  as `skin` or `keepListOpen` by writing that prefs.json first).
 
 - `PET_HOME=<dir>` points both pet-emit and the shell at a scratch folder instead of
   `~\.claude\pet` (write fake `sessions\*.json` there to stage a state).

@@ -65,6 +65,45 @@ function language() {
   return app.getLocale().toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
+// ------------------------------------------------------------------ settings from the Mac's menu
+// Chatter.noticeHoldChoices / noticeCountChoices: a stored value not on offer (a hand-edited
+// prefs.json) falls back to the default, as Chatter.noticeHold(stored:) does.
+const NOTICE_HOLDS = [10, 30, 60];
+const NOTICE_COUNTS = [1, 2, 3];
+
+function noticeHold() {
+  const v = readPrefs().noticeHoldSeconds;
+  return NOTICE_HOLDS.includes(v) ? v : 30;
+}
+
+function noticeCount() {
+  const v = readPrefs().noticeCount;
+  return NOTICE_COUNTS.includes(v) ? v : 3;
+}
+
+// PetSkins: every skin draws the same nine poses from skins/<id>/assets; one missing a picture
+// is listed greyed out ("no artwork yet") and never shown.
+const SKINS = [{ id: "cat", en: "Cat", zh: "小猫" }, { id: "cultivator", en: "Cultivator", zh: "修仙者" }];
+const POSES = ["idle", "working", "waiting", "sleeping", "urgent", "reading", "compacting", "finished", "awaiting-agent"];
+
+function skinComplete(id) {
+  return /^[a-z0-9-]+$/.test(id) && POSES.every((p) => fs.existsSync(path.join(PET_ROOT, "skins", id, "assets", p + ".png")));
+}
+
+/** PetSkins.resolve: the stored choice while it can still be drawn, the cat otherwise. Worked
+ * out once (the tray icon asks on every --watch line), again when the user picks one. */
+let resolvedSkin = null;
+function skin() {
+  if (resolvedSkin) return resolvedSkin;
+  const v = readPrefs().skin;
+  resolvedSkin = SKINS.some((s) => s.id === v) && skinComplete(v) ? v : "cat";
+  return resolvedSkin;
+}
+
+function keepListOpen() {
+  return readPrefs().keepListOpen === true;
+}
+
 /** Bottom-right of the primary display's work area, unless the user dragged it somewhere. */
 function startPosition() {
   const p = readPrefs();
@@ -122,18 +161,23 @@ function createWindow() {
   // Clicks fall through to whatever is behind, except where preload.js says there is a cat or
   // a panel under the pointer; `forward` keeps mouse moves coming so it can tell.
   win.setIgnoreMouseEvents(true, { forward: true });
-  win.loadURL("pet://app/index.html");
+  loadPetPage();
   win.webContents.on("did-finish-load", () => {
     ready = true;
     lastDrawn = "";
+    // The page loaded at its defaults (WebBridge's onReady): three notices, the list shut.
+    run(`window.setMaxNotices(${noticeCount()});`);
+    win.webContents.send("pinned", keepListOpen());
+    if (keepListOpen()) openPinnedList();
     // WKWebView draws a thin overlay scrollbar; Chromium on Windows a wide grey one that eats
     // into the list. Made thin here, leaving the Mac's page as it is.
     win.webContents.insertCSS(
       "::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }"
       + " ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.45); border-radius: 3px; }"
       + " ::-webkit-scrollbar-button { display: none; }").catch(() => {});
-    win.showInactive();
-    if (last) push(last, true);
+    // Only the first load: a skin switch reloads the page and must not bring back a hidden pet.
+    if (!shownOnce) { shownOnce = true; win.showInactive(); }
+    if (last || paused) draw(true);
     // PET_SHOT=out.png [PET_SHOT_JS=script]: render the window to a PNG after a few seconds and
     // quit — how CI and a Mac without screen-capture permission check what the window draws.
     // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board);
@@ -160,6 +204,83 @@ function createWindow() {
   win.on("closed", () => { win = null; ready = false; });
 }
 
+let shownOnce = false;
+
+/** PetPanel.loadPetPage: the page picks its pictures from `?skin=`. */
+function loadPetPage() {
+  if (!win) return;
+  ready = false;
+  // The new page's preload.js starts out thinking clicks fall through, and a hover card asked
+  // for on the old page must not land on the new one.
+  win.setIgnoreMouseEvents(true, { forward: true });
+  detailWanted = "";
+  cardUp = false;
+  // A second pick before the first page is in aborts that load (ERR_ABORTED).
+  win.loadURL("pet://app/index.html?skin=" + skin()).catch((e) => { if (!/ERR_ABORTED/.test(e.message)) log("load failed:", e.message); });
+}
+
+/** PetPanel.setSkin: reloaded rather than told, as on the Mac — did-finish-load puts back the
+ * state, the open list and the notice limit, so nothing of the old skin is left behind. */
+function setSkin(id) {
+  if (id === skin() || !SKINS.some((s) => s.id === id) || !skinComplete(id)) return;
+  writePrefs({ ...readPrefs(), skin: id });
+  resolvedSkin = id;
+  loadPetPage();
+  updateTray(last);
+  buildTray();
+}
+
+/** Keep List Open (the Mac's toggleKeepListOpen): the list goes up or down with it, and while it
+ * is on nothing but turning it off closes the list (preload.js keeps a click on the cat from it). */
+function setKeepListOpen(on) {
+  writePrefs({ ...readPrefs(), keepListOpen: on });
+  if (win) win.webContents.send("pinned", on);
+  if (on) openPinnedList(); else run("window.setPanelOpen(false);");
+  buildTray();
+}
+
+function openPinnedList() {
+  run("window.setPanelOpen(true);");
+  // As a click that opens the list: the footer's "N aged out" has been seen.
+  panelOpened();
+}
+
+/** WebBridge.closePanel: "done with the list now" (after a jump, say); a no-op while pinned. */
+function closePanel() {
+  if (!keepListOpen()) run("window.setPanelOpen(false);");
+}
+
+function setNoticeHold(seconds) {
+  writePrefs({ ...readPrefs(), noticeHoldSeconds: seconds });
+  buildTray();
+}
+
+function setNoticeCount(n) {
+  writePrefs({ ...readPrefs(), noticeCount: n });
+  run(`window.setMaxNotices(${n});`);
+  buildTray();
+}
+
+// Take a Nap / Wake Up (the Mac's paused, not kept across a restart either): the cat sleeps
+// with nothing listed, says nothing and counts nothing. --watch keeps running and `last` stays
+// current (the board's quota and unread counts); the pet draws the fixed state below, and the
+// board's dots go empty, as the Mac's come from what the nap pushed. Notices come
+// only on the line where a session finished, and those lines are not shown while napping, so
+// waking up does not replay what happened meanwhile.
+let paused = false;
+const NAP = {
+  mood: "idle", phase: "", pose: "sleeping", mark: "none", waitingProject: null, waitingOn: "",
+  waitingSessionId: "", waitingAskId: "", badge: "", sessions: [], finished: [], hidden: 0,
+};
+
+function togglePause() {
+  paused = !paused;
+  ipcHush();
+  draw(true);
+  updateTray(last);
+  buildTray();
+}
+
 function js(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
@@ -170,10 +291,33 @@ function run(script) {
 }
 
 /** One line from pet-emit --watch, drawn. */
-function push(s, force) {
-  const prev = force ? null : last;
-  if (!force) overlay(s);
+function push(s) {
+  overlay(s);
   last = s;
+  pendingDropped += Number(s.dropped) || 0;
+  // Pinned open, the list is always being looked at: the note gets its ten seconds from now.
+  if (Number(s.dropped) && keepListOpen()) panelOpened();
+  draw(false);
+  syncTray(s);
+  // Sessions that just finished, each in a notice of its own (the page skips them while the
+  // list is open), up for the hold picked in the tray. Only on the line they came on: a redraw
+  // does not repeat them. None while napping (the Mac's announceFinishes).
+  if (!paused) {
+    for (const n of s.notices || []) {
+      run(`window.notify(${js(n.text)}, ${noticeHold() * 1000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${opensSomewhere(n.sessionId)});`);
+    }
+  }
+  updateTray(s);
+}
+
+/** What the pet shows: the last --watch line, or the nap. `force` redraws everything (a page
+ * that just loaded, a nap begun or ended). */
+let drawnState = null;
+function draw(force) {
+  const s = paused ? NAP : last;
+  if (!s) return;
+  const prev = force ? null : drawnState;
+  drawnState = s;
   if (!prev || prev.mood !== s.mood || prev.waitingProject !== s.waitingProject || prev.waitingOn !== s.waitingOn
       || prev.waitingAskId !== s.waitingAskId) {
     const ask = { sessionId: s.waitingSessionId || "", askId: s.waitingAskId || "" };
@@ -182,33 +326,27 @@ function push(s, force) {
   if (!prev || prev.pose !== s.pose || prev.mark !== s.mark) run(`window.setCatLook(${js(s.pose)}, ${js(s.mark)});`);
   if (!prev || prev.phase !== s.phase) run(`window.setPhase(${js(s.phase)});`);
   if (!prev || prev.badge !== s.badge) run(`window.setBadge(${js(s.badge)});`);
-  pendingDropped += Number(s.dropped) || 0;
   drawSessions(s);
-  syncTray(s);
-  // Sessions that just finished, each in a notice of its own (the page skips them while the
-  // list is open). Only on the line they came on: a redraw (force) does not repeat them.
-  if (!force) {
-    for (const n of s.notices || []) {
-      run(`window.notify(${js(n.text)}, ${Number(n.holdMs) || 30000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${opensSomewhere(n.sessionId)});`);
-    }
-  }
-  updateTray(s);
 }
 
 // Unread finishes that aged out unseen. --watch says so on one line, usually when it starts,
 // before the list is ever opened: kept for the footer until the list has been open a while.
 let pendingDropped = 0;
-ipcMain.on("panel-opened", () => {
+function panelOpened() {
   if (pendingDropped) setTimeout(() => { pendingDropped = 0; }, 10000);
-});
+}
+ipcMain.on("panel-opened", panelOpened);
 
 /** The rows, the muted count (the footer's "N muted") and the Finished group. No HQ asks or
  * jobs yet. */
 let lastDrawn = "";
 function drawSessions(s) {
+  // Napping: an empty list, whatever changed underneath (a mute, a read).
+  if (paused) s = NAP;
+  if (!s) return;
   // Clicks that go to the board (see clickTarget) make a row clickable even with no terminal.
   const boardRows = (rows) => (rows || []).map((r) => (routeOf(r.sessionId, r.termKind).task ? { ...r, opensBoard: true } : r));
-  const script = `window.setSessions(${js(boardRows(s.sessions))}, ${Number(s.hidden) || 0}, ${js(boardRows(s.finished))}, ${pendingDropped}, [], []);`;
+  const script = `window.setSessions(${js(boardRows(s.sessions))}, ${Number(s.hidden) || 0}, ${js(boardRows(s.finished))}, ${paused ? 0 : pendingDropped}, [], []);`;
   // As WebBridge: the same payload is not drawn twice (did-finish-load clears it).
   if (script === lastDrawn || !win || !ready) return;
   lastDrawn = script;
@@ -452,12 +590,12 @@ hqBoard.configure({
   petEnv: emitEnv,
   // BoardWindow's "pet" read: unread finishes per session (the list's Finished group), and each
   // row's state and held prompt as WebBridge.dotState (the page offers Allow / Deny, a question's
-  // picks or a plan's feedback from these).
+  // picks or a plan's feedback from these). None while napping.
   petState: () => {
     const unread = {};
     for (const r of (last && last.finished) || []) if (r.sessionId) unread[r.sessionId] = (unread[r.sessionId] || 0) + (r.count || 1);
     const dots = {};
-    for (const r of (last && last.sessions) || []) {
+    for (const r of (!paused && last && last.sessions) || []) {
       if (!r.sessionId) continue;
       dots[r.sessionId] = Object.fromEntries(Object.entries(r).filter(([k]) => DOT_KEYS.has(k)));
     }
@@ -547,12 +685,12 @@ function act(a) {
   }
   if (a.action === "jump") {
     // As the Mac: the list has served its purpose once we are jumping away.
-    if (openSession(a.sessionId, a.kind)) run("window.setPanelOpen(false);");
+    if (openSession(a.sessionId, a.kind)) closePanel();
     return;
   }
   if (a.action === "openBoard") {
     openBoard(a.task || "");
-    run("window.setPanelOpen(false);");
+    closePanel();
     return;
   }
   if (a.action === "openFinished") {
@@ -563,7 +701,7 @@ function act(a) {
     if (r.task || r.jump) {
       if (openSession(a.sessionId, a.kind)) {   // false: that jump is already under way
         markRead(ids);
-        run("window.setPanelOpen(false);");
+        closePanel();
       }
     } else {
       markRead(ids);
@@ -630,15 +768,18 @@ function markRead(what) {
 
 const ICONS = { idle: "idle", busy: "working", waiting: "waiting", urgent: "urgent" };
 
+/** The tray icon: the picked skin's picture for the mood; asleep while napping. */
 function trayImage(mood) {
-  const file = path.join(PET_ROOT, "skins", "cat", "assets", (ICONS[mood] || "sleeping") + ".png");
+  const file = path.join(PET_ROOT, "skins", skin(), "assets", (paused ? "sleeping" : ICONS[mood] || "sleeping") + ".png");
   const img = nativeImage.createFromPath(file);
   return img.isEmpty() ? img : img.resize({ width: 16, height: 16 });
 }
 
 function updateTray(s) {
   if (!tray) return;
-  tray.setImage(trayImage(s.mood));
+  tray.setImage(trayImage(s ? s.mood : "idle"));
+  if (paused) return tray.setToolTip(language() === "zh" ? "Claude Pet — 小睡中" : "Claude Pet — napping");
+  if (!s) return tray.setToolTip("Claude Pet");
   const n = (s.sessions || []).length;
   tray.setToolTip(`Claude Pet — ${s.mood}, ${n} session${n === 1 ? "" : "s"}`);
 }
@@ -671,29 +812,57 @@ function buildTray() {
   const zh = language() === "zh";
   const setLang = (lang) => { writePrefs({ ...readPrefs(), lang }); app.relaunch(); app.quit(); };
   const muted = trayMuted;
+  const hold = noticeHold();
+  const count = noticeCount();
+  const current = skin();
+  // Laid out as the Mac's PetMenu: what gets reached for during a day on the first level, what
+  // is set once under Settings.
   tray.setContextMenu(Menu.buildFromTemplate([
-    // As the Mac's menu: only while something is muted.
-    ...(muted ? [{ label: zh ? `取消所有静音 (${muted})` : `Unmute All (${muted})`, click: () => { pending.muted.clear(); marks(["--unmute-all"]); } },
-      { type: "separator" }] : []),
     { label: zh ? "任务看板…" : "Task Board…", click: () => openBoard() },
-    // Where a click on a row or a notice takes you (the Mac's ClickTarget).
-    { label: zh ? "点击 session 时打开" : "Clicking a Session Opens", submenu: [
-      { label: zh ? "它的终端" : "Its Terminal", type: "radio", checked: clickTarget() === "terminal", click: () => setClickTarget("terminal") },
-      { label: zh ? "任务看板上它的任务" : "Its Task on the Board", type: "radio", checked: clickTarget() === "board", click: () => setClickTarget("board") },
-    ] },
+    { type: "separator" },
+    { label: paused ? (zh ? "醒来" : "Wake Up") : (zh ? "小睡一会" : "Take a Nap"), click: togglePause },
+    { label: zh ? "保持列表展开" : "Keep List Open", type: "checkbox", checked: keepListOpen(),
+      click: (item) => setKeepListOpen(item.checked) },
+    // As the Mac's menu: only while something is muted.
+    ...(muted ? [{ label: zh ? `取消所有静音 (${muted})` : `Unmute All (${muted})`, click: () => { pending.muted.clear(); marks(["--unmute-all"]); } }] : []),
     { type: "separator" },
     { label: zh ? "显示 / 隐藏桌宠" : "Show / hide the pet", click: () => win && (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: zh ? "放回右下角" : "Move back to the corner", click: () => {
       writePrefs({ ...readPrefs(), x: undefined, y: undefined });
       const p = startPosition(); if (win) win.setPosition(p.x, p.y);
     } },
-    { label: "Language · 语言", submenu: [
-      { label: "English", type: "radio", checked: !zh, click: () => setLang("en") },
-      { label: "中文", type: "radio", checked: zh, click: () => setLang("zh") },
+    { type: "separator" },
+    { label: zh ? "设置" : "Settings", submenu: [
+      ...(app.isPackaged ? [{ label: zh ? "登录时启动" : "Launch at Login", type: "checkbox",
+        checked: launchesAtLogin(), click: (item) => setLaunchAtLogin(item.checked) }] : []),
+      // Where a click on a row or a notice takes you (the Mac's ClickTarget).
+      { label: zh ? "点击 session 时打开" : "Clicking a Session Opens", submenu: [
+        { label: zh ? "它的终端" : "Its Terminal", type: "radio", checked: clickTarget() === "terminal", click: () => setClickTarget("terminal") },
+        { label: zh ? "任务看板上它的任务" : "Its Task on the Board", type: "radio", checked: clickTarget() === "board", click: () => setClickTarget("board") },
+      ] },
+      { type: "separator" },
+      // The "this session finished" notices above the pet.
+      { label: zh ? "气泡停留时间" : "Bubble Duration", submenu: NOTICE_HOLDS.map((s) => (
+        { label: zh ? `${s} 秒` : `${s} seconds`, type: "radio", checked: s === hold, click: () => setNoticeHold(s) })) },
+      { label: zh ? "同时显示的气泡数" : "Bubbles at Once", submenu: NOTICE_COUNTS.map((n) => (
+        { label: String(n), type: "radio", checked: n === count, click: () => setNoticeCount(n) })) },
+      { type: "separator" },
+      // Who the pet is drawn as; a skin whose pictures are not all there is greyed out.
+      { label: zh ? "角色" : "Character", submenu: SKINS.map((s) => {
+        const ok = skinComplete(s.id);
+        const name = zh ? s.zh : s.en;
+        return { label: ok ? name : (zh ? `${name}（还没有图）` : `${name} (no artwork yet)`), type: "radio",
+          checked: s.id === current, enabled: ok, click: () => setSkin(s.id) };
+      }) },
+      { type: "separator" },
+      // Named in both languages, so it can be found whichever one is showing.
+      { label: "Language · 语言", submenu: [
+        { label: "English", type: "radio", checked: !zh, click: () => setLang("en") },
+        { label: "中文", type: "radio", checked: zh, click: () => setLang("zh") },
+      ] },
+      { type: "separator" },
+      { label: zh ? "打开日志" : "Open the log", click: () => shell.openPath(LOG) },
     ] },
-    ...(app.isPackaged ? [{ label: zh ? "登录时启动" : "Launch at Login", type: "checkbox",
-      checked: launchesAtLogin(), click: (item) => setLaunchAtLogin(item.checked) }] : []),
-    { label: zh ? "打开日志" : "Open the log", click: () => shell.openPath(LOG) },
     { type: "separator" },
     { label: zh ? "退出" : "Quit", click: () => app.quit() },
   ]));
@@ -733,16 +902,18 @@ ipcMain.on("detail", (_e, sessionId) => {
 });
 // Resting on the cat (preload.js, with the list closed): the quota meters from the last --watch
 // line, or a line about the sessions when there is no usable reading (the Mac's showQuota).
+// Not while napping, as on the Mac.
 ipcMain.on("quota", () => {
-  if (!last) return;
+  if (!last || paused) return;
   detailWanted = "";
   cardUp = true;
   run(`window.showQuota(${js(last.quota || [])}, ${js(last.quotaFallback || "")});`);
 });
-ipcMain.on("hush", () => {
+function ipcHush() {
   detailWanted = "";
   if (cardUp) { cardUp = false; run("window.hush();"); }
-});
+}
+ipcMain.on("hush", ipcHush);
 ipcMain.on("layout", () => {});
 ipcMain.on("menu", () => { if (tray) tray.popUpContextMenu(); });
 
