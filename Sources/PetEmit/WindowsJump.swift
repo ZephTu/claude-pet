@@ -45,13 +45,18 @@ enum WindowsJump {
     /// Runs `body` attached to `pid`'s console, and detaches again. Attaching hands a process
     /// started without its own standard handles the console's instead; the hook's stdout must
     /// stay the pipe Claude Code reads (a held prompt's answer goes there), so all three are
-    /// put back.
-    private static func withConsole<T>(of pid: Int32, _ body: () -> T) -> T? {
+    /// put back. While attached, the console's Ctrl+C and Ctrl+Break events (the user's, in that
+    /// tab) are ignored: they would end this process mid-way.
+    static func withConsole<T>(of pid: Int32, _ body: () -> T) -> T? {
         let saved = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].map { ($0, GetStdHandle($0)) }
         defer { for (which, handle) in saved { SetStdHandle(which, handle) } }
         FreeConsole()
         guard AttachConsole(DWORD(bitPattern: pid)) else { return nil }
-        defer { FreeConsole() }
+        SetConsoleCtrlHandler(nil, true)
+        defer {
+            SetConsoleCtrlHandler(nil, false)
+            FreeConsole()
+        }
         return body()
     }
 
@@ -149,31 +154,122 @@ enum WindowsJump {
         return String(decoding: buffer.prefix(length), as: UTF16.self)
     }
 
+    // MARK: Typing into a console
+
+    /// One key as the console takes it from the keyboard: a press and a release.
+    struct Key {
+        var char: UInt16
+        var virtualKey: UInt16 = 0
+        var scanCode: UInt16 = 0
+        var controlState: DWORD = 0
+
+        static let enter = Key(char: 13, virtualKey: UInt16(VK_RETURN), scanCode: 0x1C)
+        static let escape = Key(char: 27, virtualKey: UInt16(VK_ESCAPE), scanCode: 0x01)
+        /// Ctrl+C as a key, not a signal: Claude Code reads its console raw and takes it as the
+        /// user's Ctrl+C (once interrupts or clears, twice in a row quits).
+        static let ctrlC = Key(char: 3, virtualKey: 0x43, scanCode: 0x2E, controlState: DWORD(LEFT_CTRL_PRESSED))
+
+        var records: [INPUT_RECORD] {
+            [true, false].map { down in
+                var r = INPUT_RECORD()
+                r.EventType = WORD(KEY_EVENT)
+                r.Event.KeyEvent.bKeyDown = WindowsBool(down)
+                r.Event.KeyEvent.wRepeatCount = 1
+                r.Event.KeyEvent.wVirtualKeyCode = virtualKey
+                r.Event.KeyEvent.wVirtualScanCode = scanCode
+                r.Event.KeyEvent.uChar.UnicodeChar = char
+                r.Event.KeyEvent.dwControlKeyState = controlState
+                return r
+            }
+        }
+    }
+
+    /// Writes keys into the input of `pid`'s console, as if typed in its window - the way into a
+    /// Windows Terminal tab or a console window, neither of which takes input from outside.
+    /// Each group goes in after a pause of its `after` seconds (a Return that arrives with the
+    /// text is taken as part of a paste, not as the key that submits it). Returns how many groups
+    /// went in whole: 0 when the console can't be reached.
+    @discardableResult
+    static func type(into pid: Int32, _ groups: [(after: Double, keys: [Key])]) -> Int {
+        withConsole(of: pid) { () -> Int in
+            // Not the standard input handle: this process may have been given a pipe (the board
+            // sends its request on stdin), and attaching leaves such a handle as it was.
+            let input = "CONIN$".withCString(encodedAs: UTF16.self) {
+                CreateFileW($0, DWORD(0xC000_0000), DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE), nil,
+                            DWORD(OPEN_EXISTING), 0, nil)
+            }
+            guard let input, input != INVALID_HANDLE_VALUE else { return 0 }
+            defer { CloseHandle(input) }
+            for (done, group) in groups.enumerated() {
+                if group.after > 0 { Sleep(DWORD(group.after * 1000)) }
+                var records = group.keys.flatMap(\.records)
+                var offset = 0
+                while offset < records.count {
+                    let count = min(512, records.count - offset)
+                    var written: DWORD = 0
+                    let ok = records.withUnsafeMutableBufferPointer {
+                        WriteConsoleInputW(input, $0.baseAddress! + offset, DWORD(count), &written)
+                    }
+                    guard ok, written > 0 else { return done }
+                    offset += Int(written)
+                }
+            }
+            return groups.count
+        } ?? 0
+    }
+
+    /// The keys that type `text` (UTF-16 units, as the console carries them).
+    static func keys(typing text: String) -> [Key] { text.utf16.map { Key(char: $0) } }
+
     // MARK: Orca
 
     private static func jumpOrca(handle: String) -> Int32 {
         guard isSafeToken(handle) else { return fail("not an Orca terminal handle: \(handle)") }
-        guard let cli = orcaCLI() else { return fail("no orca CLI found") }
+        guard let r = orca(["terminal", "switch", "--terminal", handle, "--json"]) else { return fail("no orca CLI found, or it did not start") }
+        // Usually a stale handle: the tab was closed since the hook ran.
+        guard TerminalTarget.orcaSwitchSucceeded(r.out) else {
+            return fail("orca did not switch (exit \(r.status)): \(r.out.prefix(200)) \(r.err.prefix(300))")
+        }
+        // Switching the tab does not raise the window; that is a separate step.
+        if let window = topLevelWindow(ofExecutable: "orca.exe") { raise(window) }
+        return 0
+    }
+
+    /// Runs Orca's CLI to the end, or for `timeout` seconds: one still running then is ended and
+    /// answers `timedOut` (what it did is unknown). Nil when there is no CLI or it would not start.
+    static func orca(_ arguments: [String], timeout: Double = 10)
+        -> (status: Int32, out: String, err: String, timedOut: Bool)? {
+        guard let cli = orcaCLI() else { return nil }
         let process = Process()
         process.executableURL = cli
-        process.arguments = ["terminal", "switch", "--terminal", handle, "--json"]
+        process.arguments = arguments
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
-        do { try process.run() } catch { return fail("orca did not start: \(error)") }
+        do { try process.run() } catch { return nil }
+        let finished = DispatchSemaphore(value: 0)
+        let expired = Expiry()
+        DispatchQueue.global().async {
+            if finished.wait(timeout: .now() + timeout) == .timedOut, process.isRunning {
+                expired.set()
+                process.terminate()
+            }
+        }
+        defer { finished.signal() }
         // Both pipes drain at once: read one after the other, a full stderr would block the CLI
         // while we wait for its stdout to end.
         let complaints = Drain(err.fileHandleForReading)
         let reply = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         let complaint = String(decoding: complaints.wait(), as: UTF8.self)
         process.waitUntilExit()
-        // Usually a stale handle: the tab was closed since the hook ran.
-        guard TerminalTarget.orcaSwitchSucceeded(reply) else {
-            return fail("orca did not switch (exit \(process.terminationStatus)): \(reply.prefix(200)) \(complaint.prefix(300))")
-        }
-        // Switching the tab does not raise the window; that is a separate step.
-        if let window = topLevelWindow(ofExecutable: "orca.exe") { raise(window) }
-        return 0
+        return (process.terminationStatus, reply, complaint, expired.value)
+    }
+
+    private final class Expiry: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag = false
+        func set() { lock.lock(); flag = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
     }
 
     /// The CLI Orca's installer puts in its resources, as on the Mac (per user, or for all

@@ -104,6 +104,13 @@ enum PetBoard {
             guard !text.isEmpty else { return (nil, L("say what to change first", "先写下要改什么")) }
             return answer(session: str("session"), kind: "plan",
                           PermissionDecision.Answer(askId: str("ask"), behavior: .deny, message: BoardPrompt.planFeedback(text)))
+        case "send", "interrupt", "plan-approve", "stop-session":
+            // Typing into the session's terminal (PetControl).
+            #if os(Windows)
+            return PetControl.handle(body)
+            #else
+            return (nil, L("not supported here", "这里不支持"))
+            #endif
         default:
             return (nil, L("unknown operation", "未知操作"))
         }

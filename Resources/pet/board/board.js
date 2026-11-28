@@ -42,7 +42,9 @@ const verdictLabel = (v) => (v === "suggested" ? T("As suggested", "按建议") 
 const projects = () => (ui.board && Array.isArray(ui.board.projects) ? ui.board.projects : []);
 const projectNames = () => projects().map((p) => p.name);
 // Terminals the board can type into; anything else gets Jump only.
-const SENDABLE = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
+// wt / console: Windows Terminal and a console window (the Windows shell types into the session's
+// console); the Mac never records those kinds.
+const SENDABLE = { orca: "Orca", iterm2: "iTerm2", terminal: "Terminal", wt: "Windows Terminal", console: "Console" };
 const TERMINAL_NAME = { vscode: "VS Code", ghostty: "Ghostty", orca: "Orca", iterm2: "iTerm2", terminal: "Terminal" };
 // Can the board deliver a message to this session? A terminal it can type into, or a background
 // session between turns — that one is continued with the message (BoardBridge.sendBackground).
@@ -68,8 +70,9 @@ const ON_PROMPT = () => T("It is waiting on a prompt in its terminal — answer 
 // Can the board type into this session right now?
 const canSendNow = (s) => canMessage(s) && !onPrompt(s);
 // Esc for a session mid-turn: pressed in its terminal, it interrupts the turn as it would there.
-// Only terminals that can take a lone key (Orca, iTerm2); Terminal.app always adds a Return.
-const INTERRUPTIBLE = { orca: true, iterm2: true };
+// Only terminals that can take a lone key (Orca, iTerm2, and on Windows a console); Terminal.app
+// always adds a Return.
+const INTERRUPTIBLE = { orca: true, iterm2: true, wt: true, console: true };
 // No Stop hook follows an Esc: the pet's record stays busy and only turns quiet (about 10 s later,
 // Claude Code's own status says idle), so the button stays away that long and for good once quiet:
 // a second Esc on a stopped session opens Claude Code's rewind menu.

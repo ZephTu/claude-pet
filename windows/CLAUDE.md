@@ -89,8 +89,7 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   (`pet-emit --jump`). What the Mac keeps in its defaults (BoardPrefs, BoardSeen, BoardPhrases)
   and the reading area are `pet-emit --board` (`PetBoard.swift`, `pet\board.json`, over
   QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `jobs` is
-  empty; sending to / interrupting / stopping a terminal session, approving a plan (both type
-  into the terminal), the secretary, jobs and phone access answer "not on Windows yet". No push
+  empty; the secretary, jobs and phone access answer "not on Windows yet". No push
   (BoardEvents): the page polls.
   Renders: `PET_SHOT_BOARD=1` shoots the board window (`=T-123`: opened at that task);
   `PET_HQ_HOME=<dir>` points board.js (and the hq it runs, as USERPROFILE) at a scratch home
@@ -120,6 +119,23 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   the last 1.5 s); tray → "Clicking a Session Opens" (prefs.json `clickTarget`, the board's
   setting writes the same) sends a click on a row or notice bound to a task (hq's
   `state\sessions.json`) to the board at that task, as ClickTarget.route.
+- Typing into a session from the board (`send`, `interrupt`, `plan-approve`, `stop-session`):
+  `pet-emit --board` ops in `PetControl.swift`, BoardBridge's checks over the same core
+  (BoardSend, SessionControl, ClaudeSessionStatus; the recorded pid must still be Claude Code,
+  older than the last hook, and on that session per `~\.claude\sessions\<pid>.json`). Orca: its
+  CLI, as on the Mac. `wt` / `console`: `WindowsJump.type` attaches to the session's console and
+  writes key events into `CONIN$` (not the std handle: pet-emit's stdin is the board's pipe) -
+  the text as a bracketed paste (`ESC[200~ … ESC[201~` typed as characters: Claude Code takes it
+  as text, no `@` / `/` menu; a long one shows as a paste, as on the Mac), then Enter on its own
+  after BoardSend.returnDelay; text in but no Enter is `unsure`. While attached, pet-emit ignores
+  the console's Ctrl+C events. Orca's CLI is given 10 s (then `unsure`). Stop is Ctrl+C as a key,
+  twice, up to two rounds (no SIGTERM here). The page's
+  SENDABLE / INTERRUPTIBLE list `wt` and `console` (the Mac never records them). board.js keeps
+  approvedPlans and continues background sessions (`sendBackground`: `claude stop`, then
+  `claude --bg --resume <id> <text>`). Checked with real Claude Code in Windows Terminal and Orca
+  (message, plan approval, Esc, stop) and with a raw-mode stand-in in conhost.
+  `CLAUDE_ENV` also drops `CLAUDE_CODE_CHILD_SESSION` (inherited, it turns the new session's
+  transcript off), the other per-session `CLAUDE_CODE_*` markers, `ORCA_*` and `TERM_PROGRAM`.
 
 ## Dev loop on Windows
 
@@ -211,6 +227,11 @@ npx electron .
   path", in a dialog on the user's screen): use `PET_HQ_HOME` for a scratch hq instead.
 - A Windows checkout (`core.autocrlf`) gave the `.sh` scripts CRLF, which bash can't run:
   `.gitattributes` keeps them LF.
+- A test claude started from this shell (Claude Code's own, inside Orca) inherits
+  `CLAUDE_CODE_CHILD_SESSION` (no transcript, no `~\.claude\sessions` file) and `TERM_PROGRAM=Orca`:
+  strip them first. To see what a session's tab shows, read its console screen
+  (AttachConsole + ReadConsoleOutputCharacterW on `CONOUT$`); a node copy named `claude.exe`
+  passes ProcessProbe.isClaude as a stand-in.
 - To see a PermissionRequest, the test session must be in the default permission mode
   (`claude --permission-mode default`): in `auto` mode the classifier approves the command and
   no prompt (so no hook) happens. Writes to `/tmp` are allowed without asking too.
@@ -239,10 +260,9 @@ with a real claude-hud reading; the taskbar on another edge.
 
 The HQ board on Windows, in steps (the user's order): 1. hq itself (done: CLI, hooks, /task);
 2. the board window (done: see above); 3. prompts on the board, starting / resuming sessions,
-the cat opening the board (done: see above); 4. sending text to and interrupting a session, and
-approving a plan (Enter): Orca's `terminal send`; for wt / conhost, `WriteConsoleInputW` after
-`AttachConsole(pid)` as WindowsJump.withConsole does. After the board: the
-user wants `/hq-onboard` run on this machine (46 sessions) and reviewed on the board. Later or never: scheduled jobs (`--run-job`, Task Scheduler),
+the cat opening the board (done: see above); 4. sending text to, interrupting and stopping a
+session, approving a plan (done: see above). Now: the user wants `/hq-onboard` run on this
+machine (46 sessions) and reviewed on the board. Later or never: scheduled jobs (`--run-job`, Task Scheduler),
 the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).
 

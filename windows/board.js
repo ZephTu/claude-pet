@@ -5,9 +5,9 @@
 // the hq CLI, with the arguments BoardWindow.perform gives it; what the Mac app keeps beside hq
 // (shared prefs, read cards, quick phrases) and the reading area are `pet-emit --board`
 // (PetBoard.swift, over the same ClaudePetCore code), and so are the answers to prompts a
-// pet-emit holds open. Sessions start and resume in a Windows Terminal or Orca tab. What needs
-// typing into a session's terminal, launchd or the secretary answers "not on Windows yet" for now
-// (see windows/CLAUDE.md, Next).
+// pet-emit holds open, and typing into a session's terminal (a message, Esc, the Enter that
+// approves a plan, Ctrl+C to stop it). Sessions start and resume in a Windows Terminal or Orca
+// tab. Scheduled jobs and the secretary answer "not on Windows yet" for now (windows/CLAUDE.md).
 "use strict";
 
 const { clipboard, dialog, shell } = require("electron");
@@ -26,10 +26,16 @@ const HQ_ENV = Object.fromEntries(Object.entries(process.env)
   .filter(([k]) => k !== "CLAUDECODE" && k !== "CLAUDE_PID" && !k.startsWith("CLAUDE_CODE_")));
 if (process.env.PET_HQ_HOME) HQ_ENV.USERPROFILE = HOME;
 // What claude and the terminals it starts in get: without the variables that say "inside the
-// session that started the pet" (a new session would think it is nested in it), but with the
-// user's own CLAUDE_CODE_* settings (a provider, a model), which HQ_ENV drops.
-const SESSION_VARS = new Set(["CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT"]);
-const CLAUDE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !SESSION_VARS.has(k.toUpperCase())));
+// session (or the Orca tab) that started the pet" - a new session would think it is nested in it
+// (CLAUDE_CODE_CHILD_SESSION turns its transcript off), or be recorded as that Orca tab - but with
+// the user's own CLAUDE_CODE_* settings (a provider, a model), which HQ_ENV drops. Settings a
+// session hands its children but a user may also set (an effort, plugin folders) go only when the
+// pet was in fact started from a session.
+const SESSION_VARS = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_(ENTRYPOINT|SSE_PORT|CHILD_SESSION|EXECPATH|SESSION_.*|MESSAGING_.*)|ORCA_.*|TERM_PROGRAM(_VERSION)?)$/i;
+const INHERITED_VARS = /^(CLAUDE_EFFORT|CLAUDE_CODE_(PLUGIN_DIRS|FORCE_TERMINAL_IMAGES))$/i;
+const FROM_SESSION = Boolean(process.env.CLAUDECODE || process.env.ORCA_TERMINAL_HANDLE);
+const CLAUDE_ENV = Object.fromEntries(Object.entries(process.env)
+  .filter(([k]) => !SESSION_VARS.test(k) && !(FROM_SESSION && INHERITED_VARS.test(k))));
 const READ_TIMEOUT = 15000;
 const RUN_TIMEOUT = 120000;
 // `hq inbox sort` gives its model 120 s: more here, or the board kills python and orphans claude.
@@ -58,6 +64,8 @@ let onSeen = () => {};
 let onClickTarget = () => {};
 // Sessions a Resume is under way for: a double click must not open the session twice.
 const resuming = new Set();
+// Plans Enter was pressed for (BoardWindow.approvedPlans).
+const approvedPlans = new Set();
 let lastAgents = null;
 const kept = new Map();
 
@@ -122,6 +130,7 @@ function shared(key, ttl, fetch) {
 
 async function board(body) {
   const r = await exec(petEmit, ["--board"], { timeout: READ_TIMEOUT, input: JSON.stringify(body), env: petEnv() });
+  if (r.timedOut) return { error: L("no answer in time — look in its terminal", "没有及时回应 — 去它的终端看看"), timedOut: true };
   try { return JSON.parse(r.out); } catch (_) { return { error: (r.err || "pet-emit --board failed").trim() }; }
 }
 
@@ -338,6 +347,74 @@ async function agents() {
   return { result: a.error ? (lastAgents || "[]") : a.result };
 }
 
+/** BoardWindow.sendBackground: a background session has no terminal to type into. One between
+ * turns takes the message the way `claude --bg --resume` allows: stopped (its conversation is
+ * kept) and continued in the background under the same id, with the message as its prompt. */
+async function sendBackground(body) {
+  const sid = str(body, "session"), bgId = str(body, "bg");
+  const text = str(body, "text").trim();
+  if (!text) return { error: L("empty message", "消息是空的") };
+  if (text.toLowerCase() === "/model") {
+    return { error: L("give it a model: /model opus, /model sonnet, … — alone it opens a menu in the terminal",
+      "要带上模型名：/model opus、/model sonnet……——不带参数会在终端里打开一个菜单") };
+  }
+  if (!UUID.test(sid) || !/^[0-9a-f]{8}$/.test(bgId)) return { error: L("not a session id", "不是有效的 session id") };
+  if (body.queue === true) return { error: L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试") };
+  const claude = await findClaude();
+  if (!claude) return noClaude();
+  kept.delete("agents");
+  // SessionControl.listing: null = unknown, false = not running, else its status (maybe "": a
+  // row with none is running all the same). Resuming a session that still runs starts a second
+  // copy of it, so "can't tell" is never read as "not running".
+  const listing = async () => {
+    const r = await exec(claude, ["agents", "--json"], { env: CLAUDE_ENV, timeout: READ_TIMEOUT });
+    let rows;
+    try { rows = JSON.parse(r.out); } catch (_) { return null; }
+    if (r.status !== 0 || !Array.isArray(rows)) return null;
+    const row = rows.find((x) => x && x.sessionId === sid);
+    return row ? String(row.status || row.state || "").toLowerCase() : false;
+  };
+  const st = await listing();
+  if (st === null) {
+    return { error: L("couldn't check whether it is running (claude agents failed) — try again", "没法确认它是否在运行（claude agents 失败）— 请再试一次") };
+  }
+  if (st !== false) {
+    if (st !== "idle") {
+      return { error: st === "waiting" ? L("it is waiting on a prompt in its turn — Attach to answer it", "它在等一个确认或回答，这一轮还没结束 — 用 Attach 去回答")
+        : L("it is busy — try again when its turn ends", "它正忙 — 等这一轮结束再试") };
+    }
+    await exec(claude, ["stop", bgId], { env: CLAUDE_ENV, timeout: 30000 });
+    let stopped = false;
+    for (let i = 0; i < 25 && !stopped; i++) {
+      if (await listing() === false) stopped = true;
+      else await new Promise((res) => setTimeout(res, 200));
+    }
+    if (!stopped) return { error: L("it did not stop to take the message — Attach to talk to it", "它没有停下来接收消息 — 用 Attach 和它对话") };
+  }
+  // The folder it ran in: the pet's record, else `claude agents --all` (one the pet never saw).
+  let dir = "";
+  try {
+    const home = petEnv().PET_HOME || path.join(os.homedir(), ".claude", "pet");
+    const cwd = JSON.parse(fs.readFileSync(path.join(home, "sessions", sid + ".json"), "utf8")).cwd;
+    if (typeof cwd === "string" && startDir(cwd)) dir = startDir(cwd);
+  } catch (_) {}
+  if (!dir) {
+    const all = await exec(claude, ["agents", "--json", "--all"], { env: CLAUDE_ENV, timeout: READ_TIMEOUT });
+    try {
+      const row = JSON.parse(all.out).find((x) => x && x.sessionId === sid);
+      if (row && typeof row.cwd === "string" && startDir(row.cwd)) dir = startDir(row.cwd);
+    } catch (_) {}
+  }
+  if (!dir) return { error: L("can't tell which folder that session ran in", "不知道那个 session 是在哪个文件夹运行的") };
+  // A message starting with "-" would be read as an option; a leading space keeps it the prompt.
+  const prompt = text.startsWith("-") ? " " + text : text;
+  const r = await exec(claude, ["--bg", "--resume", sid].concat(body.skip === true ? [SKIP_FLAG] : [], [prompt]),
+    { cwd: dir, env: CLAUDE_ENV, timeout: 60000 });
+  kept.delete("agents");
+  if (r.status !== 0) return { error: "claude --bg --resume: " + (r.err || r.out).trim().slice(0, 300) };
+  return { result: { ok: true, resumed: true } };
+}
+
 /** sessionId → its task's id, from hq's bindings (TaskIndex.taskBySession). Read again after 8 s. */
 let tasksRead = { at: 0, map: {} };
 function taskBySession() {
@@ -442,10 +519,32 @@ async function perform(body, win) {
       if (!r.error) onSeen(str(body, "session"));   // answering means you read it
       return r;
     }
-    case "plan-approve":
-      // Approving is Enter in the session's terminal (Claude Code ignores a hook's allow for a plan).
-      return { error: L("approving a plan from the board is not on Windows yet — Jump and approve it there",
-        "Windows 版还不能在看板上批准计划——跳到终端里批准") };
+    // Typing into a session's terminal (PetControl.swift): Orca's CLI, or keys written into the
+    // console of a Windows Terminal tab or a console window.
+    case "send": {
+      let r = body.bg ? await sendBackground(body) : await board(body);
+      // Ended at its timeout: the message may be in (BoardWindow's `unsure`, for the outbox).
+      if (r.timedOut && body.outbox === true) r = { result: { ok: false, unsure: true, error: r.error } };
+      if (!r.error && !(r.result && r.result.unsure)) onSeen(str(body, "session"));   // replying means you read it
+      return r;
+    }
+    case "interrupt": return board(body);
+    case "plan-approve": {
+      // Approving is Enter in its terminal (Claude Code ignores a hook's allow for a plan). One
+      // Enter per plan: until the next hook clears the prompt, a second Approve would press Enter
+      // in whatever the session shows next.
+      // Marked before the press: a second click arrives while pet-emit is still starting.
+      const ask = str(body, "ask");
+      if (approvedPlans.has(ask)) {
+        return { error: L("already approved — Enter was pressed in its terminal", "已经批准过了——终端里按过回车") };
+      }
+      approvedPlans.add(ask);
+      const r = await board(body);
+      if (r.error && !r.timedOut) approvedPlans.delete(ask);
+      else if (!r.error) onSeen(str(body, "session"));
+      return r;
+    }
+    case "stop-session": return board(body);
     case "launch": return launch(body, win);
     case "resume": return resume(body, win);
     case "attach": {
@@ -573,8 +672,7 @@ async function perform(body, win) {
       return { result: "ok" };
     case "jobs": return { result: JSON.stringify({ jobs: [], runner: false }) };
     default:
-      // Typing into a session's terminal (send, interrupt, stop-session), the secretary,
-      // scheduled jobs, phone access: Mac only for now.
+      // The secretary, scheduled jobs, phone access: Mac only for now.
       return notOnWindows();
   }
 }

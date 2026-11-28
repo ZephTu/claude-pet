@@ -290,6 +290,14 @@ $d = Get-Content (Join-Path $home_ 'decisions\p1.json') -Raw | ConvertFrom-Json
 Check '--board decide: a permission prompt' "$($d.askId) $($d.behavior)" 'ask-p deny'
 HeldSession 'g1' 'ask-g' 'question' 999999
 Check '...nothing holds it any more: refused' ([bool](Board '{"op":"prompt","session":"g1"}').error) 'True'
+# Typing into a terminal (PetControl): refused without a running process recorded for it.
+HeldSession 'pl1' 'ask-pl' 'plan' $PID
+Check '--board plan-approve: no terminal recorded, refused' ([bool](Board '{"op":"plan-approve","session":"pl1","ask":"ask-pl"}').error) 'True'
+Check '...another ask: refused' ([bool](Board '{"op":"plan-approve","session":"pl1","ask":"old"}').error) 'True'
+Check '--board send: no terminal recorded, refused' ([bool](Board '{"op":"send","session":"pl1","text":"hi"}').error) 'True'
+Check '--board send: /model alone is refused' ([bool](Board '{"op":"send","session":"pl1","text":"/model"}').error) 'True'
+Check '--board interrupt: a background session has no terminal' ([bool](Board '{"op":"interrupt","session":"pl1","bg":"abcdef12"}').error) 'True'
+Check '--board stop-session: not a session id' ([bool](Board '{"op":"stop-session","session":"pl1"}').error) 'True'
 
 Remove-Item $home_ -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed) { Write-Host "$failed failed"; exit 1 }
