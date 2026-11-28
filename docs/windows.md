@@ -161,3 +161,8 @@ be removed there.
 You need Swift 6.1.2 for Windows (with the Visual Studio Build Tools it asks for) and
 Node 20+. The build steps, the dev loop and how each piece maps to the Mac's code are in
 [windows/CLAUDE.md](../windows/CLAUDE.md).
+
+To build this checkout and install it in one go (instead of downloading the bundle), run
+`powershell -ExecutionPolicy Bypass -File windows\scripts\install-local.ps1`. It builds
+what CI builds, runs CI's checks and then the bundle's `install.ps1`. It refuses a checkout that
+is missing commits on `origin/main`.

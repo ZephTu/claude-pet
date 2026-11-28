@@ -216,9 +216,18 @@ npx electron .
 - `PET_SHOT=out.png` (plus `PET_SHOT_JS="window.togglePanel()"`, `PET_SHOT_DELAY=ms`) renders the
   window to a PNG and quits; read the PNG to check layout.
 - The shell's log: `%APPDATA%\ClaudePet\pet.log` (tray → Open the log).
-- To try it as the user will: `npx electron-builder --win dir --x64 --publish never`, then
-  `install.ps1` from a folder laid out like the CI bundle (`pet-emit\` with the exe and Swift
-  runtime DLLs, `app\` = `dist\win-unpacked`). `uninstall.ps1` undoes it.
+- **Installing on this machine: `powershell -ExecutionPolicy Bypass -File
+  windows\scripts\install-local.ps1`** (the user's choice: always this, not CI's artifact). It
+  does what CI does - release pet-emit plus the Swift runtime DLLs, smoke.ps1 with only the
+  bundle's DLLs on PATH, `node --test test/remote.test.js`, electron-builder (`npx --no-install`:
+  the pinned one), the bundle laid out as CI's (`pet-emit\`, `app\`) - then runs the bundle's
+  `install.ps1`. One run at a time (`ClaudePet-build\run.lock`).
+  It refuses a checkout missing commits on origin/main, as `scripts/check-main.sh` does on the Mac
+  (`-Force` exists; don't use it on the user's behalf). The app is built in
+  `%LOCALAPPDATA%\ClaudePet-build`, a copy of `windows\` and `Resources\pet` with its own
+  node_modules: `npm ci` in the checkout deletes `windows\node_modules` first, and a dev electron
+  another session runs from it holds files open (EBUSY halfway leaves it gutted - `electron`
+  down to `dist\`). `uninstall.ps1` undoes an install.
 - `.github/workflows/windows.yml` builds, smoke-tests (with only the bundle's DLLs on PATH),
   packages, renders a PNG, and uploads `ClaudePet-windows`. Keep it green.
 
@@ -284,6 +293,8 @@ npx electron .
   test side, not hq: paths compared as `C:/...` strings where hq answers `C:\...`, fake `claude`
   / `gh` / `security` written as sh scripts (python on Windows can't run them: WinError 193), and
   symlinks (Git Bash copies). It takes ~5 minutes. Not in Windows CI yet.
+- Windows PowerShell 5.1's `Start-Process -PassThru` reports an empty `ExitCode` after
+  `WaitForExit(ms)` unless `.Handle` was read right after the start.
 - Python's `os.kill(pid, 0)` on Windows sends CTRL_C_EVENT (0) to the process group, and `$$`
   in Git Bash is an MSYS pid (`/proc/$$/winpid` is the Windows one).
 - Electron started with `USERPROFILE` pointed elsewhere dies at once ("Failed to get 'userData'

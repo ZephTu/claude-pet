@@ -112,3 +112,5 @@ hq/install.sh --root ~/claude-hq
 ## 从源码构建
 
 需要 Swift 6.1.2 for Windows（加上它要求的 Visual Studio Build Tools）和 Node 20 以上。构建步骤、开发流程、每部分对应 Mac 的哪段代码，都在 [windows/CLAUDE.md](../windows/CLAUDE.md) 里。
+
+想直接用本地代码构建并安装（不下载安装包），运行 `powershell -ExecutionPolicy Bypass -File windows\scripts\install-local.ps1`。它构建 CI 构建的同样内容，跑 CI 的那些检查，再运行安装包里的 `install.ps1`。如果当前代码缺了 `origin/main` 上的提交，它会拒绝安装。
