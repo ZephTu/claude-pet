@@ -10,6 +10,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  # hq's end-to-end test in Git Bash with a Windows Python, as on the Mac's ci.yml. It needs nothing
+  # built, so it is a job of its own. The runner is an admin: the symlink cases run here too.
+  hq-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: HQ tests
+        shell: bash
+        run: ./hq/tests/test_hq.sh
+
   bundle:
     runs-on: windows-latest
     steps:

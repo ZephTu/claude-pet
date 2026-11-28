@@ -27,6 +27,42 @@ pass=0
 ok() { pass=$((pass+1)); echo "  ok - $1"; }
 fail() { echo "  FAIL - $1"; exit 1; }
 hook() { echo "$1" | "$HQ" hook; }
+skip() { echo "  skip - $1"; }
+pd() { if [ "$WINDOWS" = 1 ]; then cygpath -u "$1"; else echo "$1"; fi; }   # a dir for PATH (C:/... has a colon in it)
+exe_of() { if [ "$WINDOWS" = 1 ]; then echo "$1.exe"; else echo "$1"; fi; }   # the command fake_exe made of FILE
+# wp PATH: the path as hq writes it (on Windows C:\..., not the C:/... the test uses).
+wp() { if [ "$WINDOWS" = 1 ]; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
+# A path printed by hq, as the test writes it: on Windows \ becomes /.
+slashed() { if [ "$WINDOWS" = 1 ]; then tr '\\' /; else cat; fi; }
+# The same for JSON, where hq's C:\... is written C:\\... (a card's workdirs, --json output).
+jslashed() { if [ "$WINDOWS" = 1 ]; then sed 's#\\\\#/#g'; else cat; fi; }
+# can_symlink: true where ln -s makes a real link. Git Bash copies unless asked for a native
+# link, which takes Developer Mode or an admin (as on CI); without either the case is skipped.
+can_symlink() { [ "$WINDOWS" = 0 ] || [ "$CAN_SYMLINK" = 1 ]; }
+CAN_SYMLINK=0
+if [ "$WINDOWS" = 1 ]; then
+  export MSYS="${MSYS:-} winsymlinks:nativestrict"
+  : > "$T/.lt"; ln -s "$T/.lt" "$T/.ln" 2>/dev/null && [ -L "$T/.ln" ] && CAN_SYMLINK=1; rm -f "$T/.lt" "$T/.ln"
+fi
+# fake_exe FILE: make the sh script FILE runnable as a command, as hq runs gh / claude / security.
+# Windows runs only .exe by bare name (WinError 193 on a script): FILE moves to FILE.sh and FILE.exe,
+# pip's script launcher with a zipped __main__.py, runs it with this bash.
+fake_exe() {
+  chmod +x "$1"
+  [ "$WINDOWS" = 1 ] || return 0
+  mv -f "$1" "$1.sh"
+  python3 - "$1.exe" "$(cygpath -m "$(command -v bash)")" <<'PY'
+import io, os, sys, zipfile
+import pip._vendor.distlib as distlib
+main = ("import os, subprocess, sys\n"
+        "sys.exit(subprocess.call([%r, os.path.splitext(sys.argv[0])[0] + '.sh'] + sys.argv[1:]))\n" % sys.argv[2])
+z = io.BytesIO()
+with zipfile.ZipFile(z, "w") as f:
+    f.writestr("__main__.py", main)
+launcher = open(os.path.join(os.path.dirname(distlib.__file__), "t64.exe"), "rb").read()
+open(sys.argv[1], "wb").write(launcher + b'#!"' + sys.executable.encode() + b'"\r\n' + z.getvalue())
+PY
+}
 
 "$SRC/install.sh" --root "$T/root" --yes >/dev/null
 python3 - "$HOME/.claude/settings.json" <<'PY' && ok "install wires 3 hooks and keeps existing ones"
@@ -66,6 +102,7 @@ HOME="$H2" "$SRC/install.sh" --root "$T/root2" --yes --no-hooks --no-commands >/
 grep -q hq "$H2/.claude/settings.json" && fail "--no-hooks touched settings" || ok "--no-hooks leaves settings.json alone"
 [ ! -e "$H2/.claude/commands/task.md" ] && ok "--no-commands skips slash commands"
 H3="$T/home3"; mkdir -p "$H3/.claude" "$H3/dotfiles"; echo '{"model":"m"}' > "$H3/dotfiles/settings.json"
+if can_symlink; then
 ln -s ../dotfiles/settings.json "$H3/.claude/settings.json"
 HOME="$H3" "$SRC/install.sh" --root "$T/root3" --yes --no-commands >/dev/null
 [ -L "$H3/.claude/settings.json" ] && grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" \
@@ -73,6 +110,7 @@ HOME="$H3" "$SRC/install.sh" --root "$T/root3" --yes --no-commands >/dev/null
 HOME="$H3" "$SRC/uninstall.sh" >/dev/null
 [ -L "$H3/.claude/settings.json" ] && ! grep -q 'hq/bin/hq hook' "$H3/dotfiles/settings.json" && grep -q '"model"' "$H3/dotfiles/settings.json" \
   && ok "uninstall works through the link too" || fail "uninstall through a symlink"
+else skip "install and uninstall through a symlinked settings.json (no symlink rights)"; fi
 
 out="$("$HQ" new "Benchmark vs Neo4j" --category benchmark --workdir "$T")"
 TID="$(echo "$out" | head -1)"; [ "$TID" = "T-001" ] && ok "new task gets T-001"
@@ -463,6 +501,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do "$HQ" bind T-001 --session "par-$i" >/dev/null
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert all(f"par-{i}" in s for i in range(1,11)) and "sess-1" in s, sorted(s)' "$HOME/.claude/hq/state/sessions.json" && ok "parallel binds all survive"
 for i in 1 2 3 4 5 6 7 8 9 10; do "$HQ" unbind --session "par-$i" >/dev/null; done
 BAD="$T/odd: name, #with [chars] and a folder name well over forty characters"
+[ "$WINDOWS" = 1 ] && BAD="$T/odd; name, #with [chars] and a folder name well over forty characters"   # no : in a Windows name
 mkdir -p "$BAD/.git" "$HOME/.claude/projects/-x-odd"
 printf '%s\n' "{\"type\":\"user\",\"cwd\":\"$BAD\",\"message\":{\"content\":\"hi\"},\"timestamp\":\"2026-01-01T00:00:00Z\"}" > "$HOME/.claude/projects/-x-odd/abcdef99-0000.jsonl"
 "$HQ" scan --apply-projects >/dev/null && "$HQ" project list --json | python3 -c 'import json,sys,re; n=[p["name"] for p in json.load(sys.stdin)]; assert any(x.startswith("odd- name- -with -chars-") or x.startswith("odd") for x in n), n; assert all(len(x)<=40 and not re.search(r"[:,#\[\]]", x) for x in n), n' && ok "scan makes odd folder names into valid project names"
@@ -484,14 +523,14 @@ out="$(stop sess-1 "$(printf 'Fixed it.\n\n```hq-update\nstatus: blocked\nnext: 
 ! echo "$out" | grep -q '"decision"' && ok "a clean hq-update block does not block the turn" || fail "clean block blocked: $out"
 echo "$out" | python3 -c 'import json,sys; m=json.load(sys.stdin)["systemMessage"]; assert m=="HQ T-001: status waiting-on-me → blocked, next, state, +2 todo, +1 log, +1 ref, +1 workdir", m' \
   && ok "the user is told in one line what the block wrote" || fail "echo of a clean block: $out"
-python3 - "$C1" "$T/repo-a" <<'PY' && ok "hq-update sets status/next/state/todos/log/ref/workdir"
-import sys, re
+python3 - "$C1" "$(wp "$T/repo-a")" <<'PY' && ok "hq-update sets status/next/state/todos/log/ref/workdir"
+import json, sys, re
 t = open(sys.argv[1]).read()
 assert "status: blocked" in t and 'next: "wait for the token"' in t, t
 assert re.search(r"## Status\nbuild is green\nwaiting on infra for the token\n\n## ", t), t
 assert "- [ ] @me send the token request" in t and "- [ ] @claude rerun the suite" in t, t
 assert ": picked plan v2 because it is cheaper" in t and "PR #9 https://example.com/pr/9" in t, t
-assert sys.argv[2] in t, t
+assert sys.argv[2] in json.loads(re.search(r"^workdirs: (.*)$", t, re.M).group(1)), t
 PY
 stop sess-1 "$(printf 'ok\n```hq-update\ndone: rerun the suite\ndrop: @me send the token request\n```')" >/dev/null
 grep -q -- "- \[x\] @claude rerun the suite" "$C1" && grep -q -- "- \[-\] @me send the token request" "$C1" && ok "done/drop find the todo by its text"
@@ -675,10 +714,10 @@ stop sess-1 "$(printf 'ok\n```hq-update\nstate: - [ ] CI green\n```')" >/dev/nul
 grep -q "^CI green$" "$C1" && ok "a checkbox in state: does not become a todo" || fail "a checkbox in state: does not become a todo"
 WD="$T/repo-a"
 stop sess-1 "$(printf 'ok\n```hq-update\nworkdir: %s/\nworkdir: %s\n```' "$WD" "$WD")" >/dev/null
-python3 - "$C1" "$WD" <<'PY' && ok "workdir is normalised and not repeated" || fail "workdir is normalised and not repeated"
-import sys, re, json
+python3 - "$C1" "$(wp "$WD")" <<'PY' && ok "workdir is normalised and not repeated" || fail "workdir is normalised and not repeated"
+import os, sys, re, json
 t = open(sys.argv[1]).read(); w = json.loads(re.search(r"^workdirs: (.*)$", t, re.M).group(1))
-assert w.count(sys.argv[2]) == 1 and sys.argv[2] + "/" not in w, w
+assert w.count(sys.argv[2]) == 1 and sys.argv[2] + "/" not in w and sys.argv[2] + os.sep not in w, w
 PY
 stop sess-1 "$(printf 'ok\n```hq-update\nworkdir: %s\n```' "$HOME")" | grep -q "never a workdir" && ok "home is refused as a workdir, as bind refuses it" || fail "home is refused as a workdir, as bind refuses it"
 python3 -c 'import json; print(json.dumps({"session_id":"sess-1","hook_event_name":"Stop","stop_hook_active":True,"last_assistant_message":"ok\n```hq-update\nstatus: nope\n```"}))' | "$HQ" hook >/dev/null
@@ -717,7 +756,7 @@ ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker ha
 rm -rf "$HOME/.claude/pet"
 
 # Closed todos carry when they were closed (their latest tick), so the board lists the latest first.
-CT=$("$HQ" new "Close order" | sed -n 's#.*/\(T-[0-9]*\)-.*#\1#p')
+CT=$("$HQ" new "Close order" | slashed | sed -n 's#.*/\(T-[0-9]*\)-.*#\1#p')
 "$HQ" addtodo "$CT" "first" >/dev/null; "$HQ" addtodo "$CT" "second" >/dev/null; "$HQ" addtodo "$CT" "third" >/dev/null
 "$HQ" todo "$CT" 2 done >/dev/null; sleep 1.1; "$HQ" todo "$CT" 1 drop >/dev/null; sleep 1.1
 "$HQ" todo "$CT" 3 done >/dev/null; "$HQ" todo "$CT" 3 open >/dev/null
@@ -1607,9 +1646,9 @@ s = re.sub(r"(send the numbers to Atul <!--t:)[^>]*(-->)", lambda m: m.group(1) 
 open(p, "w", encoding="utf-8").write(s)
 PY2
 mkdir -p "$T/bin"; MERGED="$(python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
-printf '#!/bin/sh\necho "{\\"number\\":7,\\"title\\":\\"loader\\",\\"state\\":\\"MERGED\\",\\"mergedAt\\":\\"%s\\",\\"isDraft\\":false}"\n' "$MERGED" > "$T/bin/gh"; chmod +x "$T/bin/gh"
-PATH="$T/bin:$PATH" "$HQ" report daily --json > "$T/rep.json"
-python3 - "$T/rep.json" "$RT" "$T/root" <<'PY2' && ok "hq report: notes, ticked todos, answers, open asks, merged PRs, what you owe" || fail "hq report json"
+printf '#!/bin/sh\necho "{\\"number\\":7,\\"title\\":\\"loader\\",\\"state\\":\\"MERGED\\",\\"mergedAt\\":\\"%s\\",\\"isDraft\\":false}"\n' "$MERGED" > "$T/bin/gh"; fake_exe "$T/bin/gh"
+PATH="$(pd "$T/bin"):$PATH" "$HQ" report daily --json > "$T/rep.json"
+python3 - "$T/rep.json" "$RT" "$(wp "$T/root")" <<'PY2' && ok "hq report: notes, ticked todos, answers, open asks, merged PRs, what you owe" || fail "hq report json"
 import json, os, sys
 r, tid, root = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
 assert r["kind"] == "daily" and r["file"].endswith("-daily.md") and os.path.dirname(r["file"]) == os.path.join(root, "secretary", "reports"), r["file"]
@@ -1626,9 +1665,9 @@ assert [(o["task"], o["kind"], o["days"]) for o in r["owed"] if o["task"] == tid
 assert not any(x["id"] == json.load(open(os.path.join(root, "hq.json")))["secretary"]["task"] for pr in r["projects"] for x in pr["moved"] + pr["quiet"])
 assert r["edits"] == [] and r["gh"] is True
 PY2
-PATH="$T/bin:$PATH" "$HQ" report daily | grep -q "PR merged .*#7 loader" && ok "hq report prints the facts as text" || fail "hq report text"
+PATH="$(pd "$T/bin"):$PATH" "$HQ" report daily | grep -q "PR merged .*#7 loader" && ok "hq report prints the facts as text" || fail "hq report text"
 "$HQ" report daily --no-gh --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["gh"] is False' && ok "hq report --no-gh skips PR lookups" || fail "report --no-gh"
-[ "$(cd "$T" && env PATH="$T/bin:$PATH" "$HQ" report weekly --json | python3 -c 'import json,sys,datetime as d; r=json.load(sys.stdin); n=d.datetime.now(); print(r["from"][:10]==(n-d.timedelta(days=n.weekday())).date().isoformat())')" = True ] && ok "weekly report starts on Monday" || fail "weekly window"
+[ "$(cd "$T" && env PATH="$(pd "$T/bin"):$PATH" "$HQ" report weekly --json | python3 -c 'import json,sys,datetime as d; r=json.load(sys.stdin); n=d.datetime.now(); print(r["from"][:10]==(n-d.timedelta(days=n.weekday())).date().isoformat())')" = True ] && ok "weekly report starts on Monday" || fail "weekly window"
 # Keep a report, edit it: the next report shows the edit, once.
 D="$(date +%F)"; RD="$T/root/secretary/reports"
 "$HQ" report keep "$D-daily.md" 2>/dev/null && fail "keep without the file" || ok "keep refuses a report not written yet"
@@ -1684,9 +1723,9 @@ assert r["exists"] and [e["report"] for e in r["edits"]]==["'"$D"'-daily.md"], r
 # The next daily report starts where the last one's facts ended, not when it was kept.
 "$HQ" report weekly --no-gh --json > "$T/wk.json"; sleep 1; "$HQ" report keep "$D-weekly.md" >/dev/null
 python3 - "$T/wk.json" "$RD/.reports.json" <<'PY2' && ok "keep records the window the report was written from" || fail "keep window"
-import json, sys
+import json, os, sys
 g, idx = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
-w = idx[g["file"].rsplit("/", 1)[1]]
+w = idx[os.path.basename(g["file"])]
 assert (w["from"], w["to"]) == (g["from"], g["to"]) and w["kept"] > w["to"], w
 PY2
 "$HQ" report daily --no-gh --json | python3 -c '
@@ -1732,10 +1771,10 @@ printf '%s\n' "$@" > "$FAKE_DIR/args"; cat > "$FAKE_DIR/stdin"; echo "${HQ_HOOK_
 [ -f "$FAKE_DIR/junk" ] && { echo "model overloaded" >&2; exit 1; }
 printf '{"structured_output": %s, "total_cost_usd": 0.002}' "$(cat "$FAKE_DIR/answer")"
 SH
-chmod +x "$FAKE"
+fake_exe "$FAKE"; FAKE="$(exe_of "$FAKE")"
 answer() { echo "$1" > "$FAKE_DIR/answer"; }
 ITA="$("$HQ" new "Inbox target A" | head -1)"; ITB="$("$HQ" new "Inbox target B" | head -1)"
-card() { cat "$T"/root/tasks/"$1"-*/TASK.md; }
+card() { cat "$T"/root/tasks/"$1"-*/TASK.md | jslashed; }
 NSEC="$("$HQ" secretary --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 hqi inbox add --json -- "-n fix the flaky login test" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["id"]=="N-001" and x["state"]=="unsorted" and x["via"]=="cli" and x["text"]=="-n fix the flaky login test", x' && ok "inbox add: N-001, unsorted, text kept as typed" || fail "inbox add"
 answer '{"kind":"todo","task":"'"$ITA"'","owner":"claude","text":"Fix the flaky login test","confidence":0.9,"reason":"about A","alternatives":[{"kind":"note","task":"'"$ITB"'","text":"flaky login test"}]}'
@@ -1792,25 +1831,26 @@ hqi inbox drop -- N-006 >/dev/null && hqi inbox restore --json -- N-006 | grep -
 NT2="$(hqi inbox move --json --title="Card from a note" -- N-006 task | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
 { hqi inbox move --task="$NT2" -- N-006 note 2>&1 || true; } | grep -q "was made from N-006" && ls -d "$T"/root/tasks/"$NT2"-* >/dev/null 2>&1 && ok "filing a note onto the card it created is refused, the card stays" || fail "self card move"
 # Folders: a task made from a note gets one, so New session has somewhere to start.
-mkdir -p "$T/work/repo-a" "$T/work/repo-b"
+# repo-wa, not repo-a: "$T/repo-a" is already on two cards and would be the more used one by that name.
+mkdir -p "$T/work/repo-wa" "$T/work/repo-b"
 "$HQ" project add fold >/dev/null 2>&1
 WA="$("$HQ" new "Folder source" --project fold | head -1)"
-hqi workdir add "$WA" -- "$T/work/repo-a" && card "$WA" | grep -q '^workdirs: .*work/repo-a"' && ok "hq workdir add" || fail "workdir add"
-hqi workdir add "$WA" -- "$T/work/repo-a" && [ "$(card "$WA" | grep -o 'repo-a' | wc -l | tr -d ' ')" = 1 ] && ok "hq workdir add: a folder already there is not added twice" || fail "workdir add twice"
+hqi workdir add "$WA" -- "$T/work/repo-wa" && card "$WA" | grep -q '^workdirs: .*work/repo-wa"' && ok "hq workdir add" || fail "workdir add"
+hqi workdir add "$WA" -- "$T/work/repo-wa" && [ "$(card "$WA" | grep -o 'repo-wa' | wc -l | tr -d ' ')" = 1 ] && ok "hq workdir add: a folder already there is not added twice" || fail "workdir add twice"
 { hqi workdir add "$WA" -- "$T/work/nope" 2>&1 || true; } | grep -q "no such folder" && { hqi workdir add "$WA" -- "$HOME" 2>&1 || true; } | grep -q "never a task's folder" && ok "hq workdir add refuses a missing folder and the home folder" || fail "workdir add refusals"
 hqi inbox add -- "new thing for repo-b" >/dev/null
-answer '{"kind":"task","title":"Named folder","text":"t","workdir":"repo-a","confidence":0.9,"reason":"r","alternatives":[]}'
+answer '{"kind":"task","title":"Named folder","text":"t","workdir":"repo-wa","confidence":0.9,"reason":"r","alternatives":[]}'
 NF1="$(hqi inbox sort --claude "$FAKE" --json N-007 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
-grep -q "dirs: .*work/repo-a" "$FAKE_DIR/stdin" && card "$NF1" | grep -q "^workdirs: \[\"$T/work/repo-a\"\]" && ok "sorter sees folders in full; one it names by its last part is used in full" || fail "sorter named folder"
+slashed < "$FAKE_DIR/stdin" | grep -q "dirs: .*work/repo-wa" && card "$NF1" | grep -q "^workdirs: \[\"$T/work/repo-wa\"\]" && ok "sorter sees folders in full; one it names by its last part is used in full" || fail "sorter named folder"
 hqi inbox add -- "another for the fold project" >/dev/null
 answer '{"kind":"task","title":"Project folder","text":"t","project":"fold","confidence":0.9,"reason":"r","alternatives":[]}'
 NF2="$(hqi inbox sort --claude "$FAKE" --json N-008 | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"])')"
-card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-a\"\]" && ok "a new task with no folder named takes the one its project's tasks use" || fail "project folder fallback"
-hqi workdir add "$NF2" -- "$T/work/repo-b" && hqi workdir remove "$NF2" -- "$T/work/repo-a" >/dev/null && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\"\]" && ok "hq workdir remove" || fail "workdir remove"
-{ hqi workdir remove "$NF2" -- "$T/work/repo-a" 2>&1 || true; } | grep -q "is not one of" && ok "hq workdir remove: a folder it doesn't have is an error" || fail "workdir remove missing"
+card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-wa\"\]" && ok "a new task with no folder named takes the one its project's tasks use" || fail "project folder fallback"
+hqi workdir add "$NF2" -- "$T/work/repo-b" && hqi workdir remove "$NF2" -- "$T/work/repo-wa" >/dev/null && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\"\]" && ok "hq workdir remove" || fail "workdir remove"
+{ hqi workdir remove "$NF2" -- "$T/work/repo-wa" 2>&1 || true; } | grep -q "is not one of" && ok "hq workdir remove: a folder it doesn't have is an error" || fail "workdir remove missing"
 # Undo of a remove puts the folder back where it was (New session starts in the first), even one since gone.
 mkdir -p "$T/work/repo-c"
-hqi workdir add "$NF2" -- "$T/work/repo-a" && OUT="$(hqi workdir remove "$NF2" -- "$T/work/repo-b")" && hqi workdir restore "$NF2" -- "$OUT" && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\", \"$T/work/repo-a\"\]" && ok "hq workdir restore puts a removed folder back in its place" || fail "workdir restore order"
+hqi workdir add "$NF2" -- "$T/work/repo-wa" && OUT="$(hqi workdir remove "$NF2" -- "$T/work/repo-b")" && hqi workdir restore "$NF2" -- "$OUT" && card "$NF2" | grep -q "^workdirs: \[\"$T/work/repo-b\", \"$T/work/repo-wa\"\]" && ok "hq workdir restore puts a removed folder back in its place" || fail "workdir restore order"
 hqi workdir add "$NF2" -- "$T/work/repo-c" && OUT="$(hqi workdir remove "$NF2" -- "$T/work/repo-c")" && rmdir "$T/work/repo-c" && hqi workdir restore "$NF2" -- "$OUT" && card "$NF2" | grep -q 'work/repo-c"\]' && ok "hq workdir restore brings back a folder that has since gone" || fail "workdir restore gone"
 # A folder written by hand as ~/… is matched like its full path.
 mkdir -p "$HOME/hqwd"
@@ -2432,9 +2472,9 @@ ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; o={a['id']:a for a in ts[
 assert o['$CT.1']['state']=='moved' and n['$NT.1']['state']=='open' and n['$NT.1']['text']=='Which plan first?' and n['$NT.1'].get('moved_from')=='$CT.1', (o, n)" \
   && ok "continue moves open asks to the new card under new ids" || fail "asks moved"
 "$HQ" board --json | python3 -c "
-import json,sys
+import json,os,sys
 ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; n=ts['$NT']; o=ts['$CT']
-assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun the two plans' and n['category']=='benchmark' and n['workdirs']==['$T'], n
+assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun the two plans' and n['category']=='benchmark' and list(map(os.path.normpath, n['workdirs']))==[os.path.normpath('$T')], n
 assert o['status']=='done' and 'continued in $NT' in o['body'] and 'continued from $CT' in n['body'], o" && ok "links, next, category and folders carried over; the old card is done and points at the new one" || fail "continue cards"
 "$HQ" focus --json | python3 -c "import json,sys; ids=json.load(sys.stdin)['ids']; assert '$NT' in ids and '$CT' not in ids, ids" && ok "the new card takes the old one's place in Focus" || fail "focus after continue"
 c="$(hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
@@ -2516,7 +2556,7 @@ n=${3##*/}; echo "{\"number\":$n,\"title\":\"t$n\",\"state\":\"$s\",\"mergedAt\"
 SH
 # The keychain is never asked: a stub `security` that finds nothing.
 printf '#!/bin/sh\necho "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2\nexit 44\n' > "$AC/bin/security"
-chmod +x "$AC/bin/gh" "$AC/bin/security"
+fake_exe "$AC/bin/gh"; fake_exe "$AC/bin/security"
 cat > "$AC/server.py" <<'PY'
 import http.server, json, sys, os
 D = sys.argv[1]
@@ -2555,7 +2595,7 @@ AS="http://127.0.0.1:$(cat "$AC/port")"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '%s\n' "https://github.com/o/r/pull/5 MERGED" "https://github.com/o/r/pull/6 CLOSED 2020-01-01T00:00:00Z" "https://github.com/o/r/pull/7 OPEN" \
   "https://github.com/o/r/pull/8 CLOSED $NOW" > "$AC/prs"
-acenv() { env PATH="$AC/bin:$PATH" AC_STATES="$AC/prs" HQ_JIRA_SITE="$AS" HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok HQ_JENKINS_SITE="$AS" HQ_JENKINS_USER=ci "$@"; }
+acenv() { env PATH="$(pd "$AC/bin"):$PATH" AC_STATES="$AC/prs" HQ_JIRA_SITE="$AS" HQ_JIRA_EMAIL=me@example.com HQ_JIRA_TOKEN=tok HQ_JENKINS_SITE="$AS" HQ_JENKINS_USER=ci "$@"; }
 acq() { acenv HQ_JENKINS_TOKEN=jt "$HQ" "$@"; }
 A1="$("$HQ" new "Autoclose me" --no-focus | head -1)"
 "$HQ" ref add "$A1" "https://github.com/o/r/pull/6" >/dev/null; "$HQ" ref add "$A1" "$AS/job/release_test/21/" >/dev/null
@@ -2617,8 +2657,8 @@ grep -q "jenkins: no Jenkins API token in the keychain" "$AC/out" \
   && ok "autoclose: a source without credentials fails the run and says how to set it up" || fail "autoclose no token: $(cat "$AC/out")"
 acenv HQ_JENKINS_TOKEN=jt HQ_JENKINS_SITE="${AS/http:/https:}" "$HQ" autoclose --dry-run --json | python3 -c '
 import json,sys; r=json.load(sys.stdin); assert r["links"]["jenkins"]==0, r' && ok "autoclose sends Jenkins credentials only to the site, scheme too (no http when it is https)" || fail "autoclose scheme"
-printf '#!/bin/sh\n[ "$1" = auth ] && exit 1\nexit 1\n' > "$AC/gh-out"; chmod +x "$AC/gh-out"; mkdir -p "$AC/bin2"; cp "$AC/gh-out" "$AC/bin2/gh"
-env PATH="$AC/bin2:$AC/bin:$PATH" AC_STATES="$AC/prs" HQ_JENKINS_SITE= HQ_JIRA_SITE= "$HQ" autoclose > "$AC/out" 2>&1 && fail "autoclose with gh logged out should fail" || true
+printf '#!/bin/sh\n[ "$1" = auth ] && exit 1\nexit 1\n' > "$AC/gh-out"; mkdir -p "$AC/bin2"; cp "$AC/gh-out" "$AC/bin2/gh"; fake_exe "$AC/bin2/gh"
+env PATH="$(pd "$AC/bin2"):$(pd "$AC/bin"):$PATH" AC_STATES="$AC/prs" HQ_JENKINS_SITE= HQ_JIRA_SITE= "$HQ" autoclose > "$AC/out" 2>&1 && fail "autoclose with gh logged out should fail" || true
 tail -1 "$AC/out" | grep -q "pr: gh can't reach GitHub" && ok "autoclose: gh logged out or offline fails the run" || fail "autoclose gh down: $(cat "$AC/out")"
 "$HQ" site jenkins jenkins.example.com | grep -q "^jenkins: https://jenkins.example.com$" && grep -q '"jenkins": "https://jenkins.example.com"' "$HOME/.claude/hq/config.json" \
   && "$HQ" site jenkins - | grep -q "^jenkins: -$" && grep -q '"root"' "$HOME/.claude/hq/config.json" && ok "hq site keeps a site in this machine's config.json (root kept), and forgets it" || fail "hq site"
@@ -2642,13 +2682,13 @@ cat > "$IK/claude" <<'SH'
 if [ "$1" = agents ]; then echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-4000-8000-000000000001"}]'; exit 0; fi
 printf '%s\n' "$@" > "$IK/claude-args"; pwd -P > "$IK/claude-cwd"; echo "${CLAUDE_PET_JOB:-none} ${ORCA_TERMINAL_HANDLE:-none} ${TERM_PROGRAM:-none} ${ITERM_SESSION_ID:-none}" > "$IK/claude-env"; echo "Started background session abcd1234"
 SH
-chmod +x "$IK/bin/gh" "$IK/claude"
+fake_exe "$IK/bin/gh"; fake_exe "$IK/claude"; IKC="$(exe_of "$IK/claude")"
 cat > "$IK/search.json" <<'JS'
 [{"repository":{"nameWithOwner":"acme/web"},"number":12,"title":"Fix login","url":"https://github.com/acme/web/pull/12","author":{"login":"ann"},"isDraft":false},
  {"repository":{"nameWithOwner":"acme/web"},"number":13,"title":"WIP","url":"https://github.com/acme/web/pull/13","author":{"login":"ann"},"isDraft":true},
  {"repository":{"nameWithOwner":"other/lib"},"number":5,"title":"Bump","url":"https://github.com/other/lib/pull/5","author":{"login":"bob"},"isDraft":false}]
 JS
-ik() { env IK="$IK" PATH="$IK/bin:$PATH" "$HQ" "$@"; }
+ik() { env IK="$IK" PATH="$(pd "$IK/bin"):$PATH" "$HQ" "$@"; }
 "$HQ" project add rev --kind duty >/dev/null
 printf '### github-review\nrepos: acme/web\nworkdir: %s\nrun: yes\npermissions: skip\n<!-- a note -->\nbogus: 1\ngoal: Look at it.\nNote: carefully\nprompt: Review {url} by {author}.\n\n### Steps\n<keep this>\nKeep it short.\n### jira-filter\nrepos: x\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
 "$HQ" project show rev --json | python3 -c '
@@ -2662,7 +2702,7 @@ ik intake | tail -1 | grep -q "github-review: no duty set up" && [ ! -f "$IK/sea
 "$HQ" project set rev auto=github-review >/dev/null
 N0="$(ls "$T/root/tasks" | wc -l)"
 ik intake --dry-run | tail -1 | grep -q "github-review: 1 waiting, 1 new" && [ "$(ls "$T/root/tasks" | wc -l)" = "$N0" ] && ok "intake --dry-run: drafts and other repos left out, nothing made" || fail "intake dry run"
-CLAUDE_PET_JOB=intake-scan ORCA_TERMINAL_HANDLE=term_stale TERM_PROGRAM=Orca ITERM_SESSION_ID=w0t0p0:AB ik intake --claude "$IK/claude" --json > "$IK/out.json"
+CLAUDE_PET_JOB=intake-scan ORCA_TERMINAL_HANDLE=term_stale TERM_PROGRAM=Orca ITERM_SESSION_ID=w0t0p0:AB ik intake --claude "$IKC" --json > "$IK/out.json"
 IT="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["results"][0]; m=r["made"]; assert len(m)==1 and m[0]["session"].startswith("abcd1234"), r; print(m[0]["task"])' "$IK/out.json")"
 ITC="$(ls "$T"/root/tasks/$IT-*/TASK.md)"
 grep -q '^project: rev' "$ITC" && grep -q '^intake: github-review' "$ITC" && grep -q '^intake_key: acme/web#12' "$ITC" && grep -q '^intake_done: manual' "$ITC" \
@@ -2679,9 +2719,9 @@ grep -qx -- "--bg" "$IK/claude-args" && grep -q "^Start by running \`.*/hq bind 
   && ok "intake run: a background session in the workdir, told to bind, never skipping permissions (permissions: skip is review — dontAsk, read-only tools, Skill only code-review, gh only on this PR, the prompt after --), with the filled prompt and the manual-done rule, not as the pet's job nor in hq's terminal tab" || fail "intake launch: $(cat "$IK/claude-args")"
 "$HQ" bind "$IT" --session sess-ik | grep -q "came in by itself and the user closes it" && "$HQ" unbind --session sess-ik >/dev/null && ok "a bound session is told it doesn't close the task" || fail "intake protocol"
 mv "$T/root/secretary/intake/state.json" "$IK/state.bak"
-ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"
+ik intake --claude "$IKC" | tail -1 | grep -q "0 new tasks" && ok "intake: an open card for the PR is enough, state or not (a scan stopped part-way)" || fail "intake dedup by card"
 mv "$IK/state.bak" "$T/root/secretary/intake/state.json"
-ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 1 waiting, 0 new tasks" && ok "intake: a PR whose task is open makes no other" || fail "intake repeat"
+ik intake --claude "$IKC" | tail -1 | grep -q "github-review: 1 waiting, 0 new tasks" && ok "intake: a PR whose task is open makes no other" || fail "intake repeat"
 MSG='done\n\n```hq-update\nstatus: done\n```'
 hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" | grep -q "the user closes it" \
   && grep -q '^status: active' "$ITC" && ok "a session can't close a task that came in by itself (done: manual)" || fail "intake manual done: $(grep status: "$ITC")"
@@ -2691,9 +2731,9 @@ hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name
 SETOUT="$(CLAUDE_CODE_SESSION_ID=sess-x "$HQ" set "$IT" status=done 2>&1 || true)"; echo "$SETOUT" | grep -q "the user closes it" && ! grep -q "^status: done" "$ITC" && ok "…nor hq set from inside a session" || fail "intake hq set guard"
 "$HQ" set "$IT" status=done >/dev/null
 echo "2020-01-01T00:00:00Z" > "$IK/events"; echo def > "$IK/head"
-ik intake --claude "$IK/claude" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and not asked again since (new commits or not): no new task" || fail "intake closed not asked"
+ik intake --claude "$IKC" | tail -1 | grep -q "0 new tasks" && ok "intake: closed, and not asked again since (new commits or not): no new task" || fail "intake closed not asked"
 python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))' >> "$IK/events"
-IT2="$(ik intake --claude "$IK/claude" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["made"][0]["task"])')"
+IT2="$(ik intake --claude "$IKC" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["made"][0]["task"])')"
 [ "$IT2" != "$IT" ] && ok "intake: asked again after it was closed: a new task" || fail "intake asked again"
 "$HQ" set "$IT2" intake_done=auto >/dev/null
 hook "{\"session_id\":\"abcd1234-0000-4000-8000-000000000001\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"$MSG\"}" >/dev/null
@@ -2708,22 +2748,22 @@ import json, sys
 json.dump([{"repository": {"nameWithOwner": "acme/web"}, "number": n, "title": f"PR {n}", "url": f"https://github.com/acme/web/pull/{n}",
             "author": {"login": "ann"}, "isDraft": False} for n in range(20, 25)], open(sys.argv[1], "w"))
 PY
-ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 3 new tasks (.*), 2 left for the next scan" \
-  && ik intake --claude "$IK/claude" | tail -1 | grep -q "github-review: 5 waiting, 2 new tasks" && ok "intake: at most 3 new tasks a scan; the rest come next time" || fail "intake cap"
+ik intake --claude "$IKC" | tail -1 | grep -q "github-review: 5 waiting, 3 new tasks (.*), 2 left for the next scan" \
+  && ik intake --claude "$IKC" | tail -1 | grep -q "github-review: 5 waiting, 2 new tasks" && ok "intake: at most 3 new tasks a scan; the rest come next time" || fail "intake cap"
 IC="$("$HQ" intake status --json | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["recent"] if t["status"]!="done"][0])')"
 ICN="$("$HQ" continue "$IC" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["to"])')"
 grep -q '^intake_key: acme/web#' "$T"/root/tasks/$ICN-*/TASK.md && grep -q '^intake_done: manual' "$T"/root/tasks/$ICN-*/TASK.md && ok "hq continue carries what came in by itself" || fail "intake continue"
 printf '### github-review\nrepos: acme/web\nworkdir: %s/nope\nrun: yes\n' "$T" | "$HQ" project section rev intake >/dev/null
 "$HQ" project show rev --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]; assert "no folder" in c["problems"][0], c' \
   && python3 -c 'import json; print(json.dumps([{"repository":{"nameWithOwner":"acme/web"},"number":30,"title":"X","url":"https://github.com/acme/web/pull/30","author":{"login":"ann"},"isDraft":False}]))' > "$IK/search.json" \
-  && rm -f "$IK/claude-args" && ! ik intake --claude "$IK/claude" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
+  && rm -f "$IK/claude-args" && ! ik intake --claude "$IKC" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
   && IB="$(grep -l '^intake_key: acme/web#30' "$T"/root/tasks/*/TASK.md)" && grep -q '^status: waiting-on-me' "$IB" && grep -q 'could not start a background session: no folder to run in' "$IB" \
   && grep -q 'ann asked you to review https://github.com/acme/web/pull/30 (feat-30 → main)' "$IB" \
   && ok "intake: a workdir written wrong is flagged; no session starts anywhere else, the task (default goal) waits on you" || fail "intake bad workdir"
 printf '### github-review\nrepos: *\nworkdir: %s\nrun: yes\npermissions: review\n' "$T/work-rev" | "$HQ" project section rev intake >/dev/null
 "$HQ" project show rev --json | python3 -c 'import json,sys; c=json.load(sys.stdin)["intake"]["github-review"]; assert c["permissions"]=="review" and any(p.startswith("repos: *") for p in c["problems"]), c' \
   && python3 -c 'import json; print(json.dumps([{"repository":{"nameWithOwner":"zed/x"},"number":31,"title":"X","url":"https://github.com/zed/x/pull/31","author":{"login":"eve"},"isDraft":False}]))' > "$IK/search.json" \
-  && rm -f "$IK/claude-args" && ! ik intake --claude "$IK/claude" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
+  && rm -f "$IK/claude-args" && ! ik intake --claude "$IKC" >/dev/null 2>&1 && [ ! -f "$IK/claude-args" ] \
   && grep -q 'repos: \* with permissions: review' "$(grep -l '^intake_key: zed/x#31' "$T"/root/tasks/*/TASK.md)" \
   && ok "intake: repos: * with permissions: review is flagged, and no session starts — anyone could start one" || fail "intake any repo review"
 "$HQ" project set rev auto= >/dev/null

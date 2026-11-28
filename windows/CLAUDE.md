@@ -242,14 +242,16 @@ npx electron .
   another session runs from it holds files open (EBUSY halfway leaves it gutted - `electron`
   down to `dist\`). `uninstall.ps1` undoes an install.
 - `.github/workflows/windows.yml` builds, smoke-tests (with only the bundle's DLLs on PATH),
-  packages, renders a PNG, and uploads `ClaudePet-windows`. Keep it green.
+  packages, renders a PNG, and uploads `ClaudePet-windows`; its `hq-tests` job runs
+  `hq/tests/test_hq.sh` in Git Bash. Keep it green.
 
 ## Rules
 
 - **The Mac must not change.** Windows code goes behind `#if os(Windows)` /
-  `#if !canImport(Darwin)`; Mac code paths stay byte-for-byte the same. The Mac tests
-  (`swift run ClaudePetTests`, `hq/tests/test_hq.sh`) can't run here: the macOS CI job runs them
-  on every push — wait for it to be green, and say in the PR when a change touches shared code.
+  `#if !canImport(Darwin)`; Mac code paths stay byte-for-byte the same. `swift run ClaudePetTests`
+  can't run here, and `hq/tests/test_hq.sh` passing here doesn't show it passes on the Mac: the
+  macOS CI job runs both on every push — wait for it to be green, and say in the PR when a change
+  touches shared code.
 - Before every push: `gh pr view 156 --json state` — the user merges fast; never push to a
   merged branch. If the user wants it merged, they merge; you don't.
 - After a meaningful batch, have a subagent review the diff; report findings to the user (no
@@ -302,10 +304,14 @@ npx electron .
   (400), as on the Mac.
 - `PET_SHOT_JS` can drive preload.js: a `MouseEvent` dispatched on `window` from the page reaches
   its listeners (how the hover card was checked without a mouse).
-- `hq/tests/test_hq.sh` runs in Git Bash (`py` on PATH): 587 pass, 68 fail, every one from the
-  test side, not hq: paths compared as `C:/...` strings where hq answers `C:\...`, fake `claude`
-  / `gh` / `security` written as sh scripts (python on Windows can't run them: WinError 193), and
-  symlinks (Git Bash copies). It takes ~5 minutes. Not in Windows CI yet.
+- `hq/tests/test_hq.sh` runs in Git Bash (`py` on PATH) in ~5 minutes. Writing a case for it:
+  hq answers paths as `C:\...` (`C:\\...` in JSON and on a card) where the test writes `C:/...`
+  — compare through `wp` / `slashed` / `jslashed` (`card` already does); a dir put on `PATH`
+  goes through `pd` (`C:/x` has a colon); a fake `gh` / `claude` / `security` is an sh script
+  made runnable with `fake_exe` (Windows runs only an `.exe` by bare name, WinError 193 on a
+  script; pass `$(exe_of FILE)` where a path is given); `ln -s` needs `can_symlink` (Git Bash
+  makes a real link only with Developer Mode or as admin, as on CI; else the case is skipped);
+  and no `:` in a file name.
 - Windows PowerShell 5.1's `Start-Process -PassThru` reports an empty `ExitCode` after
   `WaitForExit(ms)` unless `.Handle` was read right after the start.
 - Python's `os.kill(pid, 0)` on Windows sends CTRL_C_EVENT (0) to the process group, and `$$`
