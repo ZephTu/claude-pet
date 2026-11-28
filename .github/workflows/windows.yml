@@ -10,6 +10,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  # hq's end-to-end test in Git Bash with a Windows Python, as on the Mac's ci.yml. It needs nothing
+  # built, so it is a job of its own. The runner is an admin: the symlink cases run here too.
+  # Python is the runner's own, as the test finds it (`py -3`, else `python`).
+  hq-tests:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # As in ci.yml: the tests read older shipped agent templates from history (`git show`).
+          fetch-depth: 0
+      - name: HQ tests
+        shell: bash
+        run: ./hq/tests/test_hq.sh
+
   bundle:
     runs-on: windows-latest
     steps:
