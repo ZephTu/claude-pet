@@ -77,8 +77,15 @@ task cards are kept.
   announced when it wakes); **Keep List Open**; Unmute All while something is muted; show / hide
   and back to the corner. Under **Settings**: launch at login, clicking a session opens (its
   terminal or its task), **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once**
-  (1–3) for finish notices, **Character** (Cat or Cultivator), language, and the log. The
-  settings are kept across restarts; a nap is not, as on the Mac.
+  (1–3) for finish notices, **Character** (Cat or Cultivator), language, **Connection
+  Status…** and the log. The settings are kept across restarts; a nap is not, as on the Mac.
+- **Connection Status…** checks what the pet depends on: Claude Code and its version, the
+  hooks in `settings.json`, the last event, sessions running versus reporting, which terminals
+  a row can jump to (and the last jump that failed), where the quota comes from, and the
+  pet's state files. **Copy** puts a summary on the clipboard, with your home folder as `~`,
+  to paste into an issue. When the install is broken (hooks missing, `pet-emit.exe` gone, or the
+  pet's folder not writable), a ⚠ line at the top of the tray menu opens it, and the cat says
+  so once.
 - From the session list:
   - **Allow** or **Deny** a permission prompt.
   - Read finish notices and the **Finished** group.
@@ -161,6 +168,7 @@ be removed there.
   Orca's variables. Its sessions then show as that Orca tab. Start Windows Terminal from the
   Start menu instead.
 - **Restart sessions** that were already open when you installed.
+- **If the cat shows no sessions,** open tray → Settings → **Connection Status…** first.
 - **If the cat doesn't start, or the board doesn't open,** the log is at
   `%APPDATA%\ClaudePet\pet.log` (tray → the log).
 

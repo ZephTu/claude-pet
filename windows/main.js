@@ -7,7 +7,7 @@
 // part: click-through outside the cat and the panel, drag to move, click to open the list.
 "use strict";
 
-const { app, BrowserWindow, protocol, ipcMain, screen, Tray, Menu, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, protocol, ipcMain, screen, Tray, Menu, nativeImage, shell, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -169,6 +169,8 @@ function createWindow() {
     run(`window.setMaxNotices(${noticeCount()});`);
     win.webContents.send("pinned", keepListOpen());
     if (keepListOpen()) openPinnedList();
+    // As the Mac's onReady: a broken install is said once (checkProblem).
+    checkProblem();
     // WKWebView draws a thin overlay scrollbar; Chromium on Windows a wide grey one that eats
     // into the list. Made thin here, leaving the Mac's page as it is.
     win.webContents.insertCSS(
@@ -184,11 +186,14 @@ function createWindow() {
     // quit — how CI and a Mac without screen-capture permission check what the window draws.
     // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board);
     // PET_SHOT_BOARD=T-123: opened at that task, as a click on a session bound to it does.
+    // PET_SHOT_HEALTH=1: the connection report's window (tray → Connection Status…).
     if (process.env.PET_SHOT) {
       if (process.env.PET_SHOT_BOARD) openBoard(/^T-\d+$/.test(process.env.PET_SHOT_BOARD) ? process.env.PET_SHOT_BOARD : "");
+      if (process.env.PET_SHOT_HEALTH) showHealth();
       setTimeout(async () => {
         try {
-          const shot = process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
+          const shot = process.env.PET_SHOT_HEALTH && healthWin ? healthWin
+            : process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
           if (process.env.PET_SHOT_JS) await shot.webContents.executeJavaScript(process.env.PET_SHOT_JS);
           await new Promise((r) => setTimeout(r, 800));
           const img = await shot.webContents.capturePage();
@@ -681,6 +686,119 @@ function startWatcher() {
   });
 }
 
+// ------------------------------------------------------------------ connection status
+// The Mac's HealthCollector / HealthWindow: `pet-emit --health` runs the checks, health.html shows
+// them in a small frameless window beside the pet. `--quick` (hooks missing, pet-emit gone, nowhere
+// to write) decides the tray's ⚠ item and the one line the cat says about it.
+
+const PROBLEM_EVERY = 60 * 1000;
+let healthWin = null;
+let healthDoc = null;           // the report on show, for Copy
+let lastJumpFailure = "";
+let problem = null;             // --quick's problem, or null
+let mentionedProblem = null;    // its key once the cat said it
+
+/** pet-emit --health [args], parsed; null when it did not run or said nothing usable. */
+function healthReport(args) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(PET_EMIT)) return resolve(null);
+    execFile(PET_EMIT, ["--health", ...args], { windowsHide: true, timeout: 20000, env: emitEnv() }, (err, out) => {
+      if (err) { log("pet-emit --health failed:", err.message.trim()); return resolve(null); }
+      try { resolve(JSON.parse(String(out))); } catch (e) { log("pet-emit --health:", e.message); resolve(null); }
+    });
+  });
+}
+
+/** WindowsJump's own words for why the jump failed (pet-emit's `fail`), else the exec error's. */
+function jumpFailure(err, stderr) {
+  const line = String(stderr || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop()
+    || (err.killed ? "timed out" : err.message.trim().split(/\r?\n/)[0]);
+  return line.replace(/^pet-emit:\s*/, "").slice(0, 200);
+}
+
+/** The quick check: rebuilds the tray when the problem changes, and (unless `say` is false) has
+ * the cat say a new one once, as the Mac's mentionProblem. Once fixed, it is said again if it
+ * comes back. */
+async function checkProblem({ say = true } = {}) {
+  const doc = await healthReport(["--quick"]);
+  if (!doc) return;
+  const p = doc.problem && doc.problem.key ? doc.problem : null;
+  const changed = JSON.stringify(p) !== JSON.stringify(problem);
+  problem = p;
+  if (changed) buildTray();
+  if (!p) { mentionedProblem = null; return; }
+  if (!say || paused || mentionedProblem === p.key) return;
+  mentionedProblem = p.key;
+  const zh = language() === "zh";
+  const text = zh ? `${p.name}：${p.detail} — 右键点我看详情` : `${p.name}: ${p.detail} — right-click me for details`;
+  run(`window.say(${js(text)}, 12000, ${js(p.name)}, "warn");`);
+}
+
+/** Beside the pet, as HealthWindow.show(near:): to its left, else its right, on its screen. */
+function placeHealth(height) {
+  if (!healthWin || !win) return;
+  const pet = win.getBounds();
+  const area = screen.getDisplayMatching(pet).workArea;
+  const width = healthWin.getBounds().width;
+  let x = pet.x - width - 12;
+  if (x < area.x) x = pet.x + pet.width + 12;
+  x = Math.min(Math.max(x, area.x + 8), area.x + area.width - width - 8);
+  let y = Math.round(pet.y + pet.height / 2 - height / 2);
+  y = Math.min(Math.max(y, area.y + 8), area.y + area.height - height - 8);
+  healthWin.setBounds({ x, y, width, height });
+}
+
+/** The report, run afresh each time it is opened (as the Mac: `claude --version` is not run on a
+ * timer). Shown without taking the keyboard from what the user was typing in; a click on it
+ * gives it the keyboard, and then Esc closes it. */
+function showHealth() {
+  mentionedProblem = null;
+  if (!healthWin) {
+    healthWin = new BrowserWindow({
+      width: 362, height: 120, show: false, frame: false, transparent: true, resizable: false,
+      skipTaskbar: true, alwaysOnTop: true, fullscreenable: false, maximizable: false, minimizable: false,
+      hasShadow: false, backgroundColor: "#00000000", title: "Claude Pet",
+      webPreferences: {
+        preload: path.join(__dirname, "health-preload.js"),
+        contextIsolation: true,
+        additionalArguments: ["--pet-lang=" + language()],
+      },
+    });
+    healthWin.setAlwaysOnTop(true, "floating");
+    healthWin.removeMenu();
+    const wc = healthWin.webContents;
+    wc.setWindowOpenHandler(() => ({ action: "deny" }));
+    wc.on("will-navigate", (e) => e.preventDefault());
+    healthWin.on("closed", () => { healthWin = null; healthDoc = null; });
+    healthWin.loadFile(path.join(__dirname, "health.html"));
+  }
+  healthDoc = null;
+  const target = healthWin;
+  healthReport(lastJumpFailure ? ["--jump-failure", lastJumpFailure] : []).then((doc) => {
+    if (healthWin !== target) return;
+    healthDoc = doc;
+    const send = () => target.webContents.executeJavaScript(`window.showHealth(${js(doc || {})});`).catch(() => {});
+    if (target.webContents.isLoading()) target.webContents.once("did-finish-load", send);
+    else send();
+  });
+  // Already up: brought forward. New: shown by its first "fit", with "Checking…" until the
+  // report is in (Claude Code's --version takes a moment).
+  if (healthWin.isVisible()) healthWin.showInactive();
+}
+
+ipcMain.on("health", (e, m) => {
+  if (!healthWin || e.sender !== healthWin.webContents || !m) return;
+  if (m.op === "copy") {
+    if (healthDoc && typeof healthDoc.summary === "string") clipboard.writeText(healthDoc.summary);
+  } else if (m.op === "close") {
+    healthWin.close();
+  } else if (m.op === "fit") {
+    const height = Math.min(Math.max(Math.ceil(m.height) + 2, 60), 900);
+    placeHealth(height);
+    if (!healthWin.isVisible()) healthWin.showInactive();
+  }
+});
+
 const jumping = new Set();
 
 /** What preload.js found under a click in the panel (window.hitRow). */
@@ -747,6 +865,8 @@ function jump(sessionId) {
   jumping.add(sessionId);
   execFile(PET_EMIT, ["--jump", sessionId], { windowsHide: true, timeout: 15000 }, (err, _out, stderr) => {
     jumping.delete(sessionId);
+    // The connection report's "Terminal jump" says the last failure until a jump works.
+    lastJumpFailure = err ? jumpFailure(err, stderr) : "";
     if (err) log("jump failed:", err.message.trim());
     else if (stderr) log("jump:", String(stderr).trim());
   });
@@ -841,6 +961,11 @@ function buildTray() {
   // Laid out as the Mac's PetMenu: what gets reached for during a day on the first level, what
   // is set once under Settings.
   tray.setContextMenu(Menu.buildFromTemplate([
+    // As the Mac's PetMenu: the first thing wrong with the install, only while there is one.
+    ...(problem ? [
+      { label: zh ? `⚠ ${problem.name}：${problem.label}…` : `⚠ ${problem.name}: ${problem.label}…`, click: () => showHealth() },
+      { type: "separator" },
+    ] : []),
     { label: zh ? "任务看板…" : "Task Board…", click: () => openBoard() },
     { type: "separator" },
     { label: paused ? (zh ? "醒来" : "Wake Up") : (zh ? "小睡一会" : "Take a Nap"), click: togglePause },
@@ -884,6 +1009,7 @@ function buildTray() {
         { label: "中文", type: "radio", checked: zh, click: () => setLang("zh") },
       ] },
       { type: "separator" },
+      { label: zh ? "连接状态…" : "Connection Status…", click: () => showHealth() },
       { label: zh ? "打开日志" : "Open the log", click: () => shell.openPath(LOG) },
     ] },
     { type: "separator" },
@@ -953,7 +1079,14 @@ function ipcHush() {
 ipcMain.on("hush", ipcHush);
 // Only layout reports carry `panel` (the page also posts `{skinFailed}` on this channel).
 ipcMain.on("layout", (_e, m) => { if (m && "panel" in m) tellWatcher("list", !!m.panel); });
-ipcMain.on("menu", () => { if (tray) tray.popUpContextMenu(); });
+// The Mac checks for a problem on every right-click; the tray icon's own menu has no such moment,
+// so it rides on checkProblem's timer.
+ipcMain.on("menu", () => {
+  let shown = false;
+  const show = () => { if (!shown && tray) { shown = true; tray.popUpContextMenu(); } };
+  checkProblem({ say: false }).then(show);
+  setTimeout(show, 1500);
+});
 
 let quitting = false;
 app.on("before-quit", () => { quitting = true; if (watcher) watcher.kill(); });
@@ -967,6 +1100,7 @@ if (!app.requestSingleInstanceLock()) {
     buildTray();
     startWatcher();
     phoneAccess.startIfEnabled();
+    setInterval(() => checkProblem(), PROBLEM_EVERY);
   });
   app.on("window-all-closed", () => app.quit());
 }

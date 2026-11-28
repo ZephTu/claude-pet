@@ -99,16 +99,19 @@ enum PetHealth {
         return HealthReport.hooks(installed: installed, expected: SettingsPatch.events.count, binaryExists: binaryOK)
     }
 
-    /// How many hook events carry the pet's command, and whether the file they run is there. The
-    /// command names `$HOME/.claude/pet/pet-emit` (Git Bash finds the .exe), whatever PET_HOME says.
+    /// How many hook events carry the pet's command, and whether the file they run is there (in
+    /// the pet's folder, as the Mac's HealthCollector looks; Git Bash finds the .exe). settings.json
+    /// is where Claude Code reads it: CLAUDE_CONFIG_DIR, else ~\.claude.
     static func hookState() -> (installed: Int, binaryOK: Bool) {
-        let claude = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude")
         #if os(Windows)
-        let binary = claude.appending(path: "pet/pet-emit.exe")
+        let binary = HookEmit.baseDirectory.appending(path: "pet-emit.exe")
         #else
-        let binary = claude.appending(path: "pet/pet-emit")
+        let binary = HookEmit.baseDirectory.appending(path: "pet-emit")
         #endif
         let binaryOK = FileManager.default.fileExists(atPath: binary.path)
+        let claude = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+            .map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude")
         guard let data = try? Data(contentsOf: claude.appending(path: "settings.json")),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hooks = root["hooks"] as? [String: Any]

@@ -311,6 +311,24 @@ Check '--board send: /model alone is refused' ([bool](Board '{"op":"send","sessi
 Check '--board interrupt: a background session has no terminal' ([bool](Board '{"op":"interrupt","session":"pl1","bg":"abcdef12"}').error) 'True'
 Check '--board stop-session: not a session id' ([bool](Board '{"op":"stop-session","session":"pl1"}').error) 'True'
 
+# The connection report (pet-emit --health, PetHealth). settings.json from CLAUDE_CONFIG_DIR, so a
+# broken install can be staged; pet-emit.exe is looked for in PET_HOME.
+$cfg = Join-Path $home_ 'claude-config'
+New-Item -ItemType Directory -Force $cfg | Out-Null
+$env:CLAUDE_CONFIG_DIR = $cfg
+$hook = '{"hooks":[{"type":"command","command":"\"$HOME/.claude/pet/pet-emit\""}]}'
+[IO.File]::WriteAllText((Join-Path $cfg 'settings.json'), "{""hooks"":{""Stop"":[$hook],""SessionStart"":[$hook]}}")
+$h = & $Emit --health | ConvertFrom-Json
+Check '--health: the seven checks, in order' (($h.checks | ForEach-Object { $_.key }) -join ',') 'claudeCode,hooks,events,sessions,terminals,quota,stateFiles'
+Check '--health: a summary to copy' ([bool]$h.summary) 'True'
+Check '--health --quick: hooks pointing at a missing pet-emit' (& $Emit --health --quick | ConvertFrom-Json).problem.key 'hooks'
+New-Item -ItemType File -Force (Join-Path $home_ 'pet-emit.exe') | Out-Null
+Check '--health --quick: two of the hooks' ((& $Emit --health --quick | ConvertFrom-Json).problem.status) 'needsAttention'
+Remove-Item (Join-Path $cfg 'settings.json')
+Check '--health --quick: none installed is not a problem' (& $Emit --health --quick) '{}'
+Check '--health: none installed is not set up' ((& $Emit --health | ConvertFrom-Json).checks | Where-Object { $_.key -eq 'hooks' }).status 'notConfigured'
+Remove-Item Env:CLAUDE_CONFIG_DIR
+
 Remove-Item $home_ -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed) { Write-Host "$failed failed"; exit 1 }
 Write-Host 'all passed'

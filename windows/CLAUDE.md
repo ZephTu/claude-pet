@@ -21,7 +21,7 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   `hitRow`, rest on a row for its detail card. Tray menu (laid out as PetMenu):
   Task Board, nap, Keep List Open, Unmute All, show/hide, back to the corner, and Settings: launch
   at login (installed app only; a `ClaudePet` value under HKCU `...\Run`), click target, bubble
-  duration / count, character, language, log; quit.
+  duration / count, character, language, Connection Status, log; quit.
 - The Mac's menu settings are prefs.json keys: `keepListOpen` (main.js sends `pinned` to
   preload.js, which then puts the list up instead of toggling it; `closePanel` is WebBridge's, a
   no-op while pinned), `noticeHoldSeconds` (overrides `--watch`'s `holdMs`), `noticeCount`
@@ -66,6 +66,20 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   the rest in memory. Away and back: `GetLastInputInfo` (idle for AwayReport.awayAfter, then
   input), finishes counted from `events/`. Names in the lines (and in the finish notices) are
   the rows' names.
+- Connection status (`PetHealth.swift`, the Mac's HealthCollector over Windows' paths, judged
+  by the shared HealthReport): `pet-emit --health [--jump-failure TEXT]` prints
+  `{checks: [{key, name, status, label, detail}], summary}`; main.js shows it in `health.html`
+  (`health-preload.js`: copy / close / fit), a frameless window beside the pet shown with
+  `showInactive` (Esc works once it is clicked). Copy writes the summary main.js holds, not the
+  page's. Claude Code is found as board.js's findClaude does; Claude Code processes are counted
+  by `ProcessProbe.claudePIDs` (one snapshot, a claude under a claude not counted). settings.json
+  is read from `CLAUDE_CONFIG_DIR` or `~\.claude`, `pet-emit.exe` looked for in the pet's folder
+  (PET_HOME): Foundation's home here ignores USERPROFILE, so these two are how a test stages a
+  broken install. The last failed jump is main.js's (`jumpFailure`: WindowsJump's `fail` line).
+  `--health --quick` (quickProblemKeyed: hooks, a writable folder; ~40 ms) runs when the pet's
+  page loads, every minute, and before the cat's right-click menu: a problem puts
+  "⚠ name: status…" at the top of the tray menu, and the cat says it once per problem
+  (`window.say`, `warn`); fixed, it may be said again if it comes back.
 - main.js injects a thin scrollbar: Chromium's default on Windows is a wide grey bar.
 - main.js skips a `setSessions` payload it just drew (as WebBridge), and after each redraw
   preload.js re-sends the pointer to `setHoverAt`: rows' ages change every second here, and a
@@ -125,6 +139,7 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   empty; the secretary and jobs answer "not on Windows yet". The board window gets no push
   (BoardEvents): the page polls; phones get one (below).
   Renders: `PET_SHOT_BOARD=1` shoots the board window (`=T-123`: opened at that task);
+  `PET_SHOT_HEALTH=1` shoots the connection report's window.
   `PET_HQ_HOME=<dir>` points board.js (and the hq it runs, as USERPROFILE) at a scratch home
   with its own `hq/install.sh`.
 - Prompts on the board: the `pet` read's `dots` are the `--watch` rows filtered by
@@ -341,7 +356,8 @@ npx electron .
 Not checked yet on the machine (built, smoke-tested or rendered only): launch at login; finish
 notices (and clicking one); the cat speaking up with real sessions (the away-and-back line,
 the flashes; quota, context-long and struggling lines were checked against a scratch
-`PET_HOME`); the hover card; the Finished group, its ✓ / Clear and row clicks,
+`PET_HOME`); the tray's ⚠ item and Connection Status… from the real tray (the window, Copy and
+the cat's line were rendered, with a staged broken install); the hover card; the Finished group, its ✓ / Clear and row clicks,
 scrolling the list with the wheel; snooze (the menu) and mute, Unmute All; the quota readout
 with a real claude-hud reading; the taskbar on another edge.
 

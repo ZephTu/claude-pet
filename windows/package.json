@@ -23,6 +23,8 @@
       "board-preload.js",
       "remote.js",
       "board-events.js",
+      "health.html",
+      "health-preload.js",
       "package.json"
     ],
     "extraResources": [
