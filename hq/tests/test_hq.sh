@@ -495,7 +495,7 @@ grep -q -- "- \[x\] @me first thing" "$T"/root/tasks/"$TS"-*/TASK.md && grep -q 
 rc=0; "$HQ" todo "$TS" 2 done --text "no such todo" 2>/dev/null || rc=$?
 [ "$rc" != 0 ] && ok "todo refuses when its text is gone"
 TT="$("$HQ" new "tilde dir" --no-focus --workdir "~/somewhere" | head -1)"
-grep -q "$HOME/somewhere" "$T"/root/tasks/"$TT"-*/TASK.md && ! grep -q '/~/' "$T"/root/tasks/"$TT"-*/TASK.md && ok "workdir with ~ is expanded"
+jslashed < "$(ls "$T"/root/tasks/"$TT"-*/TASK.md)" | grep -q "$HOME/somewhere" && ! jslashed < "$(ls "$T"/root/tasks/"$TT"-*/TASK.md)" | grep -q '/~/' && ok "workdir with ~ is expanded" || fail "workdir with ~ is expanded"
 "$HQ" focus --json | python3 -c 'import json,sys; f=json.load(sys.stdin); assert "'"$TS"'" not in f["ids"]' && ok "new --no-focus stays out of Focus"
 for i in 1 2 3 4 5 6 7 8 9 10; do "$HQ" bind T-001 --session "par-$i" >/dev/null & done; wait
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert all(f"par-{i}" in s for i in range(1,11)) and "sess-1" in s, sorted(s)' "$HOME/.claude/hq/state/sessions.json" && ok "parallel binds all survive"
@@ -2474,7 +2474,7 @@ assert o['$CT.1']['state']=='moved' and n['$NT.1']['state']=='open' and n['$NT.1
 "$HQ" board --json | python3 -c "
 import json,os,sys
 ts={x['id']:x for x in json.load(sys.stdin)['tasks']}; n=ts['$NT']; o=ts['$CT']
-assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun the two plans' and n['category']=='benchmark' and list(map(os.path.normpath, n['workdirs']))==[os.path.normpath('$T')], n
+assert n['refs']==['PR #8 https://github.com/o/r/pull/8'] and n['next']=='rerun the two plans' and n['category']=='benchmark' and n['workdirs']==[os.path.normpath('$T')], n
 assert o['status']=='done' and 'continued in $NT' in o['body'] and 'continued from $CT' in n['body'], o" && ok "links, next, category and folders carried over; the old card is done and points at the new one" || fail "continue cards"
 "$HQ" focus --json | python3 -c "import json,sys; ids=json.load(sys.stdin)['ids']; assert '$NT' in ids and '$CT' not in ids, ids" && ok "the new card takes the old one's place in Focus" || fail "focus after continue"
 c="$(hook '{"session_id":"sess-cont","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
