@@ -74,12 +74,12 @@ task cards are kept.
   window underneath, and you can drag the cat to another screen.
 - The tray icon's menu is laid out as the Mac's: Task Board…; **Quick Note…**; **Take a Nap** / **Wake Up**
   (the cat sleeps with an empty list, no notices and no badge; what finished meanwhile is not
-  announced when it wakes); **Keep List Open**; Unmute All while something is muted; show / hide
-  and back to the corner. Under **Settings**: launch at login, the two shortcuts (below),
-  clicking a session opens (its
-  terminal or its task), **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once**
-  (1–3) for finish notices, **Character** (Cat or Cultivator), language, and the log. The
-  settings are kept across restarts; a nap is not, as on the Mac.
+  announced when it wakes, a question that came up on the HQ board is); **Keep List Open**;
+  Unmute All while something is muted; show / hide and back to the corner. Under **Settings**:
+  launch at login, the two shortcuts (below), clicking a session opens (its terminal or its task),
+  **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once** (1–3) for finish notices,
+  **Character** (Cat or Cultivator), language, and the log. The settings are kept across
+  restarts; a nap is not, as on the Mac.
 - **Shortcuts**, off until you tick them under tray → **Settings** (the Mac's ⌃⌥⌘N and ⌃⌥⌘J):
   - **Ctrl+Alt+N** opens the quick-note box (also tray → **Quick Note…**), on the screen the
     pointer is on. Enter files the note into the HQ inbox, Shift+Enter starts a new line, a
@@ -94,6 +94,9 @@ task cards are kept.
 - From the session list:
   - **Allow** or **Deny** a permission prompt.
   - Read finish notices and the **Finished** group.
+  - See the questions waiting on the HQ board (the **Asks** group at the top; a click opens the
+    board at that task). They count in the badge, and a new one pops a notice, "T-012 asks: …",
+    for 25 seconds.
   - Snooze and mute sessions.
   - Rest the pointer on a row for its detail card.
 - Each row shows what it does on the Mac: the HQ task it is bound to, how many turns it has had,

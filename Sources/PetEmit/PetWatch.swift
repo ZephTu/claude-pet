@@ -11,7 +11,9 @@ import Foundation
 ///    "finished": [WebBridge's Finished rows], "dropped": unread finishes aged out (once),
 ///    "hidden": muted live sessions, "quota": [{"label", "percent", "resetsIn"}], "quotaFallback",
 ///    "usage": {"five_hour", "seven_day": {"used", "resets_at"}, "source"} while the reading is usable,
-///    "notices": [{"sessionId", "text", "emphasis", "holdMs"}], only when sessions just finished,
+///    "hqAsks": [{"id", "task", "text", "status"}] open on the HQ board (counted in the badge),
+///    "notices": [{"sessionId", "text", "emphasis", "holdMs", "kind"?, "askId"?}], only when
+///    sessions just finished or a new question came up on the HQ board ("kind": "ask"),
 ///    "say": {"text", "emphasis", "variant", "holdMs"} and "flash": {"kind", "pose", "mark"}, only
 ///    on the line where the cat speaks up or reacts (PetChatter)}
 ///
@@ -26,6 +28,7 @@ enum PetWatch {
         var quota = PetQuota()
         var rows = PetRows()
         var chatter = PetChatter()
+        var asked = AskAnnouncer()
         let shell = PetShellInput()
         shell.start()
         while true {
@@ -73,9 +76,14 @@ enum PetWatch {
                 context: extras.compactMapValues(\.context), names: names, notices: finished,
                 events: cache.events, shell: shell.current, idle: PetChatter.idleSeconds(), now: now)
             previous = settled
+            // As the Mac's announceAsks. Napping too: main.js holds those notices and says the
+            // ones still open on waking (the nap reaches us a moment late, and not at all
+            // before a restarted --watch's first tick).
+            let newAsks = asked.fresh(rows.tasks.openAsks)
 
             let line = render(state, now: now, notices: finished, unread: unread, dropped: dropped,
-                              snoozed: snoozed, usage: usage, extras: extras, spoken: spoken)
+                              snoozed: snoozed, usage: usage, extras: extras, spoken: spoken,
+                              hq: rows.tasks, newAsks: newAsks)
             if line != lastLine {
                 lastLine = line
                 // The reader went away (the shell quit or restarted us): stop quietly. The
@@ -141,14 +149,17 @@ enum PetWatch {
                        unread: [CompletionEvent] = [], dropped: Int = 0,
                        snoozed: [String: Snooze.Mark] = [:], usage: UsageSnapshot? = nil,
                        extras: [String: PetRows.Extra] = [:],
-                       spoken: PetChatter.Out = PetChatter.Out()) -> String {
+                       spoken: PetChatter.Out = PetChatter.Out(),
+                       hq: PetRows.Tasks = PetRows.Tasks(), newAsks: [PetRows.Tasks.Ask] = []) -> String {
         let sessions = state.sessions
         let phase = StateAggregator.phase(sessions)
         let finishedRows = PanelModel.completionRows(unread, live: sessions)
         // As the Mac's render: one number for "how many things want me", and the cat looks up
         // while it is not zero. A postponed wait is not counted: the user said "not now".
+        // Questions on the HQ board want an answer too (the nap's empty badge is main.js's).
         let badge = PanelModel.badge(
-            needsYou: PanelModel.needsYou(sessions).filter { !Snooze.isSnoozed($0, marks: snoozed, now: now) }.count,
+            needsYou: PanelModel.needsYou(sessions).filter { !Snooze.isSnoozed($0, marks: snoozed, now: now) }.count
+                + hq.openAsks.count,
             unreadFinishes: finishedRows.count)
         let look = CatSkin.look(mood: state.mood.rawValue, phase: phase, flash: "", wanted: !badge.isEmpty,
                                 blockedOn: state.waitingOn,
@@ -166,6 +177,10 @@ enum PetWatch {
             "sessions": sessions.map { row($0, now: now, snoozed: snoozed, extra: extras[$0.sessionId]) },
             "finished": finishedRows.map { finishedRow($0, live: sessions, now: now) },
             "hidden": state.hiddenCount,
+            // The list's HQ questions (WebBridge's hqAsks): a click opens the board at the task.
+            "hqAsks": hq.openAsks.map {
+                ["id": $0.id, "task": $0.task, "text": $0.text, "status": hq.statusByTask[$0.task] ?? ""]
+            },
             // What resting on the cat shows (the Mac's showQuota): meters, or this line when
             // there is no usable reading.
             "quota": Chatter.quotaRows(usage: usage, now: now).map {
@@ -185,12 +200,15 @@ enum PetWatch {
             ] as [String: Any]
         }
         // Only on the line where they happen: the shell shows each one once (window.notify).
-        if !notices.isEmpty {
-            doc["notices"] = notices.map {
-                ["sessionId": $0.sessionId, "text": $0.text, "emphasis": $0.emphasis,
-                 "holdMs": Int(Chatter.noticeHold * 1000)] as [String: Any]
-            }
+        // A new question gets 25 s, as on the Mac; a finish the tray's hold.
+        let all: [[String: Any]] = notices.map {
+            ["sessionId": $0.sessionId, "text": $0.text, "emphasis": $0.emphasis,
+             "holdMs": Int(Chatter.noticeHold * 1000)] as [String: Any]
+        } + newAsks.map {
+            ["sessionId": $0.session, "text": AskAnnouncer.text($0), "emphasis": $0.task,
+             "holdMs": 25_000, "kind": "ask", "askId": $0.id] as [String: Any]
         }
+        if !all.isEmpty { doc["notices"] = all }
         // The cat speaking up (window.say) and its brief reactions (window.flash, as WebBridge's
         // flash: a pose only for "done", the glyph for "trouble"): only on their line.
         if let say = spoken.say {
@@ -203,6 +221,25 @@ enum PetWatch {
         }
         guard let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The Mac's announceAsks: which open questions are new since the last call. The first call
+    /// only records what is there (a restart must not replay old questions), and every ask ever
+    /// announced is remembered: one put off with "Later" comes back the next day, not as new.
+    struct AskAnnouncer {
+        private var announced: Set<String>?
+
+        mutating func fresh(_ asks: [PetRows.Tasks.Ask]) -> [PetRows.Tasks.Ask] {
+            let ids = Set(asks.map(\.id))
+            guard let already = announced else { announced = ids; return [] }
+            announced = already.union(ids)
+            return asks.filter { !already.contains($0.id) }
+        }
+
+        static func text(_ ask: PetRows.Tasks.Ask) -> String {
+            let text = ask.text.count > 90 ? String(ask.text.prefix(90)) + "…" : ask.text
+            return L("\(ask.task) asks: \(text)", "\(ask.task) 在问：\(text)")
+        }
     }
 
     /// Terminals `pet-emit --jump` can bring up (WindowsJump): only these rows are clickable.
