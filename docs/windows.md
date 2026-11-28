@@ -72,13 +72,25 @@ task cards are kept.
 
 - The cat sits in the corner of the screen, always on top. Clicks beside it go through to the
   window underneath, and you can drag the cat to another screen.
-- The tray icon's menu is laid out as the Mac's: Task Board…; **Take a Nap** / **Wake Up**
+- The tray icon's menu is laid out as the Mac's: Task Board…; **Quick Note…**; **Take a Nap** / **Wake Up**
   (the cat sleeps with an empty list, no notices and no badge; what finished meanwhile is not
   announced when it wakes); **Keep List Open**; Unmute All while something is muted; show / hide
-  and back to the corner. Under **Settings**: launch at login, clicking a session opens (its
+  and back to the corner. Under **Settings**: launch at login, the two shortcuts (below),
+  clicking a session opens (its
   terminal or its task), **Bubble Duration** (10 / 30 / 60 seconds) and **Bubbles at Once**
   (1–3) for finish notices, **Character** (Cat or Cultivator), language, and the log. The
   settings are kept across restarts; a nap is not, as on the Mac.
+- **Shortcuts**, off until you tick them under tray → **Settings** (the Mac's ⌃⌥⌘N and ⌃⌥⌘J):
+  - **Ctrl+Alt+N** opens the quick-note box (also tray → **Quick Note…**), on the screen the
+    pointer is on. Enter files the note into the HQ inbox, Shift+Enter starts a new line, a
+    pasted screenshot shows as a thumbnail (✕ takes it out), Esc closes. The cat then says
+    where the note went, or that it waits in Needs you. A note that couldn't be filed comes
+    back in the box.
+  - **Ctrl+Alt+J** goes to the session that has waited on you longest (snoozed ones are
+    skipped), where a click on it goes: its terminal or its task. With none, the cat says so.
+  - A shortcut another app already holds stays unticked, and the cat says it is taken. On
+    keyboard layouts where Ctrl+Alt is AltGr (Polish, say), AltGr+N / AltGr+J stop typing
+    their character while it is on.
 - From the session list:
   - **Allow** or **Deny** a permission prompt.
   - Read finish notices and the **Finished** group.
@@ -138,7 +150,6 @@ be removed there.
 - **The secretary** and **Scheduled jobs.** The board answers "not on Windows yet".
 - **Feeds** (Zulip, Jira) and **ticking finished todos.** Their credentials live in the macOS
   Keychain.
-- **The quick-note shortcut** (⌃⌥⌘N).
 - **The cat's remarks**, such as quota warnings and "this context is getting long".
 - **Resume** always opens a new tab. It doesn't reuse an idle one.
 - **VS Code's terminal**: sessions there get no ↗.

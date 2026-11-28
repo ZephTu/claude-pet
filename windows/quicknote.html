@@ -1,0 +1,133 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: file:">
+<title>Quick note</title>
+<!-- The quick-note box (Ctrl+Alt+N, or tray → Quick Note…): the Mac's QuickNotePanel. main.js
+     files what is typed (hq inbox add, then sort) and the pet says where it went. -->
+<style>
+:root {
+  --panel: #21252e; --line: #323845; --text: #e8ebf1; --faint: #6e7688;
+  --accent: #f2a541; --red: #ef6f5a; color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --panel: #ffffff; --line: #dfe2e9; --text: #1b2030; --faint: #8b92a3;
+    --accent: #c47a0c; --red: #d24a33; color-scheme: light; }
+}
+* { box-sizing: border-box; }
+/* The window is transparent and 20px larger all round: room for the card's shadow. */
+html, body { margin: 0; background: transparent; overflow: hidden;
+  font: 14px "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif; color: var(--text); }
+.card { margin: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.28); padding: 10px 14px 9px;  /* stays inside the 20px margin */ -webkit-app-region: drag; }
+.card:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--faint); margin-bottom: 4px; }
+.top b { color: var(--accent); font-weight: 600; letter-spacing: .04em; }
+.top .x { margin-left: auto; -webkit-app-region: no-drag; border: 0; background: none; color: var(--faint);
+  font-size: 14px; cursor: pointer; padding: 0 4px; border-radius: 4px; }
+.top .x:hover { color: var(--text); background: var(--line); }
+textarea { -webkit-app-region: no-drag; display: block; width: 100%; resize: none; border: 0; outline: 0;
+  background: transparent; color: var(--text); font-family: inherit; font-size: 15px; line-height: 1.5;
+  min-height: 46px; max-height: 180px; padding: 2px 0; }
+textarea::placeholder { color: var(--faint); }
+.imgs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 2px; -webkit-app-region: no-drag; }
+.imgs:empty { display: none; }
+.thumb { position: relative; width: 56px; height: 42px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb button { position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; border-radius: 8px; border: 0;
+  background: rgba(0,0,0,.6); color: #fff; font-size: 10px; line-height: 16px; padding: 0; cursor: pointer; display: none; }
+.thumb:hover button { display: block; }
+.hint { font-size: 11.5px; color: var(--faint); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hint.err { color: var(--red); }
+</style></head>
+<body>
+<div class="card" id="card">
+  <div class="top"><b id="title"></b><span id="sub"></span><button class="x" id="x">✕</button></div>
+  <textarea id="t" rows="2" spellcheck="false"></textarea>
+  <div class="imgs" id="imgs"></div>
+  <div class="hint" id="hint"></div>
+</div>
+<script>
+"use strict";
+const note = window.quickNote;
+const zh = new URLSearchParams(location.search).get("lang") === "zh";
+const L = (en, cn) => (zh ? cn : en);
+const t = document.getElementById("t"), hint = document.getElementById("hint"), imgs = document.getElementById("imgs");
+document.documentElement.lang = zh ? "zh" : "en";
+document.title = L("Quick note", "记一笔");
+document.getElementById("title").textContent = L("Quick note", "记一笔");
+document.getElementById("sub").textContent = L("into the HQ inbox, sorted for you", "放进 HQ inbox，自动分拣");
+document.getElementById("x").title = L("Close (Esc)", "关闭 (Esc)");
+t.placeholder = L("Whatever's on your mind: a line, a link, or paste a screenshot",
+  "想到什么写什么：一句话、一个链接，或者粘贴一张截图");
+
+/** Pasted images, saved as files at once (BoardWindow.saveImage): { path, src }. */
+let images = [];
+let error = "";
+
+function fit() {
+  t.style.height = "auto";
+  t.style.height = Math.min(180, t.scrollHeight) + "px";
+  note.size(document.getElementById("card").getBoundingClientRect().height + 40);
+}
+function updateHint() {
+  hint.classList.toggle("err", !!error);
+  hint.textContent = error
+    ? L(`Couldn't note that: ${error}`, `没记下：${error}`)
+    : [L("Enter files it", "Enter 记下"), L("Shift+Enter: new line", "Shift+Enter 换行"),
+       L("paste a screenshot", "可粘贴截图"), L("Esc closes", "Esc 关闭")].join(" · ");
+}
+function drawImages() {
+  imgs.textContent = "";
+  images.forEach((img, i) => {
+    const d = document.createElement("div");
+    d.className = "thumb";
+    const pic = document.createElement("img");
+    pic.src = img.src;
+    const rm = document.createElement("button");
+    rm.textContent = "✕";
+    rm.title = L("Remove", "移除");
+    rm.onclick = () => { images.splice(i, 1); drawImages(); t.focus(); };
+    d.append(pic, rm);
+    imgs.appendChild(d);
+  });
+  fit();
+}
+function submit() {
+  const text = t.value.trim();
+  if (!text && !images.length) return;
+  note.submit(text, images.map((i) => i.path));
+  t.value = ""; images = []; error = "";
+  drawImages(); updateHint();
+}
+t.addEventListener("input", fit);
+t.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); note.close(); }
+  else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+});
+t.addEventListener("paste", (e) => {
+  const files = [...e.clipboardData.items].filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (!files.length) return;
+  e.preventDefault();
+  for (const it of files) {
+    const r = new FileReader();
+    r.onload = async () => {
+      const saved = await note.saveImage(r.result);
+      if (saved.path) { images.push({ path: saved.path, src: r.result }); error = ""; drawImages(); }
+      else { error = saved.error || "?"; }
+      updateHint();
+    };
+    r.readAsDataURL(it.getAsFile());
+  }
+});
+document.getElementById("x").onclick = () => note.close();
+note.onShown(() => { t.focus(); fit(); });
+// A note that couldn't be filed comes back, so nothing typed is lost (QuickNotePanel.restore).
+note.onRestore(({ text, images: back, error: err }) => {
+  if (text) t.value = t.value ? t.value + "\n" + text : text;
+  for (const b of back || []) images.push(b);
+  error = err || "";
+  drawImages(); updateHint(); t.focus();
+});
+updateHint(); fit();
+</script>
+</body></html>

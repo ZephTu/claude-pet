@@ -623,7 +623,9 @@ async function perform(body, win) {
       const text = str(body, "text").trim();
       const images = Array.isArray(body.images) ? body.images.filter((i) => typeof i === "string") : [];
       if (!text && !images.length) return { error: L("empty note", "内容是空的") };
-      return hq(["inbox", "--json", "--via=board"].concat(images.map((i) => `--image=${i}`), ["--", "add", text]));
+      // The quick-note box (main.js) files as "hotkey", as the Mac's does.
+      const via = body.via === "hotkey" ? "hotkey" : "board";
+      return hq(["inbox", "--json", `--via=${via}`].concat(images.map((i) => `--image=${i}`), ["--", "add", text]));
     }
     case "note-sort": {
       const claude = await findClaude();
