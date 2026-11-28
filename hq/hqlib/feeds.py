@@ -2,7 +2,7 @@
 import collections
 import contextlib
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import json
 import os
 import re
@@ -376,7 +376,7 @@ def feed_keep_raw(source, msgs):
     for m in msgs:
         by_day[dt.datetime.fromtimestamp(m.get("timestamp", 0)).date().isoformat()].append(m)
     for day, ms in by_day.items():
-        with open(os.path.join(d, f"{day}.jsonl"), "a", encoding="utf-8") as f:
+        with open(os.path.join(d, f"{day}.jsonl"), "a", encoding="utf-8", newline="\n") as f:
             for m in ms:
                 f.write(json.dumps(m, ensure_ascii=False) + "\n")
     cut = (dt.date.today() - dt.timedelta(days=FEED_KEEP_DAYS)).isoformat()

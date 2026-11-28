@@ -179,6 +179,13 @@ enum HookEmit {
             if transcript.hasPrefix("/") {
                 document["transcript"] = transcript
             }
+#if os(Windows)
+            // C:\Users\…\.claude\projects\…\<session>.jsonl: absolute there too. hq's Sessions
+            // column and the board read a live session's transcript from here.
+            if transcript.dropFirst().hasPrefix(":\\") || transcript.dropFirst().hasPrefix(":/") {
+                document["transcript"] = transcript
+            }
+#endif
             if let pid { document["pid"] = pid }
             if background {
                 document["background"] = true

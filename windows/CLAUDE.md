@@ -69,6 +69,16 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   shows; the mark is set again on every UIA try, since Claude Code animates its title while it
   works). conhost: the console window itself is raised. `wt` / `console` rows are clickable only
   when the session has a `pid` (Claude Code run by `node.exe` has none).
+- HQ (`hq/`, Python, shared with the Mac) runs on Windows: `hq/install.sh` from Git Bash (Claude
+  Code runs hooks and the slash commands' `~/.claude/hq/bin/hq` there too). On Windows the
+  installer finds a real Python 3.9+ (`py -3`, `python`; `python3` is usually the Store's
+  stand-in), installs the entry as `bin/hq.py` and writes `bin/hq` as a sh script that runs it
+  with `-X utf8` (the code page here is GBK) and `USERPROFILE=$HOME` (python reads USERPROFILE,
+  bash and the tests set HOME). `hqlib/compat.py`: `fcntl.flock` over `msvcrt.locking` (hq locks
+  only empty `.lock` files) and `win_pid_alive` (OpenProcess). `atomic_write` retries a replace
+  that a reader blocks. The user's task root here is `C:\Users\28332\claude-hq`, separate from
+  the Mac's. pet-emit records `transcript` for a `C:\` path too (it only took `/`-paths), so hq
+  finds a live session's transcript.
 
 ## Dev loop on Windows
 
@@ -150,6 +160,14 @@ npx electron .
   3 s): time things with the release build.
 - `PET_SHOT_JS` can drive preload.js: a `MouseEvent` dispatched on `window` from the page reaches
   its listeners (how the hover card was checked without a mouse).
+- `hq/tests/test_hq.sh` runs in Git Bash (`py` on PATH): 587 pass, 68 fail, every one from the
+  test side, not hq: paths compared as `C:/...` strings where hq answers `C:\...`, fake `claude`
+  / `gh` / `security` written as sh scripts (python on Windows can't run them: WinError 193), and
+  symlinks (Git Bash copies). It takes ~5 minutes. Not in Windows CI yet.
+- Python's `os.kill(pid, 0)` on Windows sends CTRL_C_EVENT (0) to the process group, and `$$`
+  in Git Bash is an MSYS pid (`/proc/$$/winpid` is the Windows one).
+- A Windows checkout (`core.autocrlf`) gave the `.sh` scripts CRLF, which bash can't run:
+  `.gitattributes` keeps them LF.
 - To see a PermissionRequest, the test session must be in the default permission mode
   (`claude --permission-mode default`): in `auto` mode the classifier approves the command and
   no prompt (so no hook) happens. Writes to `/tmp` are allowed without asking too.
@@ -176,6 +194,16 @@ with a real claude-hud reading; the taskbar on another edge.
 
 ## Next
 
-Backlog, roughly by value: jump to VS Code's terminal; the cat's chatter (quota warnings,
-context-long notes: Chatter.next / QuotaAlarm); scheduled jobs (`--run-job`, Task Scheduler); the HQ board on Windows (`hq` uses `fcntl` → `msvcrt`, `os.kill(pid, 0)`
-*kills* on Windows, Keychain → Credential Manager, a bundled Python).
+The HQ board on Windows, in steps (the user's order): 1. hq itself (done: CLI, hooks, /task);
+2. the board window: an Electron window on `Resources/pet/board/board.html`, a preload that
+plays `window.webkit.messageHandlers.hq` (a promise per message, as
+WKScriptMessageHandlerWithReply) and main.js doing what `BoardWindow.perform` does for the ops
+that only run `hq` (most of them), plus copy / open / jump; a tray item "Task Board..."; 3.
+answering prompts and questions from the board, launching / resuming a session in a new Windows
+Terminal tab (`wt.exe new-tab`); 4. sending text to and interrupting a session (no AppleScript
+here: look at Orca's CLI first). Later or never: scheduled jobs (`--run-job`, Task Scheduler),
+the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
+(its `start_new_session` is ignored on Windows: a job's end would not spare the session).
+
+Other backlog: jump to VS Code's terminal; the cat's chatter (quota warnings, context-long
+notes: Chatter.next / QuotaAlarm).

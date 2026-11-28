@@ -57,7 +57,7 @@ def read_asks(task_dir):
 def append_event(task_dir, event):
     event.setdefault("ts", now_iso())
     event.setdefault("seq", time.time_ns())
-    with open(asks_path(task_dir), "a", encoding="utf-8") as f:
+    with open(asks_path(task_dir), "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 

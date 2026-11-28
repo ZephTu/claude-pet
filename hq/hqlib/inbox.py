@@ -2,7 +2,7 @@
 import collections
 import contextlib
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import hashlib
 import json
 import os

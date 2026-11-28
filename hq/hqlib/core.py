@@ -1,7 +1,7 @@
 """hq core: paths and constants, small utilities, the card lock, and the hq-* blocks of a reply."""
 import contextlib
 import datetime as dt
-import fcntl
+from .compat import fcntl
 import json
 import os
 import re
@@ -15,6 +15,8 @@ STATE = os.path.join(HOME_DIR, "state", "sessions.json")
 HQ_BIN = os.path.join(HOME_DIR, "bin", "hq")
 # This copy's own hq: bin/ sits next to hqlib/ (a checkout, or the installed copy).
 HQ_EXE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "bin", "hq")
+if os.name == "nt":   # C:/Users/…/bin/hq: what Git Bash (Claude Code's shell) and python both take
+    HQ_EXE = HQ_EXE.replace("\\", "/")
 
 STATUSES = ["waiting-on-me", "blocked", "active", "done", "abandoned"]
 OPEN_STATUSES = ["waiting-on-me", "blocked", "active"]
@@ -153,6 +155,8 @@ def card_lock(card):
 
 def ok_workdir(path):
     """A directory a task may record as where its work happens: never /, home or the HQ root."""
+    if os.name == "nt" and os.path.isdir(path) and os.path.dirname(os.path.realpath(path)) == os.path.realpath(path):
+        return False   # a drive root, C:\ — Windows' /
     return (os.path.isdir(path) and os.path.realpath(path) not in
             ("/", os.path.realpath(hq_root()), os.path.realpath(os.path.expanduser("~"))))
 
@@ -190,9 +194,25 @@ def atomic_write(path, text):
             break
         except FileExistsError:
             continue
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
+    # newline="\n": LF on Windows too, as every reader (the pet, the board, a Mac) expects.
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    os.replace(tmp, path)
+    if os.name != "nt":
+        os.replace(tmp, path)
+        return
+    # Windows refuses to replace a file another process has open (a hook or the board reading
+    # it, a scanner): wait that out a while, as the pet's own writes do (Portable.replaceItem).
+    for _ in range(100):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.02)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        os.remove(tmp)
+        raise
 
 
 def load_json(path, default):
@@ -252,8 +272,11 @@ def find_claude(given=None):
         return given
     import shutil
     home = os.path.expanduser("~")
-    for c in [shutil.which("claude"), f"{home}/.local/bin/claude", f"{home}/.claude/local/claude",
-              "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]:
+    found = [shutil.which("claude"), f"{home}/.local/bin/claude", f"{home}/.claude/local/claude",
+             "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+    if os.name == "nt":   # the native installer's claude.exe (os.access says yes to any file there)
+        found = [shutil.which("claude"), os.path.join(home, ".local", "bin", "claude.exe")]
+    for c in found:
         if c and os.access(c, os.X_OK):
             return c
     return None

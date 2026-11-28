@@ -1,12 +1,28 @@
 #!/bin/bash
 # End-to-end test of hq in a throwaway HOME. Run: hq/tests/test_hq.sh
 set -euo pipefail
+# Windows (Git Bash): python3 as install.sh finds it, USERPROFILE following each HOME= below,
+# and the scratch folder as C:/..., a path python can open where it is written into a file.
+WINDOWS=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*)
+  WINDOWS=1
+  WINPY=""
+  for try in "py -3" python; do
+    WINPY="$($try -c 'import os, sys; print(sys.executable if os.name == "nt" else "")' 2>/dev/null | tr -d '\r')" || WINPY=""
+    [ -n "$WINPY" ] && break
+  done
+  [ -n "$WINPY" ] || { echo "no Windows Python found (py -3 or python)" >&2; exit 1; }
+  python3() { USERPROFILE="$HOME" "$WINPY" -X utf8 "$@"; } ;;
+esac
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+[ "$WINDOWS" = 1 ] && T="$(cygpath -m "$T")"
 export HOME="$T/home"; mkdir -p "$HOME/.claude"
 echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-tool"}]}]}}' > "$HOME/.claude/settings.json"
 unset CLAUDE_CODE_SESSION_ID HQ_ROOT HQ_HOOK_CHILD
 HQ="$HOME/.claude/hq/bin/hq"
+HQPY="$HQ"; [ "$WINDOWS" = 1 ] && HQPY="$HQ.py"   # the python entry itself (on Windows bin/hq runs it)
+ME=$$; [ "$WINDOWS" = 1 ] && ME="$(cat /proc/$$/winpid)"   # a live pid, as python sees pids
 pass=0
 ok() { pass=$((pass+1)); echo "  ok - $1"; }
 fail() { echo "  FAIL - $1"; exit 1; }
@@ -78,12 +94,12 @@ grep -q "\"$HOME\"" "$T"/root/tasks/T-002-*/TASK.md && fail "home dir recorded a
 "$HQ" unbind --session sess-in >/dev/null; "$HQ" unbind --session sess-home >/dev/null
 hook '{"session_id":"sess-1","hook_event_name":"SessionStart"}' | python3 -c 'import json,sys; c=json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]; assert "hq-asks" in c' && ok "SessionStart injects protocol"
 # A hook runs on every turn of every session: it loads no more of hq than it needs.
-loaded() { echo "$1" | python3 -X importtime "$HQ" hook 2>&1 >/dev/null | sed -n 's/^import time: *[0-9]* *| *[0-9]* *| *//p' \
+loaded() { echo "$1" | python3 -X importtime "$HQPY" hook 2>&1 >/dev/null | sed -n 's/^import time: *[0-9]* *| *[0-9]* *| *//p' \
   | tr -d ' ' | grep -E '^(hqlib.*|argparse|subprocess|tempfile)$' | sort | tr '\n' ' '; }
 got="$(loaded '{"session_id":"s-unbound","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-[ "$got" = "hqlib hqlib.core hqlib.hooks hqlib.sessions " ] && ok "an unbound session's hook loads only core and sessions" || fail "unbound hook loads: $got"
+[ "$got" = "hqlib hqlib.compat hqlib.core hqlib.hooks hqlib.sessions " ] && ok "an unbound session's hook loads only core and sessions" || fail "unbound hook loads: $got"
 got="$(loaded '{"session_id":"sess-1","hook_event_name":"UserPromptSubmit","prompt":"hi"}')"
-[ -n "$got" ] && [ -z "$(echo "$got" | tr ' ' '\n' | grep -v '^$' | grep -vxE 'hqlib(\.(core|sessions|hooks|cards|refs|history|projects|asks|protocol|update))?')" ] \
+[ -n "$got" ] && [ -z "$(echo "$got" | tr ' ' '\n' | grep -v '^$' | grep -vxE 'hqlib(\.(compat|core|sessions|hooks|cards|refs|history|projects|asks|protocol|update))?')" ] \
   && ok "a bound session's hook loads no command line, subprocess or unrelated module" || fail "bound hook loads: $got"
 
 MSG='Done.\n\n```hq-asks\n- Approve plan v2?\n- Ask Chengjie for the dataset\n```'
@@ -193,7 +209,7 @@ printf '%s\n' "{\"type\":\"user\",\"cwd\":\"$T/repo-g\",\"message\":{\"content\"
 # hq import: the plan /hq-onboard writes — duties and goals with PROJECT.md, task cards, sessions
 IP="$T/import"; mkdir -p "$IP/repo" "$HOME/.claude/projects/-x-imp" "$HOME/.claude/pet/sessions"
 touch "$HOME/.claude/projects/-x-imp/11112222-aaaa-bbbb-cccc-000000000001.jsonl" "$HOME/.claude/projects/-x-imp/33334444-aaaa-bbbb-cccc-000000000002.jsonl"
-echo "{\"pid\": $$, \"sessionId\": \"11112222-aaaa-bbbb-cccc-000000000001\", \"cwd\": \"$IP/repo\"}" > "$HOME/.claude/pet/sessions/11112222-aaaa-bbbb-cccc-000000000001.json"
+echo "{\"pid\": $ME, \"sessionId\": \"11112222-aaaa-bbbb-cccc-000000000001\", \"cwd\": \"$IP/repo\"}" > "$HOME/.claude/pet/sessions/11112222-aaaa-bbbb-cccc-000000000001.json"
 cat > "$IP/plan.json" <<EOF
 {"projects": [
   {"name": "imp-goal", "kind": "goal", "title": "Rebaseline", "parent": "imp-duty", "due": "2030-01-31", "goal": "New baseline numbers"},
@@ -502,14 +518,14 @@ fin | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["task"]=="T-
 first="$(fin)"; sleep 1
 stop sess-1 "$(printf 'still done\n```hq-update\nstatus: done\nlog: tidy\n```')" >/dev/null
 [ "$(fin)" = "$first" ] && ok "a task already done is not finished again" || fail "re-finished: $(fin)"
-mkdir -p "$HOME/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"sess-1\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
+mkdir -p "$HOME/.claude/pet/sessions"; echo "{\"pid\": $ME, \"sessionId\": \"sess-1\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
 "$HQ" sessions --json | python3 -c 'import json,sys; s=[x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]; assert s["finished"]["status"]=="done" and s["task"]=="T-001", s' && ok "hq sessions --json carries the finished mark" || fail "sessions --json finished"
 # Its last turn's reply, saved at Stop for the board's session row (the transcript is not here).
 lr() { "$HQ" sessions --json | python3 -c 'import json,sys; print(json.dumps([x for x in json.load(sys.stdin) if x["sessionId"]=="sess-1"][0]["lastReply"]))'; }
 lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["ts"], r' && ok "hq sessions --json carries the reply its last turn ended on, without HQ blocks" || fail "lastReply: $(lr)"
 stop sess-1 "$(printf '```hq-update\ntouch\n```')" >/dev/null
 lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "a reply holding only HQ blocks keeps the one before it" || fail "lastReply bookkeeping: $(lr)"
-echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
+echo "{\"pid\": $ME, \"sessionId\": \"sess-1\", \"state\": \"busy\"}" > "$HOME/.claude/pet/sessions/sess-1.json"
 lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done" and r["prev"] is True, r' && ok "while a turn runs, the reply is the last turn's, marked prev" || fail "lastReply busy: $(lr)"
 # A turn ended with Esc never reached the Stop hook: a newer reply in the transcript wins over the saved one.
 esc_turn() { python3 - "$T/tr.jsonl" "$1" <<'PY'
@@ -521,7 +537,7 @@ with open(sys.argv[1], "w") as f:
     f.write(row({"type": "assistant", "message": {"model": "claude", "content": [{"type": "text", "text": "cut short"}]}, "timestamp": f"{y}-01-01T00:00:05Z"}) + "\n")
     f.write(row({"type": "user", "message": {"role": "user", "content": "next"}, "timestamp": f"{y}-01-01T00:00:09Z"}) + "\n")
 PY
-echo "{\"pid\": $$, \"sessionId\": \"sess-1\", \"state\": \"busy\", \"transcript\": \"$T/tr.jsonl\"}" > "$HOME/.claude/pet/sessions/sess-1.json"; }
+echo "{\"pid\": $ME, \"sessionId\": \"sess-1\", \"state\": \"busy\", \"transcript\": \"$T/tr.jsonl\"}" > "$HOME/.claude/pet/sessions/sess-1.json"; }
 esc_turn 2099; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="cut short" and r["prev"] is True, r' && ok "mid-turn, a reply newer than the saved one (an Esc-ended turn) wins" || fail "stale saved reply: $(lr)"
 esc_turn 2001; lr | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["text"]=="still done", r' && ok "an older one in the transcript doesn't" || fail "older transcript reply won: $(lr)"
 rm "$T/tr.jsonl"
@@ -694,7 +710,7 @@ ctxof sess-b | grep -q "^- $SID.1 " && fail "an answer the asker already had wen
 hook "{\"session_id\":\"sess-c\",\"hook_event_name\":\"Stop\",\"last_assistant_message\":\"ok.\\n\\n\`\`\`hq-asks\\n- Ship it?\\n\`\`\`\"}" >/dev/null
 "$HQ" ask resolve "$SID.3" do --via board >/dev/null
 mkdir -p "$HOME/.claude/pet/sessions"
-echo "{\"pid\": $$}" > "$HOME/.claude/pet/sessions/sess-c.json"
+echo "{\"pid\": $ME}" > "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 " && fail "a live asker's answer went to another session" || ok "a live asker keeps its answer"
 rm "$HOME/.claude/pet/sessions/sess-c.json"
 ctxof sess-b | grep -q "^- $SID.3 \"Ship it?\" → yes" && ok "once the asker has ended, the next session on the task takes the answer"
@@ -721,7 +737,7 @@ assert d[1]["state"]=="open" and d[1].get("closed") is None, d' && ok "todos sha
 mkdir -p "$HOME/.claude/pet/sessions"
 old=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
 new=$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
-held() { echo "{\"pid\": $$, \"sessionId\": \"$1\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": $2, \"updatedAt\": \"$3\"}" > "$HOME/.claude/pet/sessions/$1.json"; }
+held() { echo "{\"pid\": $ME, \"sessionId\": \"$1\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": $2, \"updatedAt\": \"$3\"}" > "$HOME/.claude/pet/sessions/$1.json"; }
 held w-old '["shell"]' "$old"; held w-new '["shell"]' "$new"; held a-old '["shell", "auditor"]' "$old"
 "$HQ" sessions --json | python3 -c 'import json,sys; s={x["sessionId"]: x for x in json.load(sys.stdin)}
 assert s["w-old"]["state"]=="idle" and s["w-old"]["phase"]=="", s["w-old"]
@@ -737,7 +753,7 @@ with open(sys.argv[1], "w") as f:
         c = t if k == "user" else [{"type": "text", "text": t}]
         f.write(json.dumps({"type": k, "message": {"role": k, "model": "claude", "content": c}, "timestamp": f"2026-01-01T00:00:{s}Z"}) + "\n")
 PY
-echo "{\"pid\": $$, \"sessionId\": \"w-old\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": [\"shell\"], \"updatedAt\": \"$old\", \"transcript\": \"$T/held.jsonl\"}" > "$HOME/.claude/pet/sessions/w-old.json"
+echo "{\"pid\": $ME, \"sessionId\": \"w-old\", \"state\": \"busy\", \"phase\": \"awaiting-agent\", \"backgroundAgents\": [\"shell\"], \"updatedAt\": \"$old\", \"transcript\": \"$T/held.jsonl\"}" > "$HOME/.claude/pet/sessions/w-old.json"
 "$HQ" sessions --json | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["sessionId"]=="w-old"][0]["lastReply"]
 assert r["text"]=="the turn\x27s reply" and not r["prev"], r' && ok "past the limit, its last reply is its own turn's" || fail "held reply"
 rm "$T/held.jsonl"
@@ -1423,7 +1439,7 @@ transcript "$P/$SS2.jsonl" '[
  {"type":"assistant","message":{"id":"c1","content":[{"type":"tool_use","id":"w1","name":"Bash","input":{"command":"watch-build 12345","run_in_background":true}}]},"timestamp":"@121"},
  {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"Command running in background with ID: bgw1"}]},"toolUseResult":{"backgroundTaskId":"bgw1"},"timestamp":"@120"},
  {"type":"assistant","message":{"id":"c2","content":[{"type":"text","text":"Watching."}]},"timestamp":"@120"}]'
-echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS2\", \"transcript\": \"$P/$SS2.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS2.json"
+echo "{\"pid\": $ME, \"state\": \"idle\", \"sessionId\": \"$SS2\", \"transcript\": \"$P/$SS2.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS2.json"
 "$HQ" bind "$S2" --session "$SS2" >/dev/null
 "$HQ" set "$S2" "next=when the watcher fires, read the build result" >/dev/null
 "$HQ" status "$S2" --json | python3 -c '
@@ -1487,7 +1503,7 @@ transcript "$P/$SS2.jsonl" '[{"type":"attachment","attachment":{"type":"queued_c
 S3="$("$HQ" new "Status done" --no-focus | head -1)"
 SS3=5ca7e5a3-1111-2222-3333-444455556666
 transcript "$P/$SS3.jsonl" '[{"type":"assistant","message":{"id":"d1","content":[{"type":"text","text":"Done."}]},"timestamp":"@5"}]'
-echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS3\", \"transcript\": \"$P/$SS3.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS3.json"
+echo "{\"pid\": $ME, \"state\": \"idle\", \"sessionId\": \"$SS3\", \"transcript\": \"$P/$SS3.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS3.json"
 "$HQ" bind "$S3" --session "$SS3" >/dev/null; "$HQ" set "$S3" status=done >/dev/null
 S4="$("$HQ" new "Status stale" --no-focus | head -1)"; S4C="$(ls "$T"/root/tasks/$S4-*/TASK.md)"
 python3 - "$S4C" <<'PY'
@@ -1516,10 +1532,10 @@ assert t["'"$S4"'"]["stale"]>=7 and t["'"$S2"'"]["stale"]==0 and t["'"$S3"'"]["s
 S5="$("$HQ" new "Status prompt" --no-focus | head -1)"; S5C="$(ls "$T"/root/tasks/$S5-*/TASK.md)"
 SS5=5ca7e5a5-1111-2222-3333-444455556666
 transcript "$P/$SS5.jsonl" '[{"type":"assistant","message":{"id":"e1","content":[{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"rm -rf build"}}]},"timestamp":"@30"}]'
-echo "{\"pid\": $$, \"state\": \"waiting\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
+echo "{\"pid\": $ME, \"state\": \"waiting\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
 "$HQ" bind "$S5" --session "$SS5" >/dev/null; backdate "$S5C" 60
 "$HQ" status "$S5" --json | python3 -c 'import json,sys; t=json.load(sys.stdin)["tasks"][0]; assert t["flags"]==[] and t["sessions"][0]["state"]=="waiting-on-you", t' && ok "status: a session held at a prompt is not a card behind" || fail "status card-behind while waiting on a prompt"
-echo "{\"pid\": $$, \"state\": \"idle\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
+echo "{\"pid\": $ME, \"state\": \"idle\", \"sessionId\": \"$SS5\", \"transcript\": \"$P/$SS5.jsonl\"}" > "$HOME/.claude/pet/sessions/$SS5.json"
 "$HQ" status "$S5" --json | python3 -c 'import json,sys; k=[f["kind"] for f in json.load(sys.stdin)["tasks"][0]["flags"]]; assert k==["card-behind"], k' && ok "status: the same session, idle, is" || fail "status card-behind once idle"
 S6="$("$HQ" new "Status elsewhere" --no-focus | head -1)"
 "$HQ" bind "$S6" --session "$SS5" >/dev/null; backdate "$S5C" 60
@@ -2160,7 +2176,7 @@ JP="$(cat "$JS/port")"
 HQ_JIRA_SITE="http://127.0.0.1:$JP/same" "$HQ" feed jira --dry-run | grep -q "^jira: " && ok "feed jira: the token follows a redirect on the same host" || fail "jira same-host redirect"
 { HQ_JIRA_SITE="http://127.0.0.1:$JP/away" "$HQ" feed jira --dry-run 2>&1 || true; } | grep -q "HTTP 401" && ok "feed jira: …but not to another host" || fail "jira redirect away"
 printf '[api]\nemail=me@example.com\nkey=secret\nsite=http://127.0.0.1:1\n' > "$HOME/.zuliprc"
-python3 -c 'import fcntl,os,sys,time; os.makedirs(os.path.dirname(sys.argv[1]),exist_ok=True); f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(60)' "$HOME/.claude/hq/state/locks/feed-zulip.lock" "$T/locked" & LPID=$!
+python3 -c 'import os,sys,time; sys.path.insert(0,sys.argv[3]); from hqlib.compat import fcntl; os.makedirs(os.path.dirname(sys.argv[1]),exist_ok=True); f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(60)' "$HOME/.claude/hq/state/locks/feed-zulip.lock" "$T/locked" "$SRC" & LPID=$!
 for _ in $(seq 50); do [ -e "$T/locked" ] && break; sleep 0.1; done
 ! "$HQ" feed all --no-sort >"$T/out" 2>&1 && tail -1 "$T/out" | grep -q "^jira 1 · zulip failed: a zulip scan is already running" && ok "feed all: a source already scanning fails, the others still run" || fail "feed all lock: $(cat "$T/out")"
 kill "$LPID" 2>/dev/null; wait "$LPID" 2>/dev/null || true; rm -f "$HOME/.zuliprc"
@@ -2949,7 +2965,7 @@ echo "$out" | grep -q "✗ hq hook missing on SessionStart, UserPromptSubmit" &&
   && ok "doctor: a missing hook is an error (exit 1), a doubled one a warning; CLAUDE_CONFIG_DIR's settings are read" || fail "doctor missing hooks: $out"
 echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"$HOME/.claude/pet/pet-emit"}]}]}}' > "$DH/cfg/settings.json"
 out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor || true)"
-echo "$out" | grep -q "pet hook missing on SessionStart" && echo "$out" | grep -q "pet-emit, which is missing or not executable" \
+echo "$out" | grep -q "pet hook missing on SessionStart" && echo "$out" | grep -qE "pet-emit(\.exe)?, which is missing or not executable" \
   && ok "doctor: a pet hook wired on some events, to a binary that is gone" || fail "doctor pet hooks: $out"
 echo 'not json' > "$DH/cfg/settings.json"
 out="$(CLAUDE_CONFIG_DIR="$DH/cfg" DQ doctor)" && fail "doctor with an unreadable settings.json should exit 1" || true
@@ -2988,8 +3004,8 @@ echo "{\"type\":\"resolve\",\"id\":\"$DOPEN.2\",\"resolution\":\"later\",\"note\
 out="$(DQ doctor)"
 echo "$out" | grep -q "2 of 7 session bindings are over" && ! echo "$out" | grep -q "d-done" \
   && ok "doctor: without the pet to say, a session bound today may still be running — kept even on a done task" || { echo "$out"; fail "doctor bindings without the pet"; }
-mkdir -p "$DH/.claude/pet/sessions"; echo "{\"pid\": $$, \"sessionId\": \"d-recent\"}" > "$DH/.claude/pet/sessions/d-recent.json"
-echo "{\"pid\": $$, \"sessionId\": \"d-live\"}" > "$DH/.claude/pet/sessions/d-live.json"    # running, no transcript yet
+mkdir -p "$DH/.claude/pet/sessions"; echo "{\"pid\": $ME, \"sessionId\": \"d-recent\"}" > "$DH/.claude/pet/sessions/d-recent.json"
+echo "{\"pid\": $ME, \"sessionId\": \"d-live\"}" > "$DH/.claude/pet/sessions/d-live.json"    # running, no transcript yet
 out="$(DQ doctor)"
 echo "$out" | grep -q "4 of 7 session bindings are over" && echo "$out" | grep -q "d-done .*is done" && echo "$out" | grep -q "d-gone .*T-999 no longer exists" \
   && echo "$out" | grep -q "d-old .*quiet for" && echo "$out" | grep -q "d-held2 .*is abandoned" && ! echo "$out" | grep -q "d-held \|d-recent\|d-live" \
@@ -3004,11 +3020,16 @@ HQ_ROOT="$T/root" DQ doctor --fix | grep -q "unbound\|removed" && fail "doctor -
 DQ doctor --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["fixed"] is None and {c["area"] for c in d["checks"]} == {"hooks","bindings","state","asks"} and all(c["level"] in ("ok","warn","error") for c in d["checks"]), d' \
   && ok "doctor --json" || fail "doctor json"
 
-python3 - "$DH/.claude/hq/state/locks/T-778-held.lock" "$DH/.claude/hq/bin/hq" "$DH" > "$T/doctor-fix.out" <<'PY'
-import fcntl, os, subprocess, sys
+python3 - "$DH/.claude/hq/state/locks/T-778-held.lock" "$DH/.claude/hq/bin/hq" "$DH" "$SRC" > "$T/doctor-fix.out" <<'PY'
+import os, subprocess, sys
+sys.path.insert(0, sys.argv[4])
+from hqlib.compat import fcntl
+# On Windows bin/hq is a sh script that runs bin/hq.py; python runs the entry itself.
+cmd = [sys.executable, "-X", "utf8", sys.argv[2] + ".py"] if os.name == "nt" else [sys.argv[2]]
 with open(sys.argv[1], "a") as f:
     fcntl.flock(f, fcntl.LOCK_EX)
-    print(subprocess.run([sys.argv[2], "doctor", "--fix"], env=dict(os.environ, HOME=sys.argv[3]), capture_output=True, text=True).stdout)
+    print(subprocess.run(cmd + ["doctor", "--fix"], env=dict(os.environ, HOME=sys.argv[3], USERPROFILE=sys.argv[3]),
+                         capture_output=True, text=True).stdout)
 PY
 out="$(cat "$T/doctor-fix.out")"
 echo "$out" | grep -q "unbound 4 sessions" && echo "$out" | grep -q "dropped 2 todo-seen.json entries" && echo "$out" | grep -q "removed 1 lock file" \

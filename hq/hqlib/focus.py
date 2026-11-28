@@ -1,5 +1,5 @@
 """focus"""
-import fcntl
+from .compat import fcntl
 import json
 import os
 import re

@@ -1,6 +1,6 @@
 """Session bindings (state/sessions.json), the pet's live-session files, and the replies saved for asks."""
 import contextlib
-import fcntl
+from .compat import fcntl, win_pid_alive
 import json
 import os
 import time
@@ -62,6 +62,8 @@ PET_SESSIONS = os.path.expanduser("~/.claude/pet/sessions")
 
 
 def pid_alive(pid):
+    if win_pid_alive:
+        return win_pid_alive(pid)
     try:
         os.kill(int(pid), 0)
     except ProcessLookupError:

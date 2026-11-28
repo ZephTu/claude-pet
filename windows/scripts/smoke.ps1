@@ -34,6 +34,7 @@ Write-Host "     version $v"
 Check 'SessionStart exits 0' (Emit '{"session_id":"s1","hook_event_name":"SessionStart","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo"}') 0
 Check 'SessionStart writes the session as idle' (Field s1 state) 'idle'
 Check '...under its folder name' (Field s1 project) 'demo'
+Check '...with its transcript (a C:\ path is absolute too)' (Field s1 transcript) 'C:\t\s.jsonl'
 Emit '{"session_id":"s1","hook_event_name":"UserPromptSubmit","transcript_path":"C:\\t\\s.jsonl","cwd":"C:\\work\\demo","prompt":"hi"}' | Out-Null
 Check 'UserPromptSubmit makes it busy' (Field s1 state) 'busy'
 

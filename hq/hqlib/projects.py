@@ -782,12 +782,16 @@ def cmd_project(args):
             if new.lower() == name.lower():
                 # Only the case changes: on a case-insensitive disk new_dir "exists" — it is old_dir.
                 tmp = f"{old_dir}.renaming-{os.getpid()}"
-                os.rename(old_dir, tmp)
-                os.rename(tmp, new_dir)
+                move_folder(old_dir, tmp)
+                try:
+                    move_folder(tmp, new_dir)
+                except SystemExit:
+                    os.rename(tmp, old_dir)
+                    raise
             else:
                 if os.path.exists(new_dir):
                     die(f"{new_dir} already exists — move it away first")
-                os.rename(old_dir, new_dir)
+                move_folder(old_dir, new_dir)
             set_fields(new_file, {"name": new})
             append_log(new_file, f"renamed {name!r} → {new!r}", touch=False)
         if name in names:
@@ -819,12 +823,31 @@ def cmd_project(args):
                 i += 1
                 dest = f"{base}-{i}"
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            os.rename(os.path.dirname(f), dest)
+            move_folder(os.path.dirname(f), dest)
             kept = f"; its folder is now {dest}"
         save_projects([pr for pr in load_projects() if pr["name"] != name])
         reparent(name, to if to and (load_project(to) or {}).get("kind") == "duty" else "", [n for n in names if n != name])
         n = relabel("project", name, to, "project removed") if n_used else 0
         print(f"removed {name!r}" + (f" ({n} task(s) moved to {to or '(none)'!r})" if n else "") + kept)
+
+
+def move_folder(src, dst):
+    """os.rename. Windows moves no folder a program has open (a session's working directory, a
+    file in an editor): a few tries, then a plain error rather than a traceback."""
+    if os.name != "nt":
+        os.rename(src, dst)
+        return
+    import time
+    for _ in range(20):
+        try:
+            os.rename(src, dst)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    try:
+        os.rename(src, dst)
+    except PermissionError:
+        die(f"can't move {src}: a program has it, or a file in it, open — close that and try again")
 
 
 # ---------------------------------------------------------------- retired standing grants
