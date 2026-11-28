@@ -82,6 +82,14 @@ struct Entry {
             exit(2)
             #endif
 
+        case "--raise-orca":
+            // The board opened a session's tab in Orca: bring Orca forward, as the Mac activates it.
+            #if os(Windows)
+            exit(WindowsJump.raiseOrca())
+            #else
+            exit(2)
+            #endif
+
         case "--detail":
             // The hover card for a row in the Windows shell's panel (PetDetail).
             guard arguments.count == 2 else {

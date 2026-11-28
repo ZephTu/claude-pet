@@ -88,11 +88,38 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   reads of SharedReads, copy / openURL / openPath / open / pick-folder / saveImage / jump
   (`pet-emit --jump`). What the Mac keeps in its defaults (BoardPrefs, BoardSeen, BoardPhrases)
   and the reading area are `pet-emit --board` (`PetBoard.swift`, `pet\board.json`, over
-  QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `agents` is
-  `[]`, `jobs` empty; sending to / launching / stopping sessions, prompts, the secretary, jobs
-  and phone access answer "not on Windows yet". No push (BoardEvents): the page polls.
-  Renders: `PET_SHOT_BOARD=1` shoots the board window; `PET_HQ_HOME=<dir>` points board.js
-  (and the hq it runs, as USERPROFILE) at a scratch home with its own `hq/install.sh`.
+  QuickPhrases / SeenCards / DocReader; DocReader takes `C:\` paths on Windows). `jobs` is
+  empty; sending to / interrupting / stopping a terminal session, approving a plan (both type
+  into the terminal), the secretary, jobs and phone access answer "not on Windows yet". No push
+  (BoardEvents): the page polls.
+  Renders: `PET_SHOT_BOARD=1` shoots the board window (`=T-123`: opened at that task);
+  `PET_HQ_HOME=<dir>` points board.js (and the hq it runs, as USERPROFILE) at a scratch home
+  with its own `hq/install.sh`.
+- Prompts on the board: the `pet` read's `dots` are the `--watch` rows filtered by
+  WebBridge.dotKeys (PetWatch.row already carries BoardPrompt.dotFields). `prompt`, `decide`,
+  `answer-question`, `plan-feedback` are `pet-emit --board` ops (PetBoard): each re-reads the
+  session file and answers only while a pet-emit holds that very ask (askAnswerable, same id and
+  kind), writing `decisions\<session>.json` as the Mac's `answer` does.
+- Starting sessions (`launch`, `resume`, `attach`, board.js `openInTerminal`): the page's
+  "Terminal" place is Windows Terminal (`wt.exe -w 0 new-tab --title … -- <cmd>`), "Orca" is
+  `orca terminal create --shell powershell.exe --command "<cmd>; exit"`, "Background" is
+  `claude --bg` (and `agents` is `claude agents --json`, `stop` is `claude stop`). `<cmd>` is
+  `powershell -EncodedCommand <base64>` that starts claude through ProcessStartInfo with an exact
+  command line (`winArg`): nothing passes through wt's `;` splitting, a shell's quoting or
+  PowerShell 5.1's native-argument quote mangling; checked with quotes, curly quotes, `;`, line
+  breaks, trailing backslashes and Chinese through both terminals. A script whose base64 passes
+  8000 characters (a long prompt) goes in a temp `.ps1` the stub reads and deletes (a command
+  line stops at 32767). claude must be an `.exe` (`findClaude`): npm's `claude.cmd` would run
+  through cmd.exe, which re-parses the line (`&`, `%VAR%` in a title would run or expand), and
+  Node refuses to execFile a `.cmd`. The tab and `claude` get `CLAUDE_ENV` (no CLAUDECODE etc.,
+  but the user's CLAUDE_CODE_* settings kept). With `--focus`, `pet-emit --raise-orca` brings Orca
+  forward. No reuse of an idle tab or of Orca's sleeping tab (the Mac's resumeInIdleTab /
+  resumeInOrcaPlace).
+- The cat opens the board: a double click toggles it (preload.js puts the list back as the
+  first click found it, as WebBridge.handleDoubleClick; "in front" = focused, or lost focus in
+  the last 1.5 s); tray → "Clicking a Session Opens" (prefs.json `clickTarget`, the board's
+  setting writes the same) sends a click on a row or notice bound to a task (hq's
+  `state\sessions.json`) to the board at that task, as ClickTarget.route.
 
 ## Dev loop on Windows
 
@@ -211,11 +238,10 @@ with a real claude-hud reading; the taskbar on another edge.
 ## Next
 
 The HQ board on Windows, in steps (the user's order): 1. hq itself (done: CLI, hooks, /task);
-2. the board window (done: see above); 3. answering prompts and questions from the board (the
-`pet` read's `dots` from the watcher's held asks, `decide` → `pet-emit --decide`),
-launching / resuming a session in a new Windows Terminal tab (`wt.exe new-tab`), opening the
-board from a click on the cat (the Mac's double-click and ClickTarget); 4. sending text to and
-interrupting a session (no AppleScript here: look at Orca's CLI first). After the board: the
+2. the board window (done: see above); 3. prompts on the board, starting / resuming sessions,
+the cat opening the board (done: see above); 4. sending text to and interrupting a session, and
+approving a plan (Enter): Orca's `terminal send`; for wt / conhost, `WriteConsoleInputW` after
+`AttachConsole(pid)` as WindowsJump.withConsole does. After the board: the
 user wants `/hq-onboard` run on this machine (46 sessions) and reviewed on the board. Later or never: scheduled jobs (`--run-job`, Task Scheduler),
 the secretary, phone access, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).

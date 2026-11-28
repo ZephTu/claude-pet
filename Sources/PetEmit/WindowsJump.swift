@@ -83,6 +83,14 @@ enum WindowsJump {
         }
     }
 
+    /// `pet-emit --raise-orca`: Orca's window to the front, after the board opened a tab in it
+    /// with `--focus` (which only switches the tab inside Orca). 1 when Orca has no window.
+    static func raiseOrca() -> Int32 {
+        guard let window = topLevelWindow(ofExecutable: "orca.exe") else { return fail("no Orca window") }
+        raise(window)
+        return 0
+    }
+
     // MARK: Windows Terminal and conhost
 
     private static let windowsTerminalClass = "CASCADIA_HOSTING_WINDOW_CLASS"

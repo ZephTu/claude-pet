@@ -266,6 +266,31 @@ $req = @{ op = 'read-doc'; path = 'note.md:3'; cwd = $home_ } | ConvertTo-Json -
 Check '--board read-doc: a relative path under a C:\ folder' (Board $req).result.text '# hi'
 Check '--board: an unknown op is an error' ([bool](Board '{"op":"nope"}').error) 'True'
 
+# Prompts held open: a session waiting on a question, held by a live process (this one).
+function HeldSession($sid, $ask, $kind, $holder) {
+  $until = [DateTime]::UtcNow.AddMinutes(5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+  $now = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+  $s = @{ sessionId = $sid; project = 'p'; cwd = 'C:\p'; state = 'waiting'; since = $now; updatedAt = $now;
+    waitingOn = 'x'; detail = ''; tool = 'AskUserQuestion'; askId = $ask; askKind = $kind; askHeldBy = $holder;
+    askHeldUntil = $until; questions = @(@{ question = 'Which?'; options = @(@{ label = 'A' }) }) }
+  New-Item -ItemType Directory -Force (Join-Path $home_ 'sessions') | Out-Null
+  [IO.File]::WriteAllText((Join-Path $home_ "sessions\$sid.json"), ($s | ConvertTo-Json -Depth 6 -Compress))
+}
+HeldSession 'q1' 'ask-q' 'question' $PID
+$p = (Board '{"op":"prompt","session":"q1"}').result
+Check '--board prompt: the held question' "$($p.kind) $($p.ask) $($p.questions[0].question)" 'question ask-q Which?'
+Board '{"op":"answer-question","session":"q1","ask":"ask-q","answers":{"Which?":"A"}}' | Out-Null
+$d = Get-Content (Join-Path $home_ 'decisions\q1.json') -Raw | ConvertFrom-Json
+Check '...answer-question writes the pick for the hold' "$($d.askId) $($d.behavior) $($d.answers.'Which?')" 'ask-q allow A'
+Check '...an answer to another ask is refused' ([bool](Board '{"op":"answer-question","session":"q1","ask":"old","answers":{"Which?":"A"}}').error) 'True'
+Check '...Allow is not a question''s answer' ([bool](Board '{"op":"decide","session":"q1","ask":"ask-q","behavior":"allow"}').error) 'True'
+HeldSession 'p1' 'ask-p' '' $PID
+Board '{"op":"decide","session":"p1","ask":"ask-p","behavior":"deny"}' | Out-Null
+$d = Get-Content (Join-Path $home_ 'decisions\p1.json') -Raw | ConvertFrom-Json
+Check '--board decide: a permission prompt' "$($d.askId) $($d.behavior)" 'ask-p deny'
+HeldSession 'g1' 'ask-g' 'question' 999999
+Check '...nothing holds it any more: refused' ([bool](Board '{"op":"prompt","session":"g1"}').error) 'True'
+
 Remove-Item $home_ -Recurse -Force -ErrorAction SilentlyContinue
 if ($failed) { Write-Host "$failed failed"; exit 1 }
 Write-Host 'all passed'

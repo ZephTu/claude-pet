@@ -2,6 +2,7 @@
 //  - over the cat, the panel, the bubble or a notice the window takes clicks; anywhere else
 //    they fall through to the desktop (main.js toggles setIgnoreMouseEvents);
 //  - press on the cat and move: drag the window; press and release: open or close the list;
+//    a double click: the task board (WebBridge.handleDoubleClick);
 //  - a click in the list is looked up with the page's own window.hitRow and sent to main.js;
 //  - resting on a row of the open list: that session's detail card; on the cat: the quota;
 //  - right click: the tray's menu.
@@ -19,6 +20,8 @@ contextBridge.exposeInMainWorld("webkit", {
 const SOLID = "#pet, #panel, #bubble, #notices > *";
 let interactive = false;
 let press = null;
+// The last click on the cat that toggled the list, and whether the list was open before it.
+let lastToggle = null;
 
 function solidAt(x, y) {
   const el = document.elementFromPoint(x, y);
@@ -142,7 +145,18 @@ window.addEventListener("mouseup", async (e) => {
   // ended up: that could open a session and clear its finishes.
   if (p.moved || Math.hypot(e.screenX - p.x, e.screenY - p.y) > 4) return;
   if (p.onPet) {
+    // The second click of a double click (e.detail counts clicks within the system's interval):
+    // the list goes back to how the first click found it, and the board comes up or goes away.
+    if (e.detail >= 2 && lastToggle && Date.now() - lastToggle.at < 1000) {
+      const wasOpen = lastToggle.wasOpen;
+      lastToggle = null;
+      await webFrame.executeJavaScript(`window.setPanelOpen(${wasOpen})`);
+      ipcRenderer.send("board-toggle");
+      return;
+    }
+    const wasOpen = panelOpen();
     await webFrame.executeJavaScript("window.togglePanel()");
+    lastToggle = { at: Date.now(), wasOpen };
     if (panelOpen()) ipcRenderer.send("panel-opened");
     return;
   }

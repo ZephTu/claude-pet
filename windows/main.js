@@ -134,9 +134,10 @@ function createWindow() {
     if (last) push(last, true);
     // PET_SHOT=out.png [PET_SHOT_JS=script]: render the window to a PNG after a few seconds and
     // quit — how CI and a Mac without screen-capture permission check what the window draws.
-    // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board).
+    // PET_SHOT_BOARD=1: the task board's window instead (the script runs on the board);
+    // PET_SHOT_BOARD=T-123: opened at that task, as a click on a session bound to it does.
     if (process.env.PET_SHOT) {
-      if (process.env.PET_SHOT_BOARD) openBoard();
+      if (process.env.PET_SHOT_BOARD) openBoard(/^T-\d+$/.test(process.env.PET_SHOT_BOARD) ? process.env.PET_SHOT_BOARD : "");
       setTimeout(async () => {
         try {
           const shot = process.env.PET_SHOT_BOARD && boardWin ? boardWin : win;
@@ -186,7 +187,7 @@ function push(s, force) {
   // list is open). Only on the line they came on: a redraw (force) does not repeat them.
   if (!force) {
     for (const n of s.notices || []) {
-      run(`window.notify(${js(n.text)}, ${Number(n.holdMs) || 30000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${!!jumpKind(n.sessionId)});`);
+      run(`window.notify(${js(n.text)}, ${Number(n.holdMs) || 30000}, ${js(n.emphasis)}, ${js(n.sessionId)}, ${opensSomewhere(n.sessionId)});`);
     }
   }
   updateTray(s);
@@ -203,7 +204,9 @@ ipcMain.on("panel-opened", () => {
  * jobs yet. */
 let lastDrawn = "";
 function drawSessions(s) {
-  const script = `window.setSessions(${js(s.sessions || [])}, ${Number(s.hidden) || 0}, ${js(s.finished || [])}, ${pendingDropped}, [], []);`;
+  // Clicks that go to the board (see clickTarget) make a row clickable even with no terminal.
+  const boardRows = (rows) => (rows || []).map((r) => (routeOf(r.sessionId, r.termKind).task ? { ...r, opensBoard: true } : r));
+  const script = `window.setSessions(${js(boardRows(s.sessions))}, ${Number(s.hidden) || 0}, ${js(boardRows(s.finished))}, ${pendingDropped}, [], []);`;
   // As WebBridge: the same payload is not drawn twice (did-finish-load clears it).
   if (script === lastDrawn || !win || !ready) return;
   lastDrawn = script;
@@ -296,6 +299,44 @@ function askSnooze(sessionId) {
   ]).popup({ window: win });
 }
 
+// ------------------------------------------------------------------ where a click on a session goes
+// The Mac's ClickTarget ("Clicking a Session Opens"): its terminal, or its task on the board.
+// Kept in prefs.json; the tray and the board's settings show the same value.
+function clickTarget() {
+  return readPrefs().clickTarget === "board" ? "board" : "terminal";
+}
+
+function setClickTarget(value) {
+  const v = value === "board" ? "board" : "terminal";
+  if (v === clickTarget()) return;
+  writePrefs({ ...readPrefs(), clickTarget: v });
+  // Rows bound to a task but with no terminal become clickable, or stop being.
+  lastDrawn = "";
+  if (last) drawSessions(last);
+  buildTray();
+}
+
+/** ClickTarget.route: { task } for the board, { jump: true } for the terminal, {} for nowhere. */
+function routeOf(sessionId, termKind) {
+  const task = clickTarget() === "board" && sessionId ? hqBoard.taskBySession()[sessionId] : "";
+  if (task) return { task };
+  return termKind ? { jump: true } : {};
+}
+
+/** Whether a click on the session goes anywhere (the Mac's route(for:) != .nowhere). */
+function opensSomewhere(sessionId) {
+  const r = routeOf(sessionId, jumpKind(sessionId));
+  return !!(r.task || r.jump);
+}
+
+/** Opens a session where a click on it goes. False when there is nowhere to go (or that jump is
+ * already under way). */
+function openSession(sessionId, termKind) {
+  const r = routeOf(sessionId, termKind);
+  if (r.task) { openBoard(r.task, sessionId); return true; }
+  return r.jump ? jump(sessionId) : false;
+}
+
 /** The terminal a session's row can jump to, or "" (PetWatch.row's termKind). */
 function jumpKind(sessionId) {
   const row = ((last && last.sessions) || []).find((r) => r.sessionId === sessionId);
@@ -310,15 +351,30 @@ function emitEnv() {
 // ------------------------------------------------------------------ the HQ task board
 // BoardWindow on the Mac: an ordinary window (it takes the keyboard) showing the unchanged
 // Resources/pet/board page; its requests go to board.js. Opened from the tray menu (the cat's
-// right click shows it too).
+// right click shows it too), a double click on the cat, or a click on a session bound to a task
+// (clickTarget).
 let boardWin = null;
+// When the board last lost the keyboard: the first click of a double click on the cat takes it.
+let boardBlurAt = 0;
+// What to show once the board's page has loaded (a click that opened it at a task).
+let boardReveal = null;
 
-function openBoard() {
+/** BoardWindow.present: `task` (T-123) opens that task, with `session` picked out. */
+function revealScript(task, session) {
+  if (!task) return "window.hqRefresh && window.hqRefresh();";
+  const t = /^T-\d+$/.test(task) ? task : "";
+  const sid = /^[0-9A-Za-z-]+$/.test(session || "") ? session : "";
+  return `window.hqReveal && window.hqReveal(${js(t)}, ${js(sid)});`;
+}
+
+function openBoard(task = "", session = "") {
   if (boardWin) {
     if (boardWin.isMinimized()) boardWin.restore();
     boardWin.show();
     boardWin.focus();
-    boardWin.webContents.executeJavaScript("window.hqRefresh && window.hqRefresh();").catch(() => {});
+    // Still loading: did-finish-load runs the newest pick.
+    if (boardWin.webContents.isLoading()) boardReveal = revealScript(task, session);
+    else boardWin.webContents.executeJavaScript(revealScript(task, session)).catch(() => {});
     return;
   }
   const saved = readPrefs().board || {};
@@ -364,19 +420,48 @@ function openBoard() {
   boardWin.on("maximize", remember);
   boardWin.on("unmaximize", remember);
   boardWin.on("closed", () => { boardWin = null; });
+  boardWin.on("blur", () => { boardBlurAt = Date.now(); });
+  if (task) boardReveal = revealScript(task, session);
+  wc.on("did-finish-load", () => {
+    const script = boardReveal;
+    if (!script) return;
+    boardReveal = null;
+    wc.executeJavaScript(script).catch(() => {});
+  });
   boardWin.loadURL("pet://app/board/board.html");
 }
+
+/** The Mac's toggleBoard, for a double click on the cat: put the board away when it is in front
+ * (it had the keyboard until the double click's first press took it), else bring it up. */
+function toggleBoard() {
+  const inFront = boardWin && boardWin.isVisible() && !boardWin.isMinimized()
+    && (boardWin.isFocused() || Date.now() - boardBlurAt < 1500);
+  if (inFront) boardWin.hide();
+  else openBoard();
+}
+
+// WebBridge.dotKeys: what the board reads of a pet row.
+const DOT_KEYS = new Set(["state", "quiet", "asks", "agent", "struggle", "background", "activity", "replied",
+  "context", "contextTokens", "contextBudget", "askId", "approveText", "promptAsk", "askKind"]);
 
 hqBoard.configure({
   L: (en, zh) => (language() === "zh" ? zh : en),
   petEmit: PET_EMIT,
   petEnv: emitEnv,
-  // BoardWindow's "pet" read: unread finishes per session (the list's Finished group).
+  // BoardWindow's "pet" read: unread finishes per session (the list's Finished group), and each
+  // row's state and held prompt as WebBridge.dotState (the page offers Allow / Deny, a question's
+  // picks or a plan's feedback from these).
   petState: () => {
     const unread = {};
     for (const r of (last && last.finished) || []) if (r.sessionId) unread[r.sessionId] = (unread[r.sessionId] || 0) + (r.count || 1);
-    return { unread, dots: {} };
+    const dots = {};
+    for (const r of (last && last.sessions) || []) {
+      if (!r.sessionId) continue;
+      dots[r.sessionId] = Object.fromEntries(Object.entries(r).filter(([k]) => DOT_KEYS.has(k)));
+    }
+    return { unread, dots, clickTarget: clickTarget() };
   },
+  onClickTarget: setClickTarget,
   // A reply read on the board: its finishes leave the pet's list too, once (the drawer and Peek
   // say so on every refresh).
   onSeen: (sid) => {
@@ -439,8 +524,9 @@ function act(a) {
     // finishes count as seen; with nowhere to go, the list opens, where the session's row is.
     if (!a.sessionId) return;
     run(`window.dismissNotice(${js(a.sessionId)});`);
-    if (jumpKind(a.sessionId)) {
-      jump(a.sessionId);
+    const r = routeOf(a.sessionId, jumpKind(a.sessionId));
+    if (r.task || r.jump) {
+      openSession(a.sessionId, jumpKind(a.sessionId));
       markRead({ session: a.sessionId });
     } else {
       run("window.setPanelOpen(true);");
@@ -449,15 +535,21 @@ function act(a) {
   }
   if (a.action === "jump") {
     // As the Mac: the list has served its purpose once we are jumping away.
-    if (jump(a.sessionId)) run("window.setPanelOpen(false);");
+    if (openSession(a.sessionId, a.kind)) run("window.setPanelOpen(false);");
+    return;
+  }
+  if (a.action === "openBoard") {
+    openBoard(a.task || "");
+    run("window.setPanelOpen(false);");
     return;
   }
   if (a.action === "openFinished") {
     // Go there, then call it seen (WebBridge's openFinished). A row whose session is gone has
     // nowhere to go: the click only clears it and says why; the list stays up.
     const ids = eventIds(a.eventIds);
-    if (a.kind) {
-      if (jump(a.sessionId)) {   // false: that jump is already under way
+    const r = routeOf(a.sessionId, a.kind);
+    if (r.task || r.jump) {
+      if (openSession(a.sessionId, a.kind)) {   // false: that jump is already under way
         markRead(ids);
         run("window.setPanelOpen(false);");
       }
@@ -471,7 +563,6 @@ function act(a) {
   if (a.action === "readAll") { markRead("all"); return; }
   if (a.action === "mute") { mute(a.sessionId); return; }
   if (a.action === "snooze") { askSnooze(a.sessionId); return; }
-  // The board is not in the spike yet.
   log("not handled yet:", JSON.stringify(a));
 }
 
@@ -573,6 +664,11 @@ function buildTray() {
     ...(muted ? [{ label: zh ? `取消所有静音 (${muted})` : `Unmute All (${muted})`, click: () => { pending.muted.clear(); marks(["--unmute-all"]); } },
       { type: "separator" }] : []),
     { label: zh ? "任务看板…" : "Task Board…", click: () => openBoard() },
+    // Where a click on a row or a notice takes you (the Mac's ClickTarget).
+    { label: zh ? "点击 session 时打开" : "Clicking a Session Opens", submenu: [
+      { label: zh ? "它的终端" : "Its Terminal", type: "radio", checked: clickTarget() === "terminal", click: () => setClickTarget("terminal") },
+      { label: zh ? "任务看板上它的任务" : "Its Task on the Board", type: "radio", checked: clickTarget() === "board", click: () => setClickTarget("board") },
+    ] },
     { type: "separator" },
     { label: zh ? "显示 / 隐藏桌宠" : "Show / hide the pet", click: () => win && (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: zh ? "放回右下角" : "Move back to the corner", click: () => {
@@ -604,6 +700,8 @@ ipcMain.on("drag-end", () => {
   dragOrigin = null;
 });
 ipcMain.on("action", (_e, a) => act(a));
+// A double click on the cat (preload.js put the list back as the first click found it).
+ipcMain.on("board-toggle", () => toggleBoard());
 // The hover card (preload.js's dwell): shown only if the pointer is still on that row when
 // pet-emit answers. window.hush takes down whatever the bubble says, so it runs only when a
 // card actually went up (the Mac's dwellShowing).
