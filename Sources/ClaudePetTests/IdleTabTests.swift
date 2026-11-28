@@ -18,6 +18,23 @@ enum IdleTabTests {
         t.check("a psql prompt is not", !IdleTab.atShellPrompt("postgres=#") && !IdleTab.atShellPrompt("postgres-#"))
         t.check("a root prompt still is", IdleTab.atShellPrompt("root@box:~# "))
         t.check("a macOS bash prompt still is", IdleTab.atShellPrompt("Mac:~ zhefu$ "))
+        #if os(Windows)
+        t.check("a PowerShell prompt is a shell prompt", IdleTab.atShellPrompt("Windows PowerShell\nPS D:\\DailyWork\\claude-pet> "))
+        t.check("a cmd prompt is a shell prompt", IdleTab.atShellPrompt("D:\\DailyWork\\claude-pet>"))
+        t.check("a Git Bash prompt is a shell prompt", IdleTab.atShellPrompt("me@pc MINGW64 /d/work (main)\n$"))
+        t.check("a REPL's > is not", !IdleTab.atShellPrompt("> ") && !IdleTab.atShellPrompt(">>>")
+                && !IdleTab.atShellPrompt("Welcome to Node.js\n>"))
+        t.check("a PowerShell continuation prompt is not", !IdleTab.atShellPrompt(">> "))
+        t.check("output with a redirect in it is not", !IdleTab.atShellPrompt("D:\\x> echo hi > out.txt"))
+        let ended = "Press Ctrl-C again to exit\nResume this session with:\nclaude --resume 3e9620af-89f1-4790-a999-6e3f55ae29c6\nPS D:\\work>"
+        t.check("a tab a session ended in is found by its resume hint",
+                IdleTab.endedHere(session: "3e9620af-89f1-4790-a999-6e3f55ae29c6", preview: ended))
+        t.check("not for another session", !IdleTab.endedHere(session: "11111111-89f1-4790-a999-6e3f55ae29c6", preview: ended))
+        t.check("not once something else ran there",
+                !IdleTab.endedHere(session: "3e9620af-89f1-4790-a999-6e3f55ae29c6", preview: ended + " dir\nfoo\nbar\nbaz\nPS D:\\work>"))
+        t.check("not while a program runs", !IdleTab.endedHere(session: "3e9620af-89f1-4790-a999-6e3f55ae29c6",
+                                                               preview: ended + " python\n>>>"))
+        #endif
 
         let idle: [String: Any] = ["handle": "term_a", "title": "T-071 claude-pet", "connected": true,
                                    "writable": true, "orphaned": false, "preview": "x % "]

@@ -145,8 +145,24 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   through cmd.exe, which re-parses the line (`&`, `%VAR%` in a title would run or expand), and
   Node refuses to execFile a `.cmd`. The tab and `claude` get `CLAUDE_ENV` (no CLAUDECODE etc.,
   but the user's CLAUDE_CODE_* settings kept). With `--focus`, `pet-emit --raise-orca` brings Orca
-  forward. No reuse of an idle tab or of Orca's sleeping tab (the Mac's resumeInIdleTab /
-  resumeInOrcaPlace).
+  forward.
+- Resume going back to a tab (`PetResume.swift`, `pet-emit --board` ops; board.js `resumeInOrca`
+  / `resumeInWT` type the new tab's line without `; exit`: the tab's shell may be cmd):
+  `resume-orca` is the Mac's resumeInOrcaPlace (OrcaPlace over `orca agent show`, `terminal
+  list`, `worktree activate`; the woken tab's WakeWatch is `resume-orca-watch`, which board.js
+  runs in the background when staying on the board) and then the Orca half of resumeInIdleTab.
+  Between them, a Windows step: a tab whose screen ends at a prompt under Claude Code's exit line
+  `claude --resume <id>` (`IdleTab.endedHere`) - after an exit Orca drops the agent's place
+  (`places: []`), the pet deletes the session's record, and pwsh takes the tab's title back, so
+  nothing else finds it. `resume-wt` does that for Windows Terminal: shells (`pwsh`,
+  `powershell`, `cmd`, `bash`) right under WindowsTerminal.exe with no child process (Git Bash's
+  `Git\bin\bash.exe` is a launcher: its one inner bash is the shell), alone on their console
+  (`GetConsoleProcessList`: a `start /b` program is no child but shares it), their screen read by
+  attaching (`WindowsJump.screen`), the line typed with `WindowsJump.type`, the tab selected as a
+  jump does. A send that may have gone in (Orca's CLI ended at its timeout, a partial console
+  write) is an error, never a fallback to a new tab; so is `agent show` timing out. `IdleTab.atShellPrompt` takes `PS D:\x>` and `D:\x>` on Windows only.
+  An Orca terminal of a workspace not open in Orca's sidebar is `orphaned` (skipped) or missing
+  from `terminal list`; the place logic then wakes its workspace.
 - Phone access (`remote.js`, BoardServer + RemoteAccess + Tailnet ported to Node): the board's
   `remote*` ops go to it (board.js `configure({remote})`). A `net` server on `::` (dual stack,
   `pauseOnConnect`) decides on the peer's address before a byte is read (`admission`: private,

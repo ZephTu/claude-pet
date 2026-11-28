@@ -81,6 +81,11 @@ hq/install.sh --root ~/claude-hq
   - **Windows Terminal** 开一个新标签页；
   - **Orca** 开一个新的 Orca 标签页；
   - **后台** 运行 `claude --bg`。
+- **续上**能回到原来的标签页就不新开，和 Mac 一样：在 Orca 里先回到 Orca 记着的标签页（正在跑就切过去；
+  重启 Orca 后休眠的，叫醒它，由 Orca 自己在那里恢复；停在 shell 提示符的，就在那里输入续上的命令），再找同名、
+  停在 shell 提示符的标签页。你自己开的标签页，session 在里面结束（Stop、`/exit`）后停在提示符、上面还留着
+  Claude Code 的 `claude --resume <id>` 那行的，Orca 和 Windows Terminal 都会回到这里续上。看板自己开的
+  标签页会随 session 一起关掉。都找不到才新开。
 - 给 session 打字：发消息、**Esc** 中断、**■** 停止。
   - Windows Terminal、控制台窗口和 Orca 都支持。
   - 后台 session 在两轮之间收到消息，看板会带着消息让它接着跑。
@@ -99,7 +104,6 @@ hq/install.sh --root ~/claude-hq
 - **秘书**、**定时任务**。看板会提示"Windows 版暂不支持"。
 - **消息源**（Zulip、Jira）和**自动勾选完成的待办**。它们的凭据放在 macOS 钥匙串里。
 - **记一笔的快捷键**（⌃⌥⌘N）。
-- **续上**总是开新标签页，不会复用空闲的标签页。
 - **VS Code 里的终端**：那里的 session 没有 ↗。
 
 ## 注意事项
