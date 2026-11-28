@@ -53,6 +53,19 @@ The repo-root `CLAUDE.md` still applies; this file adds what is specific to Wind
   reading is usable) goes to the board's "pet" read for the status bar's meters. A reading comes from claude-hud's
   `display.externalUsageWritePath` = `%USERPROFILE%\.claude\pet\hud-usage.json` (what this
   machine uses), older claude-hud's `.usage-cache.json`, or `pet-emit --statusline`.
+- The cat speaking up (`PetChatter.swift`, the Mac's maybeSpeak / noticeReturn /
+  noticeTransients on the watcher's tick): `--watch` adds `say` (`{text, emphasis, variant,
+  holdMs}`: Chatter.next with the QuotaAlarm decision and the ContextAlarm's due session over
+  PetRows' context readings) and `flash` (`{kind, pose, mark}`, as WebBridge.flash) only on the
+  line where they happen; main.js calls `window.say` / `window.flash` (a line that arrives before
+  the page is in is said on did-finish-load, while its hold lasts). What the Mac reads off its
+  own window main.js writes to `--watch`'s stdin, one change per line (`list 1`, `card 0`,
+  `nap 1`, all three again when `--watch` restarts): the list open (the page's layout report has
+  a `panel`), a hover card or the quota up (`cardUp`), the nap. Recorded only when said, as on
+  the Mac: quota thresholds in `pet\quota-said.json` (the Mac's `quotaThresholdsSaid` default),
+  the rest in memory. Away and back: `GetLastInputInfo` (idle for AwayReport.awayAfter, then
+  input), finishes counted from `events/`. Names in the lines (and in the finish notices) are
+  the rows' names.
 - main.js injects a thin scrollbar: Chromium's default on Windows is a wide grey bar.
 - main.js skips a `setSessions` payload it just drew (as WebBridge), and after each redraw
   preload.js re-sends the pointer to `setHoverAt`: rows' ages change every second here, and a
@@ -326,7 +339,9 @@ npx electron .
    a conhost PowerShell window (restored from minimized).
 
 Not checked yet on the machine (built, smoke-tested or rendered only): launch at login; finish
-notices (and clicking one); the hover card; the Finished group, its ✓ / Clear and row clicks,
+notices (and clicking one); the cat speaking up with real sessions (the away-and-back line,
+the flashes; quota, context-long and struggling lines were checked against a scratch
+`PET_HOME`); the hover card; the Finished group, its ✓ / Clear and row clicks,
 scrolling the list with the wheel; snooze (the menu) and mute, Unmute All; the quota readout
 with a real claude-hud reading; the taskbar on another edge.
 
@@ -338,5 +353,4 @@ never: scheduled jobs (`--run-job`, Task Scheduler),
 the secretary, feeds and autoclose (Keychain → Credential Manager), intake
 (its `start_new_session` is ignored on Windows: a job's end would not spare the session).
 
-Other backlog: jump to VS Code's terminal; the cat's chatter (quota warnings, context-long
-notes: Chatter.next / QuotaAlarm).
+Other backlog: jump to VS Code's terminal.
